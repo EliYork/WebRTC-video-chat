@@ -4,8 +4,6 @@ import express from 'express';
 import dotenv from 'dotenv';
 dotenv.config();
 
-import { v4 as uuidv4 } from 'uuid';
-
 import { createServer as createServerHttp } from 'http';
 import { createServer as createServerHttps } from 'https';
 
@@ -62,20 +60,62 @@ const peerServer = PeerServer({
 
 const Log = new Logger(process.env.ENV);
 
+const CHANNELS = [
+    {
+        slug: 'lobby',
+        name: '大厅',
+        description: '日常集合和临时闲聊。',
+    },
+    {
+        slug: 'game',
+        name: '游戏开黑',
+        description: '开局前集合，边玩边说。',
+    },
+    {
+        slug: 'project',
+        name: '项目讨论',
+        description: '同步想法、排查问题和看屏幕。',
+    },
+    {
+        slug: 'screen',
+        name: '一起看屏幕',
+        description: '专门用来共享屏幕和一起看内容。',
+    },
+    {
+        slug: 'idle',
+        name: '发呆挂机',
+        description: '不一定说话，在线就行。',
+    },
+];
+
+const getChannel = (slug) => CHANNELS.find((channel) => channel.slug === slug);
+
 app.set('view engine', 'ejs');
 app.use(express.static(__dirname + '/views'));
 app.set('views', __dirname + '/views');
 
 /** Routes */
-app.get('/', (_, res) => res.redirect(`/${uuidv4()}`));
-
-app.get('/:room', (req, res) =>
-    res.render('room/index', {
-        roomId: req.params.room,
-        peerPort: PEER_PORT,
-        iceServers: JSON.stringify(iceServersList),
+app.get('/', (req, res) =>
+    res.render('index', {
+        channels: CHANNELS,
+        invalidChannel: req.query.invalid,
     })
 );
+
+app.get('/room/:channel', (req, res) => {
+    const channel = getChannel(req.params.channel);
+
+    if (!channel) {
+        return res.redirect('/?invalid=1');
+    }
+
+    res.render('room/index', {
+        roomId: channel.slug,
+        channelName: channel.name,
+        peerPort: PEER_PORT,
+        iceServers: JSON.stringify(iceServersList),
+    });
+});
 
 app.use((_, res) => res.status(404).send('404 Not Found'));
 

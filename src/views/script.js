@@ -7,6 +7,7 @@ myVideo.muted = true; // ensures that we do not hear ourselves
 myVideo.playsInline = 'true';
 
 const joinBtn = document.querySelector('#join-btn');
+const copyRoomLinkBtn = document.getElementById('copyRoomLink');
 const remoteStreams = {};
 let myVideoStream;
 let activeStream;
@@ -341,7 +342,8 @@ const connect = () => {
         // eslint-disable-next-line no-undef
         socket = io({
             query: {
-                roomId: window.location.pathname.split('/').pop(),
+                // eslint-disable-next-line no-undef
+                roomId: ROOM_ID,
                 peerId: peerId,
             },
         });
@@ -447,3 +449,15 @@ function removeVideoElement(id) {
 }
 
 joinBtn.addEventListener('click', connect);
+
+copyRoomLinkBtn?.addEventListener('click', async () => {
+    try {
+        await navigator.clipboard.writeText(window.location.href);
+        copyRoomLinkBtn.innerText = '已复制';
+        setTimeout(() => {
+            copyRoomLinkBtn.innerText = '复制频道链接';
+        }, 1500);
+    } catch (error) {
+        console.warn('Could not copy channel link.', error);
+    }
+});

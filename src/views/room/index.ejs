@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Zoom clone</title>
-    <link rel="stylesheet" href="style.css?v=25556">
+    <title><%= channelName %> - 语音据点</title>
+    <link rel="stylesheet" href="/style.css?v=25556">
     
     <script src="/socket.io/socket.io.js"></script>
     
@@ -19,7 +19,11 @@
 </head>
 <body>
     <div id="main">
-        <a href="https://github.com/nlukic97/peerJs-videoChat" target="_blank" rel="noopener noreferrer"> <i class="fab fa-github"></i> nlukic97</a>
+        <div class="room-header">
+            <a href="/">频道列表</a>
+            <div>当前频道：<%= channelName %></div>
+            <button id="copyRoomLink" type="button">复制频道链接</button>
+        </div>
         <div id="canvas">
             <div id="video-grid"></div>
             <div id="join-btn" class="text-center">
@@ -35,6 +39,6 @@
             <div id="destroyPeer">Exit call</div>
         </div> 
     </div> 
-    <script type="module" src="./script.js"></script> <!-- So we defined the static files of the server so we can use it here-->
+    <script type="module" src="/script.js"></script> <!-- So we defined the static files of the server so we can use it here-->
 </body>
 </html>

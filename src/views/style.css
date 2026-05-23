@@ -10,22 +10,100 @@ body {
     color: red !important;
 }
 
-a {
+.room-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 20px 32px;
+    color: #fff;
+    font-family:
+        'Gill Sans', 'Gill Sans MT', Calibri, 'Trebuchet MS', sans-serif;
+    font-size: 18px;
+}
+
+.room-header a {
     color: #fff;
     text-decoration: none;
     font-family:
         'Gill Sans', 'Gill Sans MT', Calibri, 'Trebuchet MS', sans-serif;
     font-size: 18px;
-    position: absolute;
-    left: 2%;
-    top: 3%;
     transition: 0.3s;
 }
 
-a:hover {
-    transform: scale(1.6);
+.room-header a:hover {
     cursor: pointer;
     transform: scale(1.1);
+}
+
+.room-header button,
+.channel-enter {
+    padding: 8px 14px;
+    background-color: #2d8cff;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-family:
+        'Gill Sans', 'Gill Sans MT', Calibri, 'Trebuchet MS', sans-serif;
+    font-size: 16px;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.room-header button:hover,
+.channel-enter:hover {
+    background-color: #1761b6;
+}
+
+.channel-page {
+    width: min(920px, calc(100% - 40px));
+    margin: 0 auto;
+    padding: 64px 0;
+    color: #fff;
+    font-family:
+        'Gill Sans', 'Gill Sans MT', Calibri, 'Trebuchet MS', sans-serif;
+}
+
+.channel-header h1 {
+    margin: 0 0 10px;
+    font-size: 36px;
+}
+
+.channel-header p {
+    margin: 0 0 12px;
+    color: rgba(255, 255, 255, 0.78);
+    font-size: 18px;
+}
+
+.channel-warning {
+    color: #ffb86c !important;
+}
+
+.channel-list {
+    display: grid;
+    gap: 14px;
+    margin-top: 28px;
+}
+
+.channel-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 18px 20px;
+    border: 1px solid rgba(248, 248, 248, 0.219);
+    border-radius: 8px;
+    background-color: rgb(44, 43, 43);
+}
+
+.channel-card h2 {
+    margin: 0 0 6px;
+    font-size: 22px;
+}
+
+.channel-card p {
+    margin: 0;
+    color: rgba(255, 255, 255, 0.72);
 }
 
 #canvas {

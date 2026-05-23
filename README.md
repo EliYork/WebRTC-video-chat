@@ -1,65 +1,70 @@
-# WebRTC Voice and Screen Share
+<p align="right">中文 | <a href="./README.en.md">English</a></p>
 
-A small self-hosted WebRTC room app built with Node.js, Express, PeerJS, Socket.IO, EJS, and vanilla JavaScript.
+# WebRTC 语音与屏幕共享
 
-The current baseline is a voice-first room:
+一个小型自托管 WebRTC 房间应用，使用 Node.js、Express、PeerJS、Socket.IO、EJS 和原生 JavaScript 构建。
 
-- Join Call requests microphone access only.
-- Camera video is optional and starts only after the camera button is clicked.
-- Screen sharing can be sent even when no camera video track exists.
-- Each room is a unique URL that can be shared with another browser window or user.
+当前基线是一个语音优先的固定频道房间：
 
-## Current Features
+- `Join Call` 只请求麦克风权限。
+- 摄像头视频是可选的，只有点击摄像头按钮后才会启动。
+- 即使没有摄像头视频轨道，也可以发送屏幕共享。
+- 首页展示一组固定频道。
+- 每个频道都有稳定 URL，例如 `/room/project`。
 
-- Unique room URLs from the homepage redirect.
-- Audio-only room join by default.
-- Microphone mute and unmute.
-- Optional camera toggle.
-- Screen sharing to connected peers.
-- Screen sharing for peers that do not already have a video sender.
-- Late join support when another peer is already sharing a screen.
-- Audio-only placeholder tiles when a remote peer has no video track.
-- Basic server logging to `logs/node.log`.
+## 当前功能
 
-No login system or external AI integration is included in this baseline.
+- 固定的首页频道列表。
+- 稳定的频道路由：`lobby`、`game`、`project`、`screen` 和 `idle`。
+- 默认以纯音频方式加入房间。
+- 麦克风静音与取消静音。
+- 可选摄像头开关。
+- 向已连接的对端共享屏幕。
+- 支持向没有视频 sender 的对端共享屏幕。
+- 当其他用户已经在共享屏幕时，后加入者也能接收当前屏幕共享。
+- 远端用户没有视频轨道时显示纯音频占位卡片。
+- 房间页提供复制频道链接按钮。
+- 基础服务端日志写入 `logs/node.log`。
 
-## Media Logic
+当前基线不包含登录系统或外部 AI 集成。
 
-The frontend media flow is intentionally simple:
+## 媒体逻辑
 
-- `Join Call` calls `getUserMedia({ audio: true })`.
-- The local stream always starts as audio-only.
-- The camera button calls `getUserMedia({ video: true, audio: false })` only when the user asks to turn the camera on.
-- If camera startup fails, the call stays connected and the error is logged with `console.warn`.
-- Screen sharing calls `getDisplayMedia()` and uses the returned screen video track as the active video track.
-- For each connected peer, screen sharing first looks for an existing video sender with `sender.track?.kind === 'video'`.
-- If a video sender exists, the app uses `replaceTrack(screenTrack)`.
-- If no video sender exists, the app starts a small additional PeerJS media call carrying the screen video track.
-- When a new peer joins, the app calls them with the current active stream, so an already-active screen share can be received by the late joiner.
-- When screen sharing stops, the app restores the camera track if the camera is on; otherwise it returns peers to audio-only state.
+前端媒体流程有意保持简单：
 
-## Local Setup
+- `Join Call` 调用 `getUserMedia({ audio: true })`。
+- 本地流始终以纯音频开始。
+- 只有当用户请求打开摄像头时，摄像头按钮才会调用 `getUserMedia({ video: true, audio: false })`。
+- 如果摄像头启动失败，通话会保持连接，错误会通过 `console.warn` 记录。
+- 屏幕共享调用 `getDisplayMedia()`，并把返回的屏幕视频轨道作为当前活动视频轨道。
+- 对每个已连接的对端，屏幕共享会先查找已有的视频 sender：`sender.track?.kind === 'video'`。
+- 如果存在视频 sender，应用会使用 `replaceTrack(screenTrack)`。
+- 如果不存在视频 sender，应用会额外发起一个轻量的 PeerJS 媒体通话，用来承载屏幕视频轨道。
+- 当新对端加入时，应用会使用当前活动流呼叫对方，因此已经进行中的屏幕共享可以被后加入者接收。
+- 当屏幕共享停止时，如果摄像头已开启，应用会恢复摄像头轨道；否则会让对端回到纯音频状态。
 
-### Prerequisites
+## 本地运行
+
+### 前置要求
 
 - Node.js
 - npm
 
-### Install
+### 安装
 
 ```bash
 npm install
 ```
 
-### Environment
+### 环境变量
 
-Create a `.env` file from the example:
+从示例文件创建 `.env`：
 
 ```bash
 cp .env.example .env
 ```
 
-For local HTTP development, the important values are:
+本地 HTTP 开发时，重要配置为：
 
 ```env
 USE_HTTPS=false
@@ -67,62 +72,88 @@ PORT=3000
 PEER_PORT=9000
 ```
 
-The included `.env.example` already contains these defaults.
+仓库中的 `.env.example` 已经包含这些默认值。
 
-### Start
+### 启动
 
 ```bash
 npm start
 ```
 
-For auto-reload during development:
+开发时如需自动重载：
 
 ```bash
 npm run dev
 ```
 
-Open:
+打开：
 
 ```text
 http://localhost:3000
 ```
 
-The app redirects to a unique room URL.
+应用会展示固定频道列表。
 
-## Two-Window Test
+## 频道
 
-1. Start the server with `npm start`.
-2. Open `http://localhost:3000` in browser window A.
-3. Copy the redirected room URL.
-4. Open the same room URL in browser window B.
-5. Click `Join Call` in both windows.
-6. Confirm the browser asks for microphone permission, not camera permission.
-7. In A, click the screen share button.
-8. Confirm the browser shows that `localhost:3000` is sharing the screen.
-9. Confirm B can see A's shared screen.
-10. Stop sharing in A.
-11. Confirm B returns to an audio-only placeholder and no console error is thrown.
+当前频道定义在 `src/server.js`：
 
-Late join check:
+- `lobby`：大厅
+- `game`：游戏开黑
+- `project`：项目讨论
+- `screen`：一起看屏幕
+- `idle`：发呆挂机
 
-1. Join the room in A.
-2. Start screen sharing in A.
-3. Open the same room URL in B.
-4. Join in B.
-5. Confirm B receives A's current screen share.
+频道 URL 使用以下格式：
 
-## Quality Checks
+```text
+http://localhost:3000/room/project
+```
 
-Run these before submitting changes:
+无效的频道 slug 会带着友好提示重定向回首页。
+
+## 双窗口测试
+
+1. 使用 `npm start` 启动服务。
+2. 在浏览器窗口 A 中打开 `http://localhost:3000`。
+3. 点击 `项目讨论`。
+4. 复制当前频道 URL，或点击 `复制频道链接`。
+5. 在浏览器窗口 B 中打开相同的 `/room/project` URL。
+6. 在两个窗口中都点击 `Join Call`。
+7. 确认浏览器请求的是麦克风权限，而不是摄像头权限。
+8. 在 A 中点击屏幕共享按钮。
+9. 确认浏览器显示 `localhost:3000` 正在共享屏幕。
+10. 确认 B 能看到 A 共享的屏幕。
+11. 在 A 中停止共享。
+12. 确认 B 回到纯音频占位状态，并且控制台没有抛出错误。
+
+频道隔离检查：
+
+1. 在 A 中打开 `/room/project`。
+2. 在 B 中打开 `/room/game`。
+3. 两边都加入通话。
+4. 确认它们不会连接到同一个语音房间。
+
+后加入检查：
+
+1. 在 A 中加入房间。
+2. 在 A 中开始屏幕共享。
+3. 在 B 中打开相同房间 URL。
+4. 在 B 中加入房间。
+5. 确认 B 收到 A 当前的屏幕共享。
+
+## 质量检查
+
+提交更改前运行：
 
 ```bash
 npm run eslint -- src/views/script.js
-npx prettier src/views/script.js src/views/style.css README.md --check
+npx prettier src/views/script.js src/views/style.css README.md README.en.md --check
 ```
 
-Also confirm `.env.example` contains `USE_HTTPS=false` and `PORT=3000`.
+同时确认 `.env.example` 包含 `USE_HTTPS=false` 和 `PORT=3000`。
 
-## Project Structure
+## 项目结构
 
 ```text
 src/
@@ -139,20 +170,22 @@ src/
 logs/
 package.json
 README.md
+README.en.md
 ```
 
-## Notes
+## 备注
 
-- WebRTC uses the ICE servers configured in `src/utils/iceServers.js`.
-- TURN servers may be needed for production networks with strict NAT or firewall rules.
-- HTTPS can be enabled with `USE_HTTPS=true` and certificates at `cert/selfsigned.crt` and `cert/selfsigned.key`.
+- WebRTC 使用 `src/utils/iceServers.js` 中配置的 ICE 服务器。
+- 对于 NAT 或防火墙规则较严格的生产网络，可能需要 TURN 服务器。
+- 可以通过 `USE_HTTPS=true` 启用 HTTPS，并在 `cert/selfsigned.crt` 和 `cert/selfsigned.key` 放置证书。
 
-## License
+## 许可证
 
 ISC
 
-## Credits
+## 致谢
 
-This project is based on:
-- nlukic97/WebRTC-video-chat, licensed under the MIT License.
-- nlukic97/WebSocket-Cursor-Room, licensed under the ISC License.
+本项目基于：
+
+- nlukic97/WebRTC-video-chat，使用 MIT License。
+- nlukic97/WebSocket-Cursor-Room，使用 ISC License。

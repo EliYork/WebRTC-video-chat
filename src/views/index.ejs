@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>语音据点</title>
+    <link rel="stylesheet" href="/style.css?v=25556">
+    <script src="https://kit.fontawesome.com/279db593be.js" crossorigin="anonymous"></script>
+</head>
+<body>
+    <div id="main">
+        <main class="channel-page">
+            <section class="channel-header">
+                <h1>语音据点</h1>
+                <p>选择一个固定频道进入语音房间。</p>
+                <% if (invalidChannel) { %>
+                    <p class="channel-warning">频道不存在，请从下面选择一个可用频道。</p>
+                <% } %>
+            </section>
+
+            <section class="channel-list" aria-label="频道列表">
+                <% channels.forEach((channel) => { %>
+                    <article class="channel-card">
+                        <div>
+                            <h2><%= channel.name %></h2>
+                            <p><%= channel.description %></p>
+                        </div>
+                        <a class="channel-enter" href="/room/<%= channel.slug %>">进入</a>
+                    </article>
+                <% }) %>
+            </section>
+        </main>
+    </div>
+</body>
+</html>
