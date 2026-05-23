@@ -40,10 +40,26 @@ a:hover {
     flex-wrap: wrap;
 }
 
-video {
+.video-tile {
     height: 300px;
-    /* width: 400px; */
+    min-width: 300px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: rgb(20, 20, 20);
+    color: #fff;
+    font-family:
+        'Gill Sans', 'Gill Sans MT', Calibri, 'Trebuchet MS', sans-serif;
+}
+
+.video-tile video {
+    height: 100%;
+    max-width: 100%;
     object-fit: cover;
+}
+
+.voice-placeholder {
+    font-size: 20px;
 }
 
 #main {

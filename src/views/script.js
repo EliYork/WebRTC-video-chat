@@ -7,6 +7,11 @@ myVideo.muted = true; // ensures that we do not hear ourselves
 myVideo.playsInline = 'true';
 
 const joinBtn = document.querySelector('#join-btn');
+const remoteStreams = {};
+let myVideoStream;
+let activeStream;
+let cameraStream;
+let activeVideoTrack;
 
 const connectToNewUser = (peer, peerId, stream) => {
     console.log(
@@ -14,62 +19,274 @@ const connectToNewUser = (peer, peerId, stream) => {
     );
 
     const call = peer.call(peerId, stream);
-    const video = document.createElement('video');
-    video.playsInline = 'true';
-
-    call.on('stream', (userVideoStream) => {
-        console.log('got stream of other person');
-        addVideoStream(video, userVideoStream, peerId);
-    });
+    setupCallStreamHandler(call, peerId);
 };
 
 const addVideoStream = (video, stream, videoId) => {
-    video.srcObject = stream;
-    if (videoId) {
-        video.id = videoId;
+    const tileId = videoId || 'local-video';
+    let tile = document.getElementById(tileId);
+    const hasVideo = stream.getVideoTracks().length > 0;
+    const mediaTag = hasVideo ? 'VIDEO' : 'AUDIO';
+
+    if (!tile) {
+        tile = document.createElement('div');
+        tile.id = tileId;
+        tile.className = 'video-tile';
+        videoGrid.append(tile);
     }
-    video.addEventListener('loadedmetadata', () => {
-        video.play();
+
+    let mediaElement = tile.querySelector('video, audio');
+    if (!mediaElement || mediaElement.tagName !== mediaTag) {
+        tile.replaceChildren();
+        mediaElement = hasVideo ? video : document.createElement('audio');
+        mediaElement.autoplay = true;
+        mediaElement.playsInline = 'true';
+        mediaElement.muted = !videoId;
+
+        tile.append(mediaElement);
+
+        if (!hasVideo) {
+            const placeholder = document.createElement('div');
+            placeholder.className = 'voice-placeholder';
+            placeholder.innerText = videoId ? 'Audio only' : 'Local audio only';
+            tile.append(placeholder);
+        }
+    }
+
+    mediaElement.srcObject = stream;
+    mediaElement.addEventListener('loadedmetadata', () => {
+        mediaElement.play();
     });
-    videoGrid.append(video);
     setHeightOfVideos(); //added
 };
+
+const mergeRemoteStream = (peerId, incomingStream) => {
+    const remoteStream = remoteStreams[peerId] || new MediaStream();
+    const incomingAudioTracks = incomingStream.getAudioTracks();
+    const incomingVideoTracks = incomingStream.getVideoTracks();
+
+    if (!remoteStreams[peerId]) {
+        remoteStreams[peerId] = remoteStream;
+    }
+
+    if (incomingAudioTracks.length > 0) {
+        remoteStream.getAudioTracks().forEach((track) => {
+            remoteStream.removeTrack(track);
+        });
+        incomingAudioTracks.forEach((track) => remoteStream.addTrack(track));
+    }
+
+    remoteStream.getVideoTracks().forEach((track) => {
+        remoteStream.removeTrack(track);
+    });
+    incomingVideoTracks.forEach((track) => remoteStream.addTrack(track));
+
+    return remoteStream;
+};
+
+function setupCallStreamHandler(call, peerId) {
+    call.on('stream', (userVideoStream) => {
+        console.log('got stream of other person');
+        addVideoStream(
+            document.createElement('video'),
+            mergeRemoteStream(peerId, userVideoStream),
+            peerId
+        );
+    });
+}
 // ----------------------------------------------------------------------------------
 
 // switching between sharing screen and not sharing
 var sharingNow = false;
+let currentScreenStream;
 
-async function toggleScreenShare(peer, myVideoStream) {
-    let sender;
+const getActiveStream = () => {
+    const tracks = [...(myVideoStream?.getAudioTracks() || [])];
+
+    if (activeVideoTrack?.readyState === 'live') {
+        tracks.push(activeVideoTrack);
+    }
+
+    activeStream = new MediaStream(tracks);
+    return activeStream;
+};
+
+const setLocalVideoStream = (stream) => {
+    if (!stream) {
+        console.warn('Local stream is not available; skipping preview update.');
+        return;
+    }
+
+    addVideoStream(myVideo, stream);
+};
+
+const callPeersWithStream = (peer, stream) => {
+    if (!stream) {
+        console.warn('No stream available for peer call.');
+        return;
+    }
+
     const myPeers = Object.keys(peer.connections);
 
+    myPeers.forEach((peerId) => connectToNewUser(peer, peerId, stream));
+};
+
+const sendVideoTrackToPeers = (peer, track) => {
+    const myPeers = Object.keys(peer.connections);
+
+    myPeers.forEach((peerId) => {
+        const calls = peer.connections[peerId] || [];
+        let replacedTrack = false;
+
+        calls.forEach((call) => {
+            const sender = call?.peerConnection
+                ?.getSenders()
+                .find(
+                    (currentSender) =>
+                        currentSender.track?.kind === 'video' ||
+                        currentSender.track === null
+                );
+
+            if (!sender) {
+                return;
+            }
+
+            sender.replaceTrack(track || null).catch((error) => {
+                console.warn(
+                    `Could not replace video track for peer ${peerId}.`,
+                    error
+                );
+            });
+            replacedTrack = true;
+        });
+
+        if (!replacedTrack && track) {
+            console.warn(
+                `No video sender found for peer ${peerId}; starting a video call.`
+            );
+            connectToNewUser(peer, peerId, new MediaStream([track]));
+        }
+    });
+};
+
+const sendAudioOnlyStateToPeers = (peer) => {
+    const audioOnlyStream = new MediaStream(
+        myVideoStream?.getAudioTracks() || []
+    );
+
+    if (audioOnlyStream.getTracks().length === 0) {
+        console.warn('No audio track available for audio-only state update.');
+        return;
+    }
+
+    callPeersWithStream(peer, audioOnlyStream);
+};
+
+const setActiveVideoTrack = (peer, track) => {
+    activeVideoTrack = track;
+    const stream = getActiveStream();
+    setLocalVideoStream(stream);
+    sendVideoTrackToPeers(peer, track);
+
+    if (!track) {
+        sendAudioOnlyStateToPeers(peer);
+    }
+};
+
+const toggleCamera = async (peer) => {
+    const currentCameraTrack = cameraStream?.getVideoTracks()[0];
+
+    if (currentCameraTrack?.readyState === 'live') {
+        currentCameraTrack.stop();
+        cameraStream = undefined;
+        document.getElementById('toggleVideo').firstChild.className =
+            'fas fa-video-slash red';
+
+        if (!sharingNow) {
+            setActiveVideoTrack(peer);
+        }
+        return;
+    }
+
+    try {
+        cameraStream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: false,
+        });
+    } catch (error) {
+        console.warn('Could not start camera video source.', error);
+        return;
+    }
+
+    document.getElementById('toggleVideo').firstChild.className =
+        'fas fa-video';
+
+    if (!sharingNow) {
+        setActiveVideoTrack(peer, cameraStream.getVideoTracks()[0]);
+    }
+};
+
+const stopCurrentScreenStream = () => {
+    const screenStream = currentScreenStream;
+    currentScreenStream = undefined;
+
+    screenStream?.getTracks().forEach((track) => {
+        track.stop();
+    });
+};
+
+const restoreCameraAfterScreenShare = (peer, myVideoStream) => {
+    document.getElementById('shareScreen').firstChild.className =
+        'far fa-newspaper red'; //no good symbol for sharing screen
+
+    const cameraTrack = cameraStream?.getVideoTracks()[0];
+    const nextVideoTrack =
+        cameraTrack?.readyState === 'live' ? cameraTrack : undefined;
+
+    if (myVideoStream) {
+        setActiveVideoTrack(peer, nextVideoTrack);
+    } else {
+        console.warn(
+            'Local camera stream is not ready; skipping preview restore.'
+        );
+    }
+
+    currentScreenStream = undefined;
+    sharingNow = false;
+};
+
+async function toggleScreenShare(peer, myVideoStream) {
     if (sharingNow === false) {
         var shareScreen = await navigator.mediaDevices.getDisplayMedia();
+        const [track] = shareScreen.getVideoTracks();
+
+        if (!track) {
+            console.warn('Screen sharing did not provide a video track.');
+            return;
+        }
+
         document.getElementById('shareScreen').firstChild.className =
             'far fa-newspaper';
 
-        for (let i = 0; i < myPeers.length; i++) {
-            sender =
-                peer.connections[myPeers[i]][0].peerConnection.getSenders();
-            const [track] = shareScreen.getVideoTracks();
-            sender[1].replaceTrack(track);
-        }
+        currentScreenStream = shareScreen;
+        activeVideoTrack = track;
+        setLocalVideoStream(getActiveStream());
+        track.addEventListener('ended', () => {
+            if (!sharingNow || currentScreenStream !== shareScreen) {
+                return;
+            }
+
+            console.warn('Screen sharing stopped by the browser.');
+            restoreCameraAfterScreenShare(peer, myVideoStream);
+        });
+
+        sendVideoTrackToPeers(peer, track);
 
         sharingNow = true;
-        document.querySelectorAll('video')[0].srcObject = shareScreen;
     } else {
-        document.getElementById('shareScreen').firstChild.className =
-            'far fa-newspaper red'; //no good symbol for sharing screen
-
-        for (let i = 0; i < myPeers.length; i++) {
-            sender =
-                peer.connections[myPeers[i]][0].peerConnection.getSenders();
-            sender[1].replaceTrack(myVideoStream.getVideoTracks()[0]);
-        }
-
-        document.querySelectorAll('video')[0].srcObject = myVideoStream;
+        stopCurrentScreenStream();
+        restoreCameraAfterScreenShare(peer, myVideoStream);
         // toggleVideo()
-        sharingNow = false;
     }
 }
 
@@ -89,25 +306,9 @@ const toggleAudio = (myVideoStream) => {
     }
 };
 
-//muting my video
-const toggleVideo = (myVideoStream) => {
-    const enabled = myVideoStream.getVideoTracks()[0].enabled;
-    if (enabled) {
-        myVideoStream.getVideoTracks()[0].enabled = false;
-        document.getElementById('toggleVideo').firstChild.className =
-            'fas fa-video-slash red';
-    } else {
-        myVideoStream.getVideoTracks()[0].enabled = true;
-        document.getElementById('toggleVideo').firstChild.className =
-            'fas fa-video';
-    }
-};
-const a = 2;
-console.warn(a);
 const setHeightOfVideos = () => {
     var height = document.getElementById('canvas').clientHeight;
-    console.log(height);
-    var videos = document.querySelectorAll('video');
+    var videos = document.querySelectorAll('.video-tile');
     videos.forEach((video) => {
         if (videos.length <= 2) {
             video.style.height = height / 2 + 'px';
@@ -135,8 +336,6 @@ const connect = () => {
         ],
     });
 
-    let myVideoStream;
-
     // first wait to connect to the peer server
     peer.on('open', async (peerId) => {
         // eslint-disable-next-line no-undef
@@ -152,7 +351,7 @@ const connect = () => {
             .addEventListener('click', () => toggleAudio(myVideoStream));
         document
             .getElementById('toggleVideo')
-            .addEventListener('click', () => toggleVideo(myVideoStream));
+            .addEventListener('click', () => toggleCamera(peer));
         document
             .getElementById('shareScreen')
             .addEventListener('click', () =>
@@ -167,34 +366,24 @@ const connect = () => {
         // after that wait for media stream
         navigator.mediaDevices
             .getUserMedia({
-                video: true,
                 audio: true,
             })
             .then((stream) => {
                 myVideoStream = stream;
-                addVideoStream(myVideo, stream);
+                setLocalVideoStream(getActiveStream());
 
                 peer.on('call', (call) => {
                     console.log('Received a call...');
 
-                    call.answer(stream);
-
-                    const video = document.createElement('video');
-                    video.playsInline = 'true';
-
-                    call.on('stream', (userVideoStream) => {
-                        console.log(
-                            `User video stream received: ${userVideoStream} for peer ${call.peer}. Adding their video to our box`
-                        );
-                        addVideoStream(video, userVideoStream, call.peer);
-                    });
+                    call.answer(getActiveStream());
+                    setupCallStreamHandler(call, call.peer);
                 });
 
                 // eslint-disable-next-line no-undef
                 socket.emit('joinRoom', ROOM_ID, peerId);
 
                 socket.on('userConnected', (peerId) =>
-                    connectToNewUser(peer, peerId, stream)
+                    connectToNewUser(peer, peerId, getActiveStream())
                 );
 
                 //removing video of user who has disconnected from websocket
@@ -210,6 +399,11 @@ const connect = () => {
                         `You have been disconnected from websocket. The road ends here. `
                     );
                 });
+            })
+            .catch((error) => {
+                console.warn('Could not start microphone audio source.', error);
+                joinBtn.classList.remove('hidden');
+                document.querySelector('#buttons').classList.add('hidden');
             });
     });
 
@@ -234,10 +428,7 @@ const connect = () => {
         peer.destroy();
 
         //removing all videos for client who is leaving.
-        var videoNodes = document.querySelectorAll('video');
-        videoNodes.forEach((node) => {
-            node.remove();
-        });
+        videoGrid.replaceChildren();
 
         joinBtn.querySelector('button').innerText = 'Re-join Call';
         joinBtn.classList.remove('hidden');
@@ -247,6 +438,8 @@ const connect = () => {
 
 function removeVideoElement(id) {
     var vidElement = document.getElementById(id);
+    delete remoteStreams[id];
+
     if (vidElement) {
         vidElement.remove();
         setHeightOfVideos();
