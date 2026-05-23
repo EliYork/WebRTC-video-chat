@@ -17,9 +17,11 @@
 - 固定的首页频道列表。
 - 稳定的频道路由：`lobby`、`game`、`project`、`screen` 和 `idle`。
 - 默认以纯音频方式加入房间。
+- 加入房间时默认启用浏览器支持的回声消除、降噪和自动增益。
 - 麦克风静音与取消静音。
 - 可选摄像头开关。
 - 向已连接的对端共享屏幕。
+- 远端视频和屏幕共享支持按钮或双击全屏观看。
 - 支持向没有视频 sender 的对端共享屏幕。
 - 当其他用户已经在共享屏幕时，后加入者也能接收当前屏幕共享。
 - 远端用户没有视频轨道时显示纯音频占位卡片。
@@ -32,7 +34,7 @@
 
 前端媒体流程有意保持简单：
 
-- `Join Call` 调用 `getUserMedia({ audio: true })`。
+- `Join Call` 优先调用带 `echoCancellation`、`noiseSuppression`、`autoGainControl` 的音频采集；如果浏览器不支持，会降级为基础 `audio: true`。
 - 本地流始终以纯音频开始。
 - 只有当用户请求打开摄像头时，摄像头按钮才会调用 `getUserMedia({ video: true, audio: false })`。
 - 如果摄像头启动失败，通话会保持连接，错误会通过 `console.warn` 记录。

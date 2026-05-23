@@ -9,6 +9,11 @@ myVideo.playsInline = 'true';
 const joinBtn = document.querySelector('#join-btn');
 const copyRoomLinkBtn = document.getElementById('copyRoomLink');
 const remoteStreams = {};
+const audioConstraints = {
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true,
+};
 let myVideoStream;
 let activeStream;
 let cameraStream;
@@ -21,6 +26,50 @@ const connectToNewUser = (peer, peerId, stream) => {
 
     const call = peer.call(peerId, stream);
     setupCallStreamHandler(call, peerId);
+};
+
+const requestAudioStream = async () => {
+    try {
+        return await navigator.mediaDevices.getUserMedia({
+            audio: audioConstraints,
+        });
+    } catch (error) {
+        console.warn(
+            'Could not start microphone with audio processing constraints; retrying with basic audio.',
+            error
+        );
+        return navigator.mediaDevices.getUserMedia({
+            audio: true,
+        });
+    }
+};
+
+const requestTileFullscreen = async (tile) => {
+    if (!tile.querySelector('video')) {
+        console.warn('Fullscreen is only available when this peer has video.');
+        return;
+    }
+
+    try {
+        await tile.requestFullscreen();
+    } catch (error) {
+        console.warn('Could not enter fullscreen for this video.', error);
+    }
+};
+
+const addFullscreenControls = (tile) => {
+    if (!tile.id || tile.id === 'local-video') {
+        return;
+    }
+
+    const button = document.createElement('button');
+    button.className = 'fullscreen-btn';
+    button.type = 'button';
+    button.innerText = '全屏';
+    button.addEventListener('click', () => requestTileFullscreen(tile));
+
+    tile.append(button);
+    tile.ondblclick = () => requestTileFullscreen(tile);
 };
 
 const addVideoStream = (video, stream, videoId) => {
@@ -51,13 +100,16 @@ const addVideoStream = (video, stream, videoId) => {
             placeholder.className = 'voice-placeholder';
             placeholder.innerText = videoId ? 'Audio only' : 'Local audio only';
             tile.append(placeholder);
+            tile.ondblclick = undefined;
+        } else {
+            addFullscreenControls(tile);
         }
     }
 
     mediaElement.srcObject = stream;
-    mediaElement.addEventListener('loadedmetadata', () => {
+    mediaElement.onloadedmetadata = () => {
         mediaElement.play();
-    });
+    };
     setHeightOfVideos(); //added
 };
 
@@ -294,16 +346,27 @@ async function toggleScreenShare(peer, myVideoStream) {
 // ----------------------------------------------------------------------------------------
 
 //muting my audio
+const setAudioButtonState = (enabled) => {
+    document.getElementById('toggleAudio').firstChild.className = enabled
+        ? 'fas fa-microphone-alt'
+        : 'fas fa-microphone-alt-slash red';
+};
+
 const toggleAudio = (myVideoStream) => {
-    const enabled = myVideoStream.getAudioTracks()[0].enabled;
+    const audioTrack = myVideoStream?.getAudioTracks()[0];
+
+    if (!audioTrack) {
+        console.warn('No local microphone track is available.');
+        return;
+    }
+
+    const enabled = audioTrack.enabled;
     if (enabled) {
-        myVideoStream.getAudioTracks()[0].enabled = false;
-        document.getElementById('toggleAudio').firstChild.className =
-            'fas fa-microphone-alt-slash red';
+        audioTrack.enabled = false;
+        setAudioButtonState(false);
     } else {
-        myVideoStream.getAudioTracks()[0].enabled = true;
-        document.getElementById('toggleAudio').firstChild.className =
-            'fas fa-microphone-alt';
+        audioTrack.enabled = true;
+        setAudioButtonState(true);
     }
 };
 
@@ -366,12 +429,10 @@ const connect = () => {
         console.log('My peer ID is: ' + peerId);
 
         // after that wait for media stream
-        navigator.mediaDevices
-            .getUserMedia({
-                audio: true,
-            })
+        requestAudioStream()
             .then((stream) => {
                 myVideoStream = stream;
+                setAudioButtonState(myVideoStream.getAudioTracks()[0].enabled);
                 setLocalVideoStream(getActiveStream());
 
                 peer.on('call', (call) => {
