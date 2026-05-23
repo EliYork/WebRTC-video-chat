@@ -8,12 +8,18 @@ myVideo.playsInline = 'true';
 
 const joinBtn = document.querySelector('#join-btn');
 const copyRoomLinkBtn = document.getElementById('copyRoomLink');
+const chatNameInput = document.getElementById('chatName');
+const chatMessages = document.getElementById('chatMessages');
+const chatForm = document.getElementById('chatForm');
+const chatInput = document.getElementById('chatInput');
 const remoteStreams = {};
 const audioConstraints = {
     echoCancellation: true,
     noiseSuppression: true,
     autoGainControl: true,
 };
+const CHAT_NAME_STORAGE_KEY = 'webrtc-video-chat-name';
+const CHAT_MESSAGE_MAX_LENGTH = 500;
 let myVideoStream;
 let activeStream;
 let cameraStream;
@@ -26,6 +32,119 @@ const connectToNewUser = (peer, peerId, stream) => {
 
     const call = peer.call(peerId, stream);
     setupCallStreamHandler(call, peerId);
+};
+
+const createGuestName = () =>
+    `Guest-${Math.floor(1000 + Math.random() * 9000)}`;
+
+const getStoredChatName = () => {
+    const storedName = localStorage.getItem(CHAT_NAME_STORAGE_KEY);
+
+    if (storedName) {
+        return storedName;
+    }
+
+    const guestName = createGuestName();
+    localStorage.setItem(CHAT_NAME_STORAGE_KEY, guestName);
+    return guestName;
+};
+
+const getChatName = () => {
+    const name = chatNameInput?.value.trim().slice(0, 32);
+    return name || getStoredChatName();
+};
+
+const saveChatName = () => {
+    if (!chatNameInput) {
+        return;
+    }
+
+    const name = chatNameInput.value.trim().slice(0, 32) || createGuestName();
+    chatNameInput.value = name;
+    localStorage.setItem(CHAT_NAME_STORAGE_KEY, name);
+};
+
+const formatChatTime = (createdAt) =>
+    new Date(createdAt).toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+    });
+
+const appendChatMessage = (message) => {
+    if (!chatMessages || !message?.content) {
+        return;
+    }
+
+    const item = document.createElement('li');
+    const meta = document.createElement('div');
+    const content = document.createElement('div');
+    const senderName =
+        message.senderName === getChatName()
+            ? `${message.senderName} (我)`
+            : message.senderName;
+
+    item.className = 'chat-message';
+    meta.className = 'chat-message-meta';
+    content.className = 'chat-message-content';
+    meta.textContent = `${senderName} · ${formatChatTime(message.createdAt)}`;
+    content.textContent = message.content;
+
+    item.append(meta, content);
+    chatMessages.append(item);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+};
+
+const renderChatHistory = (messages) => {
+    if (!chatMessages) {
+        return;
+    }
+
+    chatMessages.replaceChildren();
+    (Array.isArray(messages) ? messages : []).forEach(appendChatMessage);
+};
+
+const ensureSocket = () => {
+    if (socket) {
+        return socket;
+    }
+
+    // eslint-disable-next-line no-undef
+    socket = io({
+        query: {
+            // eslint-disable-next-line no-undef
+            roomId: ROOM_ID,
+        },
+    });
+
+    socket.on('chat:history', renderChatHistory);
+    socket.on('chat:message', appendChatMessage);
+
+    return socket;
+};
+
+const joinChatRoom = () => {
+    const activeSocket = ensureSocket();
+
+    // eslint-disable-next-line no-undef
+    activeSocket.emit('chat:join', { roomId: ROOM_ID });
+};
+
+const sendChatMessage = () => {
+    const content = chatInput?.value.trim().slice(0, CHAT_MESSAGE_MAX_LENGTH);
+
+    if (!content) {
+        return;
+    }
+
+    saveChatName();
+    ensureSocket().emit('chat:send', {
+        // eslint-disable-next-line no-undef
+        roomId: ROOM_ID,
+        senderName: getChatName(),
+        content,
+    });
+
+    chatInput.value = '';
 };
 
 const requestAudioStream = async () => {
@@ -402,14 +521,7 @@ const connect = () => {
 
     // first wait to connect to the peer server
     peer.on('open', async (peerId) => {
-        // eslint-disable-next-line no-undef
-        socket = io({
-            query: {
-                // eslint-disable-next-line no-undef
-                roomId: ROOM_ID,
-                peerId: peerId,
-            },
-        });
+        const activeSocket = ensureSocket();
 
         document
             .getElementById('toggleAudio')
@@ -443,21 +555,23 @@ const connect = () => {
                 });
 
                 // eslint-disable-next-line no-undef
-                socket.emit('joinRoom', ROOM_ID, peerId);
+                activeSocket.emit('joinRoom', ROOM_ID, peerId);
 
-                socket.on('userConnected', (peerId) =>
+                activeSocket.on('userConnected', (peerId) =>
                     connectToNewUser(peer, peerId, getActiveStream())
                 );
 
                 //removing video of user who has disconnected from websocket
-                socket.on('removeUserVideo', (peerId) =>
+                activeSocket.on('removeUserVideo', (peerId) =>
                     removeVideoElement(peerId)
                 );
 
                 // -DISCONNECT FUNCTION - disconnecting this user from websocket. This will trigger the on.disconnected listener on the server.
                 //this will tell other sockets to remove the video of the user who has just disconnected (video id is the same as the userId)
-                socket.on('forceDisconnect', () => {
-                    socket.close();
+                activeSocket.on('forceDisconnect', () => {
+                    activeSocket.close();
+                    socket = undefined;
+                    joinChatRoom();
                     console.log(
                         `You have been disconnected from websocket. The road ends here. `
                     );
@@ -510,6 +624,27 @@ function removeVideoElement(id) {
 }
 
 joinBtn.addEventListener('click', connect);
+
+if (chatNameInput) {
+    chatNameInput.value = getStoredChatName();
+    chatNameInput.addEventListener('change', saveChatName);
+}
+
+chatForm?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    sendChatMessage();
+});
+
+chatInput?.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' || event.shiftKey) {
+        return;
+    }
+
+    event.preventDefault();
+    sendChatMessage();
+});
+
+joinChatRoom();
 
 copyRoomLinkBtn?.addEventListener('click', async () => {
     try {

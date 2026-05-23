@@ -89,6 +89,37 @@ const CHANNELS = [
 ];
 
 const getChannel = (slug) => CHANNELS.find((channel) => channel.slug === slug);
+const CHAT_HISTORY_LIMIT = 50;
+const CHAT_MESSAGE_MAX_LENGTH = 500;
+const chatHistoryByRoom = new Map();
+
+const getChatHistory = (roomId) => chatHistoryByRoom.get(roomId) || [];
+
+const saveChatMessage = (message) => {
+    const history = getChatHistory(message.roomId);
+    history.push(message);
+
+    if (history.length > CHAT_HISTORY_LIMIT) {
+        history.splice(0, history.length - CHAT_HISTORY_LIMIT);
+    }
+
+    chatHistoryByRoom.set(message.roomId, history);
+};
+
+const createChatMessageId = () =>
+    `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+
+const normalizeSenderName = (senderName) => {
+    const normalized = String(senderName || '')
+        .trim()
+        .slice(0, 32);
+    return normalized || 'Guest';
+};
+
+const normalizeChatContent = (content) =>
+    String(content || '')
+        .trim()
+        .slice(0, CHAT_MESSAGE_MAX_LENGTH);
 
 app.set('view engine', 'ejs');
 app.use(express.static(__dirname + '/views'));
@@ -179,6 +210,47 @@ const handleDisconnect = (roomId, peerId, socket) => {
     socket.to(roomId).emit('removeUserVideo', peerId);
 };
 
+const handleChatJoin = async ({ roomId } = {}, socket) => {
+    const channel = getChannel(roomId);
+
+    if (!channel) {
+        return;
+    }
+
+    socket.data.chatRoomId = channel.slug;
+    await socket.join(channel.slug);
+    socket.emit('chat:history', getChatHistory(channel.slug));
+};
+
+const handleChatSend = async ({ roomId, senderName, content } = {}, socket) => {
+    const channel = getChannel(roomId || socket.data.chatRoomId);
+
+    if (!channel) {
+        return;
+    }
+
+    const normalizedContent = normalizeChatContent(content);
+
+    if (!normalizedContent) {
+        return;
+    }
+
+    if (!socket.rooms.has(channel.slug)) {
+        await socket.join(channel.slug);
+    }
+
+    const message = {
+        id: createChatMessageId(),
+        roomId: channel.slug,
+        senderName: normalizeSenderName(senderName),
+        content: normalizedContent,
+        createdAt: new Date().toISOString(),
+    };
+
+    saveChatMessage(message);
+    io.to(channel.slug).emit('chat:message', message);
+};
+
 /**
  * io.on('connection')
  *
@@ -193,6 +265,8 @@ io.on('connection', (socket) => {
     socket.on('joinRoom', (roomId, userId) =>
         handleJoinRoon(roomId, userId, socket)
     );
+    socket.on('chat:join', (payload) => handleChatJoin(payload, socket));
+    socket.on('chat:send', (payload) => handleChatSend(payload, socket));
     socket.on('peerLeft', () => handleManualDisconnect(socket));
 });
 

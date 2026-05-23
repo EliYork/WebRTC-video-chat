@@ -17,9 +17,12 @@ The current baseline is a voice-first fixed-channel room:
 - Fixed homepage channel list.
 - Stable channel routes: `lobby`, `game`, `project`, `screen`, and `idle`.
 - Audio-only room join by default.
+- Browser-supported echo cancellation, noise suppression, and auto gain are requested by default.
 - Microphone mute and unmute.
 - Optional camera toggle.
 - Screen sharing to connected peers.
+- Remote video and screen shares can be opened fullscreen by button or double-click.
+- In-channel text chat with the latest 50 messages kept in server memory.
 - Screen sharing for peers that do not already have a video sender.
 - Late join support when another peer is already sharing a screen.
 - Audio-only placeholder tiles when a remote peer has no video track.
@@ -32,7 +35,7 @@ No login system or external AI integration is included in this baseline.
 
 The frontend media flow is intentionally simple:
 
-- `Join Call` calls `getUserMedia({ audio: true })`.
+- `Join Call` first requests audio with `echoCancellation`, `noiseSuppression`, and `autoGainControl`; if unsupported, it falls back to basic `audio: true`.
 - The local stream always starts as audio-only.
 - The camera button calls `getUserMedia({ video: true, audio: false })` only when the user asks to turn the camera on.
 - If camera startup fails, the call stays connected and the error is logged with `console.warn`.
@@ -42,6 +45,16 @@ The frontend media flow is intentionally simple:
 - If no video sender exists, the app starts a small additional PeerJS media call carrying the screen video track.
 - When a new peer joins, the app calls them with the current active stream, so an already-active screen share can be received by the late joiner.
 - When screen sharing stops, the app restores the camera track if the camera is on; otherwise it returns peers to audio-only state.
+
+## Chat Logic
+
+- The room page creates a temporary nickname such as `Guest-1234`.
+- The nickname is stored in `localStorage` and can be edited on the room page.
+- Chat uses the existing Socket.IO connection with `chat:join`, `chat:history`, `chat:send`, and `chat:message`.
+- Each message includes `id`, `roomId`, `senderName`, `content`, and `createdAt`.
+- The server stores the latest 50 messages per channel in memory; messages are lost when the server restarts.
+- Messages only broadcast within the same channel, so `/room/project` chat does not appear in `/room/game`.
+- The client renders message content as text nodes and does not use `innerHTML` for user input.
 
 ## Local Setup
 

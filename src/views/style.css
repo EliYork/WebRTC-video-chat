@@ -108,7 +108,8 @@ body {
 
 #canvas {
     display: flex;
-    height: 100%;
+    flex: 1;
+    min-height: 0;
     flex-direction: column;
     justify-content: center;
 }
@@ -171,6 +172,105 @@ body {
 
 .voice-placeholder {
     font-size: 20px;
+}
+
+.chat-panel {
+    margin: 0 24px 12px;
+    padding: 14px;
+    border-top: 1px solid rgba(248, 248, 248, 0.219);
+    background-color: rgb(38, 37, 37);
+    color: #fff;
+    font-family:
+        'Gill Sans', 'Gill Sans MT', Calibri, 'Trebuchet MS', sans-serif;
+}
+
+.chat-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 10px;
+}
+
+.chat-header h2 {
+    margin: 0;
+    font-size: 18px;
+}
+
+.chat-header p {
+    margin: 4px 0 0;
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.chat-header label {
+    display: grid;
+    gap: 4px;
+    min-width: 160px;
+    font-size: 14px;
+}
+
+.chat-header input,
+.chat-form textarea {
+    background-color: rgb(20, 20, 20);
+    color: #fff;
+    border: 1px solid rgba(248, 248, 248, 0.219);
+    border-radius: 6px;
+    font: inherit;
+}
+
+.chat-header input {
+    padding: 7px 9px;
+}
+
+.chat-messages {
+    height: 160px;
+    margin: 0 0 10px;
+    padding: 0;
+    list-style: none;
+    overflow-y: auto;
+}
+
+.chat-message {
+    padding: 7px 0;
+    border-bottom: 1px solid rgba(248, 248, 248, 0.1);
+}
+
+.chat-message-meta {
+    margin-bottom: 3px;
+    color: rgba(255, 255, 255, 0.62);
+    font-size: 13px;
+}
+
+.chat-message-content {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.chat-form {
+    display: flex;
+    gap: 10px;
+}
+
+.chat-form textarea {
+    flex: 1;
+    min-height: 42px;
+    max-height: 90px;
+    padding: 8px 10px;
+    resize: vertical;
+}
+
+.chat-form button {
+    padding: 0 18px;
+    background-color: #2d8cff;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font: inherit;
+    cursor: pointer;
+}
+
+.chat-form button:hover {
+    background-color: #1761b6;
 }
 
 #main {
