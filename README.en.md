@@ -212,5 +212,5 @@ ISC
 
 This project is based on:
 
-- nlukic97/WebRTC-video-chat, licensed under the MIT License.
-- nlukic97/WebSocket-Cursor-Room, licensed under the ISC License.
+- nlukic97/WebRTC-video-chat, licensed under the ISC License.
+- nlukic97/WebSocket-Cursor-Room, licensed under the MIT License.
