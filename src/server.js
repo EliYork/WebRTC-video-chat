@@ -121,6 +121,28 @@ const normalizeChatContent = (content) =>
         .trim()
         .slice(0, CHAT_MESSAGE_MAX_LENGTH);
 
+const getCursorColor = (seed) => {
+    let hash = 0;
+
+    String(seed || '')
+        .split('')
+        .forEach((char) => {
+            hash = (hash * 31 + char.charCodeAt(0)) % 360;
+        });
+
+    return `hsl(${hash}, 78%, 58%)`;
+};
+
+const normalizeCursorPosition = (value) => {
+    const position = Number(value);
+
+    if (!Number.isFinite(position)) {
+        return undefined;
+    }
+
+    return Math.min(1, Math.max(0, position));
+};
+
 app.set('view engine', 'ejs');
 app.use(express.static(__dirname + '/views'));
 app.set('views', __dirname + '/views');
@@ -167,6 +189,7 @@ app.use((_, res) => res.status(404).send('404 Not Found'));
  */
 const handleJoinRoon = async (roomId, peerId, socket) => {
     Log.info(`Peer with id ${peerId} has requested to enter room ${roomId}.`);
+    socket.data.roomId = roomId;
     await socket.join(roomId);
 
     socket.to(roomId).emit('userConnected', peerId);
@@ -218,6 +241,7 @@ const handleChatJoin = async ({ roomId } = {}, socket) => {
     }
 
     socket.data.chatRoomId = channel.slug;
+    socket.data.roomId = channel.slug;
     await socket.join(channel.slug);
     socket.emit('chat:history', getChatHistory(channel.slug));
 };
@@ -251,6 +275,57 @@ const handleChatSend = async ({ roomId, senderName, content } = {}, socket) => {
     io.to(channel.slug).emit('chat:message', message);
 };
 
+const handleCursorMove = async ({ roomId, x, y, senderName } = {}, socket) => {
+    const channel = getChannel(roomId || socket.data.roomId);
+    const normalizedX = normalizeCursorPosition(x);
+    const normalizedY = normalizeCursorPosition(y);
+
+    if (!channel) {
+        return;
+    }
+
+    if (normalizedX === undefined || normalizedY === undefined) {
+        return;
+    }
+
+    if (!socket.rooms.has(channel.slug)) {
+        await socket.join(channel.slug);
+    }
+
+    socket.data.roomId = channel.slug;
+    socket.to(channel.slug).emit('cursor:move', {
+        socketId: socket.id,
+        x: normalizedX,
+        y: normalizedY,
+        senderName: normalizeSenderName(senderName),
+        color: getCursorColor(socket.id),
+    });
+};
+
+const handleCursorLeave = ({ roomId } = {}, socket) => {
+    const channel = getChannel(roomId || socket.data.roomId);
+
+    if (!channel) {
+        return;
+    }
+
+    socket.to(channel.slug).emit('cursor:leave', {
+        socketId: socket.id,
+    });
+};
+
+const handleCursorRemove = (socket) => {
+    const roomId = socket.data.roomId || socket.data.chatRoomId;
+
+    if (!roomId) {
+        return;
+    }
+
+    socket.to(roomId).emit('cursor:remove', {
+        socketId: socket.id,
+    });
+};
+
 /**
  * io.on('connection')
  *
@@ -262,11 +337,14 @@ const handleChatSend = async ({ roomId, senderName, content } = {}, socket) => {
 io.on('connection', (socket) => {
     Log.info(`User with socket.id ${socket.id} has connected.`);
 
+    socket.on('disconnecting', () => handleCursorRemove(socket));
     socket.on('joinRoom', (roomId, userId) =>
         handleJoinRoon(roomId, userId, socket)
     );
     socket.on('chat:join', (payload) => handleChatJoin(payload, socket));
     socket.on('chat:send', (payload) => handleChatSend(payload, socket));
+    socket.on('cursor:move', (payload) => handleCursorMove(payload, socket));
+    socket.on('cursor:leave', (payload) => handleCursorLeave(payload, socket));
     socket.on('peerLeft', () => handleManualDisconnect(socket));
 });
 

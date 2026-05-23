@@ -170,6 +170,51 @@ body {
     background-color: rgba(0, 0, 0, 0.9);
 }
 
+.cursor-overlay {
+    position: fixed;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+    z-index: 9999;
+}
+
+.shared-cursor {
+    position: absolute;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    opacity: 1;
+    transform: translate(0, 0);
+    transition: opacity 0.18s ease;
+}
+
+.shared-cursor.is-idle {
+    opacity: 0.32;
+}
+
+.shared-cursor-pointer {
+    width: 0;
+    height: 0;
+    border-left: 9px solid var(--cursor-color);
+    border-top: 7px solid transparent;
+    border-bottom: 7px solid transparent;
+    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.65));
+}
+
+.shared-cursor-label {
+    max-width: 120px;
+    padding: 3px 6px;
+    overflow: hidden;
+    color: #fff;
+    background-color: var(--cursor-color);
+    border-radius: 6px;
+    font-size: 12px;
+    line-height: 1.2;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+}
+
 .voice-placeholder {
     font-size: 20px;
 }

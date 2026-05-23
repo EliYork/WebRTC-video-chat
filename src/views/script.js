@@ -20,10 +20,15 @@ const audioConstraints = {
 };
 const CHAT_NAME_STORAGE_KEY = 'webrtc-video-chat-name';
 const CHAT_MESSAGE_MAX_LENGTH = 500;
+const CURSOR_THROTTLE_MS = 40;
+const CURSOR_IDLE_MS = 700;
+const cursorIdleTimers = {};
 let myVideoStream;
 let activeStream;
 let cameraStream;
 let activeVideoTrack;
+let localPeerId;
+let lastCursorMoveAt = 0;
 
 const connectToNewUser = (peer, peerId, stream) => {
     console.log(
@@ -118,6 +123,9 @@ const ensureSocket = () => {
 
     socket.on('chat:history', renderChatHistory);
     socket.on('chat:message', appendChatMessage);
+    socket.on('cursor:move', renderRemoteCursor);
+    socket.on('cursor:leave', markRemoteCursorIdle);
+    socket.on('cursor:remove', removeRemoteCursor);
 
     return socket;
 };
@@ -145,6 +153,137 @@ const sendChatMessage = () => {
     });
 
     chatInput.value = '';
+};
+
+const clampCursorPosition = (position) =>
+    Math.min(1, Math.max(0, Number(position) || 0));
+
+const getCursorOverlay = () => {
+    let overlay = document.getElementById('cursorOverlay');
+
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'cursorOverlay';
+        overlay.className = 'cursor-overlay';
+        document.body.append(overlay);
+    }
+
+    return overlay;
+};
+
+const setCursorIdle = (socketId) => {
+    const cursor = document.querySelector(
+        `.shared-cursor[data-socket-id="${socketId}"]`
+    );
+
+    if (cursor) {
+        cursor.classList.add('is-idle');
+    }
+};
+
+const clearCursorIdleTimer = (socketId) => {
+    if (!cursorIdleTimers[socketId]) {
+        return;
+    }
+
+    clearTimeout(cursorIdleTimers[socketId]);
+    delete cursorIdleTimers[socketId];
+};
+
+const scheduleCursorIdle = (socketId) => {
+    clearCursorIdleTimer(socketId);
+    cursorIdleTimers[socketId] = setTimeout(
+        () => setCursorIdle(socketId),
+        CURSOR_IDLE_MS
+    );
+};
+
+const renderRemoteCursor = ({ socketId, x, y, senderName, color }) => {
+    const overlay = getCursorOverlay();
+    let cursor = overlay.querySelector(
+        `.shared-cursor[data-socket-id="${socketId}"]`
+    );
+
+    if (!cursor) {
+        cursor = document.createElement('div');
+        const pointer = document.createElement('div');
+        const label = document.createElement('div');
+
+        cursor.className = 'shared-cursor';
+        cursor.dataset.socketId = socketId;
+        pointer.className = 'shared-cursor-pointer';
+        label.className = 'shared-cursor-label';
+
+        cursor.append(pointer, label);
+        overlay.append(cursor);
+    }
+
+    cursor.style.left = `${clampCursorPosition(x) * 100}vw`;
+    cursor.style.top = `${clampCursorPosition(y) * 100}vh`;
+    cursor.style.setProperty('--cursor-color', color);
+    cursor.querySelector('.shared-cursor-label').textContent =
+        senderName || 'Guest';
+    cursor.classList.remove('is-idle');
+    scheduleCursorIdle(socketId);
+};
+
+const markRemoteCursorIdle = ({ socketId }) => {
+    clearCursorIdleTimer(socketId);
+    setCursorIdle(socketId);
+};
+
+const removeRemoteCursor = ({ socketId }) => {
+    clearCursorIdleTimer(socketId);
+    document
+        .querySelectorAll(`.shared-cursor[data-socket-id="${socketId}"]`)
+        .forEach((cursor) => cursor.remove());
+};
+
+const getViewportCursorPosition = (event) => {
+    if (window.innerWidth === 0 || window.innerHeight === 0) {
+        return undefined;
+    }
+
+    return {
+        x: clampCursorPosition(event.clientX / window.innerWidth),
+        y: clampCursorPosition(event.clientY / window.innerHeight),
+    };
+};
+
+const sendCursorMove = (event) => {
+    const now = Date.now();
+
+    if (now - lastCursorMoveAt < CURSOR_THROTTLE_MS) {
+        return;
+    }
+
+    const position = getViewportCursorPosition(event);
+
+    if (!position) {
+        return;
+    }
+
+    lastCursorMoveAt = now;
+    ensureSocket().emit('cursor:move', {
+        // eslint-disable-next-line no-undef
+        roomId: ROOM_ID,
+        x: position.x,
+        y: position.y,
+        senderName: getChatName(),
+    });
+};
+
+const sendCursorLeave = () => {
+    ensureSocket().emit('cursor:leave', {
+        // eslint-disable-next-line no-undef
+        roomId: ROOM_ID,
+    });
+};
+
+const enablePageCursorSharing = () => {
+    getCursorOverlay();
+    document.addEventListener('pointermove', sendCursorMove);
+    document.addEventListener('pointerleave', sendCursorLeave);
 };
 
 const requestAudioStream = async () => {
@@ -202,6 +341,12 @@ const addVideoStream = (video, stream, videoId) => {
         tile.id = tileId;
         tile.className = 'video-tile';
         videoGrid.append(tile);
+    }
+
+    if (videoId) {
+        tile.dataset.peerId = videoId;
+    } else if (localPeerId) {
+        tile.dataset.peerId = localPeerId;
     }
 
     let mediaElement = tile.querySelector('video, audio');
@@ -521,6 +666,8 @@ const connect = () => {
 
     // first wait to connect to the peer server
     peer.on('open', async (peerId) => {
+        localPeerId = peerId;
+        myVideo.parentElement?.setAttribute('data-peer-id', localPeerId);
         const activeSocket = ensureSocket();
 
         document
@@ -645,6 +792,7 @@ chatInput?.addEventListener('keydown', (event) => {
 });
 
 joinChatRoom();
+enablePageCursorSharing();
 
 copyRoomLinkBtn?.addEventListener('click', async () => {
     try {

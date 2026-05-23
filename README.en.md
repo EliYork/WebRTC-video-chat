@@ -23,6 +23,7 @@ The current baseline is a voice-first fixed-channel room:
 - Screen sharing to connected peers.
 - Remote video and screen shares can be opened fullscreen by button or double-click.
 - In-channel text chat with the latest 50 messages kept in server memory.
+- Shared cursors across the whole channel page.
 - Screen sharing for peers that do not already have a video sender.
 - Late join support when another peer is already sharing a screen.
 - Audio-only placeholder tiles when a remote peer has no video track.
@@ -55,6 +56,17 @@ The frontend media flow is intentionally simple:
 - The server stores the latest 50 messages per channel in memory; messages are lost when the server restarts.
 - Messages only broadcast within the same channel, so `/room/project` chat does not appear in `/room/game`.
 - The client renders message content as text nodes and does not use `innerHTML` for user input.
+
+## Cursor Logic
+
+- Shared cursors use the existing Socket.IO connection with `cursor:move`, `cursor:leave`, and `cursor:remove`.
+- Cursors are enabled across the whole channel page, even before users join the voice call or share a screen.
+- The client sends viewport-relative coordinates where `x = event.clientX / window.innerWidth` and `y = event.clientY / window.innerHeight`, not real screen pixels.
+- The server broadcasts cursor events only to other users in the same channel.
+- Cursor color is generated from the Socket.IO `socket.id`, so it may change after refresh.
+- When the mouse stops or leaves the page, the remote cursor stays at its last position and becomes semi-transparent.
+- When a user disconnects, refreshes, or leaves the channel, other clients remove that user's cursor.
+- This first version only shares cursors; it does not include whiteboard drawing, lines, or annotations.
 
 ## Local Setup
 
