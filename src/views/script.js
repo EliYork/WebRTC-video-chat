@@ -113,10 +113,13 @@ const CHAT_NAME_STORAGE_KEY = 'webrtc-video-chat-name';
 const NOISE_SUPPRESSION_KEY = 'webrtc-noise-suppression';
 const AI_NOISE_EXPERIMENT_KEY = 'webrtc-ai-noise-experiment';
 const MIC_GAIN_KEY = 'webrtc-mic-gain';
+const TILE_LAYOUT_STORAGE_KEY = 'voice-room-tile-layouts-v1';
 const CHAT_MESSAGE_MAX_LENGTH = 500;
 const CURSOR_THROTTLE_MS = 40;
 const CURSOR_IDLE_MS = 700;
 const MOBILE_BREAKPOINT = 768;
+const TILE_MIN_WIDTH = 180;
+const TILE_MIN_HEIGHT = 120;
 const cursorSharingMedia = window.matchMedia(
     `(max-width: ${MOBILE_BREAKPOINT}px), (pointer: coarse)`
 );
@@ -1317,6 +1320,112 @@ const getTileType = (tile, hasVideo, member) => {
 const getTileLayoutId = (tileId) =>
     `tile-${String(tileId).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
 
+const getSavedTileLayouts = () => {
+    try {
+        return JSON.parse(localStorage.getItem(TILE_LAYOUT_STORAGE_KEY)) || {};
+    } catch {
+        return {};
+    }
+};
+
+const saveTileLayout = (layoutId, layout) => {
+    if (!layoutId) {
+        return;
+    }
+
+    const layouts = getSavedTileLayouts();
+    layouts[layoutId] = {
+        x: Math.round(layout.x),
+        y: Math.round(layout.y),
+        width: Math.round(layout.width),
+        height: Math.round(layout.height),
+    };
+    localStorage.setItem(TILE_LAYOUT_STORAGE_KEY, JSON.stringify(layouts));
+};
+
+const getTileBounds = () => {
+    const gridRect = videoGrid.getBoundingClientRect();
+    const fallbackRect = videoGrid.parentElement?.getBoundingClientRect();
+
+    return {
+        width: Math.max(
+            TILE_MIN_WIDTH,
+            gridRect.width || fallbackRect?.width || TILE_MIN_WIDTH
+        ),
+        height: Math.max(
+            TILE_MIN_HEIGHT,
+            gridRect.height || fallbackRect?.height || TILE_MIN_HEIGHT
+        ),
+    };
+};
+
+const clampTileLayout = ({ x, y, width, height }) => {
+    const bounds = getTileBounds();
+    const nextWidth = Math.min(Math.max(width, TILE_MIN_WIDTH), bounds.width);
+    const nextHeight = Math.min(
+        Math.max(height, TILE_MIN_HEIGHT),
+        bounds.height
+    );
+
+    return {
+        x: Math.min(Math.max(0, x), Math.max(0, bounds.width - nextWidth)),
+        y: Math.min(Math.max(0, y), Math.max(0, bounds.height - nextHeight)),
+        width: nextWidth,
+        height: nextHeight,
+    };
+};
+
+const applyTileLayout = (tile, layout) => {
+    const next = clampTileLayout(layout);
+
+    tile.classList.add('is-positioned');
+    tile.style.left = `${next.x}px`;
+    tile.style.top = `${next.y}px`;
+    tile.style.width = `${next.width}px`;
+    tile.style.height = `${next.height}px`;
+};
+
+const getCurrentTileLayout = (tile) => {
+    const tileRect = tile.getBoundingClientRect();
+    const gridRect = videoGrid.getBoundingClientRect();
+
+    return clampTileLayout({
+        x: tileRect.left - gridRect.left + videoGrid.scrollLeft,
+        y: tileRect.top - gridRect.top + videoGrid.scrollTop,
+        width: tileRect.width,
+        height: tileRect.height,
+    });
+};
+
+const persistCurrentTileLayout = (tile) => {
+    saveTileLayout(tile.dataset.layoutId, getCurrentTileLayout(tile));
+};
+
+const clampPositionedTileLayouts = () => {
+    if (isMobileLayout()) {
+        return;
+    }
+
+    getVideoTiles().forEach((tile) => {
+        if (tile.classList.contains('is-positioned')) {
+            applyTileLayout(tile, getCurrentTileLayout(tile));
+            persistCurrentTileLayout(tile);
+        }
+    });
+};
+
+const applySavedTileLayout = (tile) => {
+    if (isMobileLayout() || !tile.dataset.layoutId) {
+        return;
+    }
+
+    const layout = getSavedTileLayouts()[tile.dataset.layoutId];
+
+    if (layout) {
+        applyTileLayout(tile, layout);
+    }
+};
+
 const createTileAvatarText = (displayName) =>
     String(displayName || 'Guest')
         .trim()
@@ -1380,7 +1489,98 @@ const ensureTileStructure = (tile) => {
         tile.append(resizeHandle);
     }
 
+    bindTileLayoutControls(tile, header, resizeHandle);
+
     return { header, body, overlay, actions, footer };
+};
+
+const isTilePointerDisabled = (event) =>
+    isMobileLayout() ||
+    getFullscreenElement() ||
+    event.button !== 0 ||
+    event.target.closest('button, input, textarea, a, .fullscreen-btn');
+
+const startTileDrag = (event, tile) => {
+    if (isTilePointerDisabled(event)) {
+        return;
+    }
+
+    const startLayout = getCurrentTileLayout(tile);
+    applyTileLayout(tile, startLayout);
+    tile.classList.add('is-dragging');
+    tile.setPointerCapture(event.pointerId);
+    event.preventDefault();
+
+    const startX = event.clientX;
+    const startY = event.clientY;
+
+    const onMove = (moveEvent) => {
+        applyTileLayout(tile, {
+            ...startLayout,
+            x: startLayout.x + moveEvent.clientX - startX,
+            y: startLayout.y + moveEvent.clientY - startY,
+        });
+    };
+
+    const onEnd = () => {
+        tile.classList.remove('is-dragging');
+        persistCurrentTileLayout(tile);
+        tile.removeEventListener('pointermove', onMove);
+        tile.removeEventListener('pointerup', onEnd);
+        tile.removeEventListener('pointercancel', onEnd);
+    };
+
+    tile.addEventListener('pointermove', onMove);
+    tile.addEventListener('pointerup', onEnd);
+    tile.addEventListener('pointercancel', onEnd);
+};
+
+const startTileResize = (event, tile) => {
+    if (isMobileLayout() || getFullscreenElement() || event.button !== 0) {
+        return;
+    }
+
+    const startLayout = getCurrentTileLayout(tile);
+    applyTileLayout(tile, startLayout);
+    tile.classList.add('is-resizing');
+    tile.setPointerCapture(event.pointerId);
+    event.preventDefault();
+    event.stopPropagation();
+
+    const startX = event.clientX;
+    const startY = event.clientY;
+
+    const onMove = (moveEvent) => {
+        applyTileLayout(tile, {
+            ...startLayout,
+            width: startLayout.width + moveEvent.clientX - startX,
+            height: startLayout.height + moveEvent.clientY - startY,
+        });
+    };
+
+    const onEnd = () => {
+        tile.classList.remove('is-resizing');
+        persistCurrentTileLayout(tile);
+        tile.removeEventListener('pointermove', onMove);
+        tile.removeEventListener('pointerup', onEnd);
+        tile.removeEventListener('pointercancel', onEnd);
+    };
+
+    tile.addEventListener('pointermove', onMove);
+    tile.addEventListener('pointerup', onEnd);
+    tile.addEventListener('pointercancel', onEnd);
+};
+
+const bindTileLayoutControls = (tile, header, resizeHandle) => {
+    if (!tile.dataset.layoutBound) {
+        header.addEventListener('pointerdown', (event) =>
+            startTileDrag(event, tile)
+        );
+        resizeHandle.addEventListener('pointerdown', (event) =>
+            startTileResize(event, tile)
+        );
+        tile.dataset.layoutBound = 'true';
+    }
 };
 
 const updateVideoTileStatus = (tile) => {
@@ -1505,6 +1705,7 @@ const addVideoStream = (video, stream, videoId) => {
 
     const { body, actions } = ensureTileStructure(tile);
     tile.dataset.layoutId = tile.dataset.layoutId || getTileLayoutId(tileId);
+    applySavedTileLayout(tile);
 
     if (videoId) {
         tile.dataset.peerId = videoId;
@@ -2378,6 +2579,7 @@ mobileNextTileBtn?.addEventListener('click', () => {
 window.addEventListener('resize', () => {
     updateMobileRoomState();
     updateMobileTileView();
+    clampPositionedTileLayouts();
 });
 
 updateChannelIndicators();
