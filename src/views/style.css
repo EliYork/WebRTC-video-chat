@@ -394,6 +394,19 @@ input {
     font-size: 12px;
 }
 
+.local-ai-noise-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.local-ai-noise-row .noise-toggle.na {
+    opacity: 0.45;
+    pointer-events: none;
+}
+
 .copy-room-link {
     display: grid;
     width: 32px;
@@ -974,6 +987,10 @@ input {
 
     .voice-placeholder {
         font-size: 17px;
+    }
+
+    .local-ai-noise-row {
+        display: none;
     }
 
     .chat-messages {

@@ -39,8 +39,6 @@ const getAudioConstraints = () => {
         noiseSuppression: noiseEnabled,
         autoGainControl: true,
         channelCount: 1,
-        sampleRate: 48000,
-        sampleSize: 16,
     };
 };
 const getNoiseSuppressionEnabled = () =>
@@ -63,8 +61,43 @@ const updateNoiseToggleUI = () => {
         status.textContent = enabled ? '开' : '关';
     }
 };
+
+const updateAiExperimentToggleUI = () => {
+    const supported = isAiExperimentSupported();
+    const enabled = getAiExperimentEnabled();
+    const toggle = document.getElementById('aiNoiseToggle');
+    const status = document.getElementById('aiNoiseStatusText');
+
+    if (!toggle) {
+        return;
+    }
+
+    if (!supported) {
+        toggle.classList.add('na');
+        toggle.setAttribute('aria-pressed', 'false');
+        toggle.setAttribute('title', '当前浏览器/设备不支持');
+        toggle.style.cursor = 'default';
+
+        if (status) {
+            status.textContent = toggle.dataset.notSupportedLabel || 'N/A';
+        }
+
+        return;
+    }
+
+    toggle.classList.remove('na');
+    toggle.setAttribute('aria-pressed', String(enabled));
+    toggle.removeAttribute('title');
+    toggle.style.cursor = '';
+
+    if (status) {
+        status.textContent = enabled ? '开' : '关';
+    }
+};
+
 const CHAT_NAME_STORAGE_KEY = 'webrtc-video-chat-name';
 const NOISE_SUPPRESSION_KEY = 'webrtc-noise-suppression';
+const AI_NOISE_EXPERIMENT_KEY = 'webrtc-ai-noise-experiment';
 const CHAT_MESSAGE_MAX_LENGTH = 500;
 const CURSOR_THROTTLE_MS = 40;
 const CURSOR_IDLE_MS = 700;
@@ -73,6 +106,18 @@ const cursorSharingMedia = window.matchMedia(
     `(max-width: ${MOBILE_BREAKPOINT}px), (pointer: coarse)`
 );
 const cursorIdleTimers = {};
+
+const isAiExperimentSupported = () =>
+    typeof AudioContext !== 'undefined' &&
+    typeof AudioWorkletNode !== 'undefined' &&
+    !isMobileLayout();
+
+const getAiExperimentEnabled = () =>
+    localStorage.getItem(AI_NOISE_EXPERIMENT_KEY) === 'true';
+
+const setAiExperimentEnabled = (enabled) => {
+    localStorage.setItem(AI_NOISE_EXPERIMENT_KEY, String(enabled));
+};
 let myVideoStream;
 let activeStream;
 let cameraStream;
@@ -92,6 +137,11 @@ let outputVolume = 1;
 let activeMobileTileIndex = 0;
 const remotePeerOrder = [];
 const screenSharers = new Set();
+let noiseAudioContext = null;
+let noiseProcessorNode = null;
+// eslint-disable-next-line no-unused-vars
+let noiseProcessorActive = false;
+let noiseRawStream = null;
 
 // eslint-disable-next-line no-undef
 viewingRoomId = ROOM_ID;
@@ -310,6 +360,7 @@ const setCopyRoomLinkCopied = (isCopied) => {
 };
 
 const resetLocalVoiceState = () => {
+    destroyProcessedAudioStream();
     stopCurrentScreenStream();
     cameraStream?.getTracks().forEach((track) => track.stop());
     myVideoStream?.getTracks().forEach((track) => track.stop());
@@ -762,8 +813,10 @@ const enablePageCursorSharing = () => {
 };
 
 const requestAudioStream = async () => {
+    let rawStream;
+
     try {
-        return await navigator.mediaDevices.getUserMedia({
+        rawStream = await navigator.mediaDevices.getUserMedia({
             audio: getAudioConstraints(),
         });
     } catch (error) {
@@ -775,6 +828,72 @@ const requestAudioStream = async () => {
             audio: true,
         });
     }
+
+    if (getAiExperimentEnabled() && isAiExperimentSupported()) {
+        try {
+            return await createProcessedAudioStream(rawStream);
+        } catch (error) {
+            console.warn(
+                '[audio-experiment] Passthrough init failed, falling back to raw.',
+                error
+            );
+        }
+    }
+
+    return rawStream;
+};
+
+const createProcessedAudioStream = async (rawStream) => {
+    const ctx = new AudioContext({ sampleRate: 48000 });
+
+    await ctx.audioWorklet.addModule('/audio-worklet/passthrough-processor.js');
+
+    const source = ctx.createMediaStreamSource(rawStream);
+    const processor = new AudioWorkletNode(ctx, 'passthrough-processor');
+    const dest = ctx.createMediaStreamDestination();
+
+    source.connect(processor).connect(dest);
+
+    noiseAudioContext = ctx;
+    noiseProcessorNode = processor;
+    noiseRawStream = rawStream;
+    noiseProcessorActive = true;
+
+    console.log('[audio-experiment] Passthrough processor active');
+    return dest.stream;
+};
+
+const destroyProcessedAudioStream = () => {
+    if (noiseProcessorNode) {
+        try {
+            noiseProcessorNode.disconnect();
+        } catch {
+            /* noop */
+        }
+        noiseProcessorNode = null;
+    }
+
+    if (noiseAudioContext) {
+        try {
+            noiseAudioContext.close();
+        } catch {
+            /* noop */
+        }
+        noiseAudioContext = null;
+    }
+
+    if (noiseRawStream) {
+        noiseRawStream.getTracks().forEach((track) => {
+            try {
+                track.stop();
+            } catch {
+                /* noop */
+            }
+        });
+        noiseRawStream = null;
+    }
+
+    noiseProcessorActive = false;
 };
 
 const requestTileFullscreen = async (tile) => {
@@ -1502,6 +1621,32 @@ noiseToggleEl?.addEventListener('keydown', (event) => {
     }
 });
 
+const aiNoiseToggleEl = document.getElementById('aiNoiseToggle');
+
+aiNoiseToggleEl?.addEventListener('click', () => {
+    if (!isAiExperimentSupported()) {
+        return;
+    }
+
+    const next = !getAiExperimentEnabled();
+
+    setAiExperimentEnabled(next);
+    updateAiExperimentToggleUI();
+
+    if (joinedVoiceRoomId) {
+        console.warn(
+            `[audio-experiment] Will ${next ? 'enable' : 'disable'} on next voice join.`
+        );
+    }
+});
+
+aiNoiseToggleEl?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        aiNoiseToggleEl.click();
+    }
+});
+
 mobileBackToChannelsBtn?.addEventListener('click', () => {
     if (currentPeer && !currentPeer.destroyed) {
         document.getElementById('destroyPeer')?.click();
@@ -1542,6 +1687,7 @@ updateChannelIndicators();
 updateOutputButtonState();
 updateScreenShareButtonState();
 updateNoiseToggleUI();
+updateAiExperimentToggleUI();
 joinChatRoom(viewingRoomId);
 enablePageCursorSharing();
 
