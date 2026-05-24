@@ -7,6 +7,8 @@ myVideo.muted = true; // ensures that we do not hear ourselves
 myVideo.playsInline = 'true';
 
 const joinBtn = document.querySelector('#join-btn');
+const joinCallBtn = document.getElementById('joinCall');
+const callControls = document.getElementById('buttons');
 const copyRoomLinkBtn = document.getElementById('copyRoomLink');
 const chatNameInput = document.getElementById('chatName');
 const chatMessages = document.getElementById('chatMessages');
@@ -29,6 +31,31 @@ let cameraStream;
 let activeVideoTrack;
 let localPeerId;
 let lastCursorMoveAt = 0;
+
+const setJoinCallPending = (isPending) => {
+    if (!joinCallBtn) {
+        return;
+    }
+
+    joinCallBtn.disabled = isPending;
+    joinCallBtn.setAttribute('aria-busy', String(isPending));
+};
+
+const showJoinCall = (label) => {
+    if (label && joinCallBtn) {
+        joinCallBtn.innerText = label;
+    }
+
+    setJoinCallPending(false);
+    joinBtn?.classList.remove('hidden');
+    callControls?.classList.add('hidden');
+};
+
+const showCallControls = () => {
+    setJoinCallPending(false);
+    joinBtn?.classList.add('hidden');
+    callControls?.classList.remove('hidden');
+};
 
 const connectToNewUser = (peer, peerId, stream) => {
     console.log(
@@ -649,15 +676,25 @@ const setHeightOfVideos = () => {
 };
 
 const connect = () => {
-    joinBtn.classList.add('hidden');
+    console.log('Join Call clicked');
+
+    if (!joinBtn || !joinCallBtn || !callControls) {
+        console.warn('Join Call UI is not available.');
+        return;
+    }
+
+    setJoinCallPending(true);
+    const isSecurePeerConnection = window.location.protocol === 'https:';
+    const peerPort =
+        window.location.port || (isSecurePeerConnection ? 443 : 80);
 
     //connecting to peer from client
     // eslint-disable-next-line no-undef
     var peer = new Peer(undefined, {
         host: window.location.hostname,
         path: '/peerjs',
-        // eslint-disable-next-line no-undef
-        port: PEER_PORT,
+        port: peerPort,
+        secure: isSecurePeerConnection,
         iceServers: [
             // eslint-disable-next-line no-undef
             ...iceServers,
@@ -670,20 +707,13 @@ const connect = () => {
         myVideo.parentElement?.setAttribute('data-peer-id', localPeerId);
         const activeSocket = ensureSocket();
 
-        document
-            .getElementById('toggleAudio')
-            .addEventListener('click', () => toggleAudio(myVideoStream));
-        document
-            .getElementById('toggleVideo')
-            .addEventListener('click', () => toggleCamera(peer));
-        document
-            .getElementById('shareScreen')
-            .addEventListener('click', () =>
-                toggleScreenShare(peer, myVideoStream)
-            );
+        document.getElementById('toggleAudio').onclick = () =>
+            toggleAudio(myVideoStream);
+        document.getElementById('toggleVideo').onclick = () =>
+            toggleCamera(peer);
+        document.getElementById('shareScreen').onclick = () =>
+            toggleScreenShare(peer, myVideoStream);
         window.addEventListener('resize', setHeightOfVideos);
-
-        document.querySelector('#buttons').classList.remove('hidden');
 
         console.log('My peer ID is: ' + peerId);
 
@@ -693,6 +723,7 @@ const connect = () => {
                 myVideoStream = stream;
                 setAudioButtonState(myVideoStream.getAudioTracks()[0].enabled);
                 setLocalVideoStream(getActiveStream());
+                showCallControls();
 
                 peer.on('call', (call) => {
                     console.log('Received a call...');
@@ -726,9 +757,13 @@ const connect = () => {
             })
             .catch((error) => {
                 console.warn('Could not start microphone audio source.', error);
-                joinBtn.classList.remove('hidden');
-                document.querySelector('#buttons').classList.add('hidden');
+                showJoinCall();
             });
+    });
+
+    peer.on('error', (error) => {
+        console.warn('Peer connection failed.', error);
+        showJoinCall();
     });
 
     peer.on('connection', () => {
@@ -748,16 +783,15 @@ const connect = () => {
     });
 
     //client click to end call and stays in browser
-    document.getElementById('destroyPeer').addEventListener('click', () => {
+    document.getElementById('destroyPeer').onclick = () => {
+        console.log('Destroy peer clicked');
         peer.destroy();
 
         //removing all videos for client who is leaving.
         videoGrid.replaceChildren();
 
-        joinBtn.querySelector('button').innerText = 'Re-join Call';
-        joinBtn.classList.remove('hidden');
-        document.querySelector('#buttons').classList.add('hidden');
-    });
+        showJoinCall('Re-join Call');
+    };
 };
 
 function removeVideoElement(id) {
@@ -770,7 +804,7 @@ function removeVideoElement(id) {
     }
 }
 
-joinBtn.addEventListener('click', connect);
+joinCallBtn?.addEventListener('click', connect);
 
 if (chatNameInput) {
     chatNameInput.value = getStoredChatName();

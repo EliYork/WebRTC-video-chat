@@ -8,7 +8,7 @@ import { createServer as createServerHttp } from 'http';
 import { createServer as createServerHttps } from 'https';
 
 import { Server as SocketServer } from 'socket.io';
-import { PeerServer } from 'peer';
+import { ExpressPeerServer } from 'peer';
 
 import { dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -22,7 +22,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const HOST = process.env.HOST || 'localhost';
 const PORT = process.env.PORT || 443;
-const PEER_PORT = process.env.PEER_PORT || 9000;
 
 const app = express();
 let key;
@@ -50,13 +49,13 @@ if (useHttps) {
 
 const io = new SocketServer(httpServer);
 
-// PeerServer
-const peerServer = PeerServer({
-    port: PEER_PORT,
-    path: '/peerjs',
-    ssl: useHttps && { key, cert },
+const peerServer = ExpressPeerServer(httpServer, {
+    path: '/',
+    proxied: true,
     iceServers: [...iceServersList],
 });
+
+app.use('/peerjs', peerServer);
 
 const Log = new Logger(process.env.ENV);
 
@@ -165,7 +164,6 @@ app.get('/room/:channel', (req, res) => {
     res.render('room/index', {
         roomId: channel.slug,
         channelName: channel.name,
-        peerPort: PEER_PORT,
         iceServers: JSON.stringify(iceServersList),
     });
 });
@@ -348,14 +346,9 @@ io.on('connection', (socket) => {
     socket.on('peerLeft', () => handleManualDisconnect(socket));
 });
 
-peerServer.listen(() =>
-    // eslint-disable-next-line no-console
-    console.log(
-        `Peer server live at ${useHttps ? 'https' : 'http'}://${HOST}:9000`
-    )
-);
-
 httpServer.listen(PORT, () =>
     // eslint-disable-next-line no-console
-    console.log(`Listening at ${useHttps ? 'https' : 'http'}://${HOST}:${PORT}`)
+    console.log(
+        `Listening at ${useHttps ? 'https' : 'http'}://${HOST}:${PORT} with PeerJS at /peerjs`
+    )
 );

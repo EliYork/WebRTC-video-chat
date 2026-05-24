@@ -335,6 +335,10 @@ body {
     border-top: 1px solid rgba(248, 248, 248, 0.219);
 }
 
+#buttons.hidden {
+    pointer-events: none;
+}
+
 #buttons div {
     padding: 10px 20px;
     font-family:
@@ -410,6 +414,8 @@ body {
     justify-content: center;
     align-items: center;
     margin: 30px auto;
+    position: relative;
+    z-index: 1;
 }
 
 #join-btn button {
@@ -431,6 +437,12 @@ body {
 #join-btn button:focus {
     background-color: #1761b6;
     transform: translateY(-2px) scale(1.03);
+}
+
+#join-btn button:disabled {
+    cursor: wait;
+    opacity: 0.72;
+    transform: none;
 }
 
 #join-btn.vanish {

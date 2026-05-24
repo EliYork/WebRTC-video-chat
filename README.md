@@ -53,6 +53,12 @@ USE_HTTPS=false
 cp .env.example .env
 ```
 
+## 部署说明
+
+线上 HTTPS 建议由 Nginx 或宝塔负责，Node 仍使用 `USE_HTTPS=false` 监听 `PORT=3000`。
+
+PeerJS 已挂载在同一个 Express 服务的 `/peerjs` 路径下，页面、Socket.IO 和 PeerJS 都走同一个域名。Nginx 只需要反代到 `127.0.0.1:3000`，并为 Socket.IO / PeerJS 保留 WebSocket Upgrade 头。
+
 ## 使用方式
 
 1. 打开 `http://localhost:3000`。

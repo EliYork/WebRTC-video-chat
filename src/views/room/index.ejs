@@ -13,7 +13,6 @@
     <script src="https://kit.fontawesome.com/279db593be.js" crossorigin="anonymous"></script>
     <script>
         const ROOM_ID = '<%= roomId %>'
-        const PEER_PORT = '<%= peerPort %>'
         const iceServers = JSON.parse('<%- iceServers %>')
     </script>
 </head>
@@ -27,7 +26,7 @@
         <div id="canvas">
             <div id="video-grid"></div>
             <div id="join-btn" class="text-center">
-                <button>Join Call</button>
+                <button id="joinCall" type="button">Join Call</button>
             </div>
         </div>
         <section id="chat-panel" class="chat-panel" aria-label="频道聊天">

@@ -53,6 +53,12 @@ Create `.env` from `.env.example`:
 cp .env.example .env
 ```
 
+## Deployment Notes
+
+For production HTTPS, let Nginx or your hosting panel terminate TLS while Node keeps `USE_HTTPS=false` and listens on `PORT=3000`.
+
+PeerJS is mounted on the same Express service at `/peerjs`, so the page, Socket.IO, and PeerJS all use the same origin. Nginx only needs to proxy to `127.0.0.1:3000` and preserve WebSocket Upgrade headers for Socket.IO / PeerJS.
+
 ## Usage
 
 1. Open `http://localhost:3000`.
