@@ -109,6 +109,7 @@ const updateAiExperimentToggleUI = () => {
 const CHAT_NAME_STORAGE_KEY = 'webrtc-video-chat-name';
 const NOISE_SUPPRESSION_KEY = 'webrtc-noise-suppression';
 const AI_NOISE_EXPERIMENT_KEY = 'webrtc-ai-noise-experiment';
+const MIC_GAIN_KEY = 'webrtc-mic-gain';
 const CHAT_MESSAGE_MAX_LENGTH = 500;
 const CURSOR_THROTTLE_MS = 40;
 const CURSOR_IDLE_MS = 700;
@@ -153,9 +154,13 @@ let noiseProcessorNode = null;
 // eslint-disable-next-line no-unused-vars
 let noiseProcessorActive = false;
 let noiseRawStream = null;
-let noiseDenoiseState = null;
-let noiseRnnoiseModule = null;
 let noiseMode = 'raw';
+let noiseGainNode = null;
+
+const getMicGain = () => {
+    const val = Number(localStorage.getItem(MIC_GAIN_KEY));
+    return !Number.isNaN(val) && val >= 0 && val <= 150 ? val : 100;
+};
 
 // eslint-disable-next-line no-undef
 viewingRoomId = ROOM_ID;
@@ -287,9 +292,7 @@ const updateLocalUserCard = () => {
 
     if (callStatusText) {
         callStatusText.textContent = joinedVoiceRoomId
-            ? myVideoStream
-                ? '正在语音中'
-                : '未开麦'
+            ? '正在语音中'
             : isConnectingToPeer
               ? '正在连接语音'
               : '未加入语音';
@@ -534,10 +537,9 @@ const renderPresenceState = ({ channels = [] } = {}) => {
         membersBySocket.forEach((member) => {
             const item = document.createElement('li');
             const isMe = member.socketId && socket?.id === member.socketId;
-            const micStatus = member.hasMic ? '' : ' [未开麦]';
 
             item.className = 'channel-member';
-            item.textContent = `${member.senderName || 'Guest'}${micStatus}${isMe ? '（我）' : ''}`;
+            item.textContent = `${member.senderName || 'Guest'}${isMe ? '（我）' : ''}`;
             list.append(item);
         });
     });
@@ -841,122 +843,77 @@ const requestAudioStream = async () => {
             'Could not start microphone with enhanced constraints; retrying with basic audio.',
             error
         );
-        return navigator.mediaDevices.getUserMedia({
+        rawStream = await navigator.mediaDevices.getUserMedia({
             audio: true,
         });
     }
 
+    try {
+        return await createAudioPipeline(rawStream);
+    } catch (error) {
+        console.warn('[audio] Pipeline init failed, using raw.', error);
+        return rawStream;
+    }
+};
+
+const createAudioPipeline = async (rawStream) => {
+    const ctx = new AudioContext({ sampleRate: 48000 });
+    const source = ctx.createMediaStreamSource(rawStream);
+    const dest = ctx.createMediaStreamDestination();
+
+    let lastOutNode = source;
+
     if (getAiExperimentEnabled() && isAiExperimentSupported()) {
         try {
-            return await createProcessedAudioStream(rawStream);
+            const wns = await import('/vendor/web-noise-suppressor.js');
+
+            const wasmBinary = await wns.loadRnnoise({
+                url: '/wasm/rnnoise.wasm',
+                simdUrl: '/wasm/rnnoise_simd.wasm',
+            });
+
+            await ctx.audioWorklet.addModule(
+                '/audio-worklet/rnnoise-processor.js'
+            );
+
+            const rnnoiseNode = new wns.RnnoiseWorkletNode(ctx, {
+                wasmBinary,
+                maxChannels: 2,
+            });
+
+            source.connect(rnnoiseNode);
+            lastOutNode = rnnoiseNode;
+
+            const boost = new GainNode(ctx, { gain: 1.35 });
+            rnnoiseNode.connect(boost);
+            lastOutNode = boost;
+
+            noiseMode = 'rnnoise';
+            noiseProcessorNode = rnnoiseNode;
+            console.log(
+                '[audio-experiment] web-noise-suppressor Rnnoise active'
+            );
         } catch (error) {
             console.warn(
-                '[audio-experiment] Passthrough init failed, falling back to raw.',
+                '[audio-experiment] web-noise-suppressor init failed, gain only.',
                 error
             );
+            noiseMode = 'passthrough';
         }
     }
 
-    return rawStream;
-};
+    const micGainPercent = getMicGain();
+    const micGainNode = new GainNode(ctx, {
+        gain: Math.max(0.001, micGainPercent / 100),
+    });
 
-const createProcessedAudioStream = async (rawStream) => {
-    const ctx = new AudioContext({ sampleRate: 48000 });
-
-    let denoiseState;
-    let rnnoiseModule;
-    let processorUrl = '/audio-worklet/passthrough-processor.js';
-    let processorName = 'passthrough-processor';
-    let useRnnoise = false;
-
-    try {
-        const mod = await import('/vendor/rnnoise.js');
-
-        rnnoiseModule = new mod.Rnnoise();
-        denoiseState = rnnoiseModule.createDenoiseState();
-
-        processorUrl = '/audio-worklet/rnnoise-processor.js';
-        processorName = 'rnnoise-processor';
-        useRnnoise = true;
-    } catch (error) {
-        console.warn(
-            '[audio-experiment] RNNoise init failed, using passthrough.',
-            error
-        );
-    }
-
-    await ctx.audioWorklet.addModule(processorUrl);
-
-    const source = ctx.createMediaStreamSource(rawStream);
-    const processor = new AudioWorkletNode(ctx, processorName);
-    const dest = ctx.createMediaStreamDestination();
-
-    if (useRnnoise && denoiseState) {
-        noiseMode = 'rnnoise';
-        let statsTimer = 0;
-
-        processor.port.onmessage = (event) => {
-            const { type, data } = event.data;
-
-            if (type === 'process') {
-                const input = new Float32Array(data);
-                const output = denoiseState.processFrame(input);
-                processor.port.postMessage(
-                    { type: 'processed', data: output.buffer },
-                    [output.buffer]
-                );
-            } else if (type === 'ready') {
-                console.log('[audio-experiment] RNNoise ready');
-            } else if (type === 'fallback') {
-                console.warn(
-                    '[audio-experiment] RNNoise processor fell back to passthrough'
-                );
-            } else if (type === 'stats') {
-                const now = Date.now();
-                const elapsed = now - statsTimer;
-
-                if (statsTimer === 0 || elapsed >= 3000) {
-                    statsTimer = now;
-                    const dropped = data.frameCount - data.processedCount;
-                    console.log(
-                        `[audio-experiment] mode=rnnoise` +
-                            ` processCalls=${data.processCount}` +
-                            ` frames=${data.frameCount}` +
-                            ` processed=${data.processedCount}` +
-                            ` passthrough=${data.passthroughCount}` +
-                            ` dropped=${dropped}` +
-                            ` pending=${data.pendingFrame}` +
-                            ` ready=${data.ready}`
-                    );
-
-                    const statusEl =
-                        document.getElementById('aiNoiseStatusText');
-
-                    if (data.fallback) {
-                        noiseMode = 'fallback';
-                    }
-
-                    if (statusEl && !data.fallback && data.ready) {
-                        statusEl.textContent = 'RNNoise';
-                    }
-                }
-            }
-        };
-
-        console.log('[audio-experiment] RNNoise processor active');
-    } else {
-        noiseMode = 'passthrough';
-        console.log('[audio-experiment] Passthrough processor active');
-    }
-
-    source.connect(processor).connect(dest);
+    lastOutNode.connect(micGainNode);
+    micGainNode.connect(dest);
 
     noiseAudioContext = ctx;
-    noiseProcessorNode = processor;
+    noiseGainNode = micGainNode;
     noiseRawStream = rawStream;
     noiseProcessorActive = true;
-    noiseDenoiseState = denoiseState;
-    noiseRnnoiseModule = rnnoiseModule;
 
     return dest.stream;
 };
@@ -964,6 +921,10 @@ const createProcessedAudioStream = async (rawStream) => {
 const destroyProcessedAudioStream = () => {
     if (noiseProcessorNode) {
         try {
+            if (typeof noiseProcessorNode.destroy === 'function') {
+                noiseProcessorNode.destroy();
+            }
+
             noiseProcessorNode.disconnect();
         } catch {
             /* noop */
@@ -993,24 +954,7 @@ const destroyProcessedAudioStream = () => {
 
     noiseProcessorActive = false;
     noiseMode = 'raw';
-
-    if (noiseDenoiseState) {
-        try {
-            noiseDenoiseState.destroy();
-        } catch {
-            /* noop */
-        }
-        noiseDenoiseState = null;
-    }
-
-    if (noiseRnnoiseModule) {
-        try {
-            noiseRnnoiseModule.destroy();
-        } catch {
-            /* noop */
-        }
-        noiseRnnoiseModule = null;
-    }
+    noiseGainNode = null;
 };
 
 const requestTileFullscreen = async (tile) => {
@@ -1381,7 +1325,6 @@ const setAudioButtonNoMic = () => {
 
     icon.className = 'fas fa-microphone-slash red';
     btn.setAttribute('aria-pressed', 'true');
-    btn.title = '点击获取麦克风权限';
 };
 
 const toggleAudio = (myVideoStream) => {
@@ -1840,6 +1783,38 @@ aiNoiseToggleEl?.addEventListener('keydown', (event) => {
         aiNoiseToggleEl.click();
     }
 });
+
+const micGainSlider = document.getElementById('micGainSlider');
+const micGainValueEl = document.getElementById('micGainValue');
+
+const setMicGain = (percent) => {
+    const clamped = Math.max(0, Math.min(150, Math.round(percent)));
+    localStorage.setItem(MIC_GAIN_KEY, String(clamped));
+
+    if (micGainSlider) {
+        micGainSlider.value = String(clamped);
+    }
+
+    if (micGainValueEl) {
+        micGainValueEl.textContent = clamped + '%';
+    }
+
+    if (noiseGainNode) {
+        noiseGainNode.gain.value = Math.max(0.001, clamped / 100);
+    }
+};
+
+if (micGainSlider) {
+    micGainSlider.value = String(getMicGain());
+
+    if (micGainValueEl) {
+        micGainValueEl.textContent = getMicGain() + '%';
+    }
+
+    micGainSlider.addEventListener('input', () => {
+        setMicGain(Number(micGainSlider.value));
+    });
+}
 
 mobileBackToChannelsBtn?.addEventListener('click', () => {
     if (currentPeer && !currentPeer.destroyed) {

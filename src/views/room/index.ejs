@@ -81,8 +81,9 @@
                             <i class="fas fa-microphone"></i>
                         </button>
                         <label class="control-popover mic-volume-popover">
-                            <span>麦克风音量由系统控制</span>
-                            <input id="micVolumePreview" type="range" min="0" max="1" step="0.05" value="1" disabled>
+                            <span>麦克风音量</span>
+                            <input id="micGainSlider" type="range" min="0" max="150" step="5" value="100">
+                            <span id="micGainValue">100%</span>
                         </label>
                     </div>
                     <div class="control-button-wrap">

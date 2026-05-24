@@ -706,11 +706,11 @@ input {
     position: absolute;
     z-index: 5;
     left: 50%;
-    bottom: calc(100% + 8px);
+    bottom: 100%;
     display: grid;
     width: 150px;
     gap: 7px;
-    padding: 9px;
+    padding: 9px 9px 14px;
     border: 1px solid var(--line);
     border-radius: 8px;
     background-color: rgba(255, 250, 253, 0.98);
@@ -728,7 +728,7 @@ input {
 .control-popover::after {
     position: absolute;
     left: 50%;
-    bottom: -6px;
+    bottom: -5px;
     width: 10px;
     height: 10px;
     border-right: 1px solid var(--line);
