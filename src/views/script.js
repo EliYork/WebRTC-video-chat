@@ -26,6 +26,7 @@ const toggleOutputBtn = document.getElementById('toggleOutput');
 const outputVolumeInput = document.getElementById('outputVolume');
 const shareScreenBtn = document.getElementById('shareScreen');
 const controlMenuToggles = document.querySelectorAll('[data-control-menu]');
+const controlPanels = document.querySelectorAll('[data-control-panel]');
 const mobileBackToChannelsBtn = document.getElementById('mobileBackToChannels');
 const mobilePrevTileBtn = document.getElementById('mobilePrevTile');
 const mobileNextTileBtn = document.getElementById('mobileNextTile');
@@ -300,9 +301,7 @@ const updateLocalUserCard = () => {
     }
 
     if (screenStatusText) {
-        screenStatusText.textContent = sharingNow
-            ? '正在共享屏幕'
-            : '未共享屏幕';
+        screenStatusText.textContent = sharingNow ? '共享中' : '未共享';
     }
 
     updateNoiseToggleUI();
@@ -364,12 +363,20 @@ const updateScreenShareButtonState = () => {
 const closeControlMenus = (exceptWrap) => {
     controlMenuToggles.forEach((toggle) => {
         const wrap = toggle.closest('.control-button-wrap');
+        const panel = document.querySelector(
+            `[data-control-panel="${toggle.dataset.controlMenu}"]`
+        );
 
         if (wrap && wrap !== exceptWrap) {
             wrap.classList.remove('is-open');
             toggle.setAttribute('aria-expanded', 'false');
+            panel?.classList.remove('is-open');
         }
     });
+
+    if (!exceptWrap) {
+        controlPanels.forEach((panel) => panel.classList.remove('is-open'));
+    }
 };
 
 const setCopyRoomLinkCopied = (isCopied) => {
@@ -1752,6 +1759,9 @@ controlMenuToggles.forEach((toggle) => {
     toggle.addEventListener('click', (event) => {
         event.stopPropagation();
         const wrap = toggle.closest('.control-button-wrap');
+        const panel = document.querySelector(
+            `[data-control-panel="${toggle.dataset.controlMenu}"]`
+        );
         const shouldOpen = !wrap?.classList.contains('is-open');
 
         closeControlMenus(wrap);
@@ -1761,12 +1771,13 @@ controlMenuToggles.forEach((toggle) => {
         }
 
         wrap.classList.toggle('is-open', shouldOpen);
+        panel?.classList.toggle('is-open', shouldOpen);
         toggle.setAttribute('aria-expanded', String(shouldOpen));
     });
 });
 
 document.addEventListener('click', (event) => {
-    if (event.target.closest('.control-button-wrap')) {
+    if (event.target.closest('.control-button-wrap, .control-popover')) {
         return;
     }
 

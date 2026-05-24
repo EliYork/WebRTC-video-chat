@@ -52,28 +52,27 @@
             </nav>
 
             <section class="local-user-card" aria-label="本地用户控制">
-                <div class="local-user-main">
+                <div class="local-user-header">
                     <div class="local-avatar" aria-hidden="true">♡</div>
-                    <div>
+                    <div class="local-user-identity">
                         <strong id="localUserName">Guest</strong>
                         <p id="callStatusText">未加入语音</p>
                     </div>
                 </div>
-                <div class="local-call-meta">
-                    <div class="local-meta-lines">
-                        <span>频道：<strong id="localVoiceChannelName">大厅</strong></span>
-                        <span>时长：<strong id="callDuration">00:00</strong></span>
-                        <span id="screenStatusText">未共享屏幕</span>
+                <div class="local-meta-panel">
+                    <div class="local-status-chips">
+                        <span class="status-chip status-chip-wide">
+                            <strong id="localVoiceChannelName">大厅</strong>
+                            <span aria-hidden="true">·</span>
+                            <strong id="callDuration">00:00</strong>
+                        </span>
+                        <span id="screenStatusText" class="status-chip">未共享</span>
+                        <span id="noiseToggle" class="noise-toggle status-chip" role="button" tabindex="0" aria-pressed="true">降噪 <strong id="noiseStatusText">开</strong></span>
+                        <span id="aiNoiseToggle" class="noise-toggle status-chip" role="button" tabindex="0" aria-pressed="false" data-not-supported-label="N/A">AI <strong id="aiNoiseStatusText">关</strong></span>
                     </div>
                     <button id="copyRoomLink" class="copy-room-link" type="button" title="复制频道链接" aria-label="复制频道链接">
                         <i class="fas fa-link"></i>
                     </button>
-                </div>
-                <div class="local-noise-row">
-                    <span id="noiseToggle" class="noise-toggle" role="button" tabindex="0" aria-pressed="true">降噪：<strong id="noiseStatusText">开</strong></span>
-                </div>
-                <div class="local-ai-noise-row">
-                    <span id="aiNoiseToggle" class="noise-toggle" role="button" tabindex="0" aria-pressed="false" data-not-supported-label="N/A">AI降噪实验：<strong id="aiNoiseStatusText">关</strong></span>
                 </div>
                 <div id="buttons" class="hidden local-controls" aria-label="通话控制">
                     <div class="control-button-wrap">
@@ -83,11 +82,6 @@
                         <button class="control-menu-toggle" type="button" aria-label="麦克风设置" aria-expanded="false" data-control-menu="mic">
                             <i class="fas fa-chevron-up"></i>
                         </button>
-                        <label class="control-popover mic-volume-popover">
-                            <span>麦克风音量</span>
-                            <input id="micGainSlider" type="range" min="0" max="150" step="5" value="100">
-                            <span id="micGainValue">100%</span>
-                        </label>
                     </div>
                     <div class="control-button-wrap">
                         <button id="toggleOutput" type="button" title="听筒" aria-label="听筒">
@@ -96,10 +90,6 @@
                         <button class="control-menu-toggle" type="button" aria-label="播放设置" aria-expanded="false" data-control-menu="output">
                             <i class="fas fa-chevron-up"></i>
                         </button>
-                        <label class="control-popover">
-                            <span>播放音量</span>
-                            <input id="outputVolume" type="range" min="0" max="1" step="0.05" value="1">
-                        </label>
                     </div>
                     <button id="toggleVideo" type="button" title="摄像头" aria-label="摄像头" aria-pressed="false">
                         <i class="fas fa-video-slash red"></i>
@@ -107,6 +97,15 @@
                     <button id="shareScreen" type="button" title="屏幕共享" aria-label="屏幕共享">
                         <i class="far fa-newspaper red"></i>
                     </button>
+                    <label class="control-popover mic-volume-popover" data-control-panel="mic">
+                        <span>麦克风音量</span>
+                        <input id="micGainSlider" type="range" min="0" max="150" step="5" value="100">
+                        <span id="micGainValue">100%</span>
+                    </label>
+                    <label class="control-popover" data-control-panel="output">
+                        <span>播放音量</span>
+                        <input id="outputVolume" type="range" min="0" max="1" step="0.05" value="1">
+                    </label>
                     <button id="destroyPeer" type="button">离开</button>
                 </div>
             </section>
