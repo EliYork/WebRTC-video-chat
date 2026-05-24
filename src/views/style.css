@@ -803,7 +803,7 @@ input {
 
     .room-layout.mobile-in-room {
         display: grid;
-        grid-template-rows: minmax(0, 48dvh) minmax(0, 52dvh);
+        grid-template-rows: 1fr auto 1fr;
     }
 
     .room-layout.mobile-in-room .room-stage {
@@ -815,23 +815,20 @@ input {
 
     .room-layout.mobile-in-room .chat-panel {
         display: flex;
-        grid-row: 2;
+        grid-row: 3;
         min-height: 0;
     }
 
     .room-layout.mobile-in-room .room-sidebar {
-        position: fixed;
-        z-index: 7;
-        top: calc(48dvh - 136px);
-        right: 12px;
-        left: 12px;
+        grid-row: 2;
+        position: static;
+        display: block;
         height: auto;
-        min-height: 0;
         padding: 0;
         overflow: visible;
         border: 0;
-        background: transparent;
-        pointer-events: none;
+        border-top: 1px solid var(--line);
+        background: var(--panel-warm);
     }
 
     .room-layout.mobile-in-room .sidebar-brand,
@@ -840,10 +837,13 @@ input {
     }
 
     .room-layout.mobile-in-room .local-user-card {
-        max-height: 126px;
-        padding: 9px;
-        overflow-y: auto;
-        pointer-events: auto;
+        max-height: none;
+        padding: 8px 12px;
+        margin: 0;
+        border: 0;
+        border-radius: 0;
+        box-shadow: none;
+        background: transparent;
     }
 
     .room-layout.mobile-in-room .local-user-main {
@@ -861,7 +861,11 @@ input {
     }
 
     .room-layout.mobile-in-room .local-controls {
-        grid-template-columns: repeat(5, minmax(0, 1fr));
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .room-layout.mobile-in-room #shareScreen {
+        display: none;
     }
 
     .room-layout.mobile-in-room .control-popover {
@@ -966,4 +970,65 @@ input {
     .cursor-overlay {
         display: none;
     }
+}
+
+.voice-join-overlay {
+    position: fixed;
+    z-index: 9999;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.35);
+}
+
+.voice-join-dialog {
+    width: calc(100% - 48px);
+    max-width: 320px;
+    padding: 28px 24px 24px;
+    border-radius: 14px;
+    background: #fff;
+    box-shadow: 0 24px 48px rgba(0, 0, 0, 0.26);
+    text-align: center;
+}
+
+.voice-join-dialog h3 {
+    margin: 0 0 4px;
+    color: var(--text);
+    font-size: 20px;
+}
+
+.voice-join-dialog p {
+    margin: 0 0 22px;
+    color: var(--muted);
+    font-size: 15px;
+}
+
+.voice-join-actions {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+}
+
+.voice-join-actions button {
+    min-width: 108px;
+    padding: 11px 18px;
+    border: none;
+    border-radius: 10px;
+    font-size: 15px;
+    cursor: pointer;
+}
+
+.voice-join-confirm {
+    background: var(--accent);
+    color: #fff;
+}
+
+.voice-join-confirm:hover {
+    background: var(--accent-strong);
+}
+
+.voice-join-cancel {
+    background: var(--panel-soft);
+    color: var(--text);
 }
