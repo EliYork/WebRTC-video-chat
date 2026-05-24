@@ -487,6 +487,24 @@ io.on('connection', (socket) => {
     );
     socket.on('cursor:move', (payload) => handleCursorMove(payload, socket));
     socket.on('cursor:leave', (payload) => handleCursorLeave(payload, socket));
+    socket.on('screen:shareStart', ({ roomId } = {}) => {
+        const peerId = socket.data.voicePeerId;
+
+        if (!roomId || !peerId) {
+            return;
+        }
+
+        socket.to(roomId).emit('screen:shareStart', { peerId });
+    });
+    socket.on('screen:shareStop', ({ roomId } = {}) => {
+        const peerId = socket.data.voicePeerId;
+
+        if (!roomId || !peerId) {
+            return;
+        }
+
+        socket.to(roomId).emit('screen:shareStop', { peerId });
+    });
     socket.on('peerLeft', () => handleManualDisconnect(socket));
 });
 

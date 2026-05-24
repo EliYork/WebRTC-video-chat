@@ -61,6 +61,8 @@ let callDurationTimer;
 let outputMuted = false;
 let outputVolume = 1;
 let activeMobileTileIndex = 0;
+const remotePeerOrder = [];
+const screenSharers = new Set();
 
 // eslint-disable-next-line no-undef
 viewingRoomId = ROOM_ID;
@@ -80,9 +82,31 @@ const isMobileLayout = () => window.innerWidth <= MOBILE_BREAKPOINT;
 const getVideoTiles = () =>
     Array.from(videoGrid.querySelectorAll('.video-tile'));
 
-const updateMobileTileView = () => {
+const getOrderedTiles = () => {
     const tiles = getVideoTiles();
-    const totalTiles = tiles.length;
+    const localTile = tiles.find((t) => t.id === 'local-video');
+    const remoteTiles = tiles.filter((t) => t.id !== 'local-video');
+
+    remoteTiles.sort((a, b) => {
+        const aSharing = screenSharers.has(a.id);
+        const bSharing = screenSharers.has(b.id);
+
+        if (aSharing && !bSharing) return -1;
+        if (!aSharing && bSharing) return 1;
+
+        return remotePeerOrder.indexOf(a.id) - remotePeerOrder.indexOf(b.id);
+    });
+
+    if (localTile) {
+        remoteTiles.push(localTile);
+    }
+
+    return remoteTiles;
+};
+
+const updateMobileTileView = () => {
+    const orderedTiles = getOrderedTiles();
+    const totalTiles = orderedTiles.length;
 
     if (totalTiles === 0) {
         activeMobileTileIndex = 0;
@@ -90,12 +114,15 @@ const updateMobileTileView = () => {
         activeMobileTileIndex = Math.min(activeMobileTileIndex, totalTiles - 1);
     }
 
-    tiles.forEach((tile, index) => {
-        tile.classList.toggle(
-            'is-mobile-active',
-            index === activeMobileTileIndex
-        );
-    });
+    getVideoTiles().forEach((tile) =>
+        tile.classList.remove('is-mobile-active')
+    );
+
+    const activeTile = orderedTiles[activeMobileTileIndex];
+
+    if (activeTile) {
+        activeTile.classList.add('is-mobile-active');
+    }
 
     if (mobileTileCount) {
         mobileTileCount.textContent =
@@ -436,6 +463,14 @@ const ensureSocket = () => {
     socket.on('cursor:move', renderRemoteCursor);
     socket.on('cursor:leave', markRemoteCursorIdle);
     socket.on('cursor:remove', removeRemoteCursor);
+    socket.on('screen:shareStart', ({ peerId }) => {
+        screenSharers.add(peerId);
+        updateMobileTileView();
+    });
+    socket.on('screen:shareStop', ({ peerId }) => {
+        screenSharers.delete(peerId);
+        updateMobileTileView();
+    });
 
     return socket;
 };
@@ -755,7 +790,16 @@ const addVideoStream = (video, stream, videoId) => {
         tile = document.createElement('div');
         tile.id = tileId;
         tile.className = 'video-tile';
-        videoGrid.append(tile);
+        if (videoId) {
+            const localTile = document.getElementById('local-video');
+            if (localTile) {
+                videoGrid.insertBefore(tile, localTile);
+            } else {
+                videoGrid.append(tile);
+            }
+        } else {
+            videoGrid.append(tile);
+        }
     }
 
     if (videoId) {
@@ -1020,16 +1064,25 @@ async function toggleScreenShare(peer, myVideoStream) {
             }
 
             console.warn('Screen sharing stopped by the browser.');
+            ensureSocket().emit('screen:shareStop', {
+                roomId: joinedVoiceRoomId,
+            });
             restoreCameraAfterScreenShare(peer, myVideoStream);
         });
 
         sendVideoTrackToPeers(peer, track);
 
         sharingNow = true;
+        ensureSocket().emit('screen:shareStart', {
+            roomId: joinedVoiceRoomId,
+        });
         updateScreenShareButtonState();
         updateLocalUserCard();
     } else {
         stopCurrentScreenStream();
+        ensureSocket().emit('screen:shareStop', {
+            roomId: joinedVoiceRoomId,
+        });
         restoreCameraAfterScreenShare(peer, myVideoStream);
         // toggleVideo()
     }
@@ -1166,6 +1219,10 @@ const joinVoiceChannel = (roomId) => {
                         return;
                     }
 
+                    if (!remotePeerOrder.includes(peerId)) {
+                        remotePeerOrder.push(peerId);
+                    }
+
                     connectToNewUser(peer, peerId, getActiveStream());
                 });
 
@@ -1175,6 +1232,13 @@ const joinVoiceChannel = (roomId) => {
                         return;
                     }
 
+                    const idx = remotePeerOrder.indexOf(peerId);
+
+                    if (idx !== -1) {
+                        remotePeerOrder.splice(idx, 1);
+                    }
+
+                    screenSharers.delete(peerId);
                     removeVideoElement(peerId);
                 });
 
