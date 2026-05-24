@@ -425,6 +425,12 @@ input {
     opacity: 0.68;
 }
 
+.screen-status-chip {
+    border-color: rgba(78, 168, 118, 0.22);
+    background-color: #e7f6ed;
+    color: #3d7b59;
+}
+
 .noise-toggle.na {
     opacity: 0.45;
     pointer-events: none;
@@ -690,8 +696,9 @@ input {
 .local-controls {
     position: relative;
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: 56px 56px 36px 36px;
     gap: 6px;
+    justify-content: space-between;
 }
 
 #buttons.hidden {
@@ -701,14 +708,15 @@ input {
 .control-button-wrap {
     position: static;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 18px;
+    grid-template-columns: 36px 18px;
     gap: 2px;
     min-width: 0;
 }
 
 #buttons button {
+    position: relative;
     display: grid;
-    width: 100%;
+    width: 36px;
     height: 36px;
     min-height: 36px;
     place-items: center;
@@ -718,6 +726,23 @@ input {
     background-color: #fff;
     color: #6c4357;
     font-size: 15px;
+}
+
+#buttons button.is-off {
+    border-color: rgba(191, 82, 96, 0.18);
+    background-color: #fff6f9;
+    color: #a8657c;
+}
+
+#buttons button.is-off::after {
+    position: absolute;
+    width: 20px;
+    height: 2px;
+    border-radius: 999px;
+    background-color: #bf5260;
+    content: '';
+    pointer-events: none;
+    transform: rotate(-45deg);
 }
 
 #buttons button:hover {
@@ -735,6 +760,7 @@ input {
 }
 
 .control-menu-toggle {
+    width: 18px !important;
     border-top-left-radius: 5px !important;
     border-bottom-left-radius: 5px !important;
     font-size: 10px !important;
@@ -917,6 +943,7 @@ input {
 
     .room-layout.mobile-in-room .local-controls {
         grid-template-columns: repeat(4, minmax(0, 1fr));
+        justify-content: normal;
     }
 
     .room-layout.mobile-in-room #shareScreen {
@@ -936,6 +963,7 @@ input {
     }
 
     .room-layout.mobile-in-room #buttons button {
+        width: 100%;
         min-height: 34px;
         padding: 7px 5px;
     }

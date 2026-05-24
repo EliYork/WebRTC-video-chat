@@ -301,7 +301,8 @@ const updateLocalUserCard = () => {
     }
 
     if (screenStatusText) {
-        screenStatusText.textContent = sharingNow ? '共享中' : '未共享';
+        screenStatusText.textContent = sharingNow ? '共享中' : '';
+        screenStatusText.classList.toggle('hidden', !sharingNow);
     }
 
     updateNoiseToggleUI();
@@ -336,9 +337,9 @@ const updateOutputButtonState = () => {
         return;
     }
 
-    icon.className = outputMuted
-        ? 'fas fa-volume-mute red'
-        : 'fas fa-volume-up';
+    icon.className = 'fas fa-volume-up';
+    toggleOutputBtn?.classList.toggle('is-off', outputMuted);
+    toggleOutputBtn?.setAttribute('aria-pressed', String(outputMuted));
 
     if (label) {
         label.textContent = outputMuted ? '已静音' : '听筒';
@@ -350,9 +351,9 @@ const updateScreenShareButtonState = () => {
     const label = shareScreenBtn?.querySelector('span');
 
     if (icon) {
-        icon.className = sharingNow
-            ? 'far fa-newspaper'
-            : 'far fa-newspaper red';
+        icon.className = 'far fa-newspaper';
+        shareScreenBtn.classList.toggle('is-off', !sharingNow);
+        shareScreenBtn.setAttribute('aria-pressed', String(sharingNow));
     }
 
     if (label) {
@@ -408,6 +409,8 @@ const resetLocalVoiceState = () => {
     activeVideoTrack = undefined;
     currentScreenStream = undefined;
     sharingNow = false;
+    setCameraButtonState(false);
+    setAudioButtonNoMic();
     stopCallTimer();
     updateScreenShareButtonState();
     updateLocalUserCard();
@@ -1212,7 +1215,8 @@ const setCameraButtonState = (enabled) => {
         console.warn('toggleVideo button not found in DOM.');
         return;
     }
-    icon.className = enabled ? 'fas fa-video' : 'fas fa-video-slash red';
+    icon.className = 'fas fa-video';
+    btn.classList.toggle('is-off', !enabled);
     btn.setAttribute('aria-pressed', String(!enabled));
 };
 
@@ -1328,9 +1332,8 @@ const setAudioButtonState = (enabled) => {
         console.warn('toggleAudio button not found in DOM.');
         return;
     }
-    icon.className = enabled
-        ? 'fas fa-microphone'
-        : 'fas fa-microphone-slash red';
+    icon.className = 'fas fa-microphone';
+    btn.classList.toggle('is-off', !enabled);
     btn.setAttribute('aria-pressed', String(!enabled));
 };
 
@@ -1342,7 +1345,8 @@ const setAudioButtonNoMic = () => {
         return;
     }
 
-    icon.className = 'fas fa-microphone-slash red';
+    icon.className = 'fas fa-microphone';
+    btn.classList.add('is-off');
     btn.setAttribute('aria-pressed', 'true');
 };
 
@@ -1500,6 +1504,7 @@ const joinVoiceChannel = (roomId) => {
         selectedVoiceRoomId = roomToJoin;
         isConnectingToPeer = false;
         setAudioButtonNoMic();
+        setCameraButtonState(false);
 
         document.getElementById('toggleAudio').onclick = () =>
             handleMicClick(peer);
@@ -1513,6 +1518,7 @@ const joinVoiceChannel = (roomId) => {
 
         showCallControls();
         updateOutputButtonState();
+        updateScreenShareButtonState();
         updateChannelIndicators();
 
         activeSocket.emit('joinRoom', roomToJoin, peerId);
