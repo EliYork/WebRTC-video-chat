@@ -8,6 +8,7 @@ myVideo.muted = true; // ensures that we do not hear ourselves
 myVideo.playsInline = 'true';
 
 const callControls = document.getElementById('buttons');
+const destroyPeerBtn = document.getElementById('destroyPeer');
 const copyRoomLinkBtn = document.getElementById('copyRoomLink');
 const chatNameInput = document.getElementById('chatName');
 const chatMessages = document.getElementById('chatMessages');
@@ -171,10 +172,12 @@ selectedVoiceRoomId = ROOM_ID;
 
 const showCallControls = () => {
     callControls?.classList.remove('hidden');
+    destroyPeerBtn?.classList.remove('hidden');
 };
 
 const hideCallControls = () => {
     callControls?.classList.add('hidden');
+    destroyPeerBtn?.classList.add('hidden');
 };
 
 const isMobileLayout = () => window.innerWidth <= MOBILE_BREAKPOINT;

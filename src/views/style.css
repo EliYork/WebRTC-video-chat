@@ -317,7 +317,7 @@ input {
 
 .local-user-header {
     display: grid;
-    grid-template-columns: 36px minmax(0, 1fr);
+    grid-template-columns: 36px minmax(0, 1fr) auto;
     gap: 9px;
     align-items: center;
 }
@@ -342,6 +342,7 @@ input {
 
 .local-user-identity strong {
     display: block;
+    min-width: 0;
     overflow: hidden;
     color: #57354a;
     font-size: 14px;
@@ -358,10 +359,7 @@ input {
 }
 
 .local-meta-panel {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 30px;
-    gap: 7px;
-    align-items: start;
+    display: block;
     padding: 7px 0;
     border-top: 1px solid var(--line-soft);
     border-bottom: 1px solid var(--line-soft);
@@ -369,10 +367,11 @@ input {
 }
 
 .local-status-chips {
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto 26px;
     min-width: 0;
-    flex-wrap: wrap;
     gap: 5px;
+    align-items: center;
 }
 
 .status-chip {
@@ -438,15 +437,15 @@ input {
 
 .copy-room-link {
     display: grid;
-    width: 30px;
-    height: 30px;
-    flex: 0 0 auto;
+    width: 26px;
+    height: 22px;
     place-items: center;
     padding: 0;
     border: 1px solid rgba(216, 111, 154, 0.22) !important;
-    border-radius: 8px !important;
+    border-radius: 999px !important;
     background-color: #fff !important;
     color: var(--accent-strong) !important;
+    font-size: 11px;
 }
 
 .copy-room-link:hover {
@@ -805,23 +804,20 @@ input {
 }
 
 #destroyPeer {
-    grid-column: 1 / -1;
-    height: 32px !important;
-    min-height: 32px !important;
-    margin-top: 1px;
-    border-color: rgba(191, 82, 96, 0.18) !important;
-    background-color: #f4d0d7 !important;
-    color: #9f4857 !important;
-    font-size: 13px !important;
+    align-self: center;
+    width: auto;
+    height: 28px !important;
+    min-height: 28px !important;
+    padding: 0 10px !important;
+    border: 1px solid rgba(191, 82, 96, 0.24) !important;
+    border-radius: 999px !important;
+    background-color: #df6d7b !important;
+    color: #fff !important;
+    font-size: 12px !important;
 }
 
 #destroyPeer:hover {
-    background-color: #ecc1ca !important;
-}
-
-#destroyPeer i,
-#destroyPeer svg {
-    color: #fff !important;
+    background-color: #c95c6c !important;
 }
 
 .hidden {
@@ -966,10 +962,6 @@ input {
         width: 100%;
         min-height: 34px;
         padding: 7px 5px;
-    }
-
-    .room-layout.mobile-in-room #destroyPeer {
-        grid-column: auto;
     }
 
     .mobile-back-button,
