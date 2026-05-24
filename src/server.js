@@ -295,7 +295,7 @@ const handleVoicePeerLeft = async ({ roomId, peerId } = {}, socket) => {
 };
 
 const handlePresenceJoinVoice = (
-    { roomId, senderName, peerId } = {},
+    { roomId, senderName, peerId, hasMic } = {},
     socket
 ) => {
     const channel = getChannel(roomId);
@@ -318,6 +318,7 @@ const handlePresenceJoinVoice = (
         roomId: channel.slug,
         senderName: normalizeSenderName(senderName),
         joinedVoice: true,
+        hasMic: Boolean(hasMic),
         updatedAt: new Date().toISOString(),
     });
 
@@ -326,7 +327,7 @@ const handlePresenceJoinVoice = (
     broadcastPresence();
 };
 
-const handlePresenceUpdate = ({ senderName } = {}, socket) => {
+const handlePresenceUpdate = ({ senderName, hasMic } = {}, socket) => {
     const roomId = socket.data.presenceRoomId;
     const members = onlineMembersByRoom.get(roomId);
     const member = members?.get(socket.id);
@@ -338,6 +339,7 @@ const handlePresenceUpdate = ({ senderName } = {}, socket) => {
     members.set(socket.id, {
         ...member,
         senderName: normalizeSenderName(senderName),
+        hasMic: hasMic !== undefined ? Boolean(hasMic) : member.hasMic,
         updatedAt: new Date().toISOString(),
     });
     broadcastPresence();

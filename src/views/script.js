@@ -287,7 +287,9 @@ const updateLocalUserCard = () => {
 
     if (callStatusText) {
         callStatusText.textContent = joinedVoiceRoomId
-            ? '正在语音中'
+            ? myVideoStream
+                ? '正在语音中'
+                : '未开麦'
             : isConnectingToPeer
               ? '正在连接语音'
               : '未加入语音';
@@ -532,9 +534,10 @@ const renderPresenceState = ({ channels = [] } = {}) => {
         membersBySocket.forEach((member) => {
             const item = document.createElement('li');
             const isMe = member.socketId && socket?.id === member.socketId;
+            const micStatus = member.hasMic ? '' : ' [未开麦]';
 
             item.className = 'channel-member';
-            item.textContent = `${member.senderName || 'Guest'}${isMe ? '（我）' : ''}`;
+            item.textContent = `${member.senderName || 'Guest'}${micStatus}${isMe ? '（我）' : ''}`;
             list.append(item);
         });
     });
@@ -1368,6 +1371,19 @@ const setAudioButtonState = (enabled) => {
     btn.setAttribute('aria-pressed', String(!enabled));
 };
 
+const setAudioButtonNoMic = () => {
+    const btn = document.getElementById('toggleAudio');
+    const icon = btn?.querySelector('i');
+
+    if (!icon) {
+        return;
+    }
+
+    icon.className = 'fas fa-microphone-slash red';
+    btn.setAttribute('aria-pressed', 'true');
+    btn.title = '点击获取麦克风权限';
+};
+
 const toggleAudio = (myVideoStream) => {
     const audioTrack = myVideoStream?.getAudioTracks()[0];
 
@@ -1393,6 +1409,84 @@ const setHeightOfVideos = () => {
     videos.forEach((video) => {
         video.style.height = '';
     });
+};
+
+const initiateAudio = async (peer) => {
+    try {
+        const stream = await requestAudioStream();
+
+        myVideoStream = stream;
+        setAudioButtonState(stream.getAudioTracks()[0].enabled);
+        setLocalVideoStream(getActiveStream());
+        startCallTimer();
+        updateLocalUserCard();
+
+        ensureSocket().emit('presence:update', {
+            senderName: getChatName(),
+            hasMic: true,
+        });
+
+        peer.on('call', (call) => {
+            console.log('Received a call...');
+            call.answer(getActiveStream());
+            setupCallStreamHandler(call, call.peer);
+        });
+
+        Object.keys(peer.connections).forEach((peerId) => {
+            if (peerId !== localPeerId) {
+                connectToNewUser(peer, peerId, getActiveStream());
+            }
+        });
+    } catch (error) {
+        console.warn(
+            '[mic] Could not start microphone. User stays in channel without audio.',
+            error
+        );
+        updateLocalUserCard();
+    }
+};
+
+const handleMicClick = async (peer) => {
+    if (myVideoStream) {
+        toggleAudio(myVideoStream);
+        return;
+    }
+
+    console.log('[mic] Requesting microphone...');
+
+    try {
+        const stream = await requestAudioStream();
+
+        myVideoStream = stream;
+        setAudioButtonState(stream.getAudioTracks()[0].enabled);
+        setLocalVideoStream(getActiveStream());
+
+        if (!callStartedAt) {
+            startCallTimer();
+        }
+
+        ensureSocket().emit('presence:update', {
+            senderName: getChatName(),
+            hasMic: true,
+        });
+
+        peer.on('call', (call) => {
+            console.log('Received a call...');
+            call.answer(getActiveStream());
+            setupCallStreamHandler(call, call.peer);
+        });
+
+        Object.keys(peer.connections).forEach((peerId) => {
+            if (peerId !== localPeerId) {
+                connectToNewUser(peer, peerId, getActiveStream());
+            }
+        });
+
+        updateLocalUserCard();
+    } catch (error) {
+        console.warn('[mic] Microphone permission denied.', error);
+        updateLocalUserCard();
+    }
 };
 
 const joinVoiceChannel = (roomId) => {
@@ -1440,8 +1534,13 @@ const joinVoiceChannel = (roomId) => {
         myVideo.parentElement?.setAttribute('data-peer-id', localPeerId);
         const activeSocket = ensureSocket();
 
+        joinedVoiceRoomId = roomToJoin;
+        selectedVoiceRoomId = roomToJoin;
+        isConnectingToPeer = false;
+        setAudioButtonNoMic();
+
         document.getElementById('toggleAudio').onclick = () =>
-            toggleAudio(myVideoStream);
+            handleMicClick(peer);
         document.getElementById('toggleVideo').onclick = () =>
             toggleCamera(peer);
         document.getElementById('shareScreen').onclick = () =>
@@ -1450,80 +1549,61 @@ const joinVoiceChannel = (roomId) => {
 
         console.log('My peer ID is: ' + peerId);
 
-        // after that wait for media stream
-        requestAudioStream()
-            .then((stream) => {
-                myVideoStream = stream;
-                setAudioButtonState(myVideoStream.getAudioTracks()[0].enabled);
-                setLocalVideoStream(getActiveStream());
-                showCallControls();
-                joinedVoiceRoomId = roomToJoin;
-                selectedVoiceRoomId = roomToJoin;
-                isConnectingToPeer = false;
-                startCallTimer();
-                updateOutputButtonState();
-                updateChannelIndicators();
+        showCallControls();
+        updateOutputButtonState();
+        updateChannelIndicators();
 
-                peer.on('call', (call) => {
-                    console.log('Received a call...');
+        activeSocket.emit('joinRoom', roomToJoin, peerId);
+        activeSocket.emit('presence:joinVoice', {
+            roomId: roomToJoin,
+            senderName: getChatName(),
+            peerId,
+            hasMic: false,
+        });
 
-                    call.answer(getActiveStream());
-                    setupCallStreamHandler(call, call.peer);
-                });
+        activeSocket.on('userConnected', ({ roomId, peerId }) => {
+            if (roomId !== joinedVoiceRoomId) {
+                return;
+            }
 
-                activeSocket.emit('joinRoom', roomToJoin, peerId);
-                activeSocket.emit('presence:joinVoice', {
-                    roomId: roomToJoin,
-                    senderName: getChatName(),
-                    peerId,
-                });
+            if (!remotePeerOrder.includes(peerId)) {
+                remotePeerOrder.push(peerId);
+            }
 
-                activeSocket.on('userConnected', ({ roomId, peerId }) => {
-                    if (roomId !== joinedVoiceRoomId) {
-                        return;
-                    }
+            if (myVideoStream) {
+                connectToNewUser(peer, peerId, getActiveStream());
+            }
+        });
 
-                    if (!remotePeerOrder.includes(peerId)) {
-                        remotePeerOrder.push(peerId);
-                    }
+        //removing video of user who has disconnected from websocket
+        activeSocket.on('removeUserVideo', ({ roomId, peerId }) => {
+            if (roomId !== joinedVoiceRoomId) {
+                return;
+            }
 
-                    connectToNewUser(peer, peerId, getActiveStream());
-                });
+            const idx = remotePeerOrder.indexOf(peerId);
 
-                //removing video of user who has disconnected from websocket
-                activeSocket.on('removeUserVideo', ({ roomId, peerId }) => {
-                    if (roomId !== joinedVoiceRoomId) {
-                        return;
-                    }
+            if (idx !== -1) {
+                remotePeerOrder.splice(idx, 1);
+            }
 
-                    const idx = remotePeerOrder.indexOf(peerId);
+            screenSharers.delete(peerId);
+            removeVideoElement(peerId);
+        });
 
-                    if (idx !== -1) {
-                        remotePeerOrder.splice(idx, 1);
-                    }
+        // -DISCONNECT FUNCTION - disconnecting this user from websocket. This will trigger the on.disconnected listener on the server.
+        //this will tell other sockets to remove the video of the user who has just disconnected (video id is the same as the userId)
+        activeSocket.on('forceDisconnect', () => {
+            activeSocket.close();
+            socket = undefined;
+            joinChatRoom();
+            console.log(
+                `You have been disconnected from websocket. The road ends here. `
+            );
+        });
 
-                    screenSharers.delete(peerId);
-                    removeVideoElement(peerId);
-                });
-
-                // -DISCONNECT FUNCTION - disconnecting this user from websocket. This will trigger the on.disconnected listener on the server.
-                //this will tell other sockets to remove the video of the user who has just disconnected (video id is the same as the userId)
-                activeSocket.on('forceDisconnect', () => {
-                    activeSocket.close();
-                    socket = undefined;
-                    joinChatRoom();
-                    console.log(
-                        `You have been disconnected from websocket. The road ends here. `
-                    );
-                });
-            })
-            .catch((error) => {
-                console.warn('Could not start microphone audio source.', error);
-                isConnectingToPeer = false;
-                currentPeer = undefined;
-                resetLocalVoiceState();
-                hideCallControls();
-            });
+        // Try to get microphone; failure does NOT prevent joining the channel
+        initiateAudio(peer);
     });
 
     peer.on('error', (error) => {
