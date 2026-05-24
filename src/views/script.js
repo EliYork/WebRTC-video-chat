@@ -2,18 +2,33 @@
 let socket;
 
 const videoGrid = document.getElementById('video-grid');
+const mainLayout = document.getElementById('main');
 const myVideo = document.createElement('video');
 myVideo.muted = true; // ensures that we do not hear ourselves
 myVideo.playsInline = 'true';
 
-const joinBtn = document.querySelector('#join-btn');
-const joinCallBtn = document.getElementById('joinCall');
 const callControls = document.getElementById('buttons');
 const copyRoomLinkBtn = document.getElementById('copyRoomLink');
 const chatNameInput = document.getElementById('chatName');
 const chatMessages = document.getElementById('chatMessages');
 const chatForm = document.getElementById('chatForm');
 const chatInput = document.getElementById('chatInput');
+const treeChannels = document.querySelectorAll('[data-channel-room]');
+const channelMemberLists = document.querySelectorAll('[data-members-for]');
+const channelCountBadges = document.querySelectorAll('[data-channel-count]');
+const chatTitle = document.getElementById('chatTitle');
+const localUserName = document.getElementById('localUserName');
+const localVoiceChannelName = document.getElementById('localVoiceChannelName');
+const callStatusText = document.getElementById('callStatusText');
+const callDuration = document.getElementById('callDuration');
+const screenStatusText = document.getElementById('screenStatusText');
+const toggleOutputBtn = document.getElementById('toggleOutput');
+const outputVolumeInput = document.getElementById('outputVolume');
+const shareScreenBtn = document.getElementById('shareScreen');
+const mobileBackToChannelsBtn = document.getElementById('mobileBackToChannels');
+const mobilePrevTileBtn = document.getElementById('mobilePrevTile');
+const mobileNextTileBtn = document.getElementById('mobileNextTile');
+const mobileTileCount = document.getElementById('mobileTileCount');
 const remoteStreams = {};
 const audioConstraints = {
     echoCancellation: true,
@@ -24,6 +39,10 @@ const CHAT_NAME_STORAGE_KEY = 'webrtc-video-chat-name';
 const CHAT_MESSAGE_MAX_LENGTH = 500;
 const CURSOR_THROTTLE_MS = 40;
 const CURSOR_IDLE_MS = 700;
+const MOBILE_BREAKPOINT = 768;
+const cursorSharingMedia = window.matchMedia(
+    `(max-width: ${MOBILE_BREAKPOINT}px), (pointer: coarse)`
+);
 const cursorIdleTimers = {};
 let myVideoStream;
 let activeStream;
@@ -31,30 +50,248 @@ let cameraStream;
 let activeVideoTrack;
 let localPeerId;
 let lastCursorMoveAt = 0;
+let viewingRoomId;
+let selectedVoiceRoomId;
+let joinedVoiceRoomId;
+let currentPeer;
+let isConnectingToPeer = false;
+let pendingVoiceRoomId;
+let callStartedAt;
+let callDurationTimer;
+let outputMuted = false;
+let outputVolume = 1;
+let activeMobileTileIndex = 0;
 
-const setJoinCallPending = (isPending) => {
-    if (!joinCallBtn) {
-        return;
-    }
+// eslint-disable-next-line no-undef
+viewingRoomId = ROOM_ID;
+// eslint-disable-next-line no-undef
+selectedVoiceRoomId = ROOM_ID;
 
-    joinCallBtn.disabled = isPending;
-    joinCallBtn.setAttribute('aria-busy', String(isPending));
+const showCallControls = () => {
+    callControls?.classList.remove('hidden');
 };
 
-const showJoinCall = (label) => {
-    if (label && joinCallBtn) {
-        joinCallBtn.innerText = label;
-    }
-
-    setJoinCallPending(false);
-    joinBtn?.classList.remove('hidden');
+const hideCallControls = () => {
     callControls?.classList.add('hidden');
 };
 
-const showCallControls = () => {
-    setJoinCallPending(false);
-    joinBtn?.classList.add('hidden');
-    callControls?.classList.remove('hidden');
+const isMobileLayout = () => window.innerWidth <= MOBILE_BREAKPOINT;
+
+const getVideoTiles = () =>
+    Array.from(videoGrid.querySelectorAll('.video-tile'));
+
+const updateMobileTileView = () => {
+    const tiles = getVideoTiles();
+    const totalTiles = tiles.length;
+
+    if (totalTiles === 0) {
+        activeMobileTileIndex = 0;
+    } else {
+        activeMobileTileIndex = Math.min(activeMobileTileIndex, totalTiles - 1);
+    }
+
+    tiles.forEach((tile, index) => {
+        tile.classList.toggle(
+            'is-mobile-active',
+            index === activeMobileTileIndex
+        );
+    });
+
+    if (mobileTileCount) {
+        mobileTileCount.textContent =
+            totalTiles === 0
+                ? '0 / 0'
+                : `${activeMobileTileIndex + 1} / ${totalTiles}`;
+    }
+
+    if (mobilePrevTileBtn) {
+        mobilePrevTileBtn.disabled = totalTiles <= 1;
+    }
+
+    if (mobileNextTileBtn) {
+        mobileNextTileBtn.disabled = totalTiles <= 1;
+    }
+};
+
+const setMobileRoomView = (isInRoom) => {
+    mainLayout?.classList.toggle('mobile-in-room', isInRoom);
+    updateMobileTileView();
+};
+
+const updateMobileRoomState = () => {
+    setMobileRoomView(Boolean(joinedVoiceRoomId) && isMobileLayout());
+};
+
+const formatDuration = (durationMs) => {
+    const totalSeconds = Math.max(0, Math.floor(durationMs / 1000));
+    const minutes = String(Math.floor(totalSeconds / 60)).padStart(2, '0');
+    const seconds = String(totalSeconds % 60).padStart(2, '0');
+    return `${minutes}:${seconds}`;
+};
+
+const updateCallDuration = () => {
+    if (!callStartedAt || !callDuration) {
+        return;
+    }
+
+    callDuration.textContent = formatDuration(Date.now() - callStartedAt);
+};
+
+const startCallTimer = () => {
+    callStartedAt = Date.now();
+    updateCallDuration();
+    clearInterval(callDurationTimer);
+    callDurationTimer = setInterval(updateCallDuration, 1000);
+};
+
+const stopCallTimer = () => {
+    clearInterval(callDurationTimer);
+    callDurationTimer = undefined;
+    callStartedAt = undefined;
+
+    if (callDuration) {
+        callDuration.textContent = '00:00';
+    }
+};
+
+const updateLocalUserCard = () => {
+    if (localUserName) {
+        localUserName.textContent = getChatName();
+    }
+
+    if (localVoiceChannelName) {
+        localVoiceChannelName.textContent = getChannelName(
+            joinedVoiceRoomId || viewingRoomId
+        );
+    }
+
+    if (callStatusText) {
+        callStatusText.textContent = joinedVoiceRoomId
+            ? '正在语音中'
+            : isConnectingToPeer
+              ? '正在连接语音'
+              : '未加入语音';
+    }
+
+    if (screenStatusText) {
+        screenStatusText.textContent = sharingNow
+            ? '正在共享屏幕'
+            : '未共享屏幕';
+    }
+};
+
+const applyOutputSettings = (mediaElement, isRemote) => {
+    if (!mediaElement) {
+        return;
+    }
+
+    mediaElement.volume = outputVolume;
+    mediaElement.muted = !isRemote || outputMuted;
+};
+
+const applyOutputSettingsToRemoteMedia = () => {
+    document.querySelectorAll('.video-tile').forEach((tile) => {
+        const mediaElement = tile.querySelector('video, audio');
+        applyOutputSettings(mediaElement, tile.id !== 'local-video');
+    });
+};
+
+const updateOutputButtonState = () => {
+    const icon = toggleOutputBtn?.querySelector('i');
+    const label = toggleOutputBtn?.querySelector('span');
+
+    if (!icon) {
+        return;
+    }
+
+    icon.className = outputMuted
+        ? 'fas fa-volume-mute red'
+        : 'fas fa-volume-up';
+
+    if (label) {
+        label.textContent = outputMuted ? '已静音' : '听筒';
+    }
+};
+
+const updateScreenShareButtonState = () => {
+    const icon = shareScreenBtn?.querySelector('i');
+    const label = shareScreenBtn?.querySelector('span');
+
+    if (icon) {
+        icon.className = sharingNow
+            ? 'far fa-newspaper'
+            : 'far fa-newspaper red';
+    }
+
+    if (label) {
+        label.textContent = sharingNow ? '共享中' : '共享';
+    }
+};
+
+const setCopyRoomLinkCopied = (isCopied) => {
+    if (!copyRoomLinkBtn) {
+        return;
+    }
+
+    const icon = copyRoomLinkBtn.querySelector('i');
+    copyRoomLinkBtn.classList.toggle('is-copied', isCopied);
+    copyRoomLinkBtn.title = isCopied ? '已复制' : '复制频道链接';
+    copyRoomLinkBtn.setAttribute(
+        'aria-label',
+        isCopied ? '已复制' : '复制频道链接'
+    );
+
+    if (icon) {
+        icon.className = isCopied ? 'fas fa-check' : 'fas fa-link';
+    }
+};
+
+const resetLocalVoiceState = () => {
+    stopCurrentScreenStream();
+    cameraStream?.getTracks().forEach((track) => track.stop());
+    myVideoStream?.getTracks().forEach((track) => track.stop());
+    myVideoStream = undefined;
+    activeStream = undefined;
+    cameraStream = undefined;
+    activeVideoTrack = undefined;
+    currentScreenStream = undefined;
+    sharingNow = false;
+    stopCallTimer();
+    updateScreenShareButtonState();
+    updateLocalUserCard();
+};
+
+const getChannelElement = (roomId) =>
+    Array.from(treeChannels).find(
+        (channel) => channel.dataset.channelRoom === roomId
+    );
+
+const getChannelName = (roomId) =>
+    getChannelElement(roomId)?.dataset.channelName || roomId;
+
+const getChannelUrl = (roomId) => `${window.location.origin}/room/${roomId}`;
+
+const getCopyRoomId = () => joinedVoiceRoomId || viewingRoomId;
+
+const updateChannelIndicators = () => {
+    treeChannels.forEach((channel) => {
+        const roomId = channel.dataset.channelRoom;
+        channel.classList.toggle('is-viewing', roomId === viewingRoomId);
+        channel.classList.toggle('is-voice', roomId === joinedVoiceRoomId);
+        channel.classList.toggle(
+            'is-voice-target',
+            !joinedVoiceRoomId && roomId === selectedVoiceRoomId
+        );
+    });
+
+    const viewingName = getChannelName(viewingRoomId);
+
+    if (chatTitle) {
+        chatTitle.textContent = `${viewingName}聊天`;
+    }
+
+    updateLocalUserCard();
+    updateMobileRoomState();
 };
 
 const connectToNewUser = (peer, peerId, stream) => {
@@ -107,6 +344,10 @@ const appendChatMessage = (message) => {
         return;
     }
 
+    if (message.roomId && message.roomId !== viewingRoomId) {
+        return;
+    }
+
     const item = document.createElement('li');
     const meta = document.createElement('div');
     const content = document.createElement('div');
@@ -135,6 +376,42 @@ const renderChatHistory = (messages) => {
     (Array.isArray(messages) ? messages : []).forEach(appendChatMessage);
 };
 
+const renderPresenceState = ({ channels = [] } = {}) => {
+    channelCountBadges.forEach((badge) => {
+        const channel = channels.find(
+            (currentChannel) =>
+                currentChannel.slug === badge.dataset.channelCount
+        );
+
+        badge.textContent = String(channel?.count || 0);
+    });
+
+    channelMemberLists.forEach((list) => {
+        const channel = channels.find(
+            (currentChannel) => currentChannel.slug === list.dataset.membersFor
+        );
+        const membersBySocket = new Map();
+
+        list.replaceChildren();
+        (channel?.members || []).forEach((member) => {
+            if (!member.socketId) {
+                return;
+            }
+
+            membersBySocket.set(member.socketId, member);
+        });
+
+        membersBySocket.forEach((member) => {
+            const item = document.createElement('li');
+            const isMe = member.socketId && socket?.id === member.socketId;
+
+            item.className = 'channel-member';
+            item.textContent = `${member.senderName || 'Guest'}${isMe ? '（我）' : ''}`;
+            list.append(item);
+        });
+    });
+};
+
 const ensureSocket = () => {
     if (socket) {
         return socket;
@@ -150,6 +427,7 @@ const ensureSocket = () => {
 
     socket.on('chat:history', renderChatHistory);
     socket.on('chat:message', appendChatMessage);
+    socket.on('presence:state', renderPresenceState);
     socket.on('cursor:move', renderRemoteCursor);
     socket.on('cursor:leave', markRemoteCursorIdle);
     socket.on('cursor:remove', removeRemoteCursor);
@@ -157,11 +435,62 @@ const ensureSocket = () => {
     return socket;
 };
 
-const joinChatRoom = () => {
+const joinChatRoom = (roomId = viewingRoomId) => {
     const activeSocket = ensureSocket();
 
-    // eslint-disable-next-line no-undef
-    activeSocket.emit('chat:join', { roomId: ROOM_ID });
+    activeSocket.emit('chat:join', {
+        roomId,
+        senderName: getChatName(),
+    });
+};
+
+const updatePresenceName = () => {
+    if (!joinedVoiceRoomId) {
+        return;
+    }
+
+    ensureSocket().emit('presence:update', {
+        senderName: getChatName(),
+    });
+};
+
+const setViewingRoom = (roomId, { updateHistory = true } = {}) => {
+    if (!getChannelElement(roomId)) {
+        return;
+    }
+
+    viewingRoomId = roomId;
+    updateChannelIndicators();
+    clearRemoteCursors();
+    renderChatHistory([]);
+    joinChatRoom(viewingRoomId);
+
+    if (updateHistory) {
+        window.history.pushState({ roomId }, '', `/room/${roomId}`);
+    }
+};
+
+const setVoiceTargetRoom = (roomId) => {
+    if (!getChannelElement(roomId)) {
+        return;
+    }
+
+    if (joinedVoiceRoomId === roomId) {
+        console.info(`Already in voice channel ${getChannelName(roomId)}.`);
+        return;
+    }
+
+    if (joinedVoiceRoomId && joinedVoiceRoomId !== roomId) {
+        selectedVoiceRoomId = roomId;
+        pendingVoiceRoomId = roomId;
+        document.getElementById('destroyPeer')?.click();
+        updateChannelIndicators();
+        return;
+    }
+
+    selectedVoiceRoomId = roomId;
+    updateChannelIndicators();
+    joinVoiceChannel(roomId);
 };
 
 const sendChatMessage = () => {
@@ -172,9 +501,9 @@ const sendChatMessage = () => {
     }
 
     saveChatName();
+    updatePresenceName();
     ensureSocket().emit('chat:send', {
-        // eslint-disable-next-line no-undef
-        roomId: ROOM_ID,
+        roomId: viewingRoomId,
         senderName: getChatName(),
         content,
     });
@@ -225,7 +554,16 @@ const scheduleCursorIdle = (socketId) => {
     );
 };
 
-const renderRemoteCursor = ({ socketId, x, y, senderName, color }) => {
+const renderRemoteCursor = ({ roomId, socketId, x, y, senderName, color }) => {
+    if (shouldDisablePageCursorSharing()) {
+        removeCursorOverlay();
+        return;
+    }
+
+    if (roomId && roomId !== viewingRoomId) {
+        return;
+    }
+
     const overlay = getCursorOverlay();
     let cursor = overlay.querySelector(
         `.shared-cursor[data-socket-id="${socketId}"]`
@@ -254,7 +592,16 @@ const renderRemoteCursor = ({ socketId, x, y, senderName, color }) => {
     scheduleCursorIdle(socketId);
 };
 
-const markRemoteCursorIdle = ({ socketId }) => {
+const markRemoteCursorIdle = ({ roomId, socketId }) => {
+    if (shouldDisablePageCursorSharing()) {
+        removeCursorOverlay();
+        return;
+    }
+
+    if (roomId && roomId !== viewingRoomId) {
+        return;
+    }
+
     clearCursorIdleTimer(socketId);
     setCursorIdle(socketId);
 };
@@ -264,6 +611,20 @@ const removeRemoteCursor = ({ socketId }) => {
     document
         .querySelectorAll(`.shared-cursor[data-socket-id="${socketId}"]`)
         .forEach((cursor) => cursor.remove());
+};
+
+const clearRemoteCursors = () => {
+    Object.keys(cursorIdleTimers).forEach(clearCursorIdleTimer);
+    document.querySelectorAll('.shared-cursor').forEach((cursor) => {
+        cursor.remove();
+    });
+};
+
+const shouldDisablePageCursorSharing = () => cursorSharingMedia.matches;
+
+const removeCursorOverlay = () => {
+    clearRemoteCursors();
+    document.getElementById('cursorOverlay')?.remove();
 };
 
 const getViewportCursorPosition = (event) => {
@@ -278,6 +639,10 @@ const getViewportCursorPosition = (event) => {
 };
 
 const sendCursorMove = (event) => {
+    if (shouldDisablePageCursorSharing()) {
+        return;
+    }
+
     const now = Date.now();
 
     if (now - lastCursorMoveAt < CURSOR_THROTTLE_MS) {
@@ -292,8 +657,7 @@ const sendCursorMove = (event) => {
 
     lastCursorMoveAt = now;
     ensureSocket().emit('cursor:move', {
-        // eslint-disable-next-line no-undef
-        roomId: ROOM_ID,
+        roomId: viewingRoomId,
         x: position.x,
         y: position.y,
         senderName: getChatName(),
@@ -301,16 +665,29 @@ const sendCursorMove = (event) => {
 };
 
 const sendCursorLeave = () => {
+    if (shouldDisablePageCursorSharing()) {
+        return;
+    }
+
     ensureSocket().emit('cursor:leave', {
-        // eslint-disable-next-line no-undef
-        roomId: ROOM_ID,
+        roomId: viewingRoomId,
     });
 };
 
 const enablePageCursorSharing = () => {
-    getCursorOverlay();
+    if (!shouldDisablePageCursorSharing()) {
+        getCursorOverlay();
+    }
+
     document.addEventListener('pointermove', sendCursorMove);
     document.addEventListener('pointerleave', sendCursorLeave);
+    cursorSharingMedia.addEventListener('change', () => {
+        if (shouldDisablePageCursorSharing()) {
+            removeCursorOverlay();
+        } else {
+            getCursorOverlay();
+        }
+    });
 };
 
 const requestAudioStream = async () => {
@@ -372,8 +749,12 @@ const addVideoStream = (video, stream, videoId) => {
 
     if (videoId) {
         tile.dataset.peerId = videoId;
+        tile.dataset.peerLabel = `Peer ${videoId.slice(0, 8)}`;
     } else if (localPeerId) {
         tile.dataset.peerId = localPeerId;
+        tile.dataset.peerLabel = `我 ${localPeerId.slice(0, 8)}`;
+    } else {
+        tile.dataset.peerLabel = '我';
     }
 
     let mediaElement = tile.querySelector('video, audio');
@@ -382,7 +763,7 @@ const addVideoStream = (video, stream, videoId) => {
         mediaElement = hasVideo ? video : document.createElement('audio');
         mediaElement.autoplay = true;
         mediaElement.playsInline = 'true';
-        mediaElement.muted = !videoId;
+        applyOutputSettings(mediaElement, Boolean(videoId));
 
         tile.append(mediaElement);
 
@@ -398,10 +779,12 @@ const addVideoStream = (video, stream, videoId) => {
     }
 
     mediaElement.srcObject = stream;
+    applyOutputSettings(mediaElement, Boolean(videoId));
     mediaElement.onloadedmetadata = () => {
         mediaElement.play();
     };
     setHeightOfVideos(); //added
+    updateMobileTileView();
 };
 
 const mergeRemoteStream = (peerId, incomingStream) => {
@@ -580,9 +963,6 @@ const stopCurrentScreenStream = () => {
 };
 
 const restoreCameraAfterScreenShare = (peer, myVideoStream) => {
-    document.getElementById('shareScreen').firstChild.className =
-        'far fa-newspaper red'; //no good symbol for sharing screen
-
     const cameraTrack = cameraStream?.getVideoTracks()[0];
     const nextVideoTrack =
         cameraTrack?.readyState === 'live' ? cameraTrack : undefined;
@@ -597,6 +977,8 @@ const restoreCameraAfterScreenShare = (peer, myVideoStream) => {
 
     currentScreenStream = undefined;
     sharingNow = false;
+    updateScreenShareButtonState();
+    updateLocalUserCard();
 };
 
 async function toggleScreenShare(peer, myVideoStream) {
@@ -608,9 +990,6 @@ async function toggleScreenShare(peer, myVideoStream) {
             console.warn('Screen sharing did not provide a video track.');
             return;
         }
-
-        document.getElementById('shareScreen').firstChild.className =
-            'far fa-newspaper';
 
         currentScreenStream = shareScreen;
         activeVideoTrack = track;
@@ -627,6 +1006,8 @@ async function toggleScreenShare(peer, myVideoStream) {
         sendVideoTrackToPeers(peer, track);
 
         sharingNow = true;
+        updateScreenShareButtonState();
+        updateLocalUserCard();
     } else {
         stopCurrentScreenStream();
         restoreCameraAfterScreenShare(peer, myVideoStream);
@@ -662,28 +1043,33 @@ const toggleAudio = (myVideoStream) => {
 };
 
 const setHeightOfVideos = () => {
-    var height = document.getElementById('canvas').clientHeight;
     var videos = document.querySelectorAll('.video-tile');
     videos.forEach((video) => {
-        if (videos.length <= 2) {
-            video.style.height = height / 2 + 'px';
-        } else if (videos.length > 2 && videos.length <= 6) {
-            video.style.height = height / 3 + 'px';
-        } else if (videos.length >= 7) {
-            video.style.height = height / 4 + 'px';
-        }
+        video.style.height = '';
     });
 };
 
-const connect = () => {
-    console.log('Join Call clicked');
+const joinVoiceChannel = (roomId) => {
+    console.log(`Joining voice channel: ${getChannelName(roomId)}`);
 
-    if (!joinBtn || !joinCallBtn || !callControls) {
-        console.warn('Join Call UI is not available.');
+    if (isConnectingToPeer) {
+        console.warn('Voice channel is already connecting.');
         return;
     }
 
-    setJoinCallPending(true);
+    if (currentPeer && !currentPeer.destroyed) {
+        console.warn('Already joined a voice call.');
+        return;
+    }
+
+    if (!getChannelElement(roomId)) {
+        console.warn(`Voice channel ${roomId} is not available.`);
+        return;
+    }
+
+    isConnectingToPeer = true;
+    selectedVoiceRoomId = roomId;
+    const roomToJoin = roomId;
     const isSecurePeerConnection = window.location.protocol === 'https:';
     const peerPort =
         window.location.port || (isSecurePeerConnection ? 443 : 80);
@@ -700,6 +1086,7 @@ const connect = () => {
             ...iceServers,
         ],
     });
+    currentPeer = peer;
 
     // first wait to connect to the peer server
     peer.on('open', async (peerId) => {
@@ -724,6 +1111,12 @@ const connect = () => {
                 setAudioButtonState(myVideoStream.getAudioTracks()[0].enabled);
                 setLocalVideoStream(getActiveStream());
                 showCallControls();
+                joinedVoiceRoomId = roomToJoin;
+                selectedVoiceRoomId = roomToJoin;
+                isConnectingToPeer = false;
+                startCallTimer();
+                updateOutputButtonState();
+                updateChannelIndicators();
 
                 peer.on('call', (call) => {
                     console.log('Received a call...');
@@ -732,17 +1125,29 @@ const connect = () => {
                     setupCallStreamHandler(call, call.peer);
                 });
 
-                // eslint-disable-next-line no-undef
-                activeSocket.emit('joinRoom', ROOM_ID, peerId);
+                activeSocket.emit('joinRoom', roomToJoin, peerId);
+                activeSocket.emit('presence:joinVoice', {
+                    roomId: roomToJoin,
+                    senderName: getChatName(),
+                    peerId,
+                });
 
-                activeSocket.on('userConnected', (peerId) =>
-                    connectToNewUser(peer, peerId, getActiveStream())
-                );
+                activeSocket.on('userConnected', ({ roomId, peerId }) => {
+                    if (roomId !== joinedVoiceRoomId) {
+                        return;
+                    }
+
+                    connectToNewUser(peer, peerId, getActiveStream());
+                });
 
                 //removing video of user who has disconnected from websocket
-                activeSocket.on('removeUserVideo', (peerId) =>
-                    removeVideoElement(peerId)
-                );
+                activeSocket.on('removeUserVideo', ({ roomId, peerId }) => {
+                    if (roomId !== joinedVoiceRoomId) {
+                        return;
+                    }
+
+                    removeVideoElement(peerId);
+                });
 
                 // -DISCONNECT FUNCTION - disconnecting this user from websocket. This will trigger the on.disconnected listener on the server.
                 //this will tell other sockets to remove the video of the user who has just disconnected (video id is the same as the userId)
@@ -757,13 +1162,19 @@ const connect = () => {
             })
             .catch((error) => {
                 console.warn('Could not start microphone audio source.', error);
-                showJoinCall();
+                isConnectingToPeer = false;
+                currentPeer = undefined;
+                resetLocalVoiceState();
+                hideCallControls();
             });
     });
 
     peer.on('error', (error) => {
         console.warn('Peer connection failed.', error);
-        showJoinCall();
+        isConnectingToPeer = false;
+        currentPeer = undefined;
+        resetLocalVoiceState();
+        hideCallControls();
     });
 
     peer.on('connection', () => {
@@ -775,7 +1186,22 @@ const connect = () => {
         console.log(
             `Peer destroyed : ${peer.destroyed}. Letting Everyone else on in the room know.`
         );
-        socket.emit('peerLeft', id);
+        socket?.emit('voicePeerLeft', {
+            roomId: joinedVoiceRoomId,
+            peerId: id || localPeerId,
+        });
+        currentPeer = undefined;
+        joinedVoiceRoomId = undefined;
+        isConnectingToPeer = false;
+        resetLocalVoiceState();
+        hideCallControls();
+        updateChannelIndicators();
+
+        if (pendingVoiceRoomId) {
+            const nextRoomId = pendingVoiceRoomId;
+            pendingVoiceRoomId = undefined;
+            window.setTimeout(() => joinVoiceChannel(nextRoomId), 150);
+        }
     });
 
     peer.on('disconnected', () => {
@@ -785,12 +1211,16 @@ const connect = () => {
     //client click to end call and stays in browser
     document.getElementById('destroyPeer').onclick = () => {
         console.log('Destroy peer clicked');
+        ensureSocket().emit('presence:leaveVoice');
         peer.destroy();
+        resetLocalVoiceState();
 
         //removing all videos for client who is leaving.
         videoGrid.replaceChildren();
+        updateMobileTileView();
 
-        showJoinCall('Re-join Call');
+        hideCallControls();
+        updateChannelIndicators();
     };
 };
 
@@ -801,15 +1231,40 @@ function removeVideoElement(id) {
     if (vidElement) {
         vidElement.remove();
         setHeightOfVideos();
+        updateMobileTileView();
     }
 }
 
-joinCallBtn?.addEventListener('click', connect);
-
 if (chatNameInput) {
     chatNameInput.value = getStoredChatName();
-    chatNameInput.addEventListener('change', saveChatName);
+    chatNameInput.addEventListener('change', () => {
+        saveChatName();
+        updatePresenceName();
+    });
 }
+
+treeChannels.forEach((channel) => {
+    const link = channel.querySelector('.tree-channel-link');
+    const roomId = channel.dataset.channelRoom;
+
+    link?.addEventListener('click', (event) => {
+        event.preventDefault();
+        setViewingRoom(roomId);
+    });
+
+    link?.addEventListener('dblclick', (event) => {
+        event.preventDefault();
+        setVoiceTargetRoom(roomId);
+    });
+});
+
+window.addEventListener('popstate', () => {
+    const [, roomId] = window.location.pathname.match(/^\/room\/([^/]+)/) || [];
+
+    if (roomId) {
+        setViewingRoom(roomId, { updateHistory: false });
+    }
+});
 
 chatForm?.addEventListener('submit', (event) => {
     event.preventDefault();
@@ -825,15 +1280,65 @@ chatInput?.addEventListener('keydown', (event) => {
     sendChatMessage();
 });
 
-joinChatRoom();
+toggleOutputBtn?.addEventListener('click', () => {
+    outputMuted = !outputMuted;
+    updateOutputButtonState();
+    applyOutputSettingsToRemoteMedia();
+});
+
+outputVolumeInput?.addEventListener('input', () => {
+    outputVolume = Number(outputVolumeInput.value);
+    applyOutputSettingsToRemoteMedia();
+});
+
+mobileBackToChannelsBtn?.addEventListener('click', () => {
+    if (currentPeer && !currentPeer.destroyed) {
+        document.getElementById('destroyPeer')?.click();
+    }
+
+    setMobileRoomView(false);
+});
+
+mobilePrevTileBtn?.addEventListener('click', () => {
+    const totalTiles = getVideoTiles().length;
+
+    if (totalTiles <= 1) {
+        return;
+    }
+
+    activeMobileTileIndex =
+        (activeMobileTileIndex - 1 + totalTiles) % totalTiles;
+    updateMobileTileView();
+});
+
+mobileNextTileBtn?.addEventListener('click', () => {
+    const totalTiles = getVideoTiles().length;
+
+    if (totalTiles <= 1) {
+        return;
+    }
+
+    activeMobileTileIndex = (activeMobileTileIndex + 1) % totalTiles;
+    updateMobileTileView();
+});
+
+window.addEventListener('resize', () => {
+    updateMobileRoomState();
+    updateMobileTileView();
+});
+
+updateChannelIndicators();
+updateOutputButtonState();
+updateScreenShareButtonState();
+joinChatRoom(viewingRoomId);
 enablePageCursorSharing();
 
 copyRoomLinkBtn?.addEventListener('click', async () => {
     try {
-        await navigator.clipboard.writeText(window.location.href);
-        copyRoomLinkBtn.innerText = '已复制';
+        await navigator.clipboard.writeText(getChannelUrl(getCopyRoomId()));
+        setCopyRoomLinkCopied(true);
         setTimeout(() => {
-            copyRoomLinkBtn.innerText = '复制频道链接';
+            setCopyRoomLinkCopied(false);
         }, 1500);
     } catch (error) {
         console.warn('Could not copy channel link.', error);

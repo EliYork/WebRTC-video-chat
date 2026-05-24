@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><%= channelName %> - 语音据点</title>
-    <link rel="stylesheet" href="/style.css?v=25556">
+    <link rel="stylesheet" href="/style.css?v=25564">
     
     <script src="/socket.io/socket.io.js"></script>
     
@@ -17,43 +17,108 @@
     </script>
 </head>
 <body>
-    <div id="main">
-        <div class="room-header">
-            <a href="/">频道列表</a>
-            <div>当前频道：<%= channelName %></div>
-            <button id="copyRoomLink" type="button">复制频道链接</button>
-        </div>
-        <div id="canvas">
-            <div id="video-grid"></div>
-            <div id="join-btn" class="text-center">
-                <button id="joinCall" type="button">Join Call</button>
+    <div id="main" class="room-layout">
+        <aside class="room-sidebar" aria-label="频道列表">
+            <div class="sidebar-brand">
+                <a href="/">朋友语音房间</a>
+                <p>今晚在哪个频道集合？</p>
             </div>
-        </div>
-        <section id="chat-panel" class="chat-panel" aria-label="频道聊天">
-            <div class="chat-header">
-                <div>
-                    <h2>当前频道聊天</h2>
-                    <p>消息仅在当前频道内广播。</p>
+
+            <nav class="sidebar-channel-tree">
+                <% channels.forEach((channel) => { %>
+                    <div
+                        class="tree-channel voice-channel <%= channel.slug === roomId ? 'is-viewing' : '' %>"
+                        data-channel-room="<%= channel.slug %>"
+                        data-channel-name="<%= channel.name %>"
+                        data-channel-description="<%= channel.description %>"
+                    >
+                        <a class="tree-channel-link" href="/room/<%= channel.slug %>">
+                            <span class="tree-channel-name">
+                                <span class="tree-channel-icon">🔊</span>
+                                <%= channel.name %>
+                            </span>
+                            <span
+                                class="tree-channel-count"
+                                data-channel-count="<%= channel.slug %>"
+                            >0</span>
+                        </a>
+                        <ul
+                            class="channel-members"
+                            data-members-for="<%= channel.slug %>"
+                            aria-label="<%= channel.name %> 成员"
+                        ></ul>
+                    </div>
+                <% }) %>
+            </nav>
+
+            <section class="local-user-card" aria-label="本地用户控制">
+                <div class="local-user-main">
+                    <div class="local-avatar" aria-hidden="true">♡</div>
+                    <div>
+                        <strong id="localUserName">Guest</strong>
+                        <p id="callStatusText">未加入语音</p>
+                    </div>
                 </div>
-                <label>
-                    昵称
-                    <input id="chatName" maxlength="32" autocomplete="nickname">
-                </label>
+                <div class="local-call-meta">
+                    <div class="local-meta-lines">
+                        <span>频道：<strong id="localVoiceChannelName">大厅</strong></span>
+                        <span>时长：<strong id="callDuration">00:00</strong></span>
+                        <span id="screenStatusText">未共享屏幕</span>
+                    </div>
+                    <button id="copyRoomLink" class="copy-room-link" type="button" title="复制频道链接" aria-label="复制频道链接">
+                        <i class="fas fa-link"></i>
+                    </button>
+                </div>
+                <div id="buttons" class="hidden local-controls" aria-label="通话控制">
+                    <div class="control-button-wrap">
+                        <button id="toggleAudio" type="button" title="麦克风" aria-label="麦克风">
+                            <i class="fas fa-microphone"></i>
+                        </button>
+                        <label class="control-popover mic-volume-popover">
+                            <span>麦克风音量由系统控制</span>
+                            <input id="micVolumePreview" type="range" min="0" max="1" step="0.05" value="1" disabled>
+                        </label>
+                    </div>
+                    <div class="control-button-wrap">
+                        <button id="toggleOutput" type="button" title="听筒" aria-label="听筒">
+                            <i class="fas fa-volume-up"></i>
+                        </button>
+                        <label class="control-popover">
+                            <span>播放音量</span>
+                            <input id="outputVolume" type="range" min="0" max="1" step="0.05" value="1">
+                        </label>
+                    </div>
+                    <button id="toggleVideo" type="button" title="摄像头" aria-label="摄像头">
+                        <i class="fas fa-video"></i>
+                    </button>
+                    <button id="shareScreen" type="button" title="屏幕共享" aria-label="屏幕共享">
+                        <i class="far fa-newspaper red"></i>
+                    </button>
+                    <button id="destroyPeer" type="button">离开</button>
+                </div>
+            </section>
+        </aside>
+
+        <main class="room-stage" aria-label="活动区">
+            <button id="mobileBackToChannels" class="mobile-back-button" type="button">返回</button>
+            <div class="mobile-tile-nav" aria-label="玩家窗口切换">
+                <button id="mobilePrevTile" type="button" aria-label="上一个窗口">‹</button>
+                <span id="mobileTileCount">0 / 0</span>
+                <button id="mobileNextTile" type="button" aria-label="下一个窗口">›</button>
             </div>
+            <section id="canvas" class="stage-canvas" aria-label="玩家窗口区">
+                <div id="video-grid"></div>
+            </section>
+        </main>
+
+        <aside id="chat-panel" class="chat-panel" aria-label="频道聊天">
+            <input id="chatName" type="hidden" maxlength="32" autocomplete="nickname">
             <ol id="chatMessages" class="chat-messages"></ol>
             <form id="chatForm" class="chat-form">
-                <textarea id="chatInput" maxlength="500" rows="2" placeholder="输入消息，Enter 发送，Shift+Enter 换行"></textarea>
+                <textarea id="chatInput" maxlength="500" rows="2" placeholder="发送消息"></textarea>
                 <button type="submit">发送</button>
             </form>
-        </section>
-        <div id="buttons" class="hidden">
-            <div id="toggleAudio"><i class="fas fa-microphone"></i></div>
-            <div id="videoOptions">
-                <div id="toggleVideo"><i class="fas fa-video"></i></div>
-                <div id="shareScreen"><i class="far fa-newspaper red"></i></div>
-            </div>
-            <div id="destroyPeer">Exit call</div>
-        </div> 
+        </aside>
     </div> 
     <script type="module" src="/script.js"></script> <!-- So we defined the static files of the server so we can use it here-->
 </body>

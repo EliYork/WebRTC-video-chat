@@ -91,6 +91,7 @@ const getChannel = (slug) => CHANNELS.find((channel) => channel.slug === slug);
 const CHAT_HISTORY_LIMIT = 50;
 const CHAT_MESSAGE_MAX_LENGTH = 500;
 const chatHistoryByRoom = new Map();
+const onlineMembersByRoom = new Map();
 
 const getChatHistory = (roomId) => chatHistoryByRoom.get(roomId) || [];
 
@@ -120,6 +121,40 @@ const normalizeChatContent = (content) =>
         .trim()
         .slice(0, CHAT_MESSAGE_MAX_LENGTH);
 
+const getOnlineMembers = (roomId) =>
+    Array.from((onlineMembersByRoom.get(roomId) || new Map()).values());
+
+const getPresenceSnapshot = () => ({
+    channels: CHANNELS.map((channel) => ({
+        slug: channel.slug,
+        count: getOnlineMembers(channel.slug).length,
+        members: getOnlineMembers(channel.slug),
+    })),
+});
+
+const emitPresenceToSocket = (socket) => {
+    socket.emit('presence:state', getPresenceSnapshot());
+};
+
+const broadcastPresence = () => {
+    io.sockets.sockets.forEach(emitPresenceToSocket);
+};
+
+const removePresenceMember = (socket) => {
+    const roomId = socket.data.presenceRoomId;
+    const members = onlineMembersByRoom.get(roomId);
+
+    if (!members) {
+        return;
+    }
+
+    members.delete(socket.id);
+
+    if (members.size === 0) {
+        onlineMembersByRoom.delete(roomId);
+    }
+};
+
 const getCursorColor = (seed) => {
     let hash = 0;
 
@@ -147,21 +182,17 @@ app.use(express.static(__dirname + '/views'));
 app.set('views', __dirname + '/views');
 
 /** Routes */
-app.get('/', (req, res) =>
-    res.render('index', {
-        channels: CHANNELS,
-        invalidChannel: req.query.invalid,
-    })
-);
+app.get('/', (_, res) => res.redirect('/room/lobby'));
 
 app.get('/room/:channel', (req, res) => {
     const channel = getChannel(req.params.channel);
 
     if (!channel) {
-        return res.redirect('/?invalid=1');
+        return res.redirect('/room/lobby');
     }
 
     res.render('room/index', {
+        channels: CHANNELS,
         roomId: channel.slug,
         channelName: channel.name,
         iceServers: JSON.stringify(iceServersList),
@@ -190,7 +221,7 @@ const handleJoinRoon = async (roomId, peerId, socket) => {
     socket.data.roomId = roomId;
     await socket.join(roomId);
 
-    socket.to(roomId).emit('userConnected', peerId);
+    socket.to(roomId).emit('userConnected', { roomId, peerId });
     socket.on('disconnect', () => handleDisconnect(roomId, peerId, socket));
 };
 
@@ -228,7 +259,80 @@ const handleManualDisconnect = (socket) => {
  */
 const handleDisconnect = (roomId, peerId, socket) => {
     Log.info(`User with peer id ${peerId} has exited via browser`);
-    socket.to(roomId).emit('removeUserVideo', peerId);
+    socket.to(roomId).emit('removeUserVideo', { roomId, peerId });
+};
+
+const handleVoicePeerLeft = async ({ roomId, peerId } = {}, socket) => {
+    const channel = getChannel(roomId);
+
+    if (!channel || !peerId) {
+        return;
+    }
+
+    await socket.leave(channel.slug);
+    socket.to(channel.slug).emit('removeUserVideo', {
+        roomId: channel.slug,
+        peerId,
+    });
+
+    if (socket.data.roomId === channel.slug) {
+        delete socket.data.roomId;
+    }
+};
+
+const handlePresenceJoinVoice = (
+    { roomId, senderName, peerId } = {},
+    socket
+) => {
+    const channel = getChannel(roomId);
+
+    if (!channel) {
+        return;
+    }
+
+    if (
+        socket.data.presenceRoomId &&
+        socket.data.presenceRoomId !== channel.slug
+    ) {
+        removePresenceMember(socket);
+    }
+
+    const members = onlineMembersByRoom.get(channel.slug) || new Map();
+    members.set(socket.id, {
+        socketId: socket.id,
+        peerId,
+        roomId: channel.slug,
+        senderName: normalizeSenderName(senderName),
+        joinedVoice: true,
+        updatedAt: new Date().toISOString(),
+    });
+
+    onlineMembersByRoom.set(channel.slug, members);
+    socket.data.presenceRoomId = channel.slug;
+    broadcastPresence();
+};
+
+const handlePresenceUpdate = ({ senderName } = {}, socket) => {
+    const roomId = socket.data.presenceRoomId;
+    const members = onlineMembersByRoom.get(roomId);
+    const member = members?.get(socket.id);
+
+    if (!member) {
+        return;
+    }
+
+    members.set(socket.id, {
+        ...member,
+        senderName: normalizeSenderName(senderName),
+        updatedAt: new Date().toISOString(),
+    });
+    broadcastPresence();
+};
+
+const handlePresenceLeaveVoice = (socket) => {
+    removePresenceMember(socket);
+    delete socket.data.presenceRoomId;
+    broadcastPresence();
 };
 
 const handleChatJoin = async ({ roomId } = {}, socket) => {
@@ -239,9 +343,10 @@ const handleChatJoin = async ({ roomId } = {}, socket) => {
     }
 
     socket.data.chatRoomId = channel.slug;
-    socket.data.roomId = channel.slug;
+    socket.data.viewRoomId = channel.slug;
     await socket.join(channel.slug);
     socket.emit('chat:history', getChatHistory(channel.slug));
+    emitPresenceToSocket(socket);
 };
 
 const handleChatSend = async ({ roomId, senderName, content } = {}, socket) => {
@@ -274,7 +379,7 @@ const handleChatSend = async ({ roomId, senderName, content } = {}, socket) => {
 };
 
 const handleCursorMove = async ({ roomId, x, y, senderName } = {}, socket) => {
-    const channel = getChannel(roomId || socket.data.roomId);
+    const channel = getChannel(roomId || socket.data.viewRoomId);
     const normalizedX = normalizeCursorPosition(x);
     const normalizedY = normalizeCursorPosition(y);
 
@@ -292,6 +397,7 @@ const handleCursorMove = async ({ roomId, x, y, senderName } = {}, socket) => {
 
     socket.data.roomId = channel.slug;
     socket.to(channel.slug).emit('cursor:move', {
+        roomId: channel.slug,
         socketId: socket.id,
         x: normalizedX,
         y: normalizedY,
@@ -301,27 +407,34 @@ const handleCursorMove = async ({ roomId, x, y, senderName } = {}, socket) => {
 };
 
 const handleCursorLeave = ({ roomId } = {}, socket) => {
-    const channel = getChannel(roomId || socket.data.roomId);
+    const channel = getChannel(roomId || socket.data.viewRoomId);
 
     if (!channel) {
         return;
     }
 
     socket.to(channel.slug).emit('cursor:leave', {
+        roomId: channel.slug,
         socketId: socket.id,
     });
 };
 
 const handleCursorRemove = (socket) => {
-    const roomId = socket.data.roomId || socket.data.chatRoomId;
+    const roomId = socket.data.viewRoomId || socket.data.chatRoomId;
 
     if (!roomId) {
         return;
     }
 
     socket.to(roomId).emit('cursor:remove', {
+        roomId,
         socketId: socket.id,
     });
+};
+
+const handlePresenceRemove = (socket) => {
+    removePresenceMember(socket);
+    broadcastPresence();
 };
 
 /**
@@ -335,12 +448,25 @@ const handleCursorRemove = (socket) => {
 io.on('connection', (socket) => {
     Log.info(`User with socket.id ${socket.id} has connected.`);
 
-    socket.on('disconnecting', () => handleCursorRemove(socket));
+    socket.on('disconnecting', () => {
+        handleCursorRemove(socket);
+        handlePresenceRemove(socket);
+    });
     socket.on('joinRoom', (roomId, userId) =>
         handleJoinRoon(roomId, userId, socket)
     );
     socket.on('chat:join', (payload) => handleChatJoin(payload, socket));
     socket.on('chat:send', (payload) => handleChatSend(payload, socket));
+    socket.on('presence:joinVoice', (payload) =>
+        handlePresenceJoinVoice(payload, socket)
+    );
+    socket.on('presence:leaveVoice', () => handlePresenceLeaveVoice(socket));
+    socket.on('presence:update', (payload) =>
+        handlePresenceUpdate(payload, socket)
+    );
+    socket.on('voicePeerLeft', (payload) =>
+        handleVoicePeerLeft(payload, socket)
+    );
     socket.on('cursor:move', (payload) => handleCursorMove(payload, socket));
     socket.on('cursor:leave', (payload) => handleCursorLeave(payload, socket));
     socket.on('peerLeft', () => handleManualDisconnect(socket));

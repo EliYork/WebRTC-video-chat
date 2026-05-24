@@ -6,8 +6,8 @@ A fixed-channel voice room web app for friends, with voice chat, screen sharing,
 
 ## Features
 
-- Fixed channels: the homepage lists preset channels, and `/room/{channel}` opens the selected room.
-- Voice calls: `Join Call` requests microphone access only and does not request the camera by default.
+- Fixed channels: the homepage opens the lobby by default, and the room sidebar switches between `/room/{channel}` rooms.
+- Voice calls: double-clicking a sidebar channel requests microphone access only and does not request the camera by default.
 - Manual camera: camera video is off by default and starts only when the camera button is clicked.
 - Screen sharing: users can share their screen inside a channel.
 - Fullscreen viewing: remote video and screen-share tiles can be opened fullscreen.
@@ -61,10 +61,10 @@ PeerJS is mounted on the same Express service at `/peerjs`, so the page, Socket.
 
 ## Usage
 
-1. Open `http://localhost:3000`.
-2. Choose a channel.
+1. Open `http://localhost:3000`; it enters the lobby by default.
+2. Use the left sidebar channel tree to switch channels.
 3. After entering the channel, you can immediately see other users' cursors in the same channel.
-4. Click `Join Call` to join voice.
+4. Double-click a sidebar channel to join voice.
 5. Use microphone mute, camera, screen sharing, text chat, and fullscreen viewing as needed.
 6. Use the copy channel link button to share the current channel URL with friends.
 
