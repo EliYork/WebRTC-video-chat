@@ -202,27 +202,31 @@ app.get('/room/:channel', (req, res) => {
 app.use((_, res) => res.status(404).send('404 Not Found'));
 
 /**
- * handleJoinRoon
+ * handleJoinRoom
  *
- * Handles a user's request to join a room.
+ * Handles a user's request to join a voice room.
  *
  * @param {string} roomId - The ID of the room the user wants to join.
  * @param {string} peerId - The ID of the user joining the room.
  * @param {Socket} socket - The socket instance representing the user's connection.
  *
  * Behavior:
- * - Logs the user's request to join the room.
+ * - Stores voiceRoomId and voicePeerId on socket.data.
  * - Adds the user's socket to the specified room.
- * - Notifies other users in the room that a new user has connected by emitting 'userConnected' with the userId.
- * - Sets up a listener for the 'disconnect' event on the socket, which will call handleDisconnect when triggered.
+ * - Notifies other users in the room that a new user has connected.
+ *
+ * NOTE: disconnect handler is registered once in io.on('connection'),
+ * not here, to avoid duplicate registrations.
  */
-const handleJoinRoon = async (roomId, peerId, socket) => {
-    Log.info(`Peer with id ${peerId} has requested to enter room ${roomId}.`);
-    socket.data.roomId = roomId;
+const handleJoinRoom = async (roomId, peerId, socket) => {
+    Log.info(
+        `[joinVoice] socket=${socket.id} peerId=${peerId} roomId=${roomId}`
+    );
+    socket.data.voiceRoomId = roomId;
+    socket.data.voicePeerId = peerId;
     await socket.join(roomId);
 
     socket.to(roomId).emit('userConnected', { roomId, peerId });
-    socket.on('disconnect', () => handleDisconnect(roomId, peerId, socket));
 };
 
 /**
@@ -247,19 +251,24 @@ const handleManualDisconnect = (socket) => {
 /**
  * handleDisconnect
  *
- * Handles the disconnection of a user from a room.
- *
- * @param {string} roomId - The ID of the room the user is leaving.
- * @param {string} peerId - The ID of the user who is disconnecting.
- * @param {Socket} socket - The socket instance representing the user's connection.
- *
- * Behavior:
- * - Logs that the user has exited via the browser.
- * - Notifies other users in the room to remove the disconnected user's video by emitting 'removeUserVideo' with the peerId.
+ * Handles the disconnection of a user.
+ * Reads voiceRoomId / voicePeerId from socket.data to avoid stale closured values.
  */
-const handleDisconnect = (roomId, peerId, socket) => {
-    Log.info(`User with peer id ${peerId} has exited via browser`);
-    socket.to(roomId).emit('removeUserVideo', { roomId, peerId });
+const handleDisconnect = (socket) => {
+    const voiceRoomId = socket.data.voiceRoomId;
+    const voicePeerId = socket.data.voicePeerId;
+
+    if (!voiceRoomId || !voicePeerId) {
+        return;
+    }
+
+    Log.info(
+        `[leaveVoice] socket=${socket.id} peerId=${voicePeerId} roomId=${voiceRoomId} (disconnect)`
+    );
+    socket.to(voiceRoomId).emit('removeUserVideo', {
+        roomId: voiceRoomId,
+        peerId: voicePeerId,
+    });
 };
 
 const handleVoicePeerLeft = async ({ roomId, peerId } = {}, socket) => {
@@ -269,14 +278,19 @@ const handleVoicePeerLeft = async ({ roomId, peerId } = {}, socket) => {
         return;
     }
 
+    Log.info(
+        `[leaveVoice] socket=${socket.id} peerId=${peerId} roomId=${channel.slug} (voicePeerLeft)`
+    );
+
     await socket.leave(channel.slug);
     socket.to(channel.slug).emit('removeUserVideo', {
         roomId: channel.slug,
         peerId,
     });
 
-    if (socket.data.roomId === channel.slug) {
-        delete socket.data.roomId;
+    if (socket.data.voiceRoomId === channel.slug) {
+        delete socket.data.voiceRoomId;
+        delete socket.data.voicePeerId;
     }
 };
 
@@ -395,7 +409,6 @@ const handleCursorMove = async ({ roomId, x, y, senderName } = {}, socket) => {
         await socket.join(channel.slug);
     }
 
-    socket.data.roomId = channel.slug;
     socket.to(channel.slug).emit('cursor:move', {
         roomId: channel.slug,
         socketId: socket.id,
@@ -452,8 +465,13 @@ io.on('connection', (socket) => {
         handleCursorRemove(socket);
         handlePresenceRemove(socket);
     });
+
+    socket.on('disconnect', () => {
+        handleDisconnect(socket);
+    });
+
     socket.on('joinRoom', (roomId, userId) =>
-        handleJoinRoon(roomId, userId, socket)
+        handleJoinRoom(roomId, userId, socket)
     );
     socket.on('chat:join', (payload) => handleChatJoin(payload, socket));
     socket.on('chat:send', (payload) => handleChatSend(payload, socket));

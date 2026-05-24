@@ -185,8 +185,13 @@ const applyOutputSettings = (mediaElement, isRemote) => {
         return;
     }
 
-    mediaElement.volume = outputVolume;
-    mediaElement.muted = !isRemote || outputMuted;
+    if (isRemote && outputMuted) {
+        mediaElement.volume = 0;
+        mediaElement.muted = true;
+    } else {
+        mediaElement.volume = outputVolume;
+        mediaElement.muted = !isRemote;
+    }
 };
 
 const applyOutputSettingsToRemoteMedia = () => {
@@ -707,13 +712,19 @@ const requestAudioStream = async () => {
 };
 
 const requestTileFullscreen = async (tile) => {
-    if (!tile.querySelector('video')) {
+    const video = tile.querySelector('video');
+
+    if (!video) {
         console.warn('Fullscreen is only available when this peer has video.');
         return;
     }
 
     try {
-        await tile.requestFullscreen();
+        if (video.webkitEnterFullscreen) {
+            video.webkitEnterFullscreen();
+        } else {
+            await video.requestFullscreen();
+        }
     } catch (error) {
         console.warn('Could not enter fullscreen for this video.', error);
     }
@@ -920,14 +931,24 @@ const setActiveVideoTrack = (peer, track) => {
     }
 };
 
+const setCameraButtonState = (enabled) => {
+    const btn = document.getElementById('toggleVideo');
+    const icon = btn?.querySelector('i');
+    if (!icon) {
+        console.warn('toggleVideo button not found in DOM.');
+        return;
+    }
+    icon.className = enabled ? 'fas fa-video' : 'fas fa-video-slash red';
+    btn.setAttribute('aria-pressed', String(!enabled));
+};
+
 const toggleCamera = async (peer) => {
     const currentCameraTrack = cameraStream?.getVideoTracks()[0];
 
     if (currentCameraTrack?.readyState === 'live') {
         currentCameraTrack.stop();
         cameraStream = undefined;
-        document.getElementById('toggleVideo').firstChild.className =
-            'fas fa-video-slash red';
+        setCameraButtonState(false);
 
         if (!sharingNow) {
             setActiveVideoTrack(peer);
@@ -945,8 +966,7 @@ const toggleCamera = async (peer) => {
         return;
     }
 
-    document.getElementById('toggleVideo').firstChild.className =
-        'fas fa-video';
+    setCameraButtonState(true);
 
     if (!sharingNow) {
         setActiveVideoTrack(peer, cameraStream.getVideoTracks()[0]);
@@ -1019,9 +1039,16 @@ async function toggleScreenShare(peer, myVideoStream) {
 
 //muting my audio
 const setAudioButtonState = (enabled) => {
-    document.getElementById('toggleAudio').firstChild.className = enabled
-        ? 'fas fa-microphone-alt'
-        : 'fas fa-microphone-alt-slash red';
+    const btn = document.getElementById('toggleAudio');
+    const icon = btn?.querySelector('i');
+    if (!icon) {
+        console.warn('toggleAudio button not found in DOM.');
+        return;
+    }
+    icon.className = enabled
+        ? 'fas fa-microphone'
+        : 'fas fa-microphone-slash red';
+    btn.setAttribute('aria-pressed', String(!enabled));
 };
 
 const toggleAudio = (myVideoStream) => {
@@ -1036,9 +1063,11 @@ const toggleAudio = (myVideoStream) => {
     if (enabled) {
         audioTrack.enabled = false;
         setAudioButtonState(false);
+        console.log(`[mic] muted (track.enabled = false)`);
     } else {
         audioTrack.enabled = true;
         setAudioButtonState(true);
+        console.log(`[mic] unmuted (track.enabled = true)`);
     }
 };
 
