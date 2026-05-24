@@ -6,6 +6,9 @@ export default [
     js.configs.recommended,
     eslintConfigPrettier,
     {
+        ignores: ['src/views/vendor/'],
+    },
+    {
         files: ['**/*.{js,mjs,cjs}'],
         languageOptions: {
             globals: {

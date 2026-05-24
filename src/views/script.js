@@ -33,11 +33,12 @@ const remoteStreams = {};
 const getAudioConstraints = () => {
     const noiseEnabled =
         localStorage.getItem(NOISE_SUPPRESSION_KEY) !== 'false';
+    const aiEnabled = localStorage.getItem(AI_NOISE_EXPERIMENT_KEY) === 'true';
 
     return {
         echoCancellation: true,
         noiseSuppression: noiseEnabled,
-        autoGainControl: true,
+        autoGainControl: !aiEnabled,
         channelCount: 1,
     };
 };
@@ -91,7 +92,17 @@ const updateAiExperimentToggleUI = () => {
     toggle.style.cursor = '';
 
     if (status) {
-        status.textContent = enabled ? '开' : '关';
+        if (!enabled) {
+            status.textContent = '关';
+        } else if (noiseMode === 'rnnoise') {
+            status.textContent = 'RNNoise';
+        } else if (noiseMode === 'passthrough') {
+            status.textContent = '直通';
+        } else if (noiseMode === 'fallback') {
+            status.textContent = '回退';
+        } else {
+            status.textContent = '开';
+        }
     }
 };
 
@@ -142,6 +153,9 @@ let noiseProcessorNode = null;
 // eslint-disable-next-line no-unused-vars
 let noiseProcessorActive = false;
 let noiseRawStream = null;
+let noiseDenoiseState = null;
+let noiseRnnoiseModule = null;
+let noiseMode = 'raw';
 
 // eslint-disable-next-line no-undef
 viewingRoomId = ROOM_ID;
@@ -846,11 +860,91 @@ const requestAudioStream = async () => {
 const createProcessedAudioStream = async (rawStream) => {
     const ctx = new AudioContext({ sampleRate: 48000 });
 
-    await ctx.audioWorklet.addModule('/audio-worklet/passthrough-processor.js');
+    let denoiseState;
+    let rnnoiseModule;
+    let processorUrl = '/audio-worklet/passthrough-processor.js';
+    let processorName = 'passthrough-processor';
+    let useRnnoise = false;
+
+    try {
+        const mod = await import('/vendor/rnnoise.js');
+
+        rnnoiseModule = new mod.Rnnoise();
+        denoiseState = rnnoiseModule.createDenoiseState();
+
+        processorUrl = '/audio-worklet/rnnoise-processor.js';
+        processorName = 'rnnoise-processor';
+        useRnnoise = true;
+    } catch (error) {
+        console.warn(
+            '[audio-experiment] RNNoise init failed, using passthrough.',
+            error
+        );
+    }
+
+    await ctx.audioWorklet.addModule(processorUrl);
 
     const source = ctx.createMediaStreamSource(rawStream);
-    const processor = new AudioWorkletNode(ctx, 'passthrough-processor');
+    const processor = new AudioWorkletNode(ctx, processorName);
     const dest = ctx.createMediaStreamDestination();
+
+    if (useRnnoise && denoiseState) {
+        noiseMode = 'rnnoise';
+        let statsTimer = 0;
+
+        processor.port.onmessage = (event) => {
+            const { type, data } = event.data;
+
+            if (type === 'process') {
+                const input = new Float32Array(data);
+                const output = denoiseState.processFrame(input);
+                processor.port.postMessage(
+                    { type: 'processed', data: output.buffer },
+                    [output.buffer]
+                );
+            } else if (type === 'ready') {
+                console.log('[audio-experiment] RNNoise ready');
+            } else if (type === 'fallback') {
+                console.warn(
+                    '[audio-experiment] RNNoise processor fell back to passthrough'
+                );
+            } else if (type === 'stats') {
+                const now = Date.now();
+                const elapsed = now - statsTimer;
+
+                if (statsTimer === 0 || elapsed >= 3000) {
+                    statsTimer = now;
+                    const dropped = data.frameCount - data.processedCount;
+                    console.log(
+                        `[audio-experiment] mode=rnnoise` +
+                            ` processCalls=${data.processCount}` +
+                            ` frames=${data.frameCount}` +
+                            ` processed=${data.processedCount}` +
+                            ` passthrough=${data.passthroughCount}` +
+                            ` dropped=${dropped}` +
+                            ` pending=${data.pendingFrame}` +
+                            ` ready=${data.ready}`
+                    );
+
+                    const statusEl =
+                        document.getElementById('aiNoiseStatusText');
+
+                    if (data.fallback) {
+                        noiseMode = 'fallback';
+                    }
+
+                    if (statusEl && !data.fallback && data.ready) {
+                        statusEl.textContent = 'RNNoise';
+                    }
+                }
+            }
+        };
+
+        console.log('[audio-experiment] RNNoise processor active');
+    } else {
+        noiseMode = 'passthrough';
+        console.log('[audio-experiment] Passthrough processor active');
+    }
 
     source.connect(processor).connect(dest);
 
@@ -858,8 +952,9 @@ const createProcessedAudioStream = async (rawStream) => {
     noiseProcessorNode = processor;
     noiseRawStream = rawStream;
     noiseProcessorActive = true;
+    noiseDenoiseState = denoiseState;
+    noiseRnnoiseModule = rnnoiseModule;
 
-    console.log('[audio-experiment] Passthrough processor active');
     return dest.stream;
 };
 
@@ -894,6 +989,25 @@ const destroyProcessedAudioStream = () => {
     }
 
     noiseProcessorActive = false;
+    noiseMode = 'raw';
+
+    if (noiseDenoiseState) {
+        try {
+            noiseDenoiseState.destroy();
+        } catch {
+            /* noop */
+        }
+        noiseDenoiseState = null;
+    }
+
+    if (noiseRnnoiseModule) {
+        try {
+            noiseRnnoiseModule.destroy();
+        } catch {
+            /* noop */
+        }
+        noiseRnnoiseModule = null;
+    }
 };
 
 const requestTileFullscreen = async (tile) => {
