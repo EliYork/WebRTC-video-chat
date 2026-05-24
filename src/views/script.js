@@ -30,12 +30,41 @@ const mobilePrevTileBtn = document.getElementById('mobilePrevTile');
 const mobileNextTileBtn = document.getElementById('mobileNextTile');
 const mobileTileCount = document.getElementById('mobileTileCount');
 const remoteStreams = {};
-const audioConstraints = {
-    echoCancellation: true,
-    noiseSuppression: true,
-    autoGainControl: true,
+const getAudioConstraints = () => {
+    const noiseEnabled =
+        localStorage.getItem(NOISE_SUPPRESSION_KEY) !== 'false';
+
+    return {
+        echoCancellation: true,
+        noiseSuppression: noiseEnabled,
+        autoGainControl: true,
+        channelCount: 1,
+        sampleRate: 48000,
+        sampleSize: 16,
+    };
+};
+const getNoiseSuppressionEnabled = () =>
+    localStorage.getItem(NOISE_SUPPRESSION_KEY) !== 'false';
+
+const setNoiseSuppressionEnabled = (enabled) => {
+    localStorage.setItem(NOISE_SUPPRESSION_KEY, String(enabled));
+};
+
+const updateNoiseToggleUI = () => {
+    const enabled = getNoiseSuppressionEnabled();
+    const toggle = document.getElementById('noiseToggle');
+    const status = document.getElementById('noiseStatusText');
+
+    if (toggle) {
+        toggle.setAttribute('aria-pressed', String(enabled));
+    }
+
+    if (status) {
+        status.textContent = enabled ? '开' : '关';
+    }
 };
 const CHAT_NAME_STORAGE_KEY = 'webrtc-video-chat-name';
+const NOISE_SUPPRESSION_KEY = 'webrtc-noise-suppression';
 const CHAT_MESSAGE_MAX_LENGTH = 500;
 const CURSOR_THROTTLE_MS = 40;
 const CURSOR_IDLE_MS = 700;
@@ -205,6 +234,8 @@ const updateLocalUserCard = () => {
             ? '正在共享屏幕'
             : '未共享屏幕';
     }
+
+    updateNoiseToggleUI();
 };
 
 const applyOutputSettings = (mediaElement, isRemote) => {
@@ -733,11 +764,11 @@ const enablePageCursorSharing = () => {
 const requestAudioStream = async () => {
     try {
         return await navigator.mediaDevices.getUserMedia({
-            audio: audioConstraints,
+            audio: getAudioConstraints(),
         });
     } catch (error) {
         console.warn(
-            'Could not start microphone with audio processing constraints; retrying with basic audio.',
+            'Could not start microphone with enhanced constraints; retrying with basic audio.',
             error
         );
         return navigator.mediaDevices.getUserMedia({
@@ -1449,6 +1480,28 @@ outputVolumeInput?.addEventListener('input', () => {
     applyOutputSettingsToRemoteMedia();
 });
 
+const noiseToggleEl = document.getElementById('noiseToggle');
+
+noiseToggleEl?.addEventListener('click', () => {
+    const next = !getNoiseSuppressionEnabled();
+
+    setNoiseSuppressionEnabled(next);
+    updateNoiseToggleUI();
+
+    if (joinedVoiceRoomId) {
+        console.warn(
+            `[noise] Noise suppression will ${next ? 'enable' : 'disable'} on next voice join.`
+        );
+    }
+});
+
+noiseToggleEl?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        noiseToggleEl.click();
+    }
+});
+
 mobileBackToChannelsBtn?.addEventListener('click', () => {
     if (currentPeer && !currentPeer.destroyed) {
         document.getElementById('destroyPeer')?.click();
@@ -1488,6 +1541,7 @@ window.addEventListener('resize', () => {
 updateChannelIndicators();
 updateOutputButtonState();
 updateScreenShareButtonState();
+updateNoiseToggleUI();
 joinChatRoom(viewingRoomId);
 enablePageCursorSharing();
 

@@ -377,6 +377,23 @@ input {
     color: #614056;
 }
 
+.noise-toggle {
+    cursor: pointer;
+    user-select: none;
+}
+
+.noise-toggle:hover {
+    opacity: 0.72;
+}
+
+.local-noise-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    color: var(--muted);
+    font-size: 12px;
+}
+
 .copy-room-link {
     display: grid;
     width: 32px;
@@ -858,6 +875,12 @@ input {
 
     .room-layout.mobile-in-room .local-call-meta {
         display: none;
+    }
+
+    .room-layout.mobile-in-room .local-noise-row {
+        padding: 2px 0;
+        border-top: 1px solid var(--line-soft);
+        font-size: 11px;
     }
 
     .room-layout.mobile-in-room .local-controls {
