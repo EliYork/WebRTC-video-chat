@@ -276,7 +276,16 @@ const handleVoicePeerLeft = async ({ roomId, peerId } = {}, socket) => {
 };
 
 const handlePresenceJoinVoice = (
-    { roomId, senderName, peerId, hasMic } = {},
+    {
+        roomId,
+        senderName,
+        peerId,
+        hasMic,
+        micPermissionDenied,
+        muted,
+        cameraOn,
+        screenSharing,
+    } = {},
     socket
 ) => {
     const channel = getChannel(roomId);
@@ -300,6 +309,10 @@ const handlePresenceJoinVoice = (
         senderName: normalizeSenderName(senderName),
         joinedVoice: true,
         hasMic: Boolean(hasMic),
+        micPermissionDenied: Boolean(micPermissionDenied),
+        muted: Boolean(muted),
+        cameraOn: Boolean(cameraOn),
+        screenSharing: Boolean(screenSharing),
         updatedAt: new Date().toISOString(),
     });
 
@@ -308,21 +321,56 @@ const handlePresenceJoinVoice = (
     broadcastPresence();
 };
 
-const handlePresenceUpdate = ({ senderName, hasMic } = {}, socket) => {
-    const roomId = socket.data.presenceRoomId;
-    const members = onlineMembersByRoom.get(roomId);
-    const member = members?.get(socket.id);
+const handlePresenceUpdate = (
+    {
+        roomId,
+        senderName,
+        peerId,
+        hasMic,
+        micPermissionDenied,
+        muted,
+        cameraOn,
+        screenSharing,
+    } = {},
+    socket
+) => {
+    const channel = getChannel(roomId || socket.data.presenceRoomId);
 
-    if (!member) {
+    if (!channel) {
         return;
     }
 
+    const members = onlineMembersByRoom.get(channel.slug) || new Map();
+    const member = members.get(socket.id) || {};
+
     members.set(socket.id, {
         ...member,
-        senderName: normalizeSenderName(senderName),
-        hasMic: hasMic !== undefined ? Boolean(hasMic) : member.hasMic,
+        socketId: socket.id,
+        roomId: channel.slug,
+        joinedVoice: true,
+        senderName:
+            senderName !== undefined
+                ? normalizeSenderName(senderName)
+                : member.senderName || 'Guest',
+        peerId: peerId || member.peerId,
+        hasMic: hasMic !== undefined ? Boolean(hasMic) : Boolean(member.hasMic),
+        micPermissionDenied:
+            micPermissionDenied !== undefined
+                ? Boolean(micPermissionDenied)
+                : Boolean(member.micPermissionDenied),
+        muted: muted !== undefined ? Boolean(muted) : Boolean(member.muted),
+        cameraOn:
+            cameraOn !== undefined
+                ? Boolean(cameraOn)
+                : Boolean(member.cameraOn),
+        screenSharing:
+            screenSharing !== undefined
+                ? Boolean(screenSharing)
+                : Boolean(member.screenSharing),
         updatedAt: new Date().toISOString(),
     });
+    onlineMembersByRoom.set(channel.slug, members);
+    socket.data.presenceRoomId = channel.slug;
     broadcastPresence();
 };
 
