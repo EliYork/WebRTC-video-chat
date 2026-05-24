@@ -25,6 +25,7 @@ const screenStatusText = document.getElementById('screenStatusText');
 const toggleOutputBtn = document.getElementById('toggleOutput');
 const outputVolumeInput = document.getElementById('outputVolume');
 const shareScreenBtn = document.getElementById('shareScreen');
+const controlMenuToggles = document.querySelectorAll('[data-control-menu]');
 const mobileBackToChannelsBtn = document.getElementById('mobileBackToChannels');
 const mobilePrevTileBtn = document.getElementById('mobilePrevTile');
 const mobileNextTileBtn = document.getElementById('mobileNextTile');
@@ -358,6 +359,17 @@ const updateScreenShareButtonState = () => {
     if (label) {
         label.textContent = sharingNow ? '共享中' : '共享';
     }
+};
+
+const closeControlMenus = (exceptWrap) => {
+    controlMenuToggles.forEach((toggle) => {
+        const wrap = toggle.closest('.control-button-wrap');
+
+        if (wrap && wrap !== exceptWrap) {
+            wrap.classList.remove('is-open');
+            toggle.setAttribute('aria-expanded', 'false');
+        }
+    });
 };
 
 const setCopyRoomLinkCopied = (isCopied) => {
@@ -1734,6 +1746,37 @@ toggleOutputBtn?.addEventListener('click', () => {
 outputVolumeInput?.addEventListener('input', () => {
     outputVolume = Number(outputVolumeInput.value);
     applyOutputSettingsToRemoteMedia();
+});
+
+controlMenuToggles.forEach((toggle) => {
+    toggle.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const wrap = toggle.closest('.control-button-wrap');
+        const shouldOpen = !wrap?.classList.contains('is-open');
+
+        closeControlMenus(wrap);
+
+        if (!wrap) {
+            return;
+        }
+
+        wrap.classList.toggle('is-open', shouldOpen);
+        toggle.setAttribute('aria-expanded', String(shouldOpen));
+    });
+});
+
+document.addEventListener('click', (event) => {
+    if (event.target.closest('.control-button-wrap')) {
+        return;
+    }
+
+    closeControlMenus();
+});
+
+document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+        closeControlMenus();
+    }
 });
 
 const noiseToggleEl = document.getElementById('noiseToggle');

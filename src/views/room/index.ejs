@@ -80,6 +80,9 @@
                         <button id="toggleAudio" type="button" title="麦克风" aria-label="麦克风" aria-pressed="false">
                             <i class="fas fa-microphone"></i>
                         </button>
+                        <button class="control-menu-toggle" type="button" aria-label="麦克风设置" aria-expanded="false" data-control-menu="mic">
+                            <i class="fas fa-chevron-up"></i>
+                        </button>
                         <label class="control-popover mic-volume-popover">
                             <span>麦克风音量</span>
                             <input id="micGainSlider" type="range" min="0" max="150" step="5" value="100">
@@ -89,6 +92,9 @@
                     <div class="control-button-wrap">
                         <button id="toggleOutput" type="button" title="听筒" aria-label="听筒">
                             <i class="fas fa-volume-up"></i>
+                        </button>
+                        <button class="control-menu-toggle" type="button" aria-label="播放设置" aria-expanded="false" data-control-menu="output">
+                            <i class="fas fa-chevron-up"></i>
                         </button>
                         <label class="control-popover">
                             <span>播放音量</span>
