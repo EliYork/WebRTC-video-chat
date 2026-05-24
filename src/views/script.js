@@ -152,6 +152,7 @@ let outputVolume = 1;
 let activeMobileTileIndex = 0;
 const remotePeerOrder = [];
 const screenSharers = new Set();
+const peersWithCallHandler = new WeakSet();
 let noiseAudioContext = null;
 let noiseProcessorNode = null;
 // eslint-disable-next-line no-unused-vars
@@ -459,6 +460,46 @@ const connectToNewUser = (peer, peerId, stream) => {
 
     const call = peer.call(peerId, stream);
     setupCallStreamHandler(call, peerId);
+};
+
+const handleSocketUserConnected = ({ roomId, peerId }) => {
+    if (roomId !== joinedVoiceRoomId || peerId === localPeerId) {
+        return;
+    }
+
+    if (!currentPeer || currentPeer.destroyed) {
+        return;
+    }
+
+    if (!remotePeerOrder.includes(peerId)) {
+        remotePeerOrder.push(peerId);
+    }
+
+    if (myVideoStream) {
+        connectToNewUser(currentPeer, peerId, getActiveStream());
+    }
+};
+
+const handleSocketRemoveUserVideo = ({ roomId, peerId }) => {
+    if (roomId !== joinedVoiceRoomId) {
+        return;
+    }
+
+    const idx = remotePeerOrder.indexOf(peerId);
+
+    if (idx !== -1) {
+        remotePeerOrder.splice(idx, 1);
+    }
+
+    screenSharers.delete(peerId);
+    removeVideoElement(peerId);
+};
+
+const bindVoiceSocketHandlers = (activeSocket) => {
+    activeSocket.off('userConnected', handleSocketUserConnected);
+    activeSocket.off('removeUserVideo', handleSocketRemoveUserVideo);
+    activeSocket.on('userConnected', handleSocketUserConnected);
+    activeSocket.on('removeUserVideo', handleSocketRemoveUserVideo);
 };
 
 const createGuestName = () =>
@@ -1112,6 +1153,24 @@ function setupCallStreamHandler(call, peerId) {
         );
     });
 }
+
+const bindPeerCallHandler = (peer) => {
+    if (peersWithCallHandler.has(peer)) {
+        return;
+    }
+
+    peersWithCallHandler.add(peer);
+    peer.on('call', (call) => {
+        if (peer !== currentPeer || peer.destroyed) {
+            call.close?.();
+            return;
+        }
+
+        console.log('Received a call...');
+        call.answer(getActiveStream());
+        setupCallStreamHandler(call, call.peer);
+    });
+};
 // ----------------------------------------------------------------------------------
 
 // switching between sharing screen and not sharing
@@ -1395,11 +1454,7 @@ const initiateAudio = async (peer) => {
             hasMic: true,
         });
 
-        peer.on('call', (call) => {
-            console.log('Received a call...');
-            call.answer(getActiveStream());
-            setupCallStreamHandler(call, call.peer);
-        });
+        bindPeerCallHandler(peer);
 
         Object.keys(peer.connections).forEach((peerId) => {
             if (peerId !== localPeerId) {
@@ -1439,11 +1494,7 @@ const handleMicClick = async (peer) => {
             hasMic: true,
         });
 
-        peer.on('call', (call) => {
-            console.log('Received a call...');
-            call.answer(getActiveStream());
-            setupCallStreamHandler(call, call.peer);
-        });
+        bindPeerCallHandler(peer);
 
         Object.keys(peer.connections).forEach((peerId) => {
             if (peerId !== localPeerId) {
@@ -1516,6 +1567,7 @@ const joinVoiceChannel = (roomId) => {
         document.getElementById('shareScreen').onclick = () =>
             toggleScreenShare(peer, myVideoStream);
         window.addEventListener('resize', setHeightOfVideos);
+        bindPeerCallHandler(peer);
 
         console.log('My peer ID is: ' + peerId);
 
@@ -1532,46 +1584,7 @@ const joinVoiceChannel = (roomId) => {
             hasMic: false,
         });
 
-        activeSocket.on('userConnected', ({ roomId, peerId }) => {
-            if (roomId !== joinedVoiceRoomId) {
-                return;
-            }
-
-            if (!remotePeerOrder.includes(peerId)) {
-                remotePeerOrder.push(peerId);
-            }
-
-            if (myVideoStream) {
-                connectToNewUser(peer, peerId, getActiveStream());
-            }
-        });
-
-        //removing video of user who has disconnected from websocket
-        activeSocket.on('removeUserVideo', ({ roomId, peerId }) => {
-            if (roomId !== joinedVoiceRoomId) {
-                return;
-            }
-
-            const idx = remotePeerOrder.indexOf(peerId);
-
-            if (idx !== -1) {
-                remotePeerOrder.splice(idx, 1);
-            }
-
-            screenSharers.delete(peerId);
-            removeVideoElement(peerId);
-        });
-
-        // -DISCONNECT FUNCTION - disconnecting this user from websocket. This will trigger the on.disconnected listener on the server.
-        //this will tell other sockets to remove the video of the user who has just disconnected (video id is the same as the userId)
-        activeSocket.on('forceDisconnect', () => {
-            activeSocket.close();
-            socket = undefined;
-            joinChatRoom();
-            console.log(
-                `You have been disconnected from websocket. The road ends here. `
-            );
-        });
+        bindVoiceSocketHandlers(activeSocket);
 
         // Try to get microphone; failure does NOT prevent joining the channel
         initiateAudio(peer);

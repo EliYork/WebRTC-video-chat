@@ -230,25 +230,6 @@ const handleJoinRoom = async (roomId, peerId, socket) => {
 };
 
 /**
- * handleManualDisconnect
- *
- * Handles a manual disconnect request from a user (e.g., when a user clicks a "leave" button).
- *
- * @param {Socket} socket - The socket instance representing the user's connection.
- *
- * Behavior:
- * - Logs that the user (by socket id) has exited via the manual disconnect button.
- * - Emits a 'forceDisconnect' event to the client, instructing it to disconnect.
- * - The client-side disconnect will trigger the 'disconnect' event, which will notify other users to remove the disconnected user.
- */
-const handleManualDisconnect = (socket) => {
-    Log.info(
-        `${socket.id} has exited with the btn from peer. Sending him info to disconnect`
-    );
-    socket.emit('forceDisconnect'); //disconnecting from client side. 'On disconnect will be triggered after there, telling all to remove the disconnected person.'
-};
-
-/**
  * handleDisconnect
  *
  * Handles the disconnection of a user.
@@ -458,7 +439,6 @@ const handlePresenceRemove = (socket) => {
  * Sets up socket event listeners for each new client connection.
  * - Logs when a user connects.
  * - Handles 'joinRoom' event to join a room.
- * - Handles 'peerLeft' event for manual disconnects.
  */
 io.on('connection', (socket) => {
     Log.info(`User with socket.id ${socket.id} has connected.`);
@@ -507,7 +487,6 @@ io.on('connection', (socket) => {
 
         socket.to(roomId).emit('screen:shareStop', { peerId });
     });
-    socket.on('peerLeft', () => handleManualDisconnect(socket));
 });
 
 httpServer.listen(PORT, () =>
