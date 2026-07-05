@@ -616,6 +616,10 @@ input {
     box-shadow: 0 16px 36px rgba(169, 94, 125, 0.24);
 }
 
+.video-tile.is-layout-hidden {
+    display: none;
+}
+
 .tile-avatar {
     display: grid;
     width: 24px;

@@ -123,6 +123,14 @@ const TILE_MIN_WIDTH = 180;
 const TILE_MIN_HEIGHT = 120;
 const TILE_BASE_Z_INDEX = 2;
 const TILE_RESIZE_DIRECTIONS = ['n', 'e', 's', 'w', 'ne', 'nw', 'se', 'sw'];
+const LAYOUT_GRID_COLUMNS = 24;
+const LAYOUT_GRID_ROWS = 16;
+const LAYOUT_ITEM_TYPES = {
+    LOCAL: 'local',
+    REMOTE_PEER: 'remote-peer',
+    SCREEN_SHARE: 'screen-share',
+    PLACEHOLDER: 'placeholder',
+};
 const cursorSharingMedia = window.matchMedia(
     `(max-width: ${MOBILE_BREAKPOINT}px), (pointer: coarse)`
 );
@@ -160,6 +168,7 @@ const remotePeerOrder = [];
 const screenSharers = new Set();
 const peersWithCallHandler = new WeakSet();
 const presenceMembersByPeerId = new Map();
+const layoutItemsById = new Map();
 let tileLayoutZIndex = TILE_BASE_Z_INDEX;
 let noiseAudioContext = null;
 let noiseProcessorNode = null;
@@ -200,6 +209,17 @@ const isMobileLayout = () => window.innerWidth <= MOBILE_BREAKPOINT;
 
 const getVideoTiles = () =>
     Array.from(videoGrid.querySelectorAll('.video-tile'));
+
+const syncLayoutGridMetadata = () => {
+    if (!videoGrid) {
+        return;
+    }
+
+    videoGrid.dataset.layoutGridColumns = String(LAYOUT_GRID_COLUMNS);
+    videoGrid.dataset.layoutGridRows = String(LAYOUT_GRID_ROWS);
+};
+
+syncLayoutGridMetadata();
 
 const getOrderedTiles = () => {
     const tiles = getVideoTiles();
@@ -1391,6 +1411,9 @@ const getTileLayoutId = (tile) => {
     return `peer-${sanitizeLayoutIdPart(peerId || tile.id)}`;
 };
 
+const getTileLayoutItemId = (tile) =>
+    tile.dataset.layoutItemId || tile.dataset.layoutId || getTileLayoutId(tile);
+
 const getSavedTileLayouts = () => {
     try {
         return JSON.parse(localStorage.getItem(TILE_LAYOUT_STORAGE_KEY)) || {};
@@ -1419,6 +1442,7 @@ const saveTileLayout = (layoutId, layout) => {
         width: Math.round(layout.width),
         height: Math.round(layout.height),
         zIndex: normalizeTileLayoutZIndex(layout.zIndex),
+        grid: layout.grid || convertTileLayoutToGrid(layout),
     };
     localStorage.setItem(TILE_LAYOUT_STORAGE_KEY, JSON.stringify(layouts));
 };
@@ -1427,6 +1451,10 @@ const getTileLayoutZIndex = (tile) =>
     normalizeTileLayoutZIndex(
         tile.style.zIndex || window.getComputedStyle(tile).zIndex
     );
+
+const applyTileLayoutZIndex = (tile, zIndex) => {
+    tile.style.zIndex = String(normalizeTileLayoutZIndex(zIndex));
+};
 
 const getNextTileLayoutZIndex = () => {
     const highestTileZIndex = getVideoTiles().reduce(
@@ -1444,7 +1472,13 @@ const bringTileLayoutToFront = (tile) => {
         return;
     }
 
-    tile.style.zIndex = String(getNextTileLayoutZIndex());
+    applyTileLayoutZIndex(tile, getNextTileLayoutZIndex());
+    syncTileLayoutItemFromElement(tile, {
+        layout: {
+            ...getCurrentTileLayout(tile),
+            zIndex: getTileLayoutZIndex(tile),
+        },
+    });
 
     if (tile.classList.contains('is-positioned')) {
         persistCurrentTileLayout(tile);
@@ -1467,6 +1501,51 @@ const getTileBounds = () => {
     };
 };
 
+const clampGridNumber = (value, min, max) =>
+    Math.min(Math.max(min, value), max);
+
+const convertTileLayoutToGrid = ({ x, y, width, height }) => {
+    const bounds = getTileBounds();
+    const cellWidth = bounds.width / LAYOUT_GRID_COLUMNS;
+    const cellHeight = bounds.height / LAYOUT_GRID_ROWS;
+    const gridX = clampGridNumber(
+        Math.round(x / cellWidth),
+        0,
+        LAYOUT_GRID_COLUMNS - 1
+    );
+    const gridY = clampGridNumber(
+        Math.round(y / cellHeight),
+        0,
+        LAYOUT_GRID_ROWS - 1
+    );
+    const gridW = clampGridNumber(
+        Math.round(width / cellWidth),
+        1,
+        LAYOUT_GRID_COLUMNS - gridX
+    );
+    const gridH = clampGridNumber(
+        Math.round(height / cellHeight),
+        1,
+        LAYOUT_GRID_ROWS - gridY
+    );
+
+    return { x: gridX, y: gridY, w: gridW, h: gridH };
+};
+
+const convertGridLayoutToPixels = ({ x, y, w, h, zIndex }) => {
+    const bounds = getTileBounds();
+    const cellWidth = bounds.width / LAYOUT_GRID_COLUMNS;
+    const cellHeight = bounds.height / LAYOUT_GRID_ROWS;
+
+    return clampTileLayout({
+        x: x * cellWidth,
+        y: y * cellHeight,
+        width: w * cellWidth,
+        height: h * cellHeight,
+        zIndex,
+    });
+};
+
 const clampTileLayout = ({ x, y, width, height, zIndex }) => {
     const bounds = getTileBounds();
     const nextWidth = Math.min(Math.max(width, TILE_MIN_WIDTH), bounds.width);
@@ -1484,7 +1563,183 @@ const clampTileLayout = ({ x, y, width, height, zIndex }) => {
     };
 };
 
-const applyTileLayout = (tile, layout) => {
+const normalizeTileLayout = (layout = {}) => {
+    if (layout.grid && !Number.isFinite(Number(layout.x))) {
+        return convertGridLayoutToPixels({
+            ...layout.grid,
+            zIndex: layout.zIndex,
+        });
+    }
+
+    return clampTileLayout({
+        x: Number(layout.x) || 0,
+        y: Number(layout.y) || 0,
+        width: Number(layout.width) || TILE_MIN_WIDTH,
+        height: Number(layout.height) || TILE_MIN_HEIGHT,
+        zIndex: layout.zIndex,
+    });
+};
+
+const hasTileMediaTracks = (tile) => {
+    const mediaElement = tile.querySelector('video, audio');
+
+    return Boolean(mediaElement?.srcObject?.getTracks?.().length);
+};
+
+const getLayoutItemTypeForTile = (tile, tileType) => {
+    if (tileType === 'screen-share') {
+        return LAYOUT_ITEM_TYPES.SCREEN_SHARE;
+    }
+
+    if (tile.id === 'local-video') {
+        return LAYOUT_ITEM_TYPES.LOCAL;
+    }
+
+    if (!hasTileMediaTracks(tile)) {
+        return LAYOUT_ITEM_TYPES.PLACEHOLDER;
+    }
+
+    return LAYOUT_ITEM_TYPES.REMOTE_PEER;
+};
+
+const createTileLayoutItem = ({
+    id,
+    type,
+    peerId,
+    elementId,
+    layout,
+    visible = true,
+    positioned = false,
+}) => {
+    const nextLayout = normalizeTileLayout(layout);
+
+    return {
+        id,
+        type,
+        peerId,
+        elementId,
+        visible: Boolean(visible),
+        positioned: Boolean(positioned),
+        layout: nextLayout,
+        grid: convertTileLayoutToGrid(nextLayout),
+    };
+};
+
+const getTileLayoutItem = (itemId) => layoutItemsById.get(itemId);
+
+const upsertTileLayoutItem = (tile, updates = {}) => {
+    const id = updates.id || getTileLayoutItemId(tile);
+    const previous = getTileLayoutItem(id);
+    const layout =
+        updates.layout || previous?.layout || getCurrentTileLayout(tile);
+    const item = createTileLayoutItem({
+        id,
+        type: updates.type || previous?.type || LAYOUT_ITEM_TYPES.PLACEHOLDER,
+        peerId: updates.peerId ?? previous?.peerId ?? tile.dataset.peerId,
+        elementId: updates.elementId || previous?.elementId || tile.id,
+        layout,
+        visible: updates.visible ?? previous?.visible ?? true,
+        positioned:
+            updates.positioned ??
+            previous?.positioned ??
+            tile.classList.contains('is-positioned'),
+    });
+
+    layoutItemsById.set(id, item);
+    return item;
+};
+
+const applyTileLayoutItemToElement = (
+    tile,
+    item,
+    { applyPosition = item.positioned } = {}
+) => {
+    tile.dataset.layoutItemId = item.id;
+    tile.dataset.layoutItemType = item.type;
+    tile.dataset.layoutVisible = String(item.visible);
+    tile.dataset.layoutGridX = String(item.grid.x);
+    tile.dataset.layoutGridY = String(item.grid.y);
+    tile.dataset.layoutGridW = String(item.grid.w);
+    tile.dataset.layoutGridH = String(item.grid.h);
+    tile.classList.toggle('is-layout-hidden', !item.visible);
+
+    if (applyPosition) {
+        applyTileLayout(tile, item.layout, { syncItem: false });
+    } else {
+        applyTileLayoutZIndex(tile, item.layout.zIndex);
+    }
+};
+
+const syncTileLayoutItemFromElement = (tile, updates = {}) => {
+    const item = upsertTileLayoutItem(tile, {
+        ...updates,
+        id: updates.id || getTileLayoutItemId(tile),
+        peerId: updates.peerId ?? tile.dataset.peerId,
+        elementId: tile.id,
+    });
+
+    applyTileLayoutItemToElement(tile, item, {
+        applyPosition: false,
+    });
+    return item;
+};
+
+const persistTileLayoutItem = (tile) => {
+    const item = syncTileLayoutItemFromElement(tile, {
+        layout: getCurrentTileLayout(tile),
+        positioned: tile.classList.contains('is-positioned'),
+        visible: true,
+    });
+
+    saveTileLayout(item.id, {
+        ...item.layout,
+        grid: convertTileLayoutToGrid(item.layout),
+    });
+};
+
+const setTileLayoutItemVisibility = (
+    itemId,
+    visible,
+    { syncElement = true } = {}
+) => {
+    const item = getTileLayoutItem(itemId);
+
+    if (!item) {
+        return;
+    }
+
+    item.visible = Boolean(visible);
+    layoutItemsById.set(itemId, item);
+
+    if (!syncElement) {
+        return;
+    }
+
+    const tile = document.getElementById(item.elementId);
+
+    if (tile) {
+        applyTileLayoutItemToElement(tile, item, {
+            applyPosition: false,
+        });
+    }
+};
+
+const retirePreviousTileLayoutItem = (tile, nextItemId) => {
+    const previousItemIds = new Set([
+        tile.dataset.layoutItemId,
+        tile.dataset.layoutId,
+    ]);
+
+    previousItemIds.forEach((previousItemId) => {
+        if (previousItemId && previousItemId !== nextItemId) {
+            setTileLayoutItemVisibility(previousItemId, false, {
+                syncElement: false,
+            });
+        }
+    });
+};
+
+const applyTileLayout = (tile, layout, { syncItem = true } = {}) => {
     const next = clampTileLayout(layout);
 
     tile.classList.add('is-positioned');
@@ -1492,7 +1747,14 @@ const applyTileLayout = (tile, layout) => {
     tile.style.top = `${next.y}px`;
     tile.style.width = `${next.width}px`;
     tile.style.height = `${next.height}px`;
-    tile.style.zIndex = String(next.zIndex);
+    applyTileLayoutZIndex(tile, next.zIndex);
+
+    if (syncItem) {
+        syncTileLayoutItemFromElement(tile, {
+            layout: next,
+            positioned: true,
+        });
+    }
 };
 
 const getCurrentTileLayout = (tile) => {
@@ -1509,7 +1771,7 @@ const getCurrentTileLayout = (tile) => {
 };
 
 const persistCurrentTileLayout = (tile) => {
-    saveTileLayout(tile.dataset.layoutId, getCurrentTileLayout(tile));
+    persistTileLayoutItem(tile);
 };
 
 const clampPositionedTileLayouts = () => {
@@ -1533,7 +1795,7 @@ const applySavedTileLayout = (tile) => {
     const layout = getSavedTileLayouts()[tile.dataset.layoutId];
 
     if (layout) {
-        applyTileLayout(tile, layout);
+        applyTileLayout(tile, normalizeTileLayout(layout));
     }
 };
 
@@ -1837,9 +2099,20 @@ const updateVideoTileStatus = (tile) => {
     tile.dataset.tileType = tileType;
     const nextLayoutId = getTileLayoutId(tile);
     const layoutChanged = tile.dataset.layoutId !== nextLayoutId;
+    retirePreviousTileLayoutItem(tile, nextLayoutId);
     tile.dataset.layoutId = nextLayoutId;
+    const layoutItem = syncTileLayoutItemFromElement(tile, {
+        id: nextLayoutId,
+        type: getLayoutItemTypeForTile(tile, tileType),
+        visible: true,
+        positioned: tile.classList.contains('is-positioned'),
+    });
     if (layoutChanged && !tile.classList.contains('is-positioned')) {
         applySavedTileLayout(tile);
+    } else {
+        applyTileLayoutItemToElement(tile, layoutItem, {
+            applyPosition: false,
+        });
     }
     tile.classList.toggle('has-video', hasVideo);
     tile.classList.toggle('is-audio-only', !hasVideo);
@@ -2042,7 +2315,7 @@ const addVideoStream = (video, stream, videoId) => {
         layoutId: tile.dataset.layoutId,
         hasVideo,
     });
-    setHeightOfVideos(); //added
+    resetAutoTileLayoutHeights();
     updateMobileTileView();
 };
 
@@ -2411,10 +2684,11 @@ const toggleAudio = (myVideoStream) => {
     }
 };
 
-const setHeightOfVideos = () => {
-    var videos = document.querySelectorAll('.video-tile');
-    videos.forEach((video) => {
-        video.style.height = '';
+const resetAutoTileLayoutHeights = () => {
+    getVideoTiles().forEach((tile) => {
+        if (!tile.classList.contains('is-positioned')) {
+            tile.style.height = '';
+        }
     });
 };
 
@@ -2518,7 +2792,7 @@ const joinVoiceChannel = (roomId) => {
             toggleCamera(peer);
         document.getElementById('shareScreen').onclick = () =>
             toggleScreenShare(peer, myVideoStream);
-        window.addEventListener('resize', setHeightOfVideos);
+        window.addEventListener('resize', resetAutoTileLayoutHeights);
         bindPeerCallHandler(peer);
 
         console.log('My peer ID is: ' + peerId);
@@ -2588,6 +2862,9 @@ const joinVoiceChannel = (roomId) => {
         resetLocalVoiceState();
 
         //removing all videos for client who is leaving.
+        layoutItemsById.forEach((item) =>
+            setTileLayoutItemVisibility(item.id, false)
+        );
         videoGrid.replaceChildren();
         updateMobileTileView();
 
@@ -2601,8 +2878,9 @@ function removeVideoElement(id) {
     delete remoteStreams[id];
 
     if (vidElement) {
+        setTileLayoutItemVisibility(vidElement.dataset.layoutItemId, false);
         vidElement.remove();
-        setHeightOfVideos();
+        resetAutoTileLayoutHeights();
         updateMobileTileView();
     }
 }
@@ -2901,6 +3179,7 @@ mobileNextTileBtn?.addEventListener('click', () => {
 });
 
 window.addEventListener('resize', () => {
+    syncLayoutGridMetadata();
     updateMobileRoomState();
     updateMobileTileView();
     clampPositionedTileLayouts();
