@@ -828,6 +828,40 @@ input {
     background-color: rgba(111, 58, 83, 0.9);
 }
 
+.peer-volume-popover {
+    position: fixed;
+    z-index: 10000;
+    width: 190px;
+    padding: 10px;
+    border: 1px solid rgba(216, 111, 154, 0.24);
+    border-radius: 8px;
+    background-color: rgba(255, 255, 255, 0.96);
+    box-shadow: 0 12px 28px rgba(169, 94, 125, 0.18);
+    color: #57354a;
+}
+
+.peer-volume-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.peer-volume-popover input[type='range'] {
+    width: 100%;
+    accent-color: #40b86f;
+}
+
+.peer-volume-value {
+    display: block;
+    margin-top: 4px;
+    color: var(--muted);
+    font-size: 12px;
+    text-align: right;
+}
+
 .voice-placeholder {
     display: grid;
     width: 100%;

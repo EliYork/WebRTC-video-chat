@@ -222,10 +222,20 @@ const handleJoinRoom = async (roomId, peerId, socket) => {
     Log.info(
         `[joinVoice] socket=${socket.id} peerId=${peerId} roomId=${roomId}`
     );
+    const existingVoicePeers = (await io.in(roomId).fetchSockets())
+        .filter(
+            (currentSocket) =>
+                currentSocket.id !== socket.id && currentSocket.data.voicePeerId
+        )
+        .map((currentSocket) => currentSocket.data.voicePeerId);
+
     socket.data.voiceRoomId = roomId;
     socket.data.voicePeerId = peerId;
     await socket.join(roomId);
 
+    existingVoicePeers.forEach((existingPeerId) => {
+        socket.emit('userConnected', { roomId, peerId: existingPeerId });
+    });
     socket.to(roomId).emit('userConnected', { roomId, peerId });
 };
 

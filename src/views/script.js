@@ -114,6 +114,7 @@ const NOISE_SUPPRESSION_KEY = 'webrtc-noise-suppression';
 const AI_NOISE_EXPERIMENT_KEY = 'webrtc-ai-noise-experiment';
 const MIC_GAIN_KEY = 'webrtc-mic-gain';
 const TILE_LAYOUT_STORAGE_KEY = 'voice-room-tile-layouts-v1';
+const PEER_VOLUME_STORAGE_KEY = 'voice-room-peer-volumes-v1';
 const CHAT_MESSAGE_MAX_LENGTH = 500;
 const CURSOR_THROTTLE_MS = 40;
 const CURSOR_IDLE_MS = 700;
@@ -169,6 +170,12 @@ let micPermissionDenied = false;
 const getMicGain = () => {
     const val = Number(localStorage.getItem(MIC_GAIN_KEY));
     return !Number.isNaN(val) && val >= 0 && val <= 150 ? val : 100;
+};
+
+const ensureDefaultMicGain = () => {
+    if (localStorage.getItem(MIC_GAIN_KEY) === null) {
+        localStorage.setItem(MIC_GAIN_KEY, '100');
+    }
 };
 
 // eslint-disable-next-line no-undef
@@ -439,6 +446,30 @@ const updateLocalUserCard = () => {
     updateAllVideoTileStatus();
 };
 
+const getPeerVolumes = () => {
+    try {
+        return JSON.parse(localStorage.getItem(PEER_VOLUME_STORAGE_KEY)) || {};
+    } catch {
+        return {};
+    }
+};
+
+const getPeerVolume = (peerId) => {
+    const value = Number(getPeerVolumes()[peerId]);
+
+    return Number.isFinite(value) && value >= 0 && value <= 1 ? value : 1;
+};
+
+const setPeerVolume = (peerId, volume) => {
+    if (!peerId) {
+        return;
+    }
+
+    const volumes = getPeerVolumes();
+    volumes[peerId] = Math.min(1, Math.max(0, Number(volume)));
+    localStorage.setItem(PEER_VOLUME_STORAGE_KEY, JSON.stringify(volumes));
+};
+
 const applyOutputSettings = (mediaElement, isRemote) => {
     if (!mediaElement) {
         return;
@@ -448,7 +479,9 @@ const applyOutputSettings = (mediaElement, isRemote) => {
         mediaElement.volume = 0;
         mediaElement.muted = true;
     } else {
-        mediaElement.volume = outputVolume;
+        const peerId = mediaElement.closest('.video-tile')?.dataset.peerId;
+        const peerVolume = isRemote ? getPeerVolume(peerId) : 1;
+        mediaElement.volume = Math.min(1, outputVolume * peerVolume);
         mediaElement.muted = !isRemote;
     }
 };
@@ -590,7 +623,28 @@ const connectToNewUser = (peer, peerId, stream, options = {}) => {
     setupCallStreamHandler(call, peerId);
 };
 
+const addKnownRemotePeer = (peerId) => {
+    if (!peerId || peerId === localPeerId) {
+        return;
+    }
+
+    if (!remotePeerOrder.includes(peerId)) {
+        remotePeerOrder.push(peerId);
+    }
+};
+
+const getKnownRemotePeerIds = (peer) =>
+    Array.from(
+        new Set([
+            ...remotePeerOrder,
+            ...Object.keys(peer?.connections || {}),
+            ...presenceMembersByPeerId.keys(),
+        ])
+    ).filter((peerId) => peerId && peerId !== localPeerId);
+
 const handleSocketUserConnected = ({ roomId, peerId }) => {
+    console.info('[voice] userConnected', { roomId, peerId });
+
     if (roomId !== joinedVoiceRoomId || peerId === localPeerId) {
         return;
     }
@@ -599,9 +653,8 @@ const handleSocketUserConnected = ({ roomId, peerId }) => {
         return;
     }
 
-    if (!remotePeerOrder.includes(peerId)) {
-        remotePeerOrder.push(peerId);
-    }
+    addKnownRemotePeer(peerId);
+    ensurePresenceTileForPeer(peerId);
 
     const stream = getActiveStream();
 
@@ -794,6 +847,7 @@ const renderPresenceState = ({ channels = [] } = {}) => {
         });
     });
 
+    syncPresenceTilesForJoinedRoom(channels);
     updateAllVideoTileStatus();
 };
 
@@ -1317,8 +1371,22 @@ const getTileType = (tile, hasVideo, member) => {
     return hasVideo ? 'remote-video' : 'remote-audio';
 };
 
-const getTileLayoutId = (tileId) =>
-    `tile-${String(tileId).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+const sanitizeLayoutIdPart = (value) =>
+    String(value || 'unknown').replace(/[^a-zA-Z0-9_-]/g, '-');
+
+const getTileLayoutId = (tile) => {
+    const peerId = tile.dataset.peerId;
+
+    if (tile.dataset.tileType === 'screen-share' && peerId) {
+        return `screen-${sanitizeLayoutIdPart(peerId)}`;
+    }
+
+    if (tile.id === 'local-video') {
+        return `local-${sanitizeLayoutIdPart(localPeerId || socket?.id || 'me')}`;
+    }
+
+    return `peer-${sanitizeLayoutIdPart(peerId || tile.id)}`;
+};
 
 const getSavedTileLayouts = () => {
     try {
@@ -1579,8 +1647,70 @@ const bindTileLayoutControls = (tile, header, resizeHandle) => {
         resizeHandle.addEventListener('pointerdown', (event) =>
             startTileResize(event, tile)
         );
+        tile.addEventListener('contextmenu', (event) =>
+            showPeerVolumePopover(event, tile)
+        );
         tile.dataset.layoutBound = 'true';
     }
+};
+
+const closePeerVolumePopover = () => {
+    document.querySelector('.peer-volume-popover')?.remove();
+};
+
+const showPeerVolumePopover = (event, tile) => {
+    const peerId = tile.dataset.peerId;
+
+    if (isMobileLayout() || tile.id === 'local-video' || !peerId) {
+        return;
+    }
+
+    event.preventDefault();
+    closePeerVolumePopover();
+
+    const popover = document.createElement('div');
+    const title = document.createElement('div');
+    const titleText = document.createElement('span');
+    const icon = document.createElement('i');
+    const range = document.createElement('input');
+    const value = document.createElement('span');
+    const currentVolume = Math.round(getPeerVolume(peerId) * 100);
+
+    popover.className = 'peer-volume-popover';
+    title.className = 'peer-volume-title';
+    titleText.textContent = '设置用户音量';
+    icon.className = 'fas fa-microphone';
+    range.type = 'range';
+    range.min = '0';
+    range.max = '100';
+    range.step = '5';
+    range.value = String(currentVolume);
+    value.className = 'peer-volume-value';
+    value.textContent = `${currentVolume}%`;
+
+    title.append(titleText, icon);
+    popover.append(title, range, value);
+    document.body.append(popover);
+
+    const popoverRect = popover.getBoundingClientRect();
+    const left = Math.min(
+        Math.max(8, event.clientX),
+        window.innerWidth - popoverRect.width - 8
+    );
+    const top = Math.min(
+        Math.max(8, event.clientY),
+        window.innerHeight - popoverRect.height - 8
+    );
+
+    popover.style.left = `${left}px`;
+    popover.style.top = `${top}px`;
+
+    range.addEventListener('input', () => {
+        const nextVolume = Number(range.value);
+        setPeerVolume(peerId, nextVolume / 100);
+        value.textContent = `${nextVolume}%`;
+        applyOutputSettingsToRemoteMedia();
+    });
 };
 
 const updateVideoTileStatus = (tile) => {
@@ -1597,7 +1727,12 @@ const updateVideoTileStatus = (tile) => {
 
     tile.dataset.peerLabel = isLocal ? `${displayName}（我）` : displayName;
     tile.dataset.tileType = tileType;
-    tile.dataset.layoutId = tile.dataset.layoutId || getTileLayoutId(tile.id);
+    const nextLayoutId = getTileLayoutId(tile);
+    const layoutChanged = tile.dataset.layoutId !== nextLayoutId;
+    tile.dataset.layoutId = nextLayoutId;
+    if (layoutChanged && !tile.classList.contains('is-positioned')) {
+        applySavedTileLayout(tile);
+    }
     tile.classList.toggle('has-video', hasVideo);
     tile.classList.toggle('is-audio-only', !hasVideo);
     tile.classList.toggle('is-screen-share', tileType === 'screen-share');
@@ -1681,6 +1816,52 @@ const updateAllVideoTileStatus = () => {
     document.querySelectorAll('.video-tile').forEach(updateVideoTileStatus);
 };
 
+const ensurePresenceTileForPeer = (peerId) => {
+    if (!peerId || peerId === localPeerId) {
+        return;
+    }
+
+    if (!document.getElementById(peerId)) {
+        console.info('[tile] create presence tile', { peerId });
+        addVideoStream(
+            document.createElement('video'),
+            new MediaStream(),
+            peerId
+        );
+    } else {
+        updateVideoTileStatus(document.getElementById(peerId));
+    }
+};
+
+const syncPresenceTilesForJoinedRoom = (channels = []) => {
+    if (!joinedVoiceRoomId) {
+        return;
+    }
+
+    const currentChannel = channels.find(
+        (channel) => channel.slug === joinedVoiceRoomId
+    );
+    const activePeerIds = new Set();
+
+    (currentChannel?.members || []).forEach((member) => {
+        if (!member.peerId || member.peerId === localPeerId) {
+            return;
+        }
+
+        activePeerIds.add(member.peerId);
+        addKnownRemotePeer(member.peerId);
+        ensurePresenceTileForPeer(member.peerId);
+    });
+
+    getVideoTiles().forEach((tile) => {
+        const peerId = tile.dataset.peerId;
+
+        if (tile.id !== 'local-video' && peerId && !activePeerIds.has(peerId)) {
+            removeVideoElement(tile.id);
+        }
+    });
+};
+
 const addVideoStream = (video, stream, videoId) => {
     const tileId = videoId || 'local-video';
     let tile = document.getElementById(tileId);
@@ -1703,15 +1884,13 @@ const addVideoStream = (video, stream, videoId) => {
         }
     }
 
-    const { body, actions } = ensureTileStructure(tile);
-    tile.dataset.layoutId = tile.dataset.layoutId || getTileLayoutId(tileId);
-    applySavedTileLayout(tile);
-
     if (videoId) {
         tile.dataset.peerId = videoId;
     } else if (localPeerId) {
         tile.dataset.peerId = localPeerId;
     }
+
+    const { body, actions } = ensureTileStructure(tile);
 
     let mediaElement = body.querySelector('video, audio');
     if (!mediaElement || mediaElement.tagName !== mediaTag) {
@@ -1750,6 +1929,11 @@ const addVideoStream = (video, stream, videoId) => {
         mediaElement.play();
     };
     updateVideoTileStatus(tile);
+    console.info('[tile] add/update', {
+        peerId: tile.dataset.peerId,
+        layoutId: tile.dataset.layoutId,
+        hasVideo,
+    });
     setHeightOfVideos(); //added
     updateMobileTileView();
 };
@@ -1786,7 +1970,11 @@ const mergeRemoteStream = (
 
 function setupCallStreamHandler(call, peerId) {
     call.on('stream', (userVideoStream) => {
-        console.log('got stream of other person');
+        console.info('[voice] remote stream received', {
+            peerId,
+            audioTracks: userVideoStream.getAudioTracks().length,
+            videoTracks: userVideoStream.getVideoTracks().length,
+        });
         addVideoStream(
             document.createElement('video'),
             mergeRemoteStream(peerId, userVideoStream, {
@@ -1810,6 +1998,7 @@ const bindPeerCallHandler = (peer) => {
         }
 
         console.log('Received a call...');
+        console.info('[voice] call received', { peerId: call.peer });
         call.answer(getActiveStream());
         setupCallStreamHandler(call, call.peer);
     });
@@ -1822,6 +2011,14 @@ let currentScreenStream;
 
 const getActiveStream = () => {
     const tracks = [...(myVideoStream?.getAudioTracks() || [])];
+
+    if (sharingNow && currentScreenStream) {
+        tracks.push(
+            ...currentScreenStream
+                .getAudioTracks()
+                .filter((track) => track.readyState === 'live')
+        );
+    }
 
     if (activeVideoTrack?.readyState === 'live') {
         tracks.push(activeVideoTrack);
@@ -1846,7 +2043,7 @@ const callPeersWithStream = (peer, stream, options = {}) => {
         return;
     }
 
-    const myPeers = Object.keys(peer.connections);
+    const myPeers = getKnownRemotePeerIds(peer);
 
     myPeers.forEach((peerId) =>
         connectToNewUser(peer, peerId, stream, options)
@@ -1854,7 +2051,7 @@ const callPeersWithStream = (peer, stream, options = {}) => {
 };
 
 const sendVideoTrackToPeers = (peer, track) => {
-    const myPeers = Object.keys(peer.connections);
+    const myPeers = getKnownRemotePeerIds(peer);
 
     myPeers.forEach((peerId) => {
         const calls = peer.connections[peerId] || [];
@@ -1996,8 +2193,12 @@ const restoreCameraAfterScreenShare = (peer, myVideoStream) => {
 
 async function toggleScreenShare(peer, myVideoStream) {
     if (sharingNow === false) {
-        var shareScreen = await navigator.mediaDevices.getDisplayMedia();
+        var shareScreen = await navigator.mediaDevices.getDisplayMedia({
+            video: true,
+            audio: true,
+        });
         const [track] = shareScreen.getVideoTracks();
+        const screenAudioTracks = shareScreen.getAudioTracks();
 
         if (!track) {
             console.warn('Screen sharing did not provide a video track.');
@@ -2006,6 +2207,7 @@ async function toggleScreenShare(peer, myVideoStream) {
 
         currentScreenStream = shareScreen;
         activeVideoTrack = track;
+        sharingNow = true;
         setLocalVideoStream(getActiveStream());
         track.addEventListener('ended', () => {
             if (!sharingNow || currentScreenStream !== shareScreen) {
@@ -2021,8 +2223,15 @@ async function toggleScreenShare(peer, myVideoStream) {
         });
 
         sendVideoTrackToPeers(peer, track);
+        if (screenAudioTracks.length > 0) {
+            console.info('[screen] sending screen audio track', {
+                count: screenAudioTracks.length,
+            });
+            callPeersWithStream(peer, getActiveStream());
+        } else {
+            console.info('[screen] no screen audio track was provided');
+        }
 
-        sharingNow = true;
         ensureSocket().emit('screen:shareStart', {
             roomId: joinedVoiceRoomId,
         });
@@ -2118,7 +2327,7 @@ const initiateAudio = async (peer) => {
 
         bindPeerCallHandler(peer);
 
-        Object.keys(peer.connections).forEach((peerId) => {
+        getKnownRemotePeerIds(peer).forEach((peerId) => {
             if (peerId !== localPeerId) {
                 connectToNewUser(peer, peerId, getActiveStream());
             }
@@ -2433,6 +2642,10 @@ controlMenuToggles.forEach((toggle) => {
 });
 
 document.addEventListener('click', (event) => {
+    if (!event.target.closest('.peer-volume-popover')) {
+        closePeerVolumePopover();
+    }
+
     if (event.target.closest('.control-button-wrap, .control-popover')) {
         return;
     }
@@ -2442,6 +2655,7 @@ document.addEventListener('click', (event) => {
 
 document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
+        closePeerVolumePopover();
         closeControlMenus();
     }
 });
@@ -2509,6 +2723,8 @@ aiNoiseToggleEl?.addEventListener('keydown', (event) => {
 
 const micGainSlider = document.getElementById('micGainSlider');
 const micGainValueEl = document.getElementById('micGainValue');
+
+ensureDefaultMicGain();
 
 const setMicGain = (percent) => {
     const clamped = Math.max(0, Math.min(150, Math.round(percent)));
