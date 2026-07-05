@@ -121,6 +121,8 @@ const CURSOR_IDLE_MS = 700;
 const MOBILE_BREAKPOINT = 768;
 const TILE_MIN_WIDTH = 180;
 const TILE_MIN_HEIGHT = 120;
+const TILE_BASE_Z_INDEX = 2;
+const TILE_RESIZE_DIRECTIONS = ['n', 'e', 's', 'w', 'ne', 'nw', 'se', 'sw'];
 const cursorSharingMedia = window.matchMedia(
     `(max-width: ${MOBILE_BREAKPOINT}px), (pointer: coarse)`
 );
@@ -158,6 +160,7 @@ const remotePeerOrder = [];
 const screenSharers = new Set();
 const peersWithCallHandler = new WeakSet();
 const presenceMembersByPeerId = new Map();
+let tileLayoutZIndex = TILE_BASE_Z_INDEX;
 let noiseAudioContext = null;
 let noiseProcessorNode = null;
 // eslint-disable-next-line no-unused-vars
@@ -1396,6 +1399,14 @@ const getSavedTileLayouts = () => {
     }
 };
 
+const normalizeTileLayoutZIndex = (value) => {
+    const zIndex = Number(value);
+
+    return Number.isFinite(zIndex) && zIndex >= TILE_BASE_Z_INDEX
+        ? Math.round(zIndex)
+        : TILE_BASE_Z_INDEX;
+};
+
 const saveTileLayout = (layoutId, layout) => {
     if (!layoutId) {
         return;
@@ -1407,8 +1418,37 @@ const saveTileLayout = (layoutId, layout) => {
         y: Math.round(layout.y),
         width: Math.round(layout.width),
         height: Math.round(layout.height),
+        zIndex: normalizeTileLayoutZIndex(layout.zIndex),
     };
     localStorage.setItem(TILE_LAYOUT_STORAGE_KEY, JSON.stringify(layouts));
+};
+
+const getTileLayoutZIndex = (tile) =>
+    normalizeTileLayoutZIndex(
+        tile.style.zIndex || window.getComputedStyle(tile).zIndex
+    );
+
+const getNextTileLayoutZIndex = () => {
+    const highestTileZIndex = getVideoTiles().reduce(
+        (highest, tile) => Math.max(highest, getTileLayoutZIndex(tile)),
+        TILE_BASE_Z_INDEX
+    );
+
+    tileLayoutZIndex = Math.max(tileLayoutZIndex, highestTileZIndex) + 1;
+
+    return tileLayoutZIndex;
+};
+
+const bringTileLayoutToFront = (tile) => {
+    if (!tile) {
+        return;
+    }
+
+    tile.style.zIndex = String(getNextTileLayoutZIndex());
+
+    if (tile.classList.contains('is-positioned')) {
+        persistCurrentTileLayout(tile);
+    }
 };
 
 const getTileBounds = () => {
@@ -1427,7 +1467,7 @@ const getTileBounds = () => {
     };
 };
 
-const clampTileLayout = ({ x, y, width, height }) => {
+const clampTileLayout = ({ x, y, width, height, zIndex }) => {
     const bounds = getTileBounds();
     const nextWidth = Math.min(Math.max(width, TILE_MIN_WIDTH), bounds.width);
     const nextHeight = Math.min(
@@ -1440,6 +1480,7 @@ const clampTileLayout = ({ x, y, width, height }) => {
         y: Math.min(Math.max(0, y), Math.max(0, bounds.height - nextHeight)),
         width: nextWidth,
         height: nextHeight,
+        zIndex: normalizeTileLayoutZIndex(zIndex),
     };
 };
 
@@ -1451,6 +1492,7 @@ const applyTileLayout = (tile, layout) => {
     tile.style.top = `${next.y}px`;
     tile.style.width = `${next.width}px`;
     tile.style.height = `${next.height}px`;
+    tile.style.zIndex = String(next.zIndex);
 };
 
 const getCurrentTileLayout = (tile) => {
@@ -1462,6 +1504,7 @@ const getCurrentTileLayout = (tile) => {
         y: tileRect.top - gridRect.top + videoGrid.scrollTop,
         width: tileRect.width,
         height: tileRect.height,
+        zIndex: getTileLayoutZIndex(tile),
     });
 };
 
@@ -1506,7 +1549,6 @@ const ensureTileStructure = (tile) => {
     let overlay = tile.querySelector('.tile-overlay');
     let actions = tile.querySelector('.tile-actions');
     let footer = tile.querySelector('.tile-footer');
-    let resizeHandle = tile.querySelector('.tile-resize-handle');
 
     if (!header) {
         header = document.createElement('div');
@@ -1550,14 +1592,21 @@ const ensureTileStructure = (tile) => {
         tile.append(actions);
     }
 
-    if (!resizeHandle) {
-        resizeHandle = document.createElement('div');
-        resizeHandle.className = 'tile-resize-handle';
-        resizeHandle.setAttribute('aria-hidden', 'true');
-        tile.append(resizeHandle);
-    }
+    TILE_RESIZE_DIRECTIONS.forEach((direction) => {
+        let resizeHandle = tile.querySelector(
+            `.tile-resize-handle[data-resize-direction="${direction}"]`
+        );
 
-    bindTileLayoutControls(tile, header, resizeHandle);
+        if (!resizeHandle) {
+            resizeHandle = document.createElement('div');
+            resizeHandle.className = `tile-resize-handle tile-resize-handle--${direction}`;
+            resizeHandle.dataset.resizeDirection = direction;
+            resizeHandle.setAttribute('aria-hidden', 'true');
+            tile.append(resizeHandle);
+        }
+    });
+
+    bindTileLayoutControls(tile, header);
 
     return { header, body, overlay, actions, footer };
 };
@@ -1573,6 +1622,7 @@ const startTileDrag = (event, tile) => {
         return;
     }
 
+    bringTileLayoutToFront(tile);
     const startLayout = getCurrentTileLayout(tile);
     applyTileLayout(tile, startLayout);
     tile.classList.add('is-dragging');
@@ -1603,11 +1653,51 @@ const startTileDrag = (event, tile) => {
     tile.addEventListener('pointercancel', onEnd);
 };
 
-const startTileResize = (event, tile) => {
+const resolveTileResizeLayout = (startLayout, direction, deltaX, deltaY) => {
+    const bounds = getTileBounds();
+    const next = { ...startLayout };
+
+    if (direction.includes('e')) {
+        next.width = Math.min(
+            Math.max(TILE_MIN_WIDTH, startLayout.width + deltaX),
+            bounds.width - startLayout.x
+        );
+    }
+
+    if (direction.includes('s')) {
+        next.height = Math.min(
+            Math.max(TILE_MIN_HEIGHT, startLayout.height + deltaY),
+            bounds.height - startLayout.y
+        );
+    }
+
+    if (direction.includes('w')) {
+        const right = startLayout.x + startLayout.width;
+        next.x = Math.min(
+            Math.max(0, startLayout.x + deltaX),
+            right - TILE_MIN_WIDTH
+        );
+        next.width = right - next.x;
+    }
+
+    if (direction.includes('n')) {
+        const bottom = startLayout.y + startLayout.height;
+        next.y = Math.min(
+            Math.max(0, startLayout.y + deltaY),
+            bottom - TILE_MIN_HEIGHT
+        );
+        next.height = bottom - next.y;
+    }
+
+    return clampTileLayout(next);
+};
+
+const startTileResize = (event, tile, direction = 'se') => {
     if (isMobileLayout() || getFullscreenElement() || event.button !== 0) {
         return;
     }
 
+    bringTileLayoutToFront(tile);
     const startLayout = getCurrentTileLayout(tile);
     applyTileLayout(tile, startLayout);
     tile.classList.add('is-resizing');
@@ -1619,11 +1709,15 @@ const startTileResize = (event, tile) => {
     const startY = event.clientY;
 
     const onMove = (moveEvent) => {
-        applyTileLayout(tile, {
-            ...startLayout,
-            width: startLayout.width + moveEvent.clientX - startX,
-            height: startLayout.height + moveEvent.clientY - startY,
-        });
+        applyTileLayout(
+            tile,
+            resolveTileResizeLayout(
+                startLayout,
+                direction,
+                moveEvent.clientX - startX,
+                moveEvent.clientY - startY
+            )
+        );
     };
 
     const onEnd = () => {
@@ -1639,19 +1733,33 @@ const startTileResize = (event, tile) => {
     tile.addEventListener('pointercancel', onEnd);
 };
 
-const bindTileLayoutControls = (tile, header, resizeHandle) => {
+const bindTileLayoutControls = (tile, header) => {
     if (!tile.dataset.layoutBound) {
+        tile.addEventListener(
+            'pointerdown',
+            () => bringTileLayoutToFront(tile),
+            true
+        );
+        tile.addEventListener('click', () => bringTileLayoutToFront(tile));
         header.addEventListener('pointerdown', (event) =>
             startTileDrag(event, tile)
-        );
-        resizeHandle.addEventListener('pointerdown', (event) =>
-            startTileResize(event, tile)
         );
         tile.addEventListener('contextmenu', (event) =>
             showPeerVolumePopover(event, tile)
         );
         tile.dataset.layoutBound = 'true';
     }
+
+    tile.querySelectorAll('.tile-resize-handle').forEach((resizeHandle) => {
+        if (resizeHandle.dataset.resizeBound) {
+            return;
+        }
+
+        resizeHandle.addEventListener('pointerdown', (event) =>
+            startTileResize(event, tile, resizeHandle.dataset.resizeDirection)
+        );
+        resizeHandle.dataset.resizeBound = 'true';
+    });
 };
 
 const closePeerVolumePopover = () => {

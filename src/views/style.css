@@ -739,7 +739,7 @@ input {
     position: absolute;
     right: 0;
     bottom: 0;
-    z-index: 4;
+    z-index: 8;
     pointer-events: none;
 }
 
@@ -749,22 +749,105 @@ input {
 
 .tile-resize-handle {
     position: absolute;
-    right: 4px;
-    bottom: 4px;
     z-index: 5;
-    width: 12px;
-    height: 12px;
-    border-right: 2px solid rgba(216, 111, 154, 0.22);
-    border-bottom: 2px solid rgba(216, 111, 154, 0.22);
-    opacity: 0.6;
-    cursor: nwse-resize;
+    opacity: 0;
     pointer-events: auto;
     touch-action: none;
+    transition:
+        background-color 120ms ease,
+        border-color 120ms ease,
+        opacity 120ms ease;
 }
 
 .tile-resize-handle:hover {
-    border-color: rgba(216, 111, 154, 0.54);
+    background-color: rgba(216, 111, 154, 0.08);
     opacity: 1;
+}
+
+.tile-resize-handle--n,
+.tile-resize-handle--s {
+    right: 18px;
+    left: 18px;
+    height: 8px;
+    cursor: ns-resize;
+}
+
+.tile-resize-handle--n {
+    top: 0;
+}
+
+.tile-resize-handle--s {
+    bottom: 0;
+}
+
+.tile-resize-handle--e,
+.tile-resize-handle--w {
+    top: 18px;
+    bottom: 18px;
+    width: 8px;
+    cursor: ew-resize;
+}
+
+.tile-resize-handle--e {
+    right: 0;
+}
+
+.tile-resize-handle--w {
+    left: 0;
+}
+
+.tile-resize-handle--ne,
+.tile-resize-handle--nw,
+.tile-resize-handle--se,
+.tile-resize-handle--sw {
+    width: 16px;
+    height: 16px;
+    opacity: 0.66;
+}
+
+.tile-resize-handle--ne,
+.tile-resize-handle--sw {
+    cursor: nesw-resize;
+}
+
+.tile-resize-handle--nw,
+.tile-resize-handle--se {
+    cursor: nwse-resize;
+}
+
+.tile-resize-handle--ne {
+    top: 4px;
+    right: 4px;
+    border-top: 2px solid rgba(216, 111, 154, 0.22);
+    border-right: 2px solid rgba(216, 111, 154, 0.22);
+}
+
+.tile-resize-handle--nw {
+    top: 4px;
+    left: 4px;
+    border-top: 2px solid rgba(216, 111, 154, 0.22);
+    border-left: 2px solid rgba(216, 111, 154, 0.22);
+}
+
+.tile-resize-handle--se {
+    right: 4px;
+    bottom: 4px;
+    border-right: 2px solid rgba(216, 111, 154, 0.22);
+    border-bottom: 2px solid rgba(216, 111, 154, 0.22);
+}
+
+.tile-resize-handle--sw {
+    bottom: 4px;
+    left: 4px;
+    border-bottom: 2px solid rgba(216, 111, 154, 0.22);
+    border-left: 2px solid rgba(216, 111, 154, 0.22);
+}
+
+.tile-resize-handle--ne:hover,
+.tile-resize-handle--nw:hover,
+.tile-resize-handle--se:hover,
+.tile-resize-handle--sw:hover {
+    border-color: rgba(216, 111, 154, 0.54);
 }
 
 .video-tile video {
