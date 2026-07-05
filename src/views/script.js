@@ -1,9 +1,9 @@
 /* eslint-disable no-console */
+console.info('[page-layout] script boot v2 ' + new Date().toISOString());
 let socket;
 
 const videoGrid = document.getElementById('video-grid');
 const mainLayout = document.getElementById('main');
-const roomStage = document.querySelector('.room-stage');
 const myVideo = document.createElement('video');
 myVideo.muted = true; // ensures that we do not hear ourselves
 myVideo.playsInline = 'true';
@@ -114,8 +114,6 @@ const CHAT_NAME_STORAGE_KEY = 'webrtc-video-chat-name';
 const NOISE_SUPPRESSION_KEY = 'webrtc-noise-suppression';
 const AI_NOISE_EXPERIMENT_KEY = 'webrtc-ai-noise-experiment';
 const MIC_GAIN_KEY = 'webrtc-mic-gain';
-const LAYOUT_STORAGE_VERSION = 1;
-const LAYOUT_STORAGE_KEY_PREFIX = 'voiceLayout:v1';
 const PEER_VOLUME_STORAGE_KEY = 'voice-room-peer-volumes-v1';
 const CHAT_MESSAGE_MAX_LENGTH = 500;
 const CURSOR_THROTTLE_MS = 40;
@@ -125,10 +123,31 @@ const TILE_MIN_WIDTH = 180;
 const TILE_MIN_HEIGHT = 120;
 const TILE_BASE_Z_INDEX = 2;
 const TILE_RESIZE_DIRECTIONS = ['n', 'e', 's', 'w', 'ne', 'nw', 'se', 'sw'];
-const LAYOUT_GRID_COLUMNS = 24;
-const LAYOUT_GRID_ROWS = 14;
 const LAYOUT_MIN_GRID_W = 3;
 const LAYOUT_MIN_GRID_H = 2;
+const PAGE_GRID_COLUMNS = 32;
+const PAGE_GRID_ROWS = 18;
+const PAGE_STORAGE_VERSION = 1;
+const PAGE_LAYOUT_STORAGE_KEY_PREFIX = 'voicePageLayout:v2';
+const PAGE_COMPONENT_TYPES = {
+    SIDEBAR_PANEL: 'sidebarPanel',
+    STAGE_PANEL: 'stagePanel',
+    CHAT_PANEL: 'chatPanel',
+};
+const PAGE_SINGLETON_TYPES = new Set([
+    PAGE_COMPONENT_TYPES.SIDEBAR_PANEL,
+    PAGE_COMPONENT_TYPES.STAGE_PANEL,
+    PAGE_COMPONENT_TYPES.CHAT_PANEL,
+]);
+const REAL_DOM_PAGE_TYPES = PAGE_SINGLETON_TYPES;
+const PAGE_TILE_MIN_WIDTH = 160;
+const PAGE_TILE_MIN_HEIGHT = 80;
+const PAGE_COMPONENT_LABELS = {
+    [PAGE_COMPONENT_TYPES.SIDEBAR_PANEL]: '左侧频道栏',
+    [PAGE_COMPONENT_TYPES.STAGE_PANEL]: '语音舞台区',
+    [PAGE_COMPONENT_TYPES.CHAT_PANEL]: '聊天面板',
+};
+let pageLayoutBoard;
 const LAYOUT_ITEM_TYPES = {
     LOCAL: 'local',
     LOCAL_PEER: 'localPeer',
@@ -138,11 +157,6 @@ const LAYOUT_ITEM_TYPES = {
     ROOM: 'room',
     CHAT: 'chat',
 };
-const LAYOUT_SINGLETON_COMPONENT_TYPES = [
-    LAYOUT_ITEM_TYPES.ROOM,
-    LAYOUT_ITEM_TYPES.CHAT,
-    LAYOUT_ITEM_TYPES.LOCAL_PEER,
-];
 const LAYOUT_COMPONENT_LABELS = {
     [LAYOUT_ITEM_TYPES.ROOM]: '房间信息组件',
     [LAYOUT_ITEM_TYPES.CHAT]: '聊天组件',
@@ -342,26 +356,500 @@ const hideCallControls = () => {
 const isMobileLayout = () => window.innerWidth <= MOBILE_BREAKPOINT;
 
 const getVideoTiles = () =>
-    Array.from(videoGrid.querySelectorAll('.video-tile'));
+    Array.from((pageLayoutBoard || videoGrid).querySelectorAll('.video-tile'));
 
 const syncLayoutGridMetadata = () => {
-    if (!videoGrid) {
+    const board = pageLayoutBoard || videoGrid;
+    if (!board) {
         return;
     }
 
-    videoGrid.dataset.layoutGridColumns = String(LAYOUT_GRID_COLUMNS);
-    videoGrid.dataset.layoutGridRows = String(LAYOUT_GRID_ROWS);
-    videoGrid.style.setProperty(
-        '--layout-grid-columns',
-        String(LAYOUT_GRID_COLUMNS)
-    );
-    videoGrid.style.setProperty('--layout-grid-rows', String(LAYOUT_GRID_ROWS));
+    board.dataset.layoutGridColumns = String(PAGE_GRID_COLUMNS);
+    board.dataset.layoutGridRows = String(PAGE_GRID_ROWS);
+    board.style.setProperty('--layout-grid-columns', String(PAGE_GRID_COLUMNS));
+    board.style.setProperty('--layout-grid-rows', String(PAGE_GRID_ROWS));
 };
 
-syncLayoutGridMetadata();
+const createPageLayoutTile = (type) => {
+    const tile = document.createElement('div');
+    tile.id = `page-tile-${type}`;
+    tile.className = 'video-tile page-layout-tile';
+    tile.dataset.pageLayoutType = type;
+    tile.dataset.layoutComponentType = type;
+    tile.style.overflow = 'hidden';
+    return tile;
+};
+
+const getPageComponentId = (type) => `page-tile-${type}`;
+
+const PL_LOG = (...args) => console.log('[page-layout]', ...args);
+const PL_WARN = (...args) => console.warn('[page-layout]', ...args);
+
+const CORE_PAGE_TYPES = [
+    PAGE_COMPONENT_TYPES.SIDEBAR_PANEL,
+    PAGE_COMPONENT_TYPES.STAGE_PANEL,
+    PAGE_COMPONENT_TYPES.CHAT_PANEL,
+];
+
+const validatePageLayout = () => {
+    const missing = [];
+    const hidden = [];
+
+    CORE_PAGE_TYPES.forEach((type) => {
+        const tile = document.getElementById(getPageComponentId(type));
+        if (!tile) {
+            missing.push(type);
+        } else if (tile.classList.contains('is-layout-hidden')) {
+            hidden.push(type);
+        }
+    });
+
+    if (missing.length > 0) {
+        PL_WARN('Missing core page tiles:', missing);
+    }
+
+    if (hidden.length === CORE_PAGE_TYPES.length) {
+        PL_WARN('All core page tiles are hidden');
+    }
+
+    return { missing, hidden };
+};
+
+const ensureDefaultPageLayout = () => {
+    PL_LOG('Ensuring default page layout exists');
+
+    if (!pageLayoutBoard) {
+        PL_WARN('No page layout board, cannot ensure defaults');
+        return;
+    }
+
+    CORE_PAGE_TYPES.forEach((type) => {
+        const tile = document.getElementById(getPageComponentId(type));
+        const defaultItem = getDefaultLayoutItems().find(
+            (item) => item.type === type
+        );
+        if (!tile || !defaultItem) {
+            PL_WARN('Missing default page panel:', type);
+            return;
+        }
+
+        applyTileLayout(
+            tile,
+            convertGridLayoutToPixels({
+                ...defaultItem.grid,
+                zIndex: getNextTileLayoutZIndex(),
+            })
+        );
+        setTileLayoutItemVisibility(tile.dataset.layoutItemId, true);
+        tile.classList.remove('is-layout-hidden');
+    });
+
+    syncLayoutGridMetadata();
+    saveLayoutToStorage('布局已初始化');
+};
+
+const getPagePanelLabel = (type) => PAGE_COMPONENT_LABELS[type] || type;
+
+const createPageTileFromNode = (type, node) => {
+    const tile = createPageLayoutTile(type);
+    const className = `page-tile-${type.replace(
+        /[A-Z]/g,
+        (letter) => `-${letter.toLowerCase()}`
+    )}`;
+    tile.classList.add(className);
+    const { header, body, footer } = ensureTileStructure(tile);
+    const avatar = header.querySelector('.tile-avatar');
+    const title = header.querySelector('.tile-title');
+    const badges = header.querySelector('.tile-badges');
+    const label = getPagePanelLabel(type);
+
+    if (avatar) {
+        avatar.textContent = createTileAvatarText(label);
+    }
+
+    if (title) {
+        title.textContent = label;
+    }
+
+    if (badges) {
+        badges.replaceChildren();
+    }
+
+    body.append(node);
+    footer.textContent = label;
+
+    const itemId = `page-${sanitizeLayoutIdPart(type)}`;
+    tile.dataset.layoutItemId = itemId;
+    tile.dataset.layoutId = itemId;
+    syncTileLayoutItemFromElement(tile, {
+        id: itemId,
+        type,
+        visible: true,
+        positioned: true,
+    });
+
+    return tile;
+};
+
+const getPageTileDiagnostics = (board, type) => {
+    const tile = board.querySelector(`#${getPageComponentId(type)}`);
+    return {
+        tile,
+        text: tile?.textContent.trim() || '',
+        childCount: tile?.querySelector('.tile-body')?.children.length || 0,
+    };
+};
+
+const validateDetachedPageLayoutBoard = (board) => {
+    const tileCount = board.querySelectorAll('.page-layout-tile').length;
+    const sidebar = getPageTileDiagnostics(
+        board,
+        PAGE_COMPONENT_TYPES.SIDEBAR_PANEL
+    );
+    const stage = getPageTileDiagnostics(
+        board,
+        PAGE_COMPONENT_TYPES.STAGE_PANEL
+    );
+    const chat = getPageTileDiagnostics(board, PAGE_COMPONENT_TYPES.CHAT_PANEL);
+    const failures = [];
+
+    if (tileCount < CORE_PAGE_TYPES.length) {
+        failures.push(`expected ${CORE_PAGE_TYPES.length} page tiles`);
+    }
+
+    if (
+        !sidebar.tile ||
+        !sidebar.text.includes('朋友语音房间') ||
+        !/大厅|游戏开黑/.test(sidebar.text) ||
+        !sidebar.tile.querySelector('[data-channel-room], .tree-channel')
+    ) {
+        failures.push('sidebarPanel is missing channel content');
+    }
+
+    if (!stage.tile || stage.childCount === 0 || !stage.text) {
+        failures.push('stagePanel is empty');
+    }
+
+    if (
+        !chat.tile ||
+        !chat.tile.querySelector('textarea, input') ||
+        !Array.from(chat.tile.querySelectorAll('button')).some((button) =>
+            button.textContent.includes('发送')
+        )
+    ) {
+        failures.push('chatPanel is missing input controls');
+    }
+
+    return {
+        ok: failures.length === 0,
+        failures,
+    };
+};
+
+const restoreMovedPagePanelNodes = (entries) => {
+    entries.forEach(({ node, placeholder }) => {
+        if (placeholder.isConnected) {
+            placeholder.replaceWith(node);
+        }
+    });
+};
+
+const initPageLayoutBoard = () => {
+    if (pageLayoutBoard) {
+        return pageLayoutBoard;
+    }
+
+    if (!mainLayout) {
+        PL_WARN('No #main element found');
+        return undefined;
+    }
+
+    const sidebarEl = mainLayout.querySelector('.room-sidebar');
+    const stageEl = mainLayout.querySelector('.room-stage');
+    const chatPanelEl = mainLayout.querySelector('.chat-panel');
+
+    PL_LOG('source nodes', {
+        sidebar: Boolean(sidebarEl),
+        sidebarChildren: sidebarEl?.children.length || 0,
+        sidebarHasBrand: Boolean(sidebarEl?.querySelector('.sidebar-brand')),
+        sidebarHasTree: Boolean(
+            sidebarEl?.querySelector('.sidebar-channel-tree')
+        ),
+        sidebarHasUserCard: Boolean(
+            sidebarEl?.querySelector('.local-user-card')
+        ),
+        stage: Boolean(stageEl),
+        stageHasCanvas: Boolean(stageEl?.querySelector('#canvas')),
+        stageHasVideoGrid: Boolean(stageEl?.querySelector('#video-grid')),
+        chatPanel: Boolean(chatPanelEl),
+        chatPanelHasMessages: Boolean(
+            chatPanelEl?.querySelector('.chat-messages, #chatMessages')
+        ),
+        chatPanelHasForm: Boolean(
+            chatPanelEl?.querySelector('.chat-form, #chatForm')
+        ),
+    });
+
+    const missingSelectors = [
+        ['.room-sidebar', sidebarEl],
+        ['.room-stage', stageEl],
+        ['.chat-panel', chatPanelEl],
+    ]
+        .filter(([, node]) => !node)
+        .map(([selector]) => selector);
+
+    if (missingSelectors.length > 0) {
+        console.error('[page-layout] missing source nodes:', missingSelectors);
+        _bootstrapRecoveryToolbar();
+        return undefined;
+    }
+
+    const entries = [
+        {
+            type: PAGE_COMPONENT_TYPES.SIDEBAR_PANEL,
+            node: sidebarEl,
+        },
+        {
+            type: PAGE_COMPONENT_TYPES.STAGE_PANEL,
+            node: stageEl,
+        },
+        {
+            type: PAGE_COMPONENT_TYPES.CHAT_PANEL,
+            node: chatPanelEl,
+        },
+    ].map((entry) => {
+        const placeholder = document.createComment(
+            `page-layout-placeholder:${entry.type}`
+        );
+        entry.node.before(placeholder);
+        return { ...entry, placeholder };
+    });
+
+    const board = document.createElement('div');
+    board.id = 'page-layout-board';
+    board.className = 'page-layout-board';
+
+    PL_LOG('Board created, moving full DOM panels');
+    entries.forEach(({ type, node }) => {
+        board.append(createPageTileFromNode(type, node));
+    });
+
+    const detachedValidation = validateDetachedPageLayoutBoard(board);
+    if (!detachedValidation.ok) {
+        console.error(
+            '[page-layout] detached board validation failed:',
+            detachedValidation.failures
+        );
+        restoreMovedPagePanelNodes(entries);
+        _bootstrapRecoveryToolbar();
+        return undefined;
+    }
+
+    mainLayout.classList.remove('room-layout');
+    mainLayout.replaceChildren(board);
+    pageLayoutBoard = board;
+
+    syncLayoutGridMetadata();
+
+    const savedItems = loadLayoutFromStorage();
+    PL_LOG('Loaded layout from storage:', savedItems.length, 'items');
+    const savedHasCore =
+        savedItems.length > 0 &&
+        CORE_PAGE_TYPES.every((type) =>
+            savedItems.some((item) => item.type === type)
+        );
+
+    if (savedItems.length === 0 || !savedHasCore) {
+        PL_LOG('No valid saved layout, using defaults');
+        ensureDefaultPageLayout();
+    } else {
+        const { missing } = validatePageLayout();
+        if (missing.length > 0 || missing.length === CORE_PAGE_TYPES.length) {
+            PL_WARN('Saved layout missing core components, using defaults');
+            ensureDefaultPageLayout();
+        } else {
+            initializeLayoutFromStorage();
+        }
+    }
+
+    ensureLayoutEditModeToggle();
+    syncLayoutEditModeUI();
+
+    PL_LOG('Board initialized with', getVideoTiles().length, 'tiles');
+    return board;
+};
+
+const _originalMainSnapshot = mainLayout ? mainLayout.cloneNode(true) : null;
+
+const _bootstrapRecoveryToolbar = () => {
+    if (document.querySelector('.layout-recovery-toolbar')) {
+        return;
+    }
+    const bar = document.createElement('div');
+    bar.className = 'layout-recovery-toolbar';
+    bar.innerHTML =
+        '<button id="layoutRecoveryReset" type="button">重置布局</button>' +
+        '<button id="layoutRecoveryRestore" type="button">恢复原始页面</button>';
+    document.body.append(bar);
+    bar.querySelector('#layoutRecoveryReset').addEventListener('click', () => {
+        localStorage.removeItem(getLayoutStorageKey());
+        window.location.reload();
+    });
+    bar.querySelector('#layoutRecoveryRestore').addEventListener(
+        'click',
+        () => {
+            restoreOriginalStaticLayout();
+        }
+    );
+};
+
+const restoreOriginalStaticLayout = () => {
+    if (!mainLayout) return;
+    const board = document.getElementById('page-layout-board');
+    if (board) board.remove();
+    mainLayout.classList.add('room-layout');
+    if (_originalMainSnapshot && _originalMainSnapshot.children.length > 0) {
+        mainLayout.replaceChildren();
+        while (_originalMainSnapshot.firstChild) {
+            mainLayout.append(_originalMainSnapshot.firstChild);
+        }
+        console.info('[page-layout] restored original static layout');
+    } else {
+        mainLayout.replaceChildren();
+        mainLayout.innerHTML = `
+            <aside class="room-sidebar"><div class="sidebar-brand"><a href="/">朋友语音房间</a></div></aside>
+            <main class="room-stage"><section id="canvas"><div id="video-grid"></div></section></main>
+            <aside class="chat-panel"><ol id="chatMessages" class="chat-messages" style="height:60vh"></ol>
+            <form id="chatForm" class="chat-form"><textarea id="chatInput"></textarea><button>发送</button></form></aside>`;
+        console.info('[page-layout] created safe fallback DOM');
+    }
+    pageLayoutBoard = undefined;
+    layoutEditMode = false;
+    syncLayoutEditModeUI();
+};
+
+window.__voiceLayoutDebug = {
+    bootTime: new Date().toISOString(),
+    resetLayout() {
+        localStorage.removeItem(getLayoutStorageKey());
+        document.getElementById('page-layout-board')?.remove();
+        if (typeof initPageLayoutBoard === 'function') {
+            pageLayoutBoard = undefined;
+            try {
+                initPageLayoutBoard();
+            } catch (err) {
+                console.error('[page-layout] reset failed', err);
+                restoreOriginalStaticLayout();
+            }
+        } else {
+            window.location.reload();
+        }
+    },
+    dumpDom() {
+        const result = {
+            main: Boolean(document.getElementById('main')),
+            board: Boolean(document.getElementById('page-layout-board')),
+            pageTiles: document.querySelectorAll(
+                '#page-layout-board > .page-layout-tile'
+            ).length,
+            toolbar: Boolean(
+                document.querySelector(
+                    '.layout-recovery-toolbar, .stage-layout-toolbar'
+                )
+            ),
+        };
+        const types = CORE_PAGE_TYPES;
+        types.forEach((t) => {
+            const tile = document.getElementById(`page-tile-${t}`);
+            result[t] = tile
+                ? {
+                      exists: true,
+                      id: tile.id,
+                      hidden: tile.classList.contains('is-layout-hidden'),
+                      childCount: tile.children.length,
+                      bodyChildren:
+                          tile.querySelector('.tile-body')?.children.length ||
+                          0,
+                      textPreview: tile.textContent.trim().slice(0, 80),
+                      hasInput: Boolean(tile.querySelector('textarea, input')),
+                      hasChannelLinks: Boolean(
+                          tile.querySelector(
+                              '.tree-channel, [data-channel-room]'
+                          )
+                      ),
+                  }
+                : { exists: false };
+        });
+        result.totalTiles = document.querySelectorAll('.video-tile').length;
+        console.table(result);
+        return result;
+    },
+    dumpLayout() {
+        if (typeof serializeLayoutItems === 'function') {
+            const items = serializeLayoutItems();
+            console.table(
+                items.map((item) => ({
+                    id: item.id,
+                    type: item.type,
+                    x: item.x,
+                    y: item.y,
+                    w: item.w,
+                    h: item.h,
+                    visible: item.visible,
+                }))
+            );
+            return items;
+        }
+        console.warn('[page-layout] serializeLayoutItems not available yet');
+        return [];
+    },
+    validateLayout() {
+        if (typeof validatePageLayout === 'function') {
+            return validatePageLayout();
+        }
+        return { missing: [], hidden: [] };
+    },
+};
+
+const _detectBrokenBoard = () => {
+    const board = document.getElementById('page-layout-board');
+    if (!board) return false;
+    const tileCount = board.querySelectorAll('.page-layout-tile').length;
+    if (tileCount === 0) {
+        console.warn(
+            '[page-layout] detected empty board with 0 tiles, recovering'
+        );
+        return true;
+    }
+    const validation = validateDetachedPageLayoutBoard(board);
+    if (!validation.ok) {
+        console.warn(
+            '[page-layout] detected broken page board, recovering',
+            validation.failures
+        );
+        return true;
+    }
+    return false;
+};
+
+const _runPageLayoutInit = () => {
+    if (_detectBrokenBoard()) {
+        restoreOriginalStaticLayout();
+        _bootstrapRecoveryToolbar();
+        return;
+    }
+
+    try {
+        initPageLayoutBoard();
+    } catch (err) {
+        console.error('[page-layout] init failed', err);
+        restoreOriginalStaticLayout();
+        _bootstrapRecoveryToolbar();
+    }
+};
 
 const ensureLayoutEditModeToggle = () => {
-    if (!roomStage || layoutEditModeToggle) {
+    if (!mainLayout || layoutEditModeToggle) {
         return layoutEditModeToggle;
     }
 
@@ -415,7 +903,7 @@ const ensureLayoutEditModeToggle = () => {
     status.textContent = '已保存';
 
     toolbar.append(button, addButton, resetButton, status, menu);
-    roomStage.prepend(toolbar);
+    mainLayout.prepend(toolbar);
 
     layoutEditModeToggle = button;
     layoutAddComponentToggle = addButton;
@@ -427,7 +915,7 @@ const ensureLayoutEditModeToggle = () => {
 
 const syncLayoutEditModeUI = () => {
     mainLayout?.classList.toggle('is-layout-editing', layoutEditMode);
-    videoGrid?.classList.toggle('is-layout-editing', layoutEditMode);
+    pageLayoutBoard?.classList.toggle('is-layout-editing', layoutEditMode);
 
     if (layoutEditModeToggle) {
         layoutEditModeToggle.setAttribute(
@@ -472,9 +960,6 @@ const setLayoutEditMode = (enabled) => {
 const toggleLayoutEditMode = () => {
     setLayoutEditMode(!layoutEditMode);
 };
-
-ensureLayoutEditModeToggle()?.addEventListener('click', toggleLayoutEditMode);
-syncLayoutEditModeUI();
 
 const getOrderedTiles = () => {
     const tiles = getVideoTiles();
@@ -1716,6 +2201,10 @@ const sanitizeLayoutIdPart = (value) =>
     String(value || 'unknown').replace(/[^a-zA-Z0-9_-]/g, '-');
 
 const getTileLayoutId = (tile) => {
+    if (tile.dataset.pageLayoutType) {
+        return `page-${sanitizeLayoutIdPart(tile.dataset.pageLayoutType)}`;
+    }
+
     if (tile.dataset.layoutComponentType) {
         return `component-${sanitizeLayoutIdPart(
             tile.dataset.layoutComponentType
@@ -1803,17 +2292,20 @@ const bringTileLayoutToFront = (tile) => {
 };
 
 const getTileBounds = () => {
-    const gridRect = videoGrid.getBoundingClientRect();
-    const fallbackRect = videoGrid.parentElement?.getBoundingClientRect();
+    const board = pageLayoutBoard || videoGrid;
+    const boardRect = board.getBoundingClientRect();
+    const fallbackWidth = boardRect.width || board.parentElement?.offsetWidth;
+    const fallbackHeight =
+        boardRect.height || board.parentElement?.offsetHeight;
 
     return {
         width: Math.max(
-            TILE_MIN_WIDTH,
-            gridRect.width || fallbackRect?.width || TILE_MIN_WIDTH
+            PAGE_TILE_MIN_WIDTH,
+            fallbackWidth || PAGE_TILE_MIN_WIDTH
         ),
         height: Math.max(
-            TILE_MIN_HEIGHT,
-            gridRect.height || fallbackRect?.height || TILE_MIN_HEIGHT
+            PAGE_TILE_MIN_HEIGHT,
+            fallbackHeight || PAGE_TILE_MIN_HEIGHT
         ),
     };
 };
@@ -1823,8 +2315,8 @@ const clampGridNumber = (value, min, max) =>
 
 const getLayoutGridMetrics = () => {
     const bounds = getTileBounds();
-    const cellWidth = bounds.width / LAYOUT_GRID_COLUMNS;
-    const cellHeight = bounds.height / LAYOUT_GRID_ROWS;
+    const cellWidth = bounds.width / PAGE_GRID_COLUMNS;
+    const cellHeight = bounds.height / PAGE_GRID_ROWS;
 
     return {
         bounds,
@@ -1832,11 +2324,11 @@ const getLayoutGridMetrics = () => {
         cellHeight,
         minGridW: Math.max(
             LAYOUT_MIN_GRID_W,
-            Math.ceil(TILE_MIN_WIDTH / cellWidth)
+            Math.ceil(PAGE_TILE_MIN_WIDTH / cellWidth)
         ),
         minGridH: Math.max(
             LAYOUT_MIN_GRID_H,
-            Math.ceil(TILE_MIN_HEIGHT / cellHeight)
+            Math.ceil(PAGE_TILE_MIN_HEIGHT / cellHeight)
         ),
     };
 };
@@ -1846,22 +2338,22 @@ const clampGridLayout = ({ x, y, w, h }) => {
     const nextW = clampGridNumber(
         Math.round(Number(w) || minGridW),
         minGridW,
-        LAYOUT_GRID_COLUMNS
+        PAGE_GRID_COLUMNS
     );
     const nextH = clampGridNumber(
         Math.round(Number(h) || minGridH),
         minGridH,
-        LAYOUT_GRID_ROWS
+        PAGE_GRID_ROWS
     );
     const nextX = clampGridNumber(
         Math.round(Number(x) || 0),
         0,
-        LAYOUT_GRID_COLUMNS - nextW
+        PAGE_GRID_COLUMNS - nextW
     );
     const nextY = clampGridNumber(
         Math.round(Number(y) || 0),
         0,
-        LAYOUT_GRID_ROWS - nextH
+        PAGE_GRID_ROWS - nextH
     );
 
     return { x: nextX, y: nextY, w: nextW, h: nextH };
@@ -1898,19 +2390,14 @@ const snapTileLayoutToGrid = (layout) =>
     });
 
 const getLayoutStorageKey = () =>
-    `${LAYOUT_STORAGE_KEY_PREFIX}:${String(
+    `${PAGE_LAYOUT_STORAGE_KEY_PREFIX}:${String(
         viewingRoomId || selectedVoiceRoomId || 'default'
     ).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
 
 const getKnownLayoutItemTypes = () =>
     new Set([
-        LAYOUT_ITEM_TYPES.LOCAL,
-        LAYOUT_ITEM_TYPES.LOCAL_PEER,
-        LAYOUT_ITEM_TYPES.REMOTE_PEER,
-        LAYOUT_ITEM_TYPES.SCREEN_SHARE,
-        LAYOUT_ITEM_TYPES.PLACEHOLDER,
-        LAYOUT_ITEM_TYPES.ROOM,
-        LAYOUT_ITEM_TYPES.CHAT,
+        ...Object.values(LAYOUT_ITEM_TYPES),
+        ...Object.values(PAGE_COMPONENT_TYPES),
     ]);
 
 const serializeLayoutItems = () => {
@@ -1944,14 +2431,14 @@ const serializeLayoutItems = () => {
 };
 
 const normalizeLoadedLayoutItems = (payload) => {
-    if (!payload || payload.version !== LAYOUT_STORAGE_VERSION) {
+    if (!payload || payload.version !== PAGE_STORAGE_VERSION) {
         return [];
     }
 
     if (
         payload.grid &&
-        (Number(payload.grid.columns) !== LAYOUT_GRID_COLUMNS ||
-            Number(payload.grid.rows) !== LAYOUT_GRID_ROWS)
+        (Number(payload.grid.columns) !== PAGE_GRID_COLUMNS ||
+            Number(payload.grid.rows) !== PAGE_GRID_ROWS)
     ) {
         // Grid changes are still normalized below; incompatible payloads should
         // never be applied raw.
@@ -2036,11 +2523,11 @@ const showLayoutSaveStatus = (message) => {
 };
 
 const buildLayoutStoragePayload = () => ({
-    version: LAYOUT_STORAGE_VERSION,
+    version: PAGE_STORAGE_VERSION,
     updatedAt: new Date().toISOString(),
     grid: {
-        columns: LAYOUT_GRID_COLUMNS,
-        rows: LAYOUT_GRID_ROWS,
+        columns: PAGE_GRID_COLUMNS,
+        rows: PAGE_GRID_ROWS,
     },
     items: serializeLayoutItems(),
     preferences: layoutPreferences
@@ -2068,11 +2555,10 @@ refreshSavedLayoutItems();
 
 const clampTileLayout = ({ x, y, width, height, zIndex }) => {
     const bounds = getTileBounds();
-    const nextWidth = Math.min(Math.max(width, TILE_MIN_WIDTH), bounds.width);
-    const nextHeight = Math.min(
-        Math.max(height, TILE_MIN_HEIGHT),
-        bounds.height
-    );
+    const minW = PAGE_TILE_MIN_WIDTH;
+    const minH = PAGE_TILE_MIN_HEIGHT;
+    const nextWidth = Math.min(Math.max(width, minW), bounds.width);
+    const nextHeight = Math.min(Math.max(height, minH), bounds.height);
 
     return {
         x: Math.min(Math.max(0, x), Math.max(0, bounds.width - nextWidth)),
@@ -2107,6 +2593,10 @@ const hasTileMediaTracks = (tile) => {
 };
 
 const getLayoutItemTypeForTile = (tile, tileType) => {
+    if (tile.dataset.pageLayoutType) {
+        return tile.dataset.pageLayoutType;
+    }
+
     if (tile.dataset.layoutComponentType) {
         return tile.dataset.layoutComponentType;
     }
@@ -2289,12 +2779,13 @@ const applyTileLayout = (tile, layout, { syncItem = true } = {}) => {
 };
 
 const getCurrentTileLayout = (tile) => {
+    const board = pageLayoutBoard || videoGrid;
     const tileRect = tile.getBoundingClientRect();
-    const gridRect = videoGrid.getBoundingClientRect();
+    const boardRect = board.getBoundingClientRect();
 
     return clampTileLayout({
-        x: tileRect.left - gridRect.left + videoGrid.scrollLeft,
-        y: tileRect.top - gridRect.top + videoGrid.scrollTop,
+        x: tileRect.left - boardRect.left + board.scrollLeft,
+        y: tileRect.top - boardRect.top + board.scrollTop,
         width: tileRect.width,
         height: tileRect.height,
         zIndex: getTileLayoutZIndex(tile),
@@ -2350,62 +2841,28 @@ const applySavedTileLayout = (tile) => {
 };
 
 const getLayoutComponentId = (type) =>
-    type === LAYOUT_ITEM_TYPES.LOCAL_PEER
-        ? 'local-video'
-        : `layout-component-${type}`;
+    type === LAYOUT_ITEM_TYPES.LOCAL_PEER ? 'local-video' : `page-tile-${type}`;
 
-const getDefaultLayoutItems = () => {
-    const items = [
-        {
-            id: `component-${LAYOUT_ITEM_TYPES.ROOM}`,
-            type: LAYOUT_ITEM_TYPES.ROOM,
-            grid: { x: 0, y: 0, w: 7, h: 4 },
-            visible: true,
-        },
-        {
-            id: `component-${LAYOUT_ITEM_TYPES.CHAT}`,
-            type: LAYOUT_ITEM_TYPES.CHAT,
-            grid: { x: 16, y: 0, w: 8, h: 7 },
-            visible: true,
-        },
-    ];
-
-    const localTile = document.getElementById('local-video');
-
-    items.push({
-        id: localTile
-            ? getTileLayoutId(localTile)
-            : `local-${sanitizeLayoutIdPart(localPeerId || socket?.id || 'me')}`,
-        type: LAYOUT_ITEM_TYPES.LOCAL_PEER,
-        grid: { x: 8, y: 0, w: 7, h: 4 },
+const getDefaultLayoutItems = () => [
+    {
+        id: `page-${PAGE_COMPONENT_TYPES.SIDEBAR_PANEL}`,
+        type: PAGE_COMPONENT_TYPES.SIDEBAR_PANEL,
+        grid: { x: 0, y: 0, w: 5, h: 18 },
         visible: true,
-    });
-
-    getVideoTiles()
-        .filter(
-            (tile) =>
-                !tile.dataset.layoutComponentType && tile.id !== 'local-video'
-        )
-        .forEach((tile, index) => {
-            const type = getLayoutItemTypeForTile(tile, tile.dataset.tileType);
-            const column = index % 3;
-            const row = Math.floor(index / 3);
-
-            items.push({
-                id: getTileLayoutId(tile),
-                type,
-                grid: {
-                    x: column * 6,
-                    y: 4 + row * 4,
-                    w: 6,
-                    h: 4,
-                },
-                visible: true,
-            });
-        });
-
-    return items;
-};
+    },
+    {
+        id: `page-${PAGE_COMPONENT_TYPES.STAGE_PANEL}`,
+        type: PAGE_COMPONENT_TYPES.STAGE_PANEL,
+        grid: { x: 5, y: 0, w: 21, h: 18 },
+        visible: true,
+    },
+    {
+        id: `page-${PAGE_COMPONENT_TYPES.CHAT_PANEL}`,
+        type: PAGE_COMPONENT_TYPES.CHAT_PANEL,
+        grid: { x: 26, y: 0, w: 6, h: 18 },
+        visible: true,
+    },
+];
 
 const getLayoutComponentDisplayState = (type, config = {}) => {
     if (type === LAYOUT_ITEM_TYPES.ROOM) {
@@ -2461,6 +2918,29 @@ const getLayoutComponentDisplayState = (type, config = {}) => {
 
 const renderLayoutComponentTile = (tile) => {
     const type = tile.dataset.layoutComponentType;
+    if (REAL_DOM_PAGE_TYPES.has(type)) {
+        const itemId = tile.dataset.layoutItemId || tile.dataset.layoutId;
+        const item = getTileLayoutItem(itemId);
+        const nextLayoutId = getTileLayoutId(tile);
+
+        tile.dataset.tileType = type;
+        tile.dataset.peerLabel = getPagePanelLabel(type);
+        tile.classList.add('layout-component-tile');
+        tile.classList.toggle('is-layout-editing', layoutEditMode);
+        tile.dataset.layoutId = nextLayoutId;
+        syncTileLayoutItemFromElement(tile, {
+            id: nextLayoutId,
+            type,
+            visible: item?.visible !== false,
+            positioned: tile.classList.contains('is-positioned'),
+        });
+
+        if (layoutEditMode) {
+            ensureLayoutComponentActions();
+        }
+        return;
+    }
+
     const itemId = tile.dataset.layoutItemId || tile.dataset.layoutId;
     const item = getTileLayoutItem(itemId);
     const savedItem = getSavedLayoutItemPreference(itemId || '');
@@ -2594,33 +3074,17 @@ const getExistingLayoutComponentTile = (type) => {
 };
 
 const addLayoutComponent = (type) => {
-    const allowedTypes = new Set(LAYOUT_SINGLETON_COMPONENT_TYPES);
+    const allowedTypes = PAGE_SINGLETON_TYPES;
 
     if (!allowedTypes.has(type)) {
         return null;
     }
 
-    let tile = getExistingLayoutComponentTile(type);
-
-    if (!tile && type === LAYOUT_ITEM_TYPES.LOCAL_PEER) {
-        addVideoStream(document.createElement('video'), new MediaStream());
-        tile = getExistingLayoutComponentTile(type);
-    }
+    const tile = getExistingLayoutComponentTile(type);
 
     if (!tile) {
-        tile = document.createElement('div');
-        tile.id = getLayoutComponentId(type);
-        tile.className = 'video-tile layout-component-tile';
-        tile.dataset.layoutComponentType = type;
-        videoGrid.append(tile);
-    }
-
-    if (type !== LAYOUT_ITEM_TYPES.LOCAL_PEER) {
-        tile.dataset.layoutComponentType = type;
-        renderLayoutComponentTile(tile);
-    } else {
-        ensureTileStructure(tile);
-        updateVideoTileStatus(tile);
+        PL_WARN('Cannot recreate missing real DOM page panel:', type);
+        return null;
     }
 
     const layoutId = getTileLayoutId(tile);
@@ -2647,9 +3111,7 @@ const addLayoutComponent = (type) => {
         layoutStorageHydrating && savedItem
             ? savedItem.visible
             : layoutStorageHydrating
-              ? type === LAYOUT_ITEM_TYPES.LOCAL_PEER
-                  ? getLayoutPreference('autoShowLocalPeer')
-                  : true
+              ? true
               : true;
     tile.classList.toggle('is-layout-hidden', !visible);
     setTileLayoutItemVisibility(tile.dataset.layoutItemId, visible);
@@ -2698,17 +3160,18 @@ const resetDefaultLayout = () => {
     layoutResetDefaultButton.querySelector('span').textContent = '恢复默认布局';
     clearSavedLayout();
 
-    [LAYOUT_ITEM_TYPES.ROOM, LAYOUT_ITEM_TYPES.CHAT].forEach((type) => {
+    const defaultItems = getDefaultLayoutItems();
+    const pageTypes = CORE_PAGE_TYPES;
+
+    pageTypes.forEach((type) => {
         addLayoutComponent(type);
     });
 
-    getDefaultLayoutItems().forEach((item) => {
+    defaultItems.forEach((item) => {
         const tile =
             item.type === LAYOUT_ITEM_TYPES.LOCAL_PEER
                 ? document.getElementById('local-video')
-                : document.getElementById(
-                      item.id.replace('component-', 'layout-component-')
-                  ) ||
+                : document.getElementById(getLayoutComponentId(item.type)) ||
                   getVideoTiles().find(
                       (candidate) => getTileLayoutId(candidate) === item.id
                   );
@@ -2759,14 +3222,37 @@ const applyStoredLayoutToExistingTile = (item) => {
     tile.classList.toggle('is-layout-hidden', !item.visible);
 };
 
+const applyPageLayoutItemToPanel = (item) => {
+    const tile = getExistingLayoutComponentTile(item.type);
+
+    if (!tile) {
+        return;
+    }
+
+    applyTileLayout(
+        tile,
+        convertGridLayoutToPixels({
+            ...item.grid,
+            zIndex: item.z || getNextTileLayoutZIndex(),
+        })
+    );
+    setTileLayoutItemVisibility(tile.dataset.layoutItemId, item.visible);
+    tile.classList.toggle('is-layout-hidden', !item.visible);
+};
+
 const initializeLayoutFromStorage = () => {
     const initialItems = getInitialLayoutItems();
 
     layoutStorageHydrating = true;
     try {
         initialItems.forEach((item) => {
-            if (LAYOUT_SINGLETON_COMPONENT_TYPES.includes(item.type)) {
-                addLayoutComponent(item.type);
+            if (PAGE_SINGLETON_TYPES.has(item.type)) {
+                const existing = getExistingLayoutComponentTile(item.type);
+                if (!existing) {
+                    addLayoutComponent(item.type);
+                } else {
+                    applyPageLayoutItemToPanel(item);
+                }
                 return;
             }
 
@@ -2826,17 +3312,20 @@ function toggleLayoutComponentConfig(tile) {
     panel.className = 'layout-config-panel';
     panel.dataset.targetLayoutId = itemId;
 
-    const header = document.createElement('div');
-    header.className = 'layout-config-header';
-    header.textContent = LAYOUT_COMPONENT_LABELS[item.type] || item.type;
+    const headerEl = document.createElement('div');
+    headerEl.className = 'layout-config-header';
+    headerEl.textContent =
+        PAGE_COMPONENT_LABELS[item.type] ||
+        LAYOUT_COMPONENT_LABELS[item.type] ||
+        item.type;
     const closeButton = document.createElement('button');
     closeButton.className = 'layout-config-close';
     closeButton.type = 'button';
     closeButton.setAttribute('aria-label', '关闭设置');
     closeButton.textContent = '\u00D7';
     closeButton.addEventListener('click', closeLayoutComponentConfig);
-    header.append(closeButton);
-    panel.append(header);
+    headerEl.append(closeButton);
+    panel.append(headerEl);
 
     const options = document.createElement('div');
     options.className = 'layout-config-options';
@@ -3018,7 +3507,9 @@ function renderLayoutComponentMenu() {
 
     layoutComponentMenu.replaceChildren();
 
-    LAYOUT_SINGLETON_COMPONENT_TYPES.forEach((type) => {
+    const componentTypes = CORE_PAGE_TYPES;
+
+    componentTypes.forEach((type) => {
         const tile = getExistingLayoutComponentTile(type);
         const item = tile?.dataset.layoutItemId
             ? getTileLayoutItem(tile.dataset.layoutItemId)
@@ -3033,7 +3524,7 @@ function renderLayoutComponentMenu() {
         button.dataset.layoutComponentType = type;
         button.setAttribute('role', 'menuitem');
         button.disabled = Boolean(exists && visible && item?.visible !== false);
-        button.textContent = LAYOUT_COMPONENT_LABELS[type];
+        button.textContent = PAGE_COMPONENT_LABELS[type] || type;
         status.className = 'layout-component-menu-status';
         status.textContent = visible ? '已显示' : exists ? '重新显示' : '添加';
         button.append(status);
@@ -3104,9 +3595,6 @@ const ensureLayoutComponentActions = () => {
         }
     });
 };
-
-layoutAddComponentToggle?.addEventListener('click', toggleLayoutComponentMenu);
-layoutResetDefaultButton?.addEventListener('click', resetDefaultLayout);
 
 const createTileAvatarText = (displayName) =>
     String(displayName || 'Guest')
@@ -3231,37 +3719,33 @@ const startTileDrag = (event, tile) => {
 
 const resolveTileResizeLayout = (startLayout, direction, deltaX, deltaY) => {
     const bounds = getTileBounds();
+    const minW = PAGE_TILE_MIN_WIDTH;
+    const minH = PAGE_TILE_MIN_HEIGHT;
     const next = { ...startLayout };
 
     if (direction.includes('e')) {
         next.width = Math.min(
-            Math.max(TILE_MIN_WIDTH, startLayout.width + deltaX),
+            Math.max(minW, startLayout.width + deltaX),
             bounds.width - startLayout.x
         );
     }
 
     if (direction.includes('s')) {
         next.height = Math.min(
-            Math.max(TILE_MIN_HEIGHT, startLayout.height + deltaY),
+            Math.max(minH, startLayout.height + deltaY),
             bounds.height - startLayout.y
         );
     }
 
     if (direction.includes('w')) {
         const right = startLayout.x + startLayout.width;
-        next.x = Math.min(
-            Math.max(0, startLayout.x + deltaX),
-            right - TILE_MIN_WIDTH
-        );
+        next.x = Math.min(Math.max(0, startLayout.x + deltaX), right - minW);
         next.width = right - next.x;
     }
 
     if (direction.includes('n')) {
         const bottom = startLayout.y + startLayout.height;
-        next.y = Math.min(
-            Math.max(0, startLayout.y + deltaY),
-            bottom - TILE_MIN_HEIGHT
-        );
+        next.y = Math.min(Math.max(0, startLayout.y + deltaY), bottom - minH);
         next.height = bottom - next.y;
     }
 
@@ -3351,6 +3835,26 @@ const bindTileLayoutControls = (tile, header) => {
         resizeHandle.dataset.resizeBound = 'true';
     });
 };
+
+_bootstrapRecoveryToolbar();
+
+try {
+    _runPageLayoutInit();
+    ensureLayoutEditModeToggle()?.addEventListener(
+        'click',
+        toggleLayoutEditMode
+    );
+    layoutAddComponentToggle?.addEventListener(
+        'click',
+        toggleLayoutComponentMenu
+    );
+    layoutResetDefaultButton?.addEventListener('click', resetDefaultLayout);
+    syncLayoutEditModeUI();
+} catch (err) {
+    console.error('[page-layout] critical init failure', err);
+    restoreOriginalStaticLayout();
+    _bootstrapRecoveryToolbar();
+}
 
 const closePeerVolumePopover = () => {
     document.querySelector('.peer-volume-popover')?.remove();
@@ -4300,11 +4804,14 @@ const joinVoiceChannel = (roomId) => {
         resetLocalVoiceState();
 
         //removing all videos for client who is leaving.
-        layoutItemsById.forEach((item) =>
-            setTileLayoutItemVisibility(item.id, false)
-        );
+        layoutItemsById.forEach((item) => {
+            if (!PAGE_SINGLETON_TYPES.has(item.type)) {
+                setTileLayoutItemVisibility(item.id, false);
+            }
+        });
         videoGrid.replaceChildren();
         updateMobileTileView();
+        updateMobileRoomState();
 
         hideCallControls();
         updateChannelIndicators();
