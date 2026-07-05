@@ -3,6 +3,7 @@ let socket;
 
 const videoGrid = document.getElementById('video-grid');
 const mainLayout = document.getElementById('main');
+const roomStage = document.querySelector('.room-stage');
 const myVideo = document.createElement('video');
 myVideo.muted = true; // ensures that we do not hear ourselves
 myVideo.playsInline = 'true';
@@ -113,7 +114,8 @@ const CHAT_NAME_STORAGE_KEY = 'webrtc-video-chat-name';
 const NOISE_SUPPRESSION_KEY = 'webrtc-noise-suppression';
 const AI_NOISE_EXPERIMENT_KEY = 'webrtc-ai-noise-experiment';
 const MIC_GAIN_KEY = 'webrtc-mic-gain';
-const TILE_LAYOUT_STORAGE_KEY = 'voice-room-tile-layouts-v1';
+const LAYOUT_STORAGE_VERSION = 1;
+const LAYOUT_STORAGE_KEY_PREFIX = 'voiceLayout:v1';
 const PEER_VOLUME_STORAGE_KEY = 'voice-room-peer-volumes-v1';
 const CHAT_MESSAGE_MAX_LENGTH = 500;
 const CURSOR_THROTTLE_MS = 40;
@@ -124,12 +126,135 @@ const TILE_MIN_HEIGHT = 120;
 const TILE_BASE_Z_INDEX = 2;
 const TILE_RESIZE_DIRECTIONS = ['n', 'e', 's', 'w', 'ne', 'nw', 'se', 'sw'];
 const LAYOUT_GRID_COLUMNS = 24;
-const LAYOUT_GRID_ROWS = 16;
+const LAYOUT_GRID_ROWS = 14;
+const LAYOUT_MIN_GRID_W = 3;
+const LAYOUT_MIN_GRID_H = 2;
 const LAYOUT_ITEM_TYPES = {
     LOCAL: 'local',
+    LOCAL_PEER: 'localPeer',
     REMOTE_PEER: 'remote-peer',
     SCREEN_SHARE: 'screen-share',
     PLACEHOLDER: 'placeholder',
+    ROOM: 'room',
+    CHAT: 'chat',
+};
+const LAYOUT_SINGLETON_COMPONENT_TYPES = [
+    LAYOUT_ITEM_TYPES.ROOM,
+    LAYOUT_ITEM_TYPES.CHAT,
+    LAYOUT_ITEM_TYPES.LOCAL_PEER,
+];
+const LAYOUT_COMPONENT_LABELS = {
+    [LAYOUT_ITEM_TYPES.ROOM]: '房间信息组件',
+    [LAYOUT_ITEM_TYPES.CHAT]: '聊天组件',
+    [LAYOUT_ITEM_TYPES.LOCAL_PEER]: '我的语音组件',
+};
+const COMPONENT_CONFIG_DEFAULTS = {
+    [LAYOUT_ITEM_TYPES.ROOM]: {
+        showRoomName: true,
+        showCopyLink: true,
+        showMemberCount: true,
+    },
+    [LAYOUT_ITEM_TYPES.CHAT]: {
+        compactMode: false,
+        showHeader: true,
+    },
+    [LAYOUT_ITEM_TYPES.LOCAL_PEER]: {
+        showSelfPreview: true,
+        showControls: true,
+    },
+    [LAYOUT_ITEM_TYPES.REMOTE_PEER]: {
+        keepHiddenWhenRejoin: true,
+        showPeerName: true,
+    },
+    [LAYOUT_ITEM_TYPES.SCREEN_SHARE]: {
+        autoShowScreenShare: true,
+        showScreenHeader: true,
+    },
+};
+const LAYOUT_PREFERENCE_DEFAULTS = {
+    autoShowLocalPeer: true,
+    autoShowRemotePeers: true,
+    autoShowScreenShare: true,
+    keepHiddenRemotePeers: true,
+};
+let layoutPreferences = { ...LAYOUT_PREFERENCE_DEFAULTS };
+
+const getDefaultComponentConfig = (type) => {
+    const defaults = COMPONENT_CONFIG_DEFAULTS[type];
+    return defaults ? { ...defaults } : {};
+};
+
+const normalizeComponentConfig = (type, config = {}) => {
+    const defaults = getDefaultComponentConfig(type);
+    const result = {};
+    for (const key of Object.keys(defaults)) {
+        if (key in config && typeof config[key] === typeof defaults[key]) {
+            result[key] = config[key];
+        } else {
+            result[key] = defaults[key];
+        }
+    }
+    return result;
+};
+
+const getLayoutItemConfig = (itemId) => {
+    const item = getTileLayoutItem(itemId);
+    if (!item) {
+        return {};
+    }
+    return normalizeComponentConfig(item.type, item.config);
+};
+
+const updateLayoutItemConfig = (id, patch) => {
+    const item = getTileLayoutItem(id);
+    if (!item) {
+        return;
+    }
+    item.config = normalizeComponentConfig(item.type, {
+        ...item.config,
+        ...patch,
+    });
+    layoutItemsById.set(id, item);
+    saveLayoutToStorage('配置已更新');
+};
+
+const getDefaultLayoutPreferences = () => ({ ...LAYOUT_PREFERENCE_DEFAULTS });
+
+const normalizeLayoutPreferences = (prefs = {}) => {
+    const defaults = getDefaultLayoutPreferences();
+    const result = {};
+    for (const key of Object.keys(defaults)) {
+        result[key] =
+            typeof prefs[key] === 'boolean' ? prefs[key] : defaults[key];
+    }
+    return result;
+};
+
+const updateLayoutPreference = (key, value) => {
+    const prefs = { ...layoutPreferences };
+    prefs[key] = Boolean(value);
+    layoutPreferences = prefs;
+    saveLayoutToStorage('偏好已保存');
+};
+
+const readLayoutPreferencesFromStorage = () => {
+    try {
+        const raw = localStorage.getItem(getLayoutStorageKey());
+        if (!raw) {
+            return getDefaultLayoutPreferences();
+        }
+        const payload = JSON.parse(raw);
+        return normalizeLayoutPreferences(payload.preferences);
+    } catch {
+        return getDefaultLayoutPreferences();
+    }
+};
+
+const getLayoutPreference = (key) => {
+    const prefs = layoutPreferences || getDefaultLayoutPreferences();
+    return prefs[key] !== undefined
+        ? prefs[key]
+        : LAYOUT_PREFERENCE_DEFAULTS[key];
 };
 const cursorSharingMedia = window.matchMedia(
     `(max-width: ${MOBILE_BREAKPOINT}px), (pointer: coarse)`
@@ -170,6 +295,15 @@ const peersWithCallHandler = new WeakSet();
 const presenceMembersByPeerId = new Map();
 const layoutItemsById = new Map();
 let tileLayoutZIndex = TILE_BASE_Z_INDEX;
+let layoutEditMode = false;
+let layoutEditModeToggle;
+let layoutAddComponentToggle;
+let layoutResetDefaultButton;
+let layoutComponentMenu;
+let layoutSaveStatus;
+let layoutResetConfirmTimer;
+let layoutSaveStatusTimer;
+let layoutStorageHydrating = false;
 let noiseAudioContext = null;
 let noiseProcessorNode = null;
 // eslint-disable-next-line no-unused-vars
@@ -217,9 +351,130 @@ const syncLayoutGridMetadata = () => {
 
     videoGrid.dataset.layoutGridColumns = String(LAYOUT_GRID_COLUMNS);
     videoGrid.dataset.layoutGridRows = String(LAYOUT_GRID_ROWS);
+    videoGrid.style.setProperty(
+        '--layout-grid-columns',
+        String(LAYOUT_GRID_COLUMNS)
+    );
+    videoGrid.style.setProperty('--layout-grid-rows', String(LAYOUT_GRID_ROWS));
 };
 
 syncLayoutGridMetadata();
+
+const ensureLayoutEditModeToggle = () => {
+    if (!roomStage || layoutEditModeToggle) {
+        return layoutEditModeToggle;
+    }
+
+    const toolbar = document.createElement('div');
+    const button = document.createElement('button');
+    const icon = document.createElement('i');
+    const label = document.createElement('span');
+    const addButton = document.createElement('button');
+    const addIcon = document.createElement('i');
+    const addLabel = document.createElement('span');
+    const resetButton = document.createElement('button');
+    const resetIcon = document.createElement('i');
+    const resetLabel = document.createElement('span');
+    const menu = document.createElement('div');
+    const status = document.createElement('span');
+
+    toolbar.className = 'stage-layout-toolbar';
+    toolbar.setAttribute('aria-label', '布局工具');
+    button.id = 'layoutEditModeToggle';
+    button.className = 'layout-edit-toggle';
+    button.type = 'button';
+    button.setAttribute('aria-pressed', 'false');
+    icon.className = 'fas fa-border-all';
+    icon.setAttribute('aria-hidden', 'true');
+    label.textContent = '编辑布局';
+    button.append(icon, label);
+
+    addButton.id = 'layoutAddComponentToggle';
+    addButton.className = 'layout-tool-button';
+    addButton.type = 'button';
+    addButton.setAttribute('aria-expanded', 'false');
+    addIcon.className = 'fas fa-plus';
+    addIcon.setAttribute('aria-hidden', 'true');
+    addLabel.textContent = '添加组件';
+    addButton.append(addIcon, addLabel);
+
+    resetButton.id = 'layoutResetDefault';
+    resetButton.className = 'layout-tool-button';
+    resetButton.type = 'button';
+    resetIcon.className = 'fas fa-undo';
+    resetIcon.setAttribute('aria-hidden', 'true');
+    resetLabel.textContent = '恢复默认布局';
+    resetButton.append(resetIcon, resetLabel);
+
+    menu.className = 'layout-component-menu';
+    menu.hidden = true;
+    menu.setAttribute('role', 'menu');
+    menu.setAttribute('aria-label', '添加布局组件');
+
+    status.className = 'layout-save-status';
+    status.textContent = '已保存';
+
+    toolbar.append(button, addButton, resetButton, status, menu);
+    roomStage.prepend(toolbar);
+
+    layoutEditModeToggle = button;
+    layoutAddComponentToggle = addButton;
+    layoutResetDefaultButton = resetButton;
+    layoutComponentMenu = menu;
+    layoutSaveStatus = status;
+    return layoutEditModeToggle;
+};
+
+const syncLayoutEditModeUI = () => {
+    mainLayout?.classList.toggle('is-layout-editing', layoutEditMode);
+    videoGrid?.classList.toggle('is-layout-editing', layoutEditMode);
+
+    if (layoutEditModeToggle) {
+        layoutEditModeToggle.setAttribute(
+            'aria-pressed',
+            String(layoutEditMode)
+        );
+        layoutEditModeToggle.querySelector('span').textContent = layoutEditMode
+            ? '完成编辑'
+            : '编辑布局';
+    }
+
+    [layoutAddComponentToggle, layoutResetDefaultButton].forEach((button) => {
+        if (button) {
+            button.hidden = !layoutEditMode;
+        }
+    });
+
+    if (layoutSaveStatus) {
+        layoutSaveStatus.hidden = !layoutEditMode;
+    }
+
+    getVideoTiles().forEach((tile) => {
+        tile.classList.toggle('is-layout-editing', layoutEditMode);
+    });
+
+    if (layoutEditMode) {
+        closePeerVolumePopover();
+        renderLayoutComponentMenu();
+        ensureLayoutComponentActions();
+    } else {
+        closeLayoutComponentMenu();
+        closeLayoutComponentConfig();
+    }
+};
+
+const setLayoutEditMode = (enabled) => {
+    layoutEditMode = Boolean(enabled);
+    syncLayoutGridMetadata();
+    syncLayoutEditModeUI();
+};
+
+const toggleLayoutEditMode = () => {
+    setLayoutEditMode(!layoutEditMode);
+};
+
+ensureLayoutEditModeToggle()?.addEventListener('click', toggleLayoutEditMode);
+syncLayoutEditModeUI();
 
 const getOrderedTiles = () => {
     const tiles = getVideoTiles();
@@ -856,6 +1111,7 @@ const renderPresenceState = ({ channels = [] } = {}) => {
             const name = document.createElement('span');
             const statuses = document.createElement('span');
             const isMe = member.socketId && socket?.id === member.socketId;
+            const memberPeerId = member.peerId;
 
             item.className = 'channel-member';
             name.className = 'channel-member-name';
@@ -866,6 +1122,60 @@ const renderPresenceState = ({ channels = [] } = {}) => {
             });
 
             item.append(name, statuses);
+
+            if (memberPeerId && memberPeerId !== localPeerId) {
+                const toggleBtn = document.createElement('button');
+                toggleBtn.type = 'button';
+                toggleBtn.className = 'member-toggle-tile';
+                toggleBtn.title = '显示/隐藏组件';
+                toggleBtn.setAttribute('aria-label', '显示/隐藏组件');
+                const toggleIcon = document.createElement('i');
+                const tileForPeer = document.getElementById(memberPeerId);
+                const layoutItemId =
+                    tileForPeer?.dataset.layoutItemId ||
+                    `peer-${sanitizeLayoutIdPart(memberPeerId)}`;
+                const layoutItem = getTileLayoutItem(layoutItemId);
+                const isVisible =
+                    layoutItem?.visible !== false &&
+                    (!tileForPeer ||
+                        !tileForPeer.classList.contains('is-layout-hidden'));
+                toggleIcon.className = isVisible
+                    ? 'fas fa-eye'
+                    : 'fas fa-eye-slash';
+                toggleBtn.append(toggleIcon);
+                toggleBtn.addEventListener('click', (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    toggleMemberTileVisibility(memberPeerId);
+                });
+                statuses.append(toggleBtn);
+            } else if (memberPeerId && memberPeerId === localPeerId) {
+                const toggleBtn = document.createElement('button');
+                toggleBtn.type = 'button';
+                toggleBtn.className = 'member-toggle-tile';
+                toggleBtn.title = '显示/隐藏我的语音组件';
+                toggleBtn.setAttribute('aria-label', '显示/隐藏我的语音组件');
+                const toggleIcon = document.createElement('i');
+                const localTile = document.getElementById('local-video');
+                const layoutItem = localTile?.dataset.layoutItemId
+                    ? getTileLayoutItem(localTile.dataset.layoutItemId)
+                    : null;
+                const isVisible =
+                    layoutItem?.visible !== false &&
+                    (!localTile ||
+                        !localTile.classList.contains('is-layout-hidden'));
+                toggleIcon.className = isVisible
+                    ? 'fas fa-eye'
+                    : 'fas fa-eye-slash';
+                toggleBtn.append(toggleIcon);
+                toggleBtn.addEventListener('click', (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    toggleLocalPeerTileVisibility();
+                });
+                statuses.append(toggleBtn);
+            }
+
             list.append(item);
         });
     });
@@ -895,6 +1205,14 @@ const ensureSocket = () => {
     socket.on('cursor:remove', removeRemoteCursor);
     socket.on('screen:shareStart', ({ peerId }) => {
         screenSharers.add(peerId);
+        if (getLayoutPreference('autoShowScreenShare')) {
+            const tile = document.getElementById(peerId);
+            if (tile && tile.classList.contains('is-layout-hidden')) {
+                setTileLayoutItemVisibility(tile.dataset.layoutItemId, true);
+                tile.classList.remove('is-layout-hidden');
+                bringTileLayoutToFront(tile);
+            }
+        }
         updateAllVideoTileStatus();
         updateMobileTileView();
     });
@@ -1398,6 +1716,12 @@ const sanitizeLayoutIdPart = (value) =>
     String(value || 'unknown').replace(/[^a-zA-Z0-9_-]/g, '-');
 
 const getTileLayoutId = (tile) => {
+    if (tile.dataset.layoutComponentType) {
+        return `component-${sanitizeLayoutIdPart(
+            tile.dataset.layoutComponentType
+        )}`;
+    }
+
     const peerId = tile.dataset.peerId;
 
     if (tile.dataset.tileType === 'screen-share' && peerId) {
@@ -1414,14 +1738,6 @@ const getTileLayoutId = (tile) => {
 const getTileLayoutItemId = (tile) =>
     tile.dataset.layoutItemId || tile.dataset.layoutId || getTileLayoutId(tile);
 
-const getSavedTileLayouts = () => {
-    try {
-        return JSON.parse(localStorage.getItem(TILE_LAYOUT_STORAGE_KEY)) || {};
-    } catch {
-        return {};
-    }
-};
-
 const normalizeTileLayoutZIndex = (value) => {
     const zIndex = Number(value);
 
@@ -1435,16 +1751,15 @@ const saveTileLayout = (layoutId, layout) => {
         return;
     }
 
-    const layouts = getSavedTileLayouts();
-    layouts[layoutId] = {
-        x: Math.round(layout.x),
-        y: Math.round(layout.y),
-        width: Math.round(layout.width),
-        height: Math.round(layout.height),
-        zIndex: normalizeTileLayoutZIndex(layout.zIndex),
-        grid: layout.grid || convertTileLayoutToGrid(layout),
-    };
-    localStorage.setItem(TILE_LAYOUT_STORAGE_KEY, JSON.stringify(layouts));
+    const item = getTileLayoutItem(layoutId);
+
+    if (item) {
+        item.layout = normalizeTileLayout(layout);
+        item.grid = convertTileLayoutToGrid(item.layout);
+        layoutItemsById.set(layoutId, item);
+    }
+
+    saveLayoutToStorage('布局已更新');
 };
 
 const getTileLayoutZIndex = (tile) =>
@@ -1482,6 +1797,8 @@ const bringTileLayoutToFront = (tile) => {
 
     if (tile.classList.contains('is-positioned')) {
         persistCurrentTileLayout(tile);
+    } else {
+        saveLayoutToStorage('布局已更新');
     }
 };
 
@@ -1504,47 +1821,250 @@ const getTileBounds = () => {
 const clampGridNumber = (value, min, max) =>
     Math.min(Math.max(min, value), max);
 
-const convertTileLayoutToGrid = ({ x, y, width, height }) => {
+const getLayoutGridMetrics = () => {
     const bounds = getTileBounds();
     const cellWidth = bounds.width / LAYOUT_GRID_COLUMNS;
     const cellHeight = bounds.height / LAYOUT_GRID_ROWS;
-    const gridX = clampGridNumber(
-        Math.round(x / cellWidth),
+
+    return {
+        bounds,
+        cellWidth,
+        cellHeight,
+        minGridW: Math.max(
+            LAYOUT_MIN_GRID_W,
+            Math.ceil(TILE_MIN_WIDTH / cellWidth)
+        ),
+        minGridH: Math.max(
+            LAYOUT_MIN_GRID_H,
+            Math.ceil(TILE_MIN_HEIGHT / cellHeight)
+        ),
+    };
+};
+
+const clampGridLayout = ({ x, y, w, h }) => {
+    const { minGridW, minGridH } = getLayoutGridMetrics();
+    const nextW = clampGridNumber(
+        Math.round(Number(w) || minGridW),
+        minGridW,
+        LAYOUT_GRID_COLUMNS
+    );
+    const nextH = clampGridNumber(
+        Math.round(Number(h) || minGridH),
+        minGridH,
+        LAYOUT_GRID_ROWS
+    );
+    const nextX = clampGridNumber(
+        Math.round(Number(x) || 0),
         0,
-        LAYOUT_GRID_COLUMNS - 1
+        LAYOUT_GRID_COLUMNS - nextW
     );
-    const gridY = clampGridNumber(
-        Math.round(y / cellHeight),
+    const nextY = clampGridNumber(
+        Math.round(Number(y) || 0),
         0,
-        LAYOUT_GRID_ROWS - 1
-    );
-    const gridW = clampGridNumber(
-        Math.round(width / cellWidth),
-        1,
-        LAYOUT_GRID_COLUMNS - gridX
-    );
-    const gridH = clampGridNumber(
-        Math.round(height / cellHeight),
-        1,
-        LAYOUT_GRID_ROWS - gridY
+        LAYOUT_GRID_ROWS - nextH
     );
 
-    return { x: gridX, y: gridY, w: gridW, h: gridH };
+    return { x: nextX, y: nextY, w: nextW, h: nextH };
+};
+
+const convertTileLayoutToGrid = ({ x, y, width, height }) => {
+    const { cellWidth, cellHeight } = getLayoutGridMetrics();
+
+    return clampGridLayout({
+        x: Math.round(x / cellWidth),
+        y: Math.round(y / cellHeight),
+        w: Math.round(width / cellWidth),
+        h: Math.round(height / cellHeight),
+    });
 };
 
 const convertGridLayoutToPixels = ({ x, y, w, h, zIndex }) => {
-    const bounds = getTileBounds();
-    const cellWidth = bounds.width / LAYOUT_GRID_COLUMNS;
-    const cellHeight = bounds.height / LAYOUT_GRID_ROWS;
+    const grid = clampGridLayout({ x, y, w, h });
+    const { cellWidth, cellHeight } = getLayoutGridMetrics();
 
     return clampTileLayout({
-        x: x * cellWidth,
-        y: y * cellHeight,
-        width: w * cellWidth,
-        height: h * cellHeight,
+        x: grid.x * cellWidth,
+        y: grid.y * cellHeight,
+        width: grid.w * cellWidth,
+        height: grid.h * cellHeight,
         zIndex,
     });
 };
+
+const snapTileLayoutToGrid = (layout) =>
+    convertGridLayoutToPixels({
+        ...convertTileLayoutToGrid(layout),
+        zIndex: layout.zIndex,
+    });
+
+const getLayoutStorageKey = () =>
+    `${LAYOUT_STORAGE_KEY_PREFIX}:${String(
+        viewingRoomId || selectedVoiceRoomId || 'default'
+    ).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+
+const getKnownLayoutItemTypes = () =>
+    new Set([
+        LAYOUT_ITEM_TYPES.LOCAL,
+        LAYOUT_ITEM_TYPES.LOCAL_PEER,
+        LAYOUT_ITEM_TYPES.REMOTE_PEER,
+        LAYOUT_ITEM_TYPES.SCREEN_SHARE,
+        LAYOUT_ITEM_TYPES.PLACEHOLDER,
+        LAYOUT_ITEM_TYPES.ROOM,
+        LAYOUT_ITEM_TYPES.CHAT,
+    ]);
+
+const serializeLayoutItems = () => {
+    const seen = new Set();
+    const items = [];
+
+    layoutItemsById.forEach((item) => {
+        if (!item?.id || seen.has(item.id)) {
+            return;
+        }
+
+        const grid = clampGridLayout(item.grid || item.layout || {});
+        seen.add(item.id);
+        items.push({
+            id: item.id,
+            type: item.type,
+            x: grid.x,
+            y: grid.y,
+            w: grid.w,
+            h: grid.h,
+            z: normalizeTileLayoutZIndex(item.layout?.zIndex),
+            visible: item.visible !== false,
+            config: {
+                ...normalizeComponentConfig(item.type, item.config),
+                peerId: item.peerId || null,
+            },
+        });
+    });
+
+    return items;
+};
+
+const normalizeLoadedLayoutItems = (payload) => {
+    if (!payload || payload.version !== LAYOUT_STORAGE_VERSION) {
+        return [];
+    }
+
+    if (
+        payload.grid &&
+        (Number(payload.grid.columns) !== LAYOUT_GRID_COLUMNS ||
+            Number(payload.grid.rows) !== LAYOUT_GRID_ROWS)
+    ) {
+        // Grid changes are still normalized below; incompatible payloads should
+        // never be applied raw.
+    }
+
+    const knownTypes = getKnownLayoutItemTypes();
+    const seen = new Set();
+
+    return (Array.isArray(payload.items) ? payload.items : [])
+        .map((item) => {
+            if (!item?.id || !knownTypes.has(item.type) || seen.has(item.id)) {
+                return null;
+            }
+
+            seen.add(item.id);
+            const grid = clampGridLayout({
+                x: item.x,
+                y: item.y,
+                w: item.w,
+                h: item.h,
+            });
+
+            return {
+                id: String(item.id),
+                type: item.type,
+                grid,
+                z: normalizeTileLayoutZIndex(item.z),
+                visible: item.visible !== false,
+                config: {
+                    ...normalizeComponentConfig(item.type, item.config),
+                    peerId:
+                        typeof item.config?.peerId === 'string'
+                            ? item.config.peerId
+                            : null,
+                },
+            };
+        })
+        .filter(Boolean);
+};
+
+const loadLayoutFromStorage = () => {
+    try {
+        const raw = localStorage.getItem(getLayoutStorageKey());
+
+        if (!raw) {
+            return [];
+        }
+
+        return normalizeLoadedLayoutItems(JSON.parse(raw));
+    } catch (error) {
+        console.warn(
+            '[layout] saved layout is invalid; using defaults.',
+            error
+        );
+        return [];
+    }
+};
+
+const savedLayoutItemsById = new Map();
+
+const refreshSavedLayoutItems = () => {
+    savedLayoutItemsById.clear();
+    loadLayoutFromStorage().forEach((item) => {
+        savedLayoutItemsById.set(item.id, item);
+    });
+    layoutPreferences = readLayoutPreferencesFromStorage();
+};
+
+const getSavedLayoutItemPreference = (itemId) =>
+    savedLayoutItemsById.get(itemId);
+
+const showLayoutSaveStatus = (message) => {
+    if (!layoutSaveStatus) {
+        return;
+    }
+
+    layoutSaveStatus.textContent = message;
+    clearTimeout(layoutSaveStatusTimer);
+    layoutSaveStatusTimer = setTimeout(() => {
+        layoutSaveStatus.textContent = '已保存';
+    }, 1800);
+};
+
+const buildLayoutStoragePayload = () => ({
+    version: LAYOUT_STORAGE_VERSION,
+    updatedAt: new Date().toISOString(),
+    grid: {
+        columns: LAYOUT_GRID_COLUMNS,
+        rows: LAYOUT_GRID_ROWS,
+    },
+    items: serializeLayoutItems(),
+    preferences: layoutPreferences
+        ? { ...layoutPreferences }
+        : getDefaultLayoutPreferences(),
+});
+
+const saveLayoutToStorage = (message = '已保存') => {
+    if (layoutStorageHydrating) {
+        return;
+    }
+
+    const payload = buildLayoutStoragePayload();
+    localStorage.setItem(getLayoutStorageKey(), JSON.stringify(payload));
+    refreshSavedLayoutItems();
+    showLayoutSaveStatus(message);
+};
+
+const clearSavedLayout = () => {
+    localStorage.removeItem(getLayoutStorageKey());
+    refreshSavedLayoutItems();
+};
+
+refreshSavedLayoutItems();
 
 const clampTileLayout = ({ x, y, width, height, zIndex }) => {
     const bounds = getTileBounds();
@@ -1587,12 +2107,16 @@ const hasTileMediaTracks = (tile) => {
 };
 
 const getLayoutItemTypeForTile = (tile, tileType) => {
+    if (tile.dataset.layoutComponentType) {
+        return tile.dataset.layoutComponentType;
+    }
+
     if (tileType === 'screen-share') {
         return LAYOUT_ITEM_TYPES.SCREEN_SHARE;
     }
 
     if (tile.id === 'local-video') {
-        return LAYOUT_ITEM_TYPES.LOCAL;
+        return LAYOUT_ITEM_TYPES.LOCAL_PEER;
     }
 
     if (!hasTileMediaTracks(tile)) {
@@ -1610,6 +2134,7 @@ const createTileLayoutItem = ({
     layout,
     visible = true,
     positioned = false,
+    config,
 }) => {
     const nextLayout = normalizeTileLayout(layout);
 
@@ -1622,6 +2147,7 @@ const createTileLayoutItem = ({
         positioned: Boolean(positioned),
         layout: nextLayout,
         grid: convertTileLayoutToGrid(nextLayout),
+        config: normalizeComponentConfig(type, config),
     };
 };
 
@@ -1632,6 +2158,10 @@ const upsertTileLayoutItem = (tile, updates = {}) => {
     const previous = getTileLayoutItem(id);
     const layout =
         updates.layout || previous?.layout || getCurrentTileLayout(tile);
+    const mergedConfig = {
+        ...(previous?.config || {}),
+        ...(updates.config || {}),
+    };
     const item = createTileLayoutItem({
         id,
         type: updates.type || previous?.type || LAYOUT_ITEM_TYPES.PLACEHOLDER,
@@ -1643,6 +2173,7 @@ const upsertTileLayoutItem = (tile, updates = {}) => {
             updates.positioned ??
             previous?.positioned ??
             tile.classList.contains('is-positioned'),
+        config: mergedConfig,
     });
 
     layoutItemsById.set(id, item);
@@ -1774,6 +2305,14 @@ const persistCurrentTileLayout = (tile) => {
     persistTileLayoutItem(tile);
 };
 
+const finishTileLayoutInteraction = (tile) => {
+    if (layoutEditMode) {
+        applyTileLayout(tile, snapTileLayoutToGrid(getCurrentTileLayout(tile)));
+    }
+
+    persistCurrentTileLayout(tile);
+};
+
 const clampPositionedTileLayouts = () => {
     if (isMobileLayout()) {
         return;
@@ -1792,12 +2331,782 @@ const applySavedTileLayout = (tile) => {
         return;
     }
 
-    const layout = getSavedTileLayouts()[tile.dataset.layoutId];
+    const savedItem = getSavedLayoutItemPreference(tile.dataset.layoutId);
 
-    if (layout) {
-        applyTileLayout(tile, normalizeTileLayout(layout));
+    if (savedItem) {
+        applyTileLayout(
+            tile,
+            convertGridLayoutToPixels({
+                ...savedItem.grid,
+                zIndex: savedItem.z,
+            })
+        );
+        setTileLayoutItemVisibility(
+            tile.dataset.layoutItemId,
+            savedItem.visible
+        );
+        tile.classList.toggle('is-layout-hidden', !savedItem.visible);
     }
 };
+
+const getLayoutComponentId = (type) =>
+    type === LAYOUT_ITEM_TYPES.LOCAL_PEER
+        ? 'local-video'
+        : `layout-component-${type}`;
+
+const getDefaultLayoutItems = () => {
+    const items = [
+        {
+            id: `component-${LAYOUT_ITEM_TYPES.ROOM}`,
+            type: LAYOUT_ITEM_TYPES.ROOM,
+            grid: { x: 0, y: 0, w: 7, h: 4 },
+            visible: true,
+        },
+        {
+            id: `component-${LAYOUT_ITEM_TYPES.CHAT}`,
+            type: LAYOUT_ITEM_TYPES.CHAT,
+            grid: { x: 16, y: 0, w: 8, h: 7 },
+            visible: true,
+        },
+    ];
+
+    const localTile = document.getElementById('local-video');
+
+    items.push({
+        id: localTile
+            ? getTileLayoutId(localTile)
+            : `local-${sanitizeLayoutIdPart(localPeerId || socket?.id || 'me')}`,
+        type: LAYOUT_ITEM_TYPES.LOCAL_PEER,
+        grid: { x: 8, y: 0, w: 7, h: 4 },
+        visible: true,
+    });
+
+    getVideoTiles()
+        .filter(
+            (tile) =>
+                !tile.dataset.layoutComponentType && tile.id !== 'local-video'
+        )
+        .forEach((tile, index) => {
+            const type = getLayoutItemTypeForTile(tile, tile.dataset.tileType);
+            const column = index % 3;
+            const row = Math.floor(index / 3);
+
+            items.push({
+                id: getTileLayoutId(tile),
+                type,
+                grid: {
+                    x: column * 6,
+                    y: 4 + row * 4,
+                    w: 6,
+                    h: 4,
+                },
+                visible: true,
+            });
+        });
+
+    return items;
+};
+
+const getLayoutComponentDisplayState = (type, config = {}) => {
+    if (type === LAYOUT_ITEM_TYPES.ROOM) {
+        const channelName = getChannelName(viewingRoomId || joinedVoiceRoomId);
+        const currentMemberList = document.querySelector(
+            `[data-members-for="${viewingRoomId || joinedVoiceRoomId}"]`
+        );
+        const memberCount =
+            currentMemberList?.querySelectorAll('.channel-member').length || 0;
+        const body = [];
+        if (config.showRoomName !== false) {
+            body.push(`频道：${channelName}`);
+        }
+        if (config.showMemberCount !== false) {
+            body.push(`在线成员：${memberCount}`);
+        }
+        body.push(joinedVoiceRoomId ? '语音状态：已加入' : '语音状态：未加入');
+
+        return {
+            title: '房间信息',
+            body: body.length ? body : ['房间信息组件'],
+            footer: '房间组件',
+            showCopyLink: config.showCopyLink !== false,
+        };
+    }
+
+    if (type === LAYOUT_ITEM_TYPES.CHAT) {
+        const messages = Array.from(
+            chatMessages?.querySelectorAll('.chat-message') || []
+        )
+            .slice(-3)
+            .map((message) => message.textContent.trim())
+            .filter(Boolean);
+
+        return {
+            title: '聊天',
+            body: messages.length
+                ? messages
+                : ['聊天组件已添加', '普通聊天输入仍在右侧面板中'],
+            footer: '聊天组件',
+            compactMode: config.compactMode === true,
+        };
+    }
+
+    return {
+        title: '我的语音',
+        body: ['本地语音组件', joinedVoiceRoomId ? '已加入语音' : '未加入语音'],
+        footer: '我的语音组件',
+        showSelfPreview: config.showSelfPreview !== false,
+        showControls: config.showControls !== false,
+    };
+};
+
+const renderLayoutComponentTile = (tile) => {
+    const type = tile.dataset.layoutComponentType;
+    const itemId = tile.dataset.layoutItemId || tile.dataset.layoutId;
+    const item = getTileLayoutItem(itemId);
+    const savedItem = getSavedLayoutItemPreference(itemId || '');
+    const config = normalizeComponentConfig(
+        type,
+        item?.config || savedItem?.config
+    );
+    const { header, body, footer } = ensureTileStructure(tile);
+    const avatar = header.querySelector('.tile-avatar');
+    const title = header.querySelector('.tile-title');
+    const badges = header.querySelector('.tile-badges');
+    const state = getLayoutComponentDisplayState(type, config);
+
+    tile.dataset.tileType = type;
+    tile.dataset.peerLabel = state.title;
+    tile.classList.add('layout-component-tile');
+    tile.classList.toggle('is-layout-editing', layoutEditMode);
+    tile.classList.toggle(
+        'chat-compact-mode',
+        type === LAYOUT_ITEM_TYPES.CHAT && state.compactMode
+    );
+
+    if (avatar) {
+        avatar.textContent = createTileAvatarText(state.title);
+    }
+
+    if (title) {
+        title.textContent = state.title;
+    }
+
+    if (badges) {
+        badges.replaceChildren();
+    }
+
+    body.replaceChildren();
+    const content = document.createElement('div');
+    content.className = 'layout-component-content';
+    state.body.forEach((line) => {
+        const itemEl = document.createElement('p');
+        itemEl.textContent = line;
+        content.append(itemEl);
+    });
+    body.append(content);
+
+    if (type === LAYOUT_ITEM_TYPES.ROOM && state.showCopyLink) {
+        const linkBtn = document.createElement('button');
+        linkBtn.type = 'button';
+        linkBtn.className = 'layout-component-link-btn';
+        linkBtn.textContent = '复制频道链接';
+        const linkIcon = document.createElement('i');
+        linkIcon.className = 'fas fa-link';
+        linkBtn.prepend(linkIcon);
+        linkBtn.addEventListener('click', async () => {
+            try {
+                await navigator.clipboard.writeText(
+                    getChannelUrl(getCopyRoomId())
+                );
+                linkBtn.textContent = '已复制';
+                const checkIcon = document.createElement('i');
+                checkIcon.className = 'fas fa-check';
+                linkBtn.prepend(checkIcon);
+                setTimeout(() => {
+                    linkBtn.textContent = '复制频道链接';
+                    const restoreIcon = document.createElement('i');
+                    restoreIcon.className = 'fas fa-link';
+                    linkBtn.prepend(restoreIcon);
+                }, 1500);
+            } catch {
+                // noop
+            }
+        });
+        content.append(linkBtn);
+    }
+
+    if (type === LAYOUT_ITEM_TYPES.CHAT && state.showHeader !== false) {
+        header.style.display = '';
+    } else if (type === LAYOUT_ITEM_TYPES.CHAT && state.showHeader === false) {
+        header.style.display = 'none';
+    } else if (type !== LAYOUT_ITEM_TYPES.CHAT) {
+        header.style.display = '';
+    }
+
+    if (type === LAYOUT_ITEM_TYPES.LOCAL_PEER) {
+        const bodyEl = tile.querySelector('.tile-body');
+        const localVideo = bodyEl?.querySelector('video');
+        const localPlaceholder = bodyEl?.querySelector('.voice-placeholder');
+        if (!state.showSelfPreview) {
+            if (localVideo) {
+                localVideo.style.display = 'none';
+            }
+            if (localPlaceholder) {
+                localPlaceholder.style.display = 'none';
+            }
+        } else {
+            if (localVideo) {
+                localVideo.style.display = '';
+            }
+            if (localPlaceholder) {
+                localPlaceholder.style.display = '';
+            }
+        }
+        const localActions = tile.querySelector('.tile-overlay');
+        if (localActions) {
+            localActions.style.display = state.showControls ? '' : 'none';
+        }
+    }
+
+    footer.textContent = state.footer;
+
+    const nextLayoutId = getTileLayoutId(tile);
+    tile.dataset.layoutId = nextLayoutId;
+    syncTileLayoutItemFromElement(tile, {
+        id: nextLayoutId,
+        type,
+        visible: true,
+        positioned: tile.classList.contains('is-positioned'),
+        config,
+    });
+
+    if (layoutEditMode) {
+        ensureLayoutComponentActions();
+    }
+};
+
+const getExistingLayoutComponentTile = (type) => {
+    if (type === LAYOUT_ITEM_TYPES.LOCAL_PEER) {
+        return document.getElementById('local-video');
+    }
+
+    return document.getElementById(getLayoutComponentId(type));
+};
+
+const addLayoutComponent = (type) => {
+    const allowedTypes = new Set(LAYOUT_SINGLETON_COMPONENT_TYPES);
+
+    if (!allowedTypes.has(type)) {
+        return null;
+    }
+
+    let tile = getExistingLayoutComponentTile(type);
+
+    if (!tile && type === LAYOUT_ITEM_TYPES.LOCAL_PEER) {
+        addVideoStream(document.createElement('video'), new MediaStream());
+        tile = getExistingLayoutComponentTile(type);
+    }
+
+    if (!tile) {
+        tile = document.createElement('div');
+        tile.id = getLayoutComponentId(type);
+        tile.className = 'video-tile layout-component-tile';
+        tile.dataset.layoutComponentType = type;
+        videoGrid.append(tile);
+    }
+
+    if (type !== LAYOUT_ITEM_TYPES.LOCAL_PEER) {
+        tile.dataset.layoutComponentType = type;
+        renderLayoutComponentTile(tile);
+    } else {
+        ensureTileStructure(tile);
+        updateVideoTileStatus(tile);
+    }
+
+    const layoutId = getTileLayoutId(tile);
+    const savedItem = getSavedLayoutItemPreference(layoutId);
+    const defaultItem = getDefaultLayoutItems().find(
+        (item) => item.type === type
+    );
+    const layoutItem = savedItem || defaultItem;
+
+    if (
+        layoutItem &&
+        (savedItem || !tile.classList.contains('is-positioned'))
+    ) {
+        applyTileLayout(
+            tile,
+            convertGridLayoutToPixels({
+                ...layoutItem.grid,
+                zIndex: layoutItem.z || getNextTileLayoutZIndex(),
+            })
+        );
+    }
+
+    const visible =
+        layoutStorageHydrating && savedItem
+            ? savedItem.visible
+            : layoutStorageHydrating
+              ? type === LAYOUT_ITEM_TYPES.LOCAL_PEER
+                  ? getLayoutPreference('autoShowLocalPeer')
+                  : true
+              : true;
+    tile.classList.toggle('is-layout-hidden', !visible);
+    setTileLayoutItemVisibility(tile.dataset.layoutItemId, visible);
+    bringTileLayoutToFront(tile);
+    saveLayoutToStorage(visible ? '布局已更新' : '布局已更新');
+    renderLayoutComponentMenu();
+    updateMobileTileView();
+
+    return tile;
+};
+
+const hideLayoutComponent = (tile) => {
+    if (!tile) {
+        return;
+    }
+
+    setTileLayoutItemVisibility(tile.dataset.layoutItemId, false);
+    tile.classList.add('is-layout-hidden');
+    closePeerVolumePopover();
+    saveLayoutToStorage('布局已更新');
+    renderLayoutComponentMenu();
+    updateMobileTileView();
+};
+
+const resetDefaultLayout = () => {
+    const confirmed = layoutResetDefaultButton?.dataset.confirmReset === 'true';
+
+    if (!confirmed) {
+        if (layoutResetDefaultButton) {
+            layoutResetDefaultButton.dataset.confirmReset = 'true';
+            layoutResetDefaultButton.querySelector('span').textContent =
+                '再次点击确认';
+            clearTimeout(layoutResetConfirmTimer);
+            layoutResetConfirmTimer = setTimeout(() => {
+                delete layoutResetDefaultButton.dataset.confirmReset;
+                layoutResetDefaultButton.querySelector('span').textContent =
+                    '恢复默认布局';
+            }, 2400);
+        }
+
+        return;
+    }
+
+    clearTimeout(layoutResetConfirmTimer);
+    delete layoutResetDefaultButton.dataset.confirmReset;
+    layoutResetDefaultButton.querySelector('span').textContent = '恢复默认布局';
+    clearSavedLayout();
+
+    [LAYOUT_ITEM_TYPES.ROOM, LAYOUT_ITEM_TYPES.CHAT].forEach((type) => {
+        addLayoutComponent(type);
+    });
+
+    getDefaultLayoutItems().forEach((item) => {
+        const tile =
+            item.type === LAYOUT_ITEM_TYPES.LOCAL_PEER
+                ? document.getElementById('local-video')
+                : document.getElementById(
+                      item.id.replace('component-', 'layout-component-')
+                  ) ||
+                  getVideoTiles().find(
+                      (candidate) => getTileLayoutId(candidate) === item.id
+                  );
+
+        if (!tile) {
+            return;
+        }
+
+        tile.classList.remove('is-layout-hidden');
+        applyTileLayout(
+            tile,
+            convertGridLayoutToPixels({
+                ...item.grid,
+                zIndex: getNextTileLayoutZIndex(),
+            })
+        );
+        setTileLayoutItemVisibility(tile.dataset.layoutItemId, item.visible);
+    });
+
+    saveLayoutToStorage('已恢复默认');
+    renderLayoutComponentMenu();
+    updateMobileTileView();
+};
+
+const getInitialLayoutItems = () => {
+    const savedItems = Array.from(savedLayoutItemsById.values());
+
+    return savedItems.length ? savedItems : getDefaultLayoutItems();
+};
+
+const applyStoredLayoutToExistingTile = (item) => {
+    const tile = getVideoTiles().find(
+        (candidate) => getTileLayoutId(candidate) === item.id
+    );
+
+    if (!tile) {
+        return;
+    }
+
+    applyTileLayout(
+        tile,
+        convertGridLayoutToPixels({
+            ...item.grid,
+            zIndex: item.z || getNextTileLayoutZIndex(),
+        })
+    );
+    setTileLayoutItemVisibility(tile.dataset.layoutItemId, item.visible);
+    tile.classList.toggle('is-layout-hidden', !item.visible);
+};
+
+const initializeLayoutFromStorage = () => {
+    const initialItems = getInitialLayoutItems();
+
+    layoutStorageHydrating = true;
+    try {
+        initialItems.forEach((item) => {
+            if (LAYOUT_SINGLETON_COMPONENT_TYPES.includes(item.type)) {
+                addLayoutComponent(item.type);
+                return;
+            }
+
+            applyStoredLayoutToExistingTile(item);
+        });
+    } finally {
+        layoutStorageHydrating = false;
+    }
+
+    renderLayoutComponentMenu();
+    updateMobileTileView();
+};
+
+function closeLayoutComponentMenu() {
+    if (layoutComponentMenu) {
+        layoutComponentMenu.hidden = true;
+    }
+
+    if (layoutAddComponentToggle) {
+        layoutAddComponentToggle.setAttribute('aria-expanded', 'false');
+    }
+}
+
+function closeLayoutComponentConfig() {
+    const panel = document.querySelector('.layout-config-panel');
+    if (panel) {
+        panel.remove();
+    }
+}
+
+function toggleLayoutComponentConfig(tile) {
+    const existingPanel = document.querySelector('.layout-config-panel');
+    const isSameTile =
+        existingPanel &&
+        existingPanel.dataset.targetLayoutId ===
+            (tile.dataset.layoutItemId || tile.dataset.layoutId);
+
+    if (existingPanel && isSameTile) {
+        closeLayoutComponentConfig();
+        return;
+    }
+
+    closeLayoutComponentConfig();
+
+    const itemId = tile.dataset.layoutItemId || tile.dataset.layoutId;
+    if (!itemId) {
+        return;
+    }
+
+    const item = getTileLayoutItem(itemId);
+    if (!item) {
+        return;
+    }
+
+    const config = normalizeComponentConfig(item.type, item.config);
+    const panel = document.createElement('div');
+    panel.className = 'layout-config-panel';
+    panel.dataset.targetLayoutId = itemId;
+
+    const header = document.createElement('div');
+    header.className = 'layout-config-header';
+    header.textContent = LAYOUT_COMPONENT_LABELS[item.type] || item.type;
+    const closeButton = document.createElement('button');
+    closeButton.className = 'layout-config-close';
+    closeButton.type = 'button';
+    closeButton.setAttribute('aria-label', '关闭设置');
+    closeButton.textContent = '\u00D7';
+    closeButton.addEventListener('click', closeLayoutComponentConfig);
+    header.append(closeButton);
+    panel.append(header);
+
+    const options = document.createElement('div');
+    options.className = 'layout-config-options';
+
+    const defaults = getDefaultComponentConfig(item.type);
+
+    for (const key of Object.keys(defaults)) {
+        const label = document.createElement('label');
+        label.className = 'layout-config-option';
+
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = Boolean(config[key]);
+
+        const labelText = document.createElement('span');
+        labelText.className = 'layout-config-option-label';
+        labelText.textContent = getConfigKeyLabel(key);
+
+        label.append(checkbox, labelText);
+
+        checkbox.addEventListener('change', () => {
+            updateLayoutItemConfig(itemId, { [key]: checkbox.checked });
+            checkbox.checked = Boolean(getLayoutItemConfig(itemId)[key]);
+            applyComponentConfigToTile(tile, itemId);
+        });
+
+        options.append(label);
+    }
+
+    if (item.type === LAYOUT_ITEM_TYPES.LOCAL_PEER) {
+        const prefsLabel = document.createElement('label');
+        prefsLabel.className = 'layout-config-option';
+        const prefsCheckbox = document.createElement('input');
+        prefsCheckbox.type = 'checkbox';
+        prefsCheckbox.checked = getLayoutPreference('autoShowLocalPeer');
+        const prefsLabelText = document.createElement('span');
+        prefsLabelText.className = 'layout-config-option-label';
+        prefsLabelText.textContent = '初始化时自动显示';
+        prefsLabel.append(prefsCheckbox, prefsLabelText);
+        prefsCheckbox.addEventListener('change', () => {
+            updateLayoutPreference('autoShowLocalPeer', prefsCheckbox.checked);
+        });
+        options.append(prefsLabel);
+    }
+
+    if (item.type === LAYOUT_ITEM_TYPES.REMOTE_PEER) {
+        const prefsLabel1 = document.createElement('label');
+        prefsLabel1.className = 'layout-config-option';
+        const prefsCheckbox1 = document.createElement('input');
+        prefsCheckbox1.type = 'checkbox';
+        prefsCheckbox1.checked = getLayoutPreference('autoShowRemotePeers');
+        const prefsText1 = document.createElement('span');
+        prefsText1.className = 'layout-config-option-label';
+        prefsText1.textContent = '远端进入时自动显示组件';
+        prefsLabel1.append(prefsCheckbox1, prefsText1);
+        prefsCheckbox1.addEventListener('change', () => {
+            updateLayoutPreference(
+                'autoShowRemotePeers',
+                prefsCheckbox1.checked
+            );
+        });
+        options.append(prefsLabel1);
+
+        const prefsLabel2 = document.createElement('label');
+        prefsLabel2.className = 'layout-config-option';
+        const prefsCheckbox2 = document.createElement('input');
+        prefsCheckbox2.type = 'checkbox';
+        prefsCheckbox2.checked = getLayoutPreference('keepHiddenRemotePeers');
+        const prefsText2 = document.createElement('span');
+        prefsText2.className = 'layout-config-option-label';
+        prefsText2.textContent = '隐藏后保持隐藏（重连后）';
+        prefsLabel2.append(prefsCheckbox2, prefsText2);
+        prefsCheckbox2.addEventListener('change', () => {
+            updateLayoutPreference(
+                'keepHiddenRemotePeers',
+                prefsCheckbox2.checked
+            );
+        });
+        options.append(prefsLabel2);
+    }
+
+    if (item.type === LAYOUT_ITEM_TYPES.SCREEN_SHARE) {
+        const prefsLabel = document.createElement('label');
+        prefsLabel.className = 'layout-config-option';
+        const prefsCheckbox = document.createElement('input');
+        prefsCheckbox.type = 'checkbox';
+        prefsCheckbox.checked = getLayoutPreference('autoShowScreenShare');
+        const prefsLabelText = document.createElement('span');
+        prefsLabelText.className = 'layout-config-option-label';
+        prefsLabelText.textContent = '屏幕共享时自动弹出大组件';
+        prefsLabel.append(prefsCheckbox, prefsLabelText);
+        prefsCheckbox.addEventListener('change', () => {
+            updateLayoutPreference(
+                'autoShowScreenShare',
+                prefsCheckbox.checked
+            );
+        });
+        options.append(prefsLabel);
+    }
+
+    panel.append(options);
+
+    const settingsButton = tile.querySelector('.layout-component-settings');
+    const tileRect = tile.getBoundingClientRect();
+    panel.style.position = 'fixed';
+    panel.style.left = `${Math.min(
+        tileRect.right - 10,
+        window.innerWidth - 240
+    )}px`;
+    panel.style.top = `${Math.min(tileRect.top, window.innerHeight - 300)}px`;
+
+    document.body.append(panel);
+
+    const closeOnClickOutside = (event) => {
+        if (
+            !panel.contains(event.target) &&
+            event.target !== settingsButton &&
+            !settingsButton?.contains(event.target)
+        ) {
+            closeLayoutComponentConfig();
+            document.removeEventListener('click', closeOnClickOutside, true);
+        }
+    };
+    setTimeout(() => {
+        document.addEventListener('click', closeOnClickOutside, true);
+    }, 0);
+}
+
+function getConfigKeyLabel(key) {
+    const labels = {
+        showRoomName: '显示房间名称',
+        showCopyLink: '显示复制链接',
+        showMemberCount: '显示在线人数',
+        compactMode: '紧凑模式',
+        showHeader: '显示标题栏',
+        showSelfPreview: '显示视频/占位预览',
+        showControls: '显示组件内控制区',
+        keepHiddenWhenRejoin: '重连后保持隐藏',
+        showPeerName: '显示成员名称',
+        autoShowScreenShare: '屏幕共享时自动弹出',
+        showScreenHeader: '显示标题栏',
+    };
+    return labels[key] || key;
+}
+
+function applyComponentConfigToTile(tile, itemId) {
+    if (!tile || !itemId) {
+        return;
+    }
+
+    if (tile.dataset.layoutComponentType) {
+        renderLayoutComponentTile(tile);
+        return;
+    }
+
+    const item = getTileLayoutItem(itemId);
+    if (!item) {
+        return;
+    }
+
+    if (item.type === LAYOUT_ITEM_TYPES.REMOTE_PEER) {
+        const config = normalizeComponentConfig(item.type, item.config);
+        const { header } = ensureTileStructure(tile);
+        const title = header.querySelector('.tile-title');
+        if (title) {
+            title.style.display = config.showPeerName ? '' : 'none';
+        }
+        const avatar = header.querySelector('.tile-avatar');
+        if (avatar) {
+            avatar.style.display = config.showPeerName ? '' : 'none';
+        }
+    }
+}
+
+function renderLayoutComponentMenu() {
+    if (!layoutComponentMenu) {
+        return;
+    }
+
+    layoutComponentMenu.replaceChildren();
+
+    LAYOUT_SINGLETON_COMPONENT_TYPES.forEach((type) => {
+        const tile = getExistingLayoutComponentTile(type);
+        const item = tile?.dataset.layoutItemId
+            ? getTileLayoutItem(tile.dataset.layoutItemId)
+            : null;
+        const exists = Boolean(tile);
+        const visible = exists && !tile.classList.contains('is-layout-hidden');
+        const button = document.createElement('button');
+        const status = document.createElement('span');
+
+        button.type = 'button';
+        button.className = 'layout-component-menu-item';
+        button.dataset.layoutComponentType = type;
+        button.setAttribute('role', 'menuitem');
+        button.disabled = Boolean(exists && visible && item?.visible !== false);
+        button.textContent = LAYOUT_COMPONENT_LABELS[type];
+        status.className = 'layout-component-menu-status';
+        status.textContent = visible ? '已显示' : exists ? '重新显示' : '添加';
+        button.append(status);
+        button.addEventListener('click', () => {
+            addLayoutComponent(type);
+            closeLayoutComponentMenu();
+        });
+        layoutComponentMenu.append(button);
+    });
+}
+
+const toggleLayoutComponentMenu = () => {
+    if (!layoutComponentMenu || !layoutEditMode) {
+        return;
+    }
+
+    renderLayoutComponentMenu();
+    layoutComponentMenu.hidden = !layoutComponentMenu.hidden;
+    layoutAddComponentToggle?.setAttribute(
+        'aria-expanded',
+        String(!layoutComponentMenu.hidden)
+    );
+};
+
+const ensureLayoutComponentActions = () => {
+    getVideoTiles().forEach((tile) => {
+        const { actions } = ensureTileStructure(tile);
+        let removeButton = actions.querySelector('.layout-component-remove');
+
+        if (!removeButton) {
+            removeButton = document.createElement('button');
+            removeButton.className = 'layout-component-remove';
+            removeButton.type = 'button';
+            removeButton.title = '隐藏组件';
+            removeButton.setAttribute('aria-label', '隐藏组件');
+            removeButton.textContent = '\u00D7';
+            removeButton.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                hideLayoutComponent(tile);
+            });
+            actions.prepend(removeButton);
+        }
+
+        let settingsButton = actions.querySelector(
+            '.layout-component-settings'
+        );
+
+        if (!settingsButton) {
+            settingsButton = document.createElement('button');
+            settingsButton.className = 'layout-component-settings';
+            settingsButton.type = 'button';
+            settingsButton.title = '组件设置';
+            settingsButton.setAttribute('aria-label', '组件设置');
+            const gearIcon = document.createElement('i');
+            gearIcon.className = 'fas fa-gear';
+            settingsButton.append(gearIcon);
+            settingsButton.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                toggleLayoutComponentConfig(tile);
+            });
+            if (removeButton) {
+                removeButton.after(settingsButton);
+            } else {
+                actions.prepend(settingsButton);
+            }
+        }
+    });
+};
+
+layoutAddComponentToggle?.addEventListener('click', toggleLayoutComponentMenu);
+layoutResetDefaultButton?.addEventListener('click', resetDefaultLayout);
 
 const createTileAvatarText = (displayName) =>
     String(displayName || 'Guest')
@@ -1877,7 +3186,11 @@ const isTilePointerDisabled = (event) =>
     isMobileLayout() ||
     getFullscreenElement() ||
     event.button !== 0 ||
-    event.target.closest('button, input, textarea, a, .fullscreen-btn');
+    event.target.closest('.tile-resize-handle') ||
+    event.target.closest('.layout-component-remove') ||
+    event.target.closest('.layout-component-settings') ||
+    (!layoutEditMode &&
+        event.target.closest('button, input, textarea, a, .fullscreen-btn'));
 
 const startTileDrag = (event, tile) => {
     if (isTilePointerDisabled(event)) {
@@ -1890,6 +3203,7 @@ const startTileDrag = (event, tile) => {
     tile.classList.add('is-dragging');
     tile.setPointerCapture(event.pointerId);
     event.preventDefault();
+    event.stopPropagation();
 
     const startX = event.clientX;
     const startY = event.clientY;
@@ -1904,7 +3218,7 @@ const startTileDrag = (event, tile) => {
 
     const onEnd = () => {
         tile.classList.remove('is-dragging');
-        persistCurrentTileLayout(tile);
+        finishTileLayoutInteraction(tile);
         tile.removeEventListener('pointermove', onMove);
         tile.removeEventListener('pointerup', onEnd);
         tile.removeEventListener('pointercancel', onEnd);
@@ -1984,7 +3298,7 @@ const startTileResize = (event, tile, direction = 'se') => {
 
     const onEnd = () => {
         tile.classList.remove('is-resizing');
-        persistCurrentTileLayout(tile);
+        finishTileLayoutInteraction(tile);
         tile.removeEventListener('pointermove', onMove);
         tile.removeEventListener('pointerup', onEnd);
         tile.removeEventListener('pointercancel', onEnd);
@@ -1999,12 +3313,26 @@ const bindTileLayoutControls = (tile, header) => {
     if (!tile.dataset.layoutBound) {
         tile.addEventListener(
             'pointerdown',
-            () => bringTileLayoutToFront(tile),
+            (event) => {
+                bringTileLayoutToFront(tile);
+
+                if (layoutEditMode) {
+                    startTileDrag(event, tile);
+                }
+            },
             true
         );
-        tile.addEventListener('click', () => bringTileLayoutToFront(tile));
-        header.addEventListener('pointerdown', (event) =>
-            startTileDrag(event, tile)
+        tile.addEventListener('click', (event) => {
+            bringTileLayoutToFront(tile);
+
+            if (layoutEditMode) {
+                event.preventDefault();
+                event.stopPropagation();
+            }
+        });
+        header.addEventListener(
+            'pointerdown',
+            (event) => !layoutEditMode && startTileDrag(event, tile)
         );
         tile.addEventListener('contextmenu', (event) =>
             showPeerVolumePopover(event, tile)
@@ -2030,6 +3358,12 @@ const closePeerVolumePopover = () => {
 
 const showPeerVolumePopover = (event, tile) => {
     const peerId = tile.dataset.peerId;
+
+    if (layoutEditMode) {
+        event.preventDefault();
+        closePeerVolumePopover();
+        return;
+    }
 
     if (isMobileLayout() || tile.id === 'local-video' || !peerId) {
         return;
@@ -2088,6 +3422,11 @@ const updateVideoTileStatus = (tile) => {
         return;
     }
 
+    if (tile.dataset.layoutComponentType) {
+        renderLayoutComponentTile(tile);
+        return;
+    }
+
     const member = getTileMember(tile);
     const isLocal = tile.id === 'local-video';
     const hasVideo = Boolean(tile.querySelector('video'));
@@ -2117,6 +3456,10 @@ const updateVideoTileStatus = (tile) => {
     tile.classList.toggle('has-video', hasVideo);
     tile.classList.toggle('is-audio-only', !hasVideo);
     tile.classList.toggle('is-screen-share', tileType === 'screen-share');
+    tile.classList.toggle('is-layout-editing', layoutEditMode);
+    if (layoutEditMode) {
+        ensureLayoutComponentActions();
+    }
 
     if (member.socketId) {
         tile.dataset.socketId = member.socketId;
@@ -2134,6 +3477,30 @@ const updateVideoTileStatus = (tile) => {
 
     if (title) {
         title.textContent = isLocal ? `${displayName}（我）` : displayName;
+    }
+
+    const remoteConfigItem = getTileLayoutItem(tile.dataset.layoutItemId);
+    if (
+        remoteConfigItem &&
+        remoteConfigItem.type === LAYOUT_ITEM_TYPES.REMOTE_PEER
+    ) {
+        const remoteConfig = normalizeComponentConfig(
+            LAYOUT_ITEM_TYPES.REMOTE_PEER,
+            remoteConfigItem.config
+        );
+        if (avatar) {
+            avatar.style.display = remoteConfig.showPeerName ? '' : 'none';
+        }
+        if (title) {
+            title.style.display = remoteConfig.showPeerName ? '' : 'none';
+        }
+    } else {
+        if (avatar && !tile.dataset.layoutComponentType) {
+            avatar.style.display = '';
+        }
+        if (title && !tile.dataset.layoutComponentType) {
+            title.style.display = '';
+        }
     }
 
     if (badges) {
@@ -2197,20 +3564,89 @@ const updateAllVideoTileStatus = () => {
     document.querySelectorAll('.video-tile').forEach(updateVideoTileStatus);
 };
 
+const toggleMemberTileVisibility = (peerId) => {
+    if (!peerId) {
+        return;
+    }
+
+    const tile = document.getElementById(peerId);
+    if (!tile) {
+        return;
+    }
+
+    const isCurrentlyVisible = !tile.classList.contains('is-layout-hidden');
+
+    if (isCurrentlyVisible) {
+        hideLayoutComponent(tile);
+    } else {
+        const itemId = tile.dataset.layoutItemId;
+        setTileLayoutItemVisibility(itemId, true);
+        tile.classList.remove('is-layout-hidden');
+        bringTileLayoutToFront(tile);
+        saveLayoutToStorage('布局已更新');
+        renderLayoutComponentMenu();
+        updateMobileTileView();
+    }
+};
+
+const toggleLocalPeerTileVisibility = () => {
+    const tile = document.getElementById('local-video');
+    if (!tile) {
+        return;
+    }
+
+    const isCurrentlyVisible = !tile.classList.contains('is-layout-hidden');
+
+    if (isCurrentlyVisible) {
+        hideLayoutComponent(tile);
+    } else {
+        const itemId = tile.dataset.layoutItemId;
+        setTileLayoutItemVisibility(itemId, true);
+        tile.classList.remove('is-layout-hidden');
+        bringTileLayoutToFront(tile);
+        saveLayoutToStorage('布局已更新');
+        renderLayoutComponentMenu();
+        updateMobileTileView();
+    }
+};
+
 const ensurePresenceTileForPeer = (peerId) => {
     if (!peerId || peerId === localPeerId) {
         return;
     }
 
-    if (!document.getElementById(peerId)) {
+    const existingTile = document.getElementById(peerId);
+    const autoShowRemotePeers = getLayoutPreference('autoShowRemotePeers');
+    const keepHidden = getLayoutPreference('keepHiddenRemotePeers');
+    const layoutItemId = `peer-${sanitizeLayoutIdPart(peerId)}`;
+
+    if (!existingTile) {
         console.info('[tile] create presence tile', { peerId });
+
+        let shouldAutoShow = autoShowRemotePeers;
+
+        if (keepHidden) {
+            const savedItem = getSavedLayoutItemPreference(layoutItemId);
+            if (savedItem && savedItem.visible === false) {
+                shouldAutoShow = false;
+            }
+        }
+
         addVideoStream(
             document.createElement('video'),
             new MediaStream(),
             peerId
         );
+
+        if (!shouldAutoShow) {
+            const tile = document.getElementById(peerId);
+            if (tile) {
+                tile.classList.add('is-layout-hidden');
+                setTileLayoutItemVisibility(tile.dataset.layoutItemId, false);
+            }
+        }
     } else {
-        updateVideoTileStatus(document.getElementById(peerId));
+        updateVideoTileStatus(existingTile);
     }
 };
 
@@ -2318,6 +3754,8 @@ const addVideoStream = (video, stream, videoId) => {
     resetAutoTileLayoutHeights();
     updateMobileTileView();
 };
+
+initializeLayoutFromStorage();
 
 const mergeRemoteStream = (
     peerId,
