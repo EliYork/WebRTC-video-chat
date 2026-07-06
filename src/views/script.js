@@ -49,6 +49,7 @@ const mobileNextTileBtn = byId('mobileNextTile');
 const mobileTileCount = byId('mobileTileCount');
 const noiseSettingsUI = window.VoiceNoiseSettingsUI;
 const controlPopoversUI = window.VoiceControlPopoversUI;
+const remoteVolumeUI = window.VoiceRemoteVolumeUI;
 const remoteStreams = {};
 const getAudioConstraints = () => noiseSettingsUI.getAudioConstraints();
 
@@ -4649,7 +4650,7 @@ try {
 }
 
 const closePeerVolumePopover = () => {
-    document.querySelector('.peer-volume-popover')?.remove();
+    remoteVolumeUI.closePopover();
 };
 
 const showPeerVolumePopover = (event, tile) => {
@@ -4666,50 +4667,15 @@ const showPeerVolumePopover = (event, tile) => {
     }
 
     event.preventDefault();
-    closePeerVolumePopover();
-
-    const popover = document.createElement('div');
-    const title = document.createElement('div');
-    const titleText = document.createElement('span');
-    const icon = document.createElement('i');
-    const range = document.createElement('input');
-    const value = document.createElement('span');
     const currentVolume = Math.round(getPeerVolume(peerId) * 100);
 
-    popover.className = 'peer-volume-popover';
-    title.className = 'peer-volume-title';
-    titleText.textContent = '设置用户音量';
-    icon.className = 'fas fa-microphone';
-    range.type = 'range';
-    range.min = '0';
-    range.max = '100';
-    range.step = '5';
-    range.value = String(currentVolume);
-    value.className = 'peer-volume-value';
-    value.textContent = `${currentVolume}%`;
-
-    title.append(titleText, icon);
-    popover.append(title, range, value);
-    document.body.append(popover);
-
-    const popoverRect = popover.getBoundingClientRect();
-    const left = Math.min(
-        Math.max(8, event.clientX),
-        window.innerWidth - popoverRect.width - 8
-    );
-    const top = Math.min(
-        Math.max(8, event.clientY),
-        window.innerHeight - popoverRect.height - 8
-    );
-
-    popover.style.left = `${left}px`;
-    popover.style.top = `${top}px`;
-
-    range.addEventListener('input', () => {
-        const nextVolume = Number(range.value);
-        setPeerVolume(peerId, nextVolume / 100);
-        value.textContent = `${nextVolume}%`;
-        applyOutputSettingsToRemoteMedia();
+    remoteVolumeUI.openPopover({
+        event,
+        currentVolume,
+        onVolumeInput: (nextVolume) => {
+            setPeerVolume(peerId, nextVolume / 100);
+            applyOutputSettingsToRemoteMedia();
+        },
     });
 };
 
@@ -5777,17 +5743,7 @@ controlPopoversUI.createController({
     panels: controlPanels,
 });
 
-document.addEventListener('click', (event) => {
-    if (!event.target.closest('.peer-volume-popover')) {
-        closePeerVolumePopover();
-    }
-});
-
-document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') {
-        closePeerVolumePopover();
-    }
-});
+remoteVolumeUI.init();
 
 noiseSettingsControls = noiseSettingsUI.init({
     refs: {

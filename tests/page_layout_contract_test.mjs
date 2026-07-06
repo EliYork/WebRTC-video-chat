@@ -41,6 +41,10 @@ const controlPopoversUi = readFileSync(
     new URL('../src/views/js/control-popovers-ui.js', import.meta.url),
     'utf8'
 );
+const peerVolumeUi = readFileSync(
+    new URL('../src/views/js/peer-volume-ui.js', import.meta.url),
+    'utf8'
+);
 const style = loadCssWithImports(
     new URL('../src/views/style.css', import.meta.url)
 );
@@ -55,6 +59,7 @@ const noiseSettingsScriptIndex = indexOfRoomScript('/js/noise-settings-ui.js');
 const controlPopoversScriptIndex = indexOfRoomScript(
     '/js/control-popovers-ui.js'
 );
+const peerVolumeScriptIndex = indexOfRoomScript('/js/peer-volume-ui.js');
 const mainScriptIndex = indexOfRoomScript('/script.js');
 
 assert.ok(viewUtilsScriptIndex >= 0, 'room index must load /js/view-utils.js');
@@ -65,6 +70,10 @@ assert.ok(
 assert.ok(
     controlPopoversScriptIndex >= 0,
     'room index must load /js/control-popovers-ui.js'
+);
+assert.ok(
+    peerVolumeScriptIndex >= 0,
+    'room index must load /js/peer-volume-ui.js'
 );
 assert.ok(mainScriptIndex >= 0, 'room index must load /script.js');
 assert.ok(
@@ -78,6 +87,10 @@ assert.ok(
 assert.ok(
     controlPopoversScriptIndex < mainScriptIndex,
     '/js/control-popovers-ui.js must load before /script.js'
+);
+assert.ok(
+    peerVolumeScriptIndex < mainScriptIndex,
+    '/js/peer-volume-ui.js must load before /script.js'
 );
 
 if (noiseSettingsUi.includes('VoiceViewUtils')) {
@@ -94,6 +107,13 @@ if (controlPopoversUi.includes('VoiceViewUtils')) {
     );
 }
 
+if (peerVolumeUi.includes('VoiceViewUtils')) {
+    assert.ok(
+        viewUtilsScriptIndex < peerVolumeScriptIndex,
+        '/js/view-utils.js must load before /js/peer-volume-ui.js'
+    );
+}
+
 [
     'getUserMedia',
     'Peer',
@@ -105,6 +125,22 @@ if (controlPopoversUi.includes('VoiceViewUtils')) {
     assert.ok(
         !controlPopoversUi.includes(forbiddenKeyword),
         `control-popovers-ui.js must not contain ${forbiddenKeyword}`
+    );
+});
+
+[
+    'getUserMedia',
+    'Peer',
+    'socket.emit',
+    'replaceTrack',
+    'requestAudioStream',
+    'createAudioPipeline',
+    'joinVoiceChannel',
+    'setupCallStreamHandler',
+].forEach((forbiddenKeyword) => {
+    assert.ok(
+        !peerVolumeUi.includes(forbiddenKeyword),
+        `peer-volume-ui.js must not contain ${forbiddenKeyword}`
     );
 });
 
