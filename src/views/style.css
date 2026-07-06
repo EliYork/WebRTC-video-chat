@@ -16,8 +16,10 @@
     --accent-soft: #f8d8e5;
     --danger: #bf5260;
     --shadow: 0 18px 48px rgba(169, 94, 125, 0.16);
-    --resize-hit-corner: 22px;
-    --resize-hit-edge: 10px;
+    --resize-hit-corner: 24px;
+    --resize-hit-edge: 16px;
+    --resize-hit-inset: 8px;
+    --resize-hit-outset: 8px;
 }
 
 body {
@@ -1318,7 +1320,6 @@ input {
     .video-tile.is-resizing
     .tile-resize-handle {
     opacity: 0.22;
-    pointer-events: auto;
 }
 
 .video-tile.is-free-move-enabled:hover .tile-resize-handle {
@@ -1339,11 +1340,11 @@ input {
 }
 
 .tile-resize-handle--n {
-    top: calc(var(--resize-hit-edge) / -2);
+    top: calc(var(--resize-hit-outset) * -1);
 }
 
 .tile-resize-handle--s {
-    bottom: calc(var(--resize-hit-edge) / -2);
+    bottom: calc(var(--resize-hit-outset) * -1);
 }
 
 .tile-resize-handle--e,
@@ -1355,11 +1356,11 @@ input {
 }
 
 .tile-resize-handle--e {
-    right: calc(var(--resize-hit-edge) / -2);
+    right: calc(var(--resize-hit-outset) * -1);
 }
 
 .tile-resize-handle--w {
-    left: calc(var(--resize-hit-edge) / -2);
+    left: calc(var(--resize-hit-outset) * -1);
 }
 
 .tile-resize-handle--ne,
@@ -1381,29 +1382,29 @@ input {
 }
 
 .tile-resize-handle--ne {
-    top: calc(var(--resize-hit-corner) / -2);
-    right: calc(var(--resize-hit-corner) / -2);
+    top: calc(var(--resize-hit-outset) * -1);
+    right: calc(var(--resize-hit-outset) * -1);
     border-top: 2px solid rgba(216, 111, 154, 0.22);
     border-right: 2px solid rgba(216, 111, 154, 0.22);
 }
 
 .tile-resize-handle--nw {
-    top: calc(var(--resize-hit-corner) / -2);
-    left: calc(var(--resize-hit-corner) / -2);
+    top: calc(var(--resize-hit-outset) * -1);
+    left: calc(var(--resize-hit-outset) * -1);
     border-top: 2px solid rgba(216, 111, 154, 0.22);
     border-left: 2px solid rgba(216, 111, 154, 0.22);
 }
 
 .tile-resize-handle--se {
-    right: calc(var(--resize-hit-corner) / -2);
-    bottom: calc(var(--resize-hit-corner) / -2);
+    right: calc(var(--resize-hit-outset) * -1);
+    bottom: calc(var(--resize-hit-outset) * -1);
     border-right: 2px solid rgba(216, 111, 154, 0.22);
     border-bottom: 2px solid rgba(216, 111, 154, 0.22);
 }
 
 .tile-resize-handle--sw {
-    bottom: calc(var(--resize-hit-corner) / -2);
-    left: calc(var(--resize-hit-corner) / -2);
+    bottom: calc(var(--resize-hit-outset) * -1);
+    left: calc(var(--resize-hit-outset) * -1);
     border-bottom: 2px solid rgba(216, 111, 154, 0.22);
     border-left: 2px solid rgba(216, 111, 154, 0.22);
 }

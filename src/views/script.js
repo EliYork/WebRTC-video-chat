@@ -123,6 +123,19 @@ const TILE_MIN_WIDTH = 180;
 const TILE_MIN_HEIGHT = 120;
 const TILE_BASE_Z_INDEX = 2;
 const TILE_RESIZE_DIRECTIONS = ['n', 'e', 's', 'w', 'ne', 'nw', 'se', 'sw'];
+const TILE_RESIZE_CURSORS = {
+    n: 'ns-resize',
+    s: 'ns-resize',
+    e: 'ew-resize',
+    w: 'ew-resize',
+    nw: 'nwse-resize',
+    se: 'nwse-resize',
+    ne: 'nesw-resize',
+    sw: 'nesw-resize',
+};
+const TILE_RESIZE_EDGE_INSET_PX = 8;
+const TILE_RESIZE_EDGE_OUTSET_PX = 8;
+const TILE_RESIZE_CORNER_SIZE_PX = 24;
 const LAYOUT_MIN_GRID_W = 3;
 const LAYOUT_MIN_GRID_H = 2;
 const PAGE_GRID_COLUMNS = 32;
@@ -140,8 +153,6 @@ const PAGE_SINGLETON_TYPES = new Set([
 const REAL_DOM_PAGE_TYPES = PAGE_SINGLETON_TYPES;
 const PAGE_TILE_MIN_WIDTH = 160;
 const PAGE_TILE_MIN_HEIGHT = 80;
-const TILE_RESIZE_EDGE_HIT_PX = 10;
-const TILE_RESIZE_CORNER_HIT_PX = 22;
 const PAGE_COMPONENT_LABELS = {
     [PAGE_COMPONENT_TYPES.SIDEBAR_PANEL]: '左侧频道栏',
     [PAGE_COMPONENT_TYPES.CHAT_PANEL]: '聊天面板',
@@ -150,12 +161,18 @@ let pageLayoutBoard;
 const LAYOUT_ITEM_TYPES = {
     LOCAL: 'local',
     LOCAL_PEER: 'localPeer',
-    REMOTE_PEER: 'remote-peer',
+    REMOTE_PEER: 'remotePeer',
     SCREEN_SHARE: 'screen-share',
     PLACEHOLDER: 'placeholder',
     ROOM: 'room',
     CHAT: 'chat',
 };
+const LEGACY_LAYOUT_ITEM_TYPES = {
+    remotePeer: LAYOUT_ITEM_TYPES.REMOTE_PEER,
+    'remote-peer': LAYOUT_ITEM_TYPES.REMOTE_PEER,
+    screenShare: LAYOUT_ITEM_TYPES.SCREEN_SHARE,
+};
+const REMOTE_PEER_LAYOUT_ID_PREFIX = 'remotePeer:';
 const AUTO_LAYOUT_GRID_SIZES = {
     [LAYOUT_ITEM_TYPES.LOCAL_PEER]: { w: 5, h: 4 },
     [LAYOUT_ITEM_TYPES.REMOTE_PEER]: { w: 5, h: 4 },
@@ -312,6 +329,7 @@ let layoutSaveStatusTimer;
 let layoutStorageHydrating = false;
 let activeLayoutToolbarTile;
 let snapPreviewOverlay;
+const layoutResizeBoundBoards = new WeakSet();
 let noiseAudioContext = null;
 let noiseProcessorNode = null;
 // eslint-disable-next-line no-unused-vars
@@ -760,7 +778,7 @@ window.__voiceLayoutDebug = {
                 document.getElementById('page-tile-stagePanel')
             ),
             remotePeerCount: document.querySelectorAll(
-                '.video-tile[data-layout-item-type="remote-peer"]'
+                '.video-tile[data-layout-item-type="remotePeer"]'
             ).length,
             localPeer: {
                 exists: Boolean(document.getElementById('local-video')),
@@ -1656,7 +1674,7 @@ const renderPresenceState = ({ channels = [] } = {}) => {
                 const tileForPeer = document.getElementById(memberPeerId);
                 const layoutItemId =
                     tileForPeer?.dataset.layoutItemId ||
-                    `peer-${sanitizeLayoutIdPart(memberPeerId)}`;
+                    getRemoteLayoutItemId(memberPeerId, member);
                 const layoutItem = getTileLayoutItem(layoutItemId);
                 const isVisible =
                     layoutItem?.visible !== false &&
@@ -2238,7 +2256,107 @@ const getTileType = (tile, hasVideo, member) => {
 const sanitizeLayoutIdPart = (value) =>
     String(value || 'unknown').replace(/[^a-zA-Z0-9_-]/g, '-');
 
-const getTileLayoutId = (tile) => {
+const getRemoteMemberForPeerId = (peerId) =>
+    peerId ? presenceMembersByPeerId.get(peerId) || null : null;
+
+const getRemoteLayoutKey = (
+    peerId,
+    member = getRemoteMemberForPeerId(peerId)
+) => {
+    const roomKey = member?.roomId || joinedVoiceRoomId || 'room';
+    const displayName = member?.displayName || member?.senderName;
+    const candidates = [
+        ['member', member?.memberId],
+        ['user', member?.userId],
+        ['client', member?.clientId],
+        ['socket', member?.socketId],
+        ['name', displayName ? `${roomKey}:${displayName}` : null],
+        ['peer', peerId || member?.peerId],
+    ];
+    const candidate = candidates.find(([, value]) => {
+        if (value === undefined || value === null) {
+            return false;
+        }
+
+        return String(value).trim() !== '';
+    });
+
+    return sanitizeLayoutIdPart(
+        candidate ? `${candidate[0]}-${candidate[1]}` : 'unknown'
+    );
+};
+
+const getRemoteLayoutItemId = (
+    peerId,
+    member = getRemoteMemberForPeerId(peerId)
+) => `${REMOTE_PEER_LAYOUT_ID_PREFIX}${getRemoteLayoutKey(peerId, member)}`;
+
+const getLegacyRemoteLayoutPeerId = (id) => {
+    const value = String(id || '');
+
+    if (value.startsWith(REMOTE_PEER_LAYOUT_ID_PREFIX)) {
+        return value.slice(REMOTE_PEER_LAYOUT_ID_PREFIX.length);
+    }
+
+    if (value.startsWith('remote-peer:')) {
+        return value.slice('remote-peer:'.length);
+    }
+
+    if (value.startsWith('peer:')) {
+        return value.slice('peer:'.length);
+    }
+
+    if (value.startsWith('peer-')) {
+        return value.slice('peer-'.length);
+    }
+
+    return null;
+};
+
+const normalizeRemotePeerLayoutId = (id, peerId, member) => {
+    const resolvedPeerId =
+        peerId || member?.peerId || getLegacyRemoteLayoutPeerId(id);
+
+    if (
+        !resolvedPeerId &&
+        String(id || '').startsWith(REMOTE_PEER_LAYOUT_ID_PREFIX)
+    ) {
+        return `${REMOTE_PEER_LAYOUT_ID_PREFIX}${sanitizeLayoutIdPart(
+            String(id).slice(REMOTE_PEER_LAYOUT_ID_PREFIX.length)
+        )}`;
+    }
+
+    return resolvedPeerId ? getRemoteLayoutItemId(resolvedPeerId, member) : id;
+};
+
+const getRemoteLayoutAliasIds = (peerId, member, preferredId) => {
+    const aliases = new Set();
+    const resolvedPeerId = peerId || member?.peerId;
+    const sanitizedPeerId = resolvedPeerId
+        ? sanitizeLayoutIdPart(resolvedPeerId)
+        : null;
+
+    if (preferredId) {
+        aliases.add(preferredId);
+    }
+
+    if (resolvedPeerId || member) {
+        aliases.add(getRemoteLayoutItemId(resolvedPeerId, member));
+    }
+
+    if (sanitizedPeerId) {
+        aliases.add(`${REMOTE_PEER_LAYOUT_ID_PREFIX}peer-${sanitizedPeerId}`);
+        aliases.add(`${REMOTE_PEER_LAYOUT_ID_PREFIX}${sanitizedPeerId}`);
+        aliases.add(`remote-peer:${sanitizedPeerId}`);
+        aliases.add(`remote-peer:peer-${sanitizedPeerId}`);
+        aliases.add(`peer:${sanitizedPeerId}`);
+        aliases.add(`peer-${sanitizedPeerId}`);
+    }
+
+    return Array.from(aliases).filter(Boolean);
+};
+
+const getTileLayoutId = (tile, member) => {
     if (tile.dataset.pageLayoutType) {
         return `page-${sanitizeLayoutIdPart(tile.dataset.pageLayoutType)}`;
     }
@@ -2259,7 +2377,14 @@ const getTileLayoutId = (tile) => {
         return `local-${sanitizeLayoutIdPart(localPeerId || socket?.id || 'me')}`;
     }
 
-    return `peer-${sanitizeLayoutIdPart(peerId || tile.id)}`;
+    if (peerId) {
+        return getRemoteLayoutItemId(
+            peerId,
+            member || getRemoteMemberForPeerId(peerId)
+        );
+    }
+
+    return `peer-${sanitizeLayoutIdPart(tile.id)}`;
 };
 
 const getTileLayoutItemId = (tile) =>
@@ -2429,6 +2554,9 @@ const snapTileLayoutToGrid = (layout) =>
 
 const isAutoPlacedLayoutType = (type) => Boolean(AUTO_LAYOUT_GRID_SIZES[type]);
 
+const normalizeLayoutItemType = (type) =>
+    LEGACY_LAYOUT_ITEM_TYPES[type] || type;
+
 const getAutoLayoutGridSize = (type) =>
     clampGridLayout({
         x: 0,
@@ -2438,6 +2566,78 @@ const getAutoLayoutGridSize = (type) =>
             h: LAYOUT_MIN_GRID_H,
         }),
     });
+
+const isAbnormallyLargeAutoGrid = (type, grid) =>
+    isAutoPlacedLayoutType(type) &&
+    (Number(grid?.w) >= PAGE_GRID_COLUMNS - 1 ||
+        Number(grid?.h) >= PAGE_GRID_ROWS - 1);
+
+const normalizeAutoLayoutGrid = (type, grid = {}) => {
+    if (!isAutoPlacedLayoutType(type)) {
+        return clampGridLayout(grid);
+    }
+
+    const defaultSize = getAutoLayoutGridSize(type);
+    const width = Number(grid.w);
+    const height = Number(grid.h);
+    const hasUsableSize =
+        Number.isFinite(width) &&
+        Number.isFinite(height) &&
+        width > 0 &&
+        height > 0 &&
+        !isAbnormallyLargeAutoGrid(type, { w: width, h: height });
+
+    return clampGridLayout({
+        x: grid.x,
+        y: grid.y,
+        w: hasUsableSize ? width : defaultSize.w,
+        h: hasUsableSize ? height : defaultSize.h,
+    });
+};
+
+const getFallbackTileLayoutForType = (type, layout = {}) => {
+    if (layout?.grid && isAutoPlacedLayoutType(type)) {
+        return {
+            grid: normalizeAutoLayoutGrid(type, layout.grid),
+            zIndex: layout.zIndex,
+        };
+    }
+
+    if (
+        isAutoPlacedLayoutType(type) &&
+        Number.isFinite(Number(layout?.width)) &&
+        Number.isFinite(Number(layout?.height))
+    ) {
+        const grid = convertTileLayoutToGrid(layout);
+        if (isAbnormallyLargeAutoGrid(type, grid)) {
+            return {
+                grid: {
+                    ...grid,
+                    w: getAutoLayoutGridSize(type).w,
+                    h: getAutoLayoutGridSize(type).h,
+                },
+                zIndex: layout.zIndex,
+            };
+        }
+    }
+
+    if (
+        layout?.grid ||
+        Number.isFinite(Number(layout?.width)) ||
+        Number.isFinite(Number(layout?.height))
+    ) {
+        return layout;
+    }
+
+    if (!isAutoPlacedLayoutType(type)) {
+        return layout;
+    }
+
+    return {
+        grid: getAutoLayoutGridSize(type),
+        zIndex: layout?.zIndex,
+    };
+};
 
 const isRectWithinGrid = (rect) =>
     rect &&
@@ -2693,12 +2893,24 @@ const normalizeLoadedLayoutItems = (payload) => {
                 return null;
             }
 
-            if (!item?.id || !knownTypes.has(item.type) || seen.has(item.id)) {
+            const type = normalizeLayoutItemType(item?.type);
+            const peerId =
+                typeof item.config?.peerId === 'string'
+                    ? item.config.peerId
+                    : getLegacyRemoteLayoutPeerId(item.id);
+            const itemId =
+                type === LAYOUT_ITEM_TYPES.REMOTE_PEER
+                    ? normalizeRemotePeerLayoutId(item.id, peerId, {
+                          peerId,
+                      })
+                    : String(item.id);
+
+            if (!item?.id || !knownTypes.has(type) || seen.has(itemId)) {
                 return null;
             }
 
-            seen.add(item.id);
-            const grid = clampGridLayout({
+            seen.add(itemId);
+            const grid = normalizeAutoLayoutGrid(type, {
                 x: item.x,
                 y: item.y,
                 w: item.w,
@@ -2706,17 +2918,14 @@ const normalizeLoadedLayoutItems = (payload) => {
             });
 
             return {
-                id: String(item.id),
-                type: item.type,
+                id: itemId,
+                type,
                 grid,
                 z: normalizeTileLayoutZIndex(item.z),
                 visible: item.visible !== false,
                 config: {
-                    ...normalizeComponentConfig(item.type, item.config),
-                    peerId:
-                        typeof item.config?.peerId === 'string'
-                            ? item.config.peerId
-                            : null,
+                    ...normalizeComponentConfig(type, item.config),
+                    peerId: peerId || null,
                 },
             };
         })
@@ -2753,6 +2962,11 @@ const refreshSavedLayoutItems = () => {
 
 const getSavedLayoutItemPreference = (itemId) =>
     savedLayoutItemsById.get(itemId);
+
+const getSavedRemoteLayoutItemPreference = (peerId, member, preferredId) =>
+    getRemoteLayoutAliasIds(peerId, member, preferredId)
+        .map((aliasId) => savedLayoutItemsById.get(aliasId))
+        .find(Boolean);
 
 const showLayoutSaveStatus = (message) => {
     if (!layoutSaveStatus) {
@@ -2853,6 +3067,10 @@ const getLayoutItemTypeForTile = (tile, tileType) => {
         return LAYOUT_ITEM_TYPES.LOCAL_PEER;
     }
 
+    if (tile.dataset.peerId) {
+        return LAYOUT_ITEM_TYPES.REMOTE_PEER;
+    }
+
     if (!hasTileMediaTracks(tile)) {
         return LAYOUT_ITEM_TYPES.PLACEHOLDER;
     }
@@ -2870,7 +3088,9 @@ const createTileLayoutItem = ({
     positioned = false,
     config,
 }) => {
-    const nextLayout = normalizeTileLayout(layout);
+    const nextLayout = normalizeTileLayout(
+        getFallbackTileLayoutForType(type, layout)
+    );
 
     return {
         id,
@@ -2933,7 +3153,7 @@ const applyTileLayoutItemToElement = (
     tile.classList.toggle('is-layout-hidden', !item.visible);
     tile.classList.toggle(
         'is-free-move-enabled',
-        item.config?.freeMove !== false
+        item.config?.freeMove === true
     );
 
     if (applyPosition) {
@@ -2997,6 +3217,22 @@ const setTileLayoutItemVisibility = (
     }
 };
 
+const isRemoteLayoutAliasForTile = (tile, itemId, nextItemId) => {
+    const peerId = tile?.dataset.peerId;
+
+    if (!peerId || !itemId || !nextItemId || itemId === nextItemId) {
+        return false;
+    }
+
+    return (
+        normalizeRemotePeerLayoutId(
+            itemId,
+            peerId,
+            getRemoteMemberForPeerId(peerId)
+        ) === nextItemId
+    );
+};
+
 const retirePreviousTileLayoutItem = (tile, nextItemId) => {
     const previousItemIds = new Set([
         tile.dataset.layoutItemId,
@@ -3005,6 +3241,11 @@ const retirePreviousTileLayoutItem = (tile, nextItemId) => {
 
     previousItemIds.forEach((previousItemId) => {
         if (previousItemId && previousItemId !== nextItemId) {
+            if (isRemoteLayoutAliasForTile(tile, previousItemId, nextItemId)) {
+                layoutItemsById.delete(previousItemId);
+                return;
+            }
+
             setTileLayoutItemVisibility(previousItemId, false, {
                 syncElement: false,
             });
@@ -3098,15 +3339,81 @@ const clampPositionedTileLayouts = () => {
     });
 };
 
+const getPreferredTileLayoutItem = (layoutId, type, options = {}) => {
+    const savedItem =
+        type === LAYOUT_ITEM_TYPES.REMOTE_PEER
+            ? getSavedRemoteLayoutItemPreference(
+                  options.peerId,
+                  options.member,
+                  layoutId
+              )
+            : getSavedLayoutItemPreference(layoutId);
+    const defaultItem = getDefaultLayoutItems().find(
+        (candidate) => candidate.type === type
+    );
+    const generatedGrid =
+        !savedItem && isAutoPlacedLayoutType(type)
+            ? findAvailableLayoutSlot(type, getAutoLayoutGridSize(type), {
+                  excludeId: options.excludeId || layoutId,
+              })
+            : null;
+
+    return (
+        savedItem ||
+        (isAutoPlacedLayoutType(type) ? null : defaultItem) ||
+        (generatedGrid
+            ? {
+                  grid: generatedGrid,
+                  z: getNextTileLayoutZIndex(),
+                  visible: true,
+                  config: getDefaultComponentConfig(type),
+              }
+            : null)
+    );
+};
+
+const getInitialTileLayoutForSync = (tile, layoutId, tileType, member) => {
+    if (!tile || tile.classList.contains('is-positioned')) {
+        return null;
+    }
+
+    const type = getLayoutItemTypeForTile(tile, tileType);
+    const peerId = tile.dataset.peerId;
+    const remoteMember = member || getRemoteMemberForPeerId(peerId);
+    const layoutItem = getPreferredTileLayoutItem(layoutId, type, {
+        excludeId: layoutId,
+        peerId,
+        member: remoteMember,
+    });
+
+    if (!layoutItem?.grid) {
+        return null;
+    }
+
+    return convertGridLayoutToPixels({
+        ...layoutItem.grid,
+        zIndex: layoutItem.z || getTileLayoutZIndex(tile),
+    });
+};
+
 const applySavedTileLayout = (tile) => {
     if (isMobileLayout() || !tile.dataset.layoutId) {
         return;
     }
 
-    const savedItem = getSavedLayoutItemPreference(tile.dataset.layoutId);
     const item = getTileLayoutItem(tile.dataset.layoutItemId);
     const type =
         item?.type || getLayoutItemTypeForTile(tile, tile.dataset.tileType);
+    const peerId = tile.dataset.peerId;
+    const member = getRemoteMemberForPeerId(peerId);
+    const savedItem =
+        type === LAYOUT_ITEM_TYPES.REMOTE_PEER
+            ? getSavedRemoteLayoutItemPreference(
+                  peerId,
+                  member,
+                  tile.dataset.layoutId
+              )
+            : getSavedLayoutItemPreference(tile.dataset.layoutId);
     const defaultItem = getDefaultLayoutItems().find(
         (candidate) => candidate.type === type
     );
@@ -3678,13 +3985,13 @@ const getLayoutItemForTile = (tile) =>
     getTileLayoutItem(tile?.dataset.layoutItemId || tile?.dataset.layoutId);
 
 const isTileFreeMoveEnabled = (tile) =>
-    getLayoutItemForTile(tile)?.config?.freeMove !== false;
+    getLayoutItemForTile(tile)?.config?.freeMove === true;
 
 const canDragLayoutItem = (item) =>
-    layoutEditMode || item?.config?.freeMove !== false;
+    layoutEditMode || item?.config?.freeMove === true;
 
 const canResizeLayoutItem = (item) =>
-    layoutEditMode || item?.config?.freeMove !== false;
+    layoutEditMode || item?.config?.freeMove === true;
 
 const shouldIgnoreLayoutDragTarget = (target) =>
     Boolean(
@@ -3796,7 +4103,10 @@ const toggleTileFreeMove = (tile) => {
     }
 
     const nextFreeMove = !isTileFreeMoveEnabled(tile);
-    updateLayoutItemConfig(item.id, { freeMove: nextFreeMove });
+    updateLayoutItemConfig(
+        item.id,
+        nextFreeMove ? { freeMove: true } : { freeMove: false }
+    );
     syncLayoutComponentToolbarState(tile);
     positionLayoutComponentToolbar(tile);
 };
@@ -3945,6 +4255,7 @@ const ensureTileStructure = (tile) => {
     });
 
     bindTileLayoutControls(tile, header);
+    bindLayoutResizeBoardControls();
 
     return { header, body, overlay, actions, footer };
 };
@@ -3960,16 +4271,43 @@ const detectTileResizeDirection = (event, tile) => {
     }
 
     const rect = tile.getBoundingClientRect();
+    if (!rect.width || !rect.height) {
+        return null;
+    }
+
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
-    const nearLeftCorner = x <= TILE_RESIZE_CORNER_HIT_PX;
-    const nearRightCorner = x >= rect.width - TILE_RESIZE_CORNER_HIT_PX;
-    const nearTopCorner = y <= TILE_RESIZE_CORNER_HIT_PX;
-    const nearBottomCorner = y >= rect.height - TILE_RESIZE_CORNER_HIT_PX;
-    const nearLeftEdge = x <= TILE_RESIZE_EDGE_HIT_PX;
-    const nearRightEdge = x >= rect.width - TILE_RESIZE_EDGE_HIT_PX;
-    const nearTopEdge = y <= TILE_RESIZE_EDGE_HIT_PX;
-    const nearBottomEdge = y >= rect.height - TILE_RESIZE_EDGE_HIT_PX;
+    const withinHorizontalBand =
+        x >= -TILE_RESIZE_EDGE_OUTSET_PX &&
+        x <= rect.width + TILE_RESIZE_EDGE_OUTSET_PX;
+    const withinVerticalBand =
+        y >= -TILE_RESIZE_EDGE_OUTSET_PX &&
+        y <= rect.height + TILE_RESIZE_EDGE_OUTSET_PX;
+
+    if (!withinHorizontalBand || !withinVerticalBand) {
+        return null;
+    }
+
+    const nearLeftCorner =
+        x >= -TILE_RESIZE_EDGE_OUTSET_PX && x <= TILE_RESIZE_CORNER_SIZE_PX;
+    const nearRightCorner =
+        x >= rect.width - TILE_RESIZE_CORNER_SIZE_PX &&
+        x <= rect.width + TILE_RESIZE_EDGE_OUTSET_PX;
+    const nearTopCorner =
+        y >= -TILE_RESIZE_EDGE_OUTSET_PX && y <= TILE_RESIZE_CORNER_SIZE_PX;
+    const nearBottomCorner =
+        y >= rect.height - TILE_RESIZE_CORNER_SIZE_PX &&
+        y <= rect.height + TILE_RESIZE_EDGE_OUTSET_PX;
+    const nearLeftEdge =
+        x >= -TILE_RESIZE_EDGE_OUTSET_PX && x <= TILE_RESIZE_EDGE_INSET_PX;
+    const nearRightEdge =
+        x >= rect.width - TILE_RESIZE_EDGE_INSET_PX &&
+        x <= rect.width + TILE_RESIZE_EDGE_OUTSET_PX;
+    const nearTopEdge =
+        y >= -TILE_RESIZE_EDGE_OUTSET_PX && y <= TILE_RESIZE_EDGE_INSET_PX;
+    const nearBottomEdge =
+        y >= rect.height - TILE_RESIZE_EDGE_INSET_PX &&
+        y <= rect.height + TILE_RESIZE_EDGE_OUTSET_PX;
 
     if (nearTopCorner && nearLeftCorner) {
         return 'nw';
@@ -4004,6 +4342,80 @@ const detectTileResizeDirection = (event, tile) => {
     }
 
     return null;
+};
+
+const getTileResizeCursor = (direction) => TILE_RESIZE_CURSORS[direction] || '';
+
+const resetTileResizeCursor = (tile) => {
+    if (tile) {
+        tile.style.cursor = '';
+    }
+};
+
+const resetBoardResizeCursor = (board = pageLayoutBoard || videoGrid) => {
+    if (board) {
+        board.style.cursor = '';
+    }
+};
+
+const updateTileResizeCursor = (event, tile) => {
+    if (!tile || shouldIgnoreLayoutDragTarget(event.target)) {
+        resetTileResizeCursor(tile);
+        return;
+    }
+
+    const resizeDirection = detectTileResizeDirection(event, tile);
+    tile.style.cursor = getTileResizeCursor(resizeDirection);
+};
+
+const getResizeTileAtPoint = (event) => {
+    if (shouldIgnoreLayoutDragTarget(event.target)) {
+        return null;
+    }
+
+    return getVideoTiles()
+        .filter((tile) => !tile.classList.contains('is-layout-hidden'))
+        .sort((a, b) => getTileLayoutZIndex(b) - getTileLayoutZIndex(a))
+        .map((tile) => ({
+            tile,
+            direction: detectTileResizeDirection(event, tile),
+        }))
+        .find((candidate) => candidate.direction);
+};
+
+const bindLayoutResizeBoardControls = () => {
+    const board = pageLayoutBoard || videoGrid;
+
+    if (!board || layoutResizeBoundBoards.has(board)) {
+        return;
+    }
+
+    board.addEventListener('pointermove', (event) => {
+        const hit = getResizeTileAtPoint(event);
+
+        if (!hit) {
+            resetBoardResizeCursor(board);
+            return;
+        }
+
+        board.style.cursor = getTileResizeCursor(hit.direction);
+    });
+    board.addEventListener('pointerleave', () => resetBoardResizeCursor(board));
+    board.addEventListener('pointerdown', (event) => {
+        if (event.button !== 0) {
+            return;
+        }
+
+        const hit = getResizeTileAtPoint(event);
+
+        if (!hit) {
+            return;
+        }
+
+        setActiveLayoutToolbarTile(hit.tile);
+        startTileResize(event, hit.tile, hit.direction);
+    });
+    layoutResizeBoundBoards.add(board);
 };
 
 const isTilePointerDisabled = (event) =>
@@ -4116,6 +4528,7 @@ const startTileResize = (event, tile, direction = 'se') => {
     const startLayout = getCurrentTileLayout(tile);
     applyTileLayout(tile, startLayout);
     tile.classList.add('is-resizing');
+    tile.style.cursor = getTileResizeCursor(direction);
     tile.setPointerCapture(event.pointerId);
     event.preventDefault();
     event.stopPropagation();
@@ -4147,6 +4560,7 @@ const startTileResize = (event, tile, direction = 'se') => {
             tile.releasePointerCapture(event.pointerId);
         }
         tile.classList.remove('is-resizing');
+        resetTileResizeCursor(tile);
         finishTileLayoutInteraction(tile);
         window.removeEventListener('pointermove', onMove);
         window.removeEventListener('pointerup', onEnd);
@@ -4160,6 +4574,12 @@ const startTileResize = (event, tile, direction = 'se') => {
 
 const bindTileLayoutControls = (tile, header) => {
     if (!tile.dataset.layoutBound) {
+        tile.addEventListener('pointermove', (event) =>
+            updateTileResizeCursor(event, tile)
+        );
+        tile.addEventListener('pointerleave', () =>
+            resetTileResizeCursor(tile)
+        );
         tile.addEventListener(
             'pointerdown',
             (event) => {
@@ -4320,20 +4740,42 @@ const updateVideoTileStatus = (tile) => {
     const displayName = member.senderName || (isLocal ? getChatName() : 'Peer');
     const { header, overlay, footer } = ensureTileStructure(tile);
     const tileType = getTileType(tile, hasVideo, member);
+    const peerId = tile.dataset.peerId;
+    const previousLayoutItem = getLayoutItemForTile(tile);
 
     tile.dataset.peerLabel = isLocal ? `${displayName}（我）` : displayName;
     tile.dataset.tileType = tileType;
-    const nextLayoutId = getTileLayoutId(tile);
+    const nextLayoutId = getTileLayoutId(tile, member);
     const layoutChanged = tile.dataset.layoutId !== nextLayoutId;
     retirePreviousTileLayoutItem(tile, nextLayoutId);
     tile.dataset.layoutId = nextLayoutId;
+    const layoutItemType = getLayoutItemTypeForTile(tile, tileType);
+    const initialLayout = getInitialTileLayoutForSync(
+        tile,
+        nextLayoutId,
+        tileType,
+        member
+    );
     const layoutItem = syncTileLayoutItemFromElement(tile, {
         id: nextLayoutId,
-        type: getLayoutItemTypeForTile(tile, tileType),
+        type: layoutItemType,
+        layout: initialLayout,
         visible: true,
         positioned: tile.classList.contains('is-positioned'),
     });
-    if (layoutChanged && !tile.classList.contains('is-positioned')) {
+    const hasSavedRemoteLayout =
+        layoutItemType === LAYOUT_ITEM_TYPES.REMOTE_PEER &&
+        Boolean(
+            getSavedRemoteLayoutItemPreference(peerId, member, nextLayoutId)
+        );
+    const canReplaceTemporaryRemoteLayout =
+        hasSavedRemoteLayout && previousLayoutItem?.config?.userPlaced !== true;
+
+    if (
+        layoutChanged &&
+        (!tile.classList.contains('is-positioned') ||
+            canReplaceTemporaryRemoteLayout)
+    ) {
         applySavedTileLayout(tile);
     } else {
         applyTileLayoutItemToElement(tile, layoutItem, {
@@ -4497,7 +4939,10 @@ const toggleLocalPeerTileVisibility = () => {
     }
 };
 
-const ensurePresenceTileForPeer = (peerId) => {
+const ensurePresenceTileForPeer = (
+    peerId,
+    member = getRemoteMemberForPeerId(peerId)
+) => {
     if (!peerId || peerId === localPeerId) {
         return;
     }
@@ -4505,7 +4950,7 @@ const ensurePresenceTileForPeer = (peerId) => {
     const existingTile = document.getElementById(peerId);
     const autoShowRemotePeers = getLayoutPreference('autoShowRemotePeers');
     const keepHidden = getLayoutPreference('keepHiddenRemotePeers');
-    const layoutItemId = `peer-${sanitizeLayoutIdPart(peerId)}`;
+    const layoutItemId = getRemoteLayoutItemId(peerId, member);
 
     if (!existingTile) {
         console.info('[tile] create presence tile', { peerId });
@@ -4513,7 +4958,11 @@ const ensurePresenceTileForPeer = (peerId) => {
         let shouldAutoShow = autoShowRemotePeers;
 
         if (keepHidden) {
-            const savedItem = getSavedLayoutItemPreference(layoutItemId);
+            const savedItem = getSavedRemoteLayoutItemPreference(
+                peerId,
+                member,
+                layoutItemId
+            );
             if (savedItem && savedItem.visible === false) {
                 shouldAutoShow = false;
             }
@@ -4554,7 +5003,7 @@ const syncPresenceTilesForJoinedRoom = (channels = []) => {
 
         activePeerIds.add(member.peerId);
         addKnownRemotePeer(member.peerId);
-        ensurePresenceTileForPeer(member.peerId);
+        ensurePresenceTileForPeer(member.peerId, member);
     });
 
     getVideoTiles().forEach((tile) => {
