@@ -51,6 +51,7 @@ const remoteVolumeUI = window.VoiceRemoteVolumeUI;
 const copyLinkUI = window.VoiceCopyLinkUI;
 const outputVolumeUI = window.VoiceOutputVolumeUI;
 const fullscreenControls = window.VoiceFullscreenControls;
+const voiceJoinOverlayUI = window.VoiceJoinOverlayUI;
 const remoteStreams = {};
 const getAudioConstraints = () => noiseSettingsUI.getAudioConstraints();
 
@@ -5542,65 +5543,13 @@ if (chatNameInput) {
     });
 }
 
-const voiceJoinOverlay = () => {
-    let overlay = document.getElementById('voiceJoinOverlay');
-
-    if (overlay) {
-        return overlay;
-    }
-
-    overlay = document.createElement('div');
-    overlay.id = 'voiceJoinOverlay';
-    overlay.className = 'voice-join-overlay hidden';
-    overlay.innerHTML = `
-        <div class="voice-join-dialog">
-            <h3 id="voiceJoinChannelName"></h3>
-            <p>进入此频道语音？</p>
-            <div class="voice-join-actions">
-                <button id="voiceJoinCancel" class="voice-join-cancel" type="button">取消</button>
-                <button id="voiceJoinConfirm" class="voice-join-confirm" type="button">进入语音</button>
-            </div>
-        </div>
-    `;
-
-    document.body.append(overlay);
-    return overlay;
-};
-
 const showVoiceJoinConfirm = (roomId) => {
-    const overlay = voiceJoinOverlay();
-    const nameEl = document.getElementById('voiceJoinChannelName');
-
-    if (nameEl) {
-        nameEl.textContent = getChannelName(roomId);
-    }
-
-    overlay.classList.remove('hidden');
-
-    const onConfirm = () => {
-        setVoiceTargetRoom(roomId);
-        hideVoiceJoinConfirm();
-    };
-
-    const onCancel = () => {
-        hideVoiceJoinConfirm();
-    };
-
-    document.getElementById('voiceJoinConfirm').onclick = onConfirm;
-    document.getElementById('voiceJoinCancel').onclick = onCancel;
-    overlay.onclick = (event) => {
-        if (event.target === overlay) {
-            onCancel();
-        }
-    };
-};
-
-const hideVoiceJoinConfirm = () => {
-    const overlay = document.getElementById('voiceJoinOverlay');
-
-    if (overlay) {
-        overlay.classList.add('hidden');
-    }
+    voiceJoinOverlayUI.show({
+        title: getChannelName(roomId),
+        onConfirm: () => {
+            setVoiceTargetRoom(roomId);
+        },
+    });
 };
 
 treeChannels.forEach((channel) => {

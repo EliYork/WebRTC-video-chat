@@ -57,6 +57,10 @@ const fullscreenControls = readFileSync(
     new URL('../src/views/js/fullscreen-controls.js', import.meta.url),
     'utf8'
 );
+const voiceJoinOverlayUi = readFileSync(
+    new URL('../src/views/js/voice-join-overlay-ui.js', import.meta.url),
+    'utf8'
+);
 const style = loadCssWithImports(
     new URL('../src/views/style.css', import.meta.url)
 );
@@ -76,6 +80,9 @@ const copyLinkScriptIndex = indexOfRoomScript('/js/copy-link-ui.js');
 const outputVolumeScriptIndex = indexOfRoomScript('/js/output-volume-ui.js');
 const fullscreenControlsScriptIndex = indexOfRoomScript(
     '/js/fullscreen-controls.js'
+);
+const voiceJoinOverlayScriptIndex = indexOfRoomScript(
+    '/js/voice-join-overlay-ui.js'
 );
 const mainScriptIndex = indexOfRoomScript('/script.js');
 
@@ -100,6 +107,10 @@ assert.ok(
 assert.ok(
     fullscreenControlsScriptIndex >= 0,
     'room index must load /js/fullscreen-controls.js'
+);
+assert.ok(
+    voiceJoinOverlayScriptIndex >= 0,
+    'room index must load /js/voice-join-overlay-ui.js'
 );
 assert.ok(mainScriptIndex >= 0, 'room index must load /script.js');
 assert.ok(
@@ -129,6 +140,10 @@ assert.ok(
 assert.ok(
     fullscreenControlsScriptIndex < mainScriptIndex,
     '/js/fullscreen-controls.js must load before /script.js'
+);
+assert.ok(
+    voiceJoinOverlayScriptIndex < mainScriptIndex,
+    '/js/voice-join-overlay-ui.js must load before /script.js'
 );
 
 if (noiseSettingsUi.includes('VoiceViewUtils')) {
@@ -170,6 +185,13 @@ if (fullscreenControls.includes('VoiceViewUtils')) {
     assert.ok(
         viewUtilsScriptIndex < fullscreenControlsScriptIndex,
         '/js/view-utils.js must load before /js/fullscreen-controls.js'
+    );
+}
+
+if (voiceJoinOverlayUi.includes('VoiceViewUtils')) {
+    assert.ok(
+        viewUtilsScriptIndex < voiceJoinOverlayScriptIndex,
+        '/js/view-utils.js must load before /js/voice-join-overlay-ui.js'
     );
 }
 
@@ -256,6 +278,24 @@ if (fullscreenControls.includes('VoiceViewUtils')) {
     );
 });
 
+[
+    'Peer',
+    'socket.emit',
+    'getUserMedia',
+    'replaceTrack',
+    'requestAudioStream',
+    'createAudioPipeline',
+    'joinVoiceChannel',
+    'setupCallStreamHandler',
+    'setViewingRoom',
+    'setVoiceTargetRoom',
+].forEach((forbiddenKeyword) => {
+    assert.ok(
+        !voiceJoinOverlayUi.includes(forbiddenKeyword),
+        `voice-join-overlay-ui.js must not contain ${forbiddenKeyword}`
+    );
+});
+
 assert.match(
     roomIndex,
     /<aside\b[^>]*id="chat-panel"[^>]*class="chat-panel"[\s\S]*?<form\b[^>]*id="chatForm"[\s\S]*?<textarea\b[^>]*id="chatInput"/,
@@ -334,6 +374,16 @@ assert.match(
     script,
     /const joinVoiceChannel = /,
     'joinVoiceChannel must stay in script.js'
+);
+assert.match(
+    script,
+    /const setViewingRoom = /,
+    'setViewingRoom must stay in script.js'
+);
+assert.match(
+    script,
+    /const setVoiceTargetRoom = /,
+    'setVoiceTargetRoom must stay in script.js'
 );
 assert.match(
     script,
