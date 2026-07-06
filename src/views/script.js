@@ -13,7 +13,6 @@ const {
     safeStorageSet,
     setHidden,
     setText,
-    toggleClass,
     writeJsonStorage,
 } = window.VoiceViewUtils;
 
@@ -48,82 +47,11 @@ const mobileBackToChannelsBtn = byId('mobileBackToChannels');
 const mobilePrevTileBtn = byId('mobilePrevTile');
 const mobileNextTileBtn = byId('mobileNextTile');
 const mobileTileCount = byId('mobileTileCount');
+const noiseSettingsUI = window.VoiceNoiseSettingsUI;
 const remoteStreams = {};
-const getAudioConstraints = () => {
-    const noiseEnabled = safeStorageGet(NOISE_SUPPRESSION_KEY) !== 'false';
-    const aiEnabled = safeStorageGet(AI_NOISE_EXPERIMENT_KEY) === 'true';
-
-    return {
-        echoCancellation: true,
-        noiseSuppression: noiseEnabled,
-        autoGainControl: !aiEnabled,
-        channelCount: 1,
-    };
-};
-const getNoiseSuppressionEnabled = () =>
-    safeStorageGet(NOISE_SUPPRESSION_KEY) !== 'false';
-
-const setNoiseSuppressionEnabled = (enabled) => {
-    safeStorageSet(NOISE_SUPPRESSION_KEY, enabled);
-};
-
-const updateNoiseToggleUI = () => {
-    const enabled = getNoiseSuppressionEnabled();
-    const toggle = byId('noiseToggle');
-    const status = byId('noiseStatusText');
-
-    if (toggle) {
-        toggle.setAttribute('aria-pressed', String(enabled));
-    }
-
-    setText(status, enabled ? '开' : '关');
-};
-
-const updateAiExperimentToggleUI = () => {
-    const supported = isAiExperimentSupported();
-    const enabled = getAiExperimentEnabled();
-    const toggle = byId('aiNoiseToggle');
-    const status = byId('aiNoiseStatusText');
-
-    if (!toggle) {
-        return;
-    }
-
-    if (!supported) {
-        toggleClass(toggle, 'na', true);
-        toggle.setAttribute('aria-pressed', 'false');
-        toggle.setAttribute('title', '当前浏览器/设备不支持');
-        toggle.style.cursor = 'default';
-
-        setText(status, toggle.dataset.notSupportedLabel || 'N/A');
-
-        return;
-    }
-
-    toggleClass(toggle, 'na', false);
-    toggle.setAttribute('aria-pressed', String(enabled));
-    toggle.removeAttribute('title');
-    toggle.style.cursor = '';
-
-    if (status) {
-        if (!enabled) {
-            setText(status, '关');
-        } else if (noiseMode === 'rnnoise') {
-            setText(status, 'RNNoise');
-        } else if (noiseMode === 'passthrough') {
-            setText(status, '直通');
-        } else if (noiseMode === 'fallback') {
-            setText(status, '回退');
-        } else {
-            setText(status, '开');
-        }
-    }
-};
+const getAudioConstraints = () => noiseSettingsUI.getAudioConstraints();
 
 const CHAT_NAME_STORAGE_KEY = 'webrtc-video-chat-name';
-const NOISE_SUPPRESSION_KEY = 'webrtc-noise-suppression';
-const AI_NOISE_EXPERIMENT_KEY = 'webrtc-ai-noise-experiment';
-const MIC_GAIN_KEY = 'webrtc-mic-gain';
 const PEER_VOLUME_STORAGE_KEY = 'voice-room-peer-volumes-v1';
 const CHAT_MESSAGE_MAX_LENGTH = 500;
 const CURSOR_THROTTLE_MS = 40;
@@ -303,12 +231,7 @@ const isAiExperimentSupported = () =>
     typeof AudioWorkletNode !== 'undefined' &&
     !isMobileLayout();
 
-const getAiExperimentEnabled = () =>
-    safeStorageGet(AI_NOISE_EXPERIMENT_KEY) === 'true';
-
-const setAiExperimentEnabled = (enabled) => {
-    safeStorageSet(AI_NOISE_EXPERIMENT_KEY, enabled);
-};
+const getAiExperimentEnabled = () => noiseSettingsUI.getAiExperimentEnabled();
 let myVideoStream;
 let activeStream;
 let cameraStream;
@@ -353,17 +276,20 @@ let noiseProcessorActive = false;
 let noiseRawStream = null;
 let noiseMode = 'raw';
 let noiseGainNode = null;
+let noiseSettingsControls;
 let micPermissionDenied = false;
 
-const getMicGain = () => {
-    const val = Number(safeStorageGet(MIC_GAIN_KEY));
-    return !Number.isNaN(val) && val >= 0 && val <= 150 ? val : 100;
-};
-
-const ensureDefaultMicGain = () => {
-    if (safeStorageGet(MIC_GAIN_KEY) === null) {
-        safeStorageSet(MIC_GAIN_KEY, '100');
+const syncNoiseSettingsUI = () => {
+    if (noiseSettingsControls) {
+        noiseSettingsControls.sync();
+        return;
     }
+
+    noiseSettingsUI.updateNoiseToggleUI();
+    noiseSettingsUI.updateAiExperimentToggleUI({
+        supported: isAiExperimentSupported(),
+        noiseMode,
+    });
 };
 
 // eslint-disable-next-line no-undef
@@ -1292,7 +1218,7 @@ const updateLocalUserCard = () => {
         setHidden(screenStatusText);
     }
 
-    updateNoiseToggleUI();
+    syncNoiseSettingsUI();
     updateAllVideoTileStatus();
 };
 
@@ -2103,7 +2029,7 @@ const createAudioPipeline = async (rawStream) => {
         }
     }
 
-    const micGainPercent = getMicGain();
+    const micGainPercent = noiseSettingsUI.getMicGain();
     const micGainNode = new GainNode(ctx, {
         gain: Math.max(0.001, micGainPercent / 100),
     });
@@ -5904,100 +5830,24 @@ document.addEventListener('keydown', (event) => {
     }
 });
 
-const noiseToggleEl = byId('noiseToggle');
-let restartNoticeTimer;
-
-const showRestartEffectNotice = () => {
-    const panel = document.querySelector('.local-meta-panel');
-
-    if (!panel) {
-        return;
-    }
-
-    let notice = panel.querySelector('.restart-effect-notice');
-    if (!notice) {
-        notice = document.createElement('div');
-        notice.className = 'restart-effect-notice';
-        panel.append(notice);
-    }
-
-    notice.textContent = '重进房间后生效';
-    notice.classList.add('is-visible');
-    clearTimeout(restartNoticeTimer);
-    restartNoticeTimer = window.setTimeout(() => {
-        notice.classList.remove('is-visible');
-    }, 2600);
-};
-
-noiseToggleEl?.addEventListener('click', () => {
-    const next = !getNoiseSuppressionEnabled();
-
-    setNoiseSuppressionEnabled(next);
-    updateNoiseToggleUI();
-    showRestartEffectNotice();
+noiseSettingsControls = noiseSettingsUI.init({
+    refs: {
+        noiseToggle: byId('noiseToggle'),
+        noiseStatusText: byId('noiseStatusText'),
+        aiNoiseToggle: byId('aiNoiseToggle'),
+        aiNoiseStatusText: byId('aiNoiseStatusText'),
+        micGainSlider: byId('micGainSlider'),
+        micGainValue: byId('micGainValue'),
+        restartNoticePanel: document.querySelector('.local-meta-panel'),
+    },
+    isAiExperimentSupported,
+    getNoiseMode: () => noiseMode,
+    onMicGainChange: (micGainPercent) => {
+        if (noiseGainNode) {
+            noiseGainNode.gain.value = Math.max(0.001, micGainPercent / 100);
+        }
+    },
 });
-
-noiseToggleEl?.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter' || event.key === ' ') {
-        event.preventDefault();
-        noiseToggleEl.click();
-    }
-});
-
-const aiNoiseToggleEl = byId('aiNoiseToggle');
-
-aiNoiseToggleEl?.addEventListener('click', () => {
-    if (!isAiExperimentSupported()) {
-        return;
-    }
-
-    const next = !getAiExperimentEnabled();
-
-    setAiExperimentEnabled(next);
-    updateAiExperimentToggleUI();
-    showRestartEffectNotice();
-});
-
-aiNoiseToggleEl?.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter' || event.key === ' ') {
-        event.preventDefault();
-        aiNoiseToggleEl.click();
-    }
-});
-
-const micGainSlider = byId('micGainSlider');
-const micGainValueEl = byId('micGainValue');
-
-ensureDefaultMicGain();
-
-const setMicGain = (percent) => {
-    const clamped = Math.max(0, Math.min(150, Math.round(percent)));
-    safeStorageSet(MIC_GAIN_KEY, clamped);
-
-    if (micGainSlider) {
-        micGainSlider.value = String(clamped);
-    }
-
-    if (micGainValueEl) {
-        micGainValueEl.textContent = clamped + '%';
-    }
-
-    if (noiseGainNode) {
-        noiseGainNode.gain.value = Math.max(0.001, clamped / 100);
-    }
-};
-
-if (micGainSlider) {
-    micGainSlider.value = String(getMicGain());
-
-    if (micGainValueEl) {
-        micGainValueEl.textContent = getMicGain() + '%';
-    }
-
-    micGainSlider.addEventListener('input', () => {
-        setMicGain(Number(micGainSlider.value));
-    });
-}
 
 document.addEventListener('fullscreenchange', updateFullscreenButtonStates);
 document.addEventListener(
@@ -6049,8 +5899,7 @@ window.addEventListener('resize', () => {
 updateChannelIndicators();
 updateOutputButtonState();
 updateScreenShareButtonState();
-updateNoiseToggleUI();
-updateAiExperimentToggleUI();
+syncNoiseSettingsUI();
 joinChatRoom(viewingRoomId);
 enablePageCursorSharing();
 

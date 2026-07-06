@@ -29,8 +29,53 @@ const script = readFileSync(
     new URL('../src/views/script.js', import.meta.url),
     'utf8'
 );
+const roomIndex = readFileSync(
+    new URL('../src/views/room/index.ejs', import.meta.url),
+    'utf8'
+);
+const noiseSettingsUi = readFileSync(
+    new URL('../src/views/js/noise-settings-ui.js', import.meta.url),
+    'utf8'
+);
 const style = loadCssWithImports(
     new URL('../src/views/style.css', import.meta.url)
+);
+
+const roomScriptSrcs = Array.from(
+    roomIndex.matchAll(/<script\b[^>]*\bsrc=["'](?<src>[^"']+)["'][^>]*>/g),
+    (match) => match.groups.src
+);
+const indexOfRoomScript = (src) => roomScriptSrcs.indexOf(src);
+const viewUtilsScriptIndex = indexOfRoomScript('/js/view-utils.js');
+const noiseSettingsScriptIndex = indexOfRoomScript('/js/noise-settings-ui.js');
+const mainScriptIndex = indexOfRoomScript('/script.js');
+
+assert.ok(viewUtilsScriptIndex >= 0, 'room index must load /js/view-utils.js');
+assert.ok(
+    noiseSettingsScriptIndex >= 0,
+    'room index must load /js/noise-settings-ui.js'
+);
+assert.ok(mainScriptIndex >= 0, 'room index must load /script.js');
+assert.ok(
+    viewUtilsScriptIndex < mainScriptIndex,
+    '/js/view-utils.js must load before /script.js'
+);
+assert.ok(
+    noiseSettingsScriptIndex < mainScriptIndex,
+    '/js/noise-settings-ui.js must load before /script.js'
+);
+
+if (noiseSettingsUi.includes('VoiceViewUtils')) {
+    assert.ok(
+        viewUtilsScriptIndex < noiseSettingsScriptIndex,
+        '/js/view-utils.js must load before /js/noise-settings-ui.js'
+    );
+}
+
+assert.match(
+    roomIndex,
+    /<aside\b[^>]*id="chat-panel"[^>]*class="chat-panel"[\s\S]*?<form\b[^>]*id="chatForm"[\s\S]*?<textarea\b[^>]*id="chatInput"/,
+    '.chat-panel must remain intact and contain #chatForm / #chatInput'
 );
 
 assert.match(
@@ -48,6 +93,15 @@ assert.match(
     script,
     /CHAT_PANEL:\s*'chatPanel'/,
     'chatPanel must be a first-class page component'
+);
+const pageComponentTypesMatch = script.match(
+    /const PAGE_COMPONENT_TYPES = \{(?<body>[\s\S]*?)\};/
+);
+assert.ok(pageComponentTypesMatch, 'PAGE_COMPONENT_TYPES must be inspectable');
+assert.doesNotMatch(
+    pageComponentTypesMatch.groups.body,
+    /CHAT_INPUT/,
+    'PAGE_COMPONENT_TYPES must not restore CHAT_INPUT'
 );
 assert.doesNotMatch(
     script,
@@ -81,6 +135,16 @@ assert.match(
     script,
     /const createPageTileFromNode = /,
     'page layout must move existing DOM roots into tiles'
+);
+assert.match(
+    script,
+    /const requestAudioStream = async/,
+    'requestAudioStream must stay in script.js'
+);
+assert.match(
+    script,
+    /const createAudioPipeline = async/,
+    'createAudioPipeline must stay in script.js'
 );
 assert.match(
     script,
