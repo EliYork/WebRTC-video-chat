@@ -15,10 +15,7 @@ const loadCssWithImports = (fileUrl, seen = new Set()) => {
         /^\s*@import\s+(?:url\(\s*)?['"](?<path>[^'"]+)['"]\s*\)?\s*;/gm;
 
     return css.replace(importPattern, (statement, importPath) => {
-        if (
-            !importPath.startsWith('./') &&
-            !importPath.startsWith('../')
-        ) {
+        if (!importPath.startsWith('./') && !importPath.startsWith('../')) {
             throw new Error(
                 `Only local relative CSS imports are supported: ${statement}`
             );
@@ -32,7 +29,9 @@ const script = readFileSync(
     new URL('../src/views/script.js', import.meta.url),
     'utf8'
 );
-const style = loadCssWithImports(new URL('../src/views/style.css', import.meta.url));
+const style = loadCssWithImports(
+    new URL('../src/views/style.css', import.meta.url)
+);
 
 assert.match(
     script,
@@ -188,10 +187,7 @@ const showSnapPreviewBody = script.slice(
     script.indexOf('const showSnapPreview = '),
     script.indexOf('const hideSnapPreview = ')
 );
-assert.ok(
-    showSnapPreviewBody,
-    'showSnapPreview body should be inspectable'
-);
+assert.ok(showSnapPreviewBody, 'showSnapPreview body should be inspectable');
 assert.doesNotMatch(
     showSnapPreviewBody,
     /layoutEditMode/,
@@ -221,19 +217,14 @@ const ignoreDragTargetBody = script.slice(
     script.indexOf('const shouldIgnoreLayoutDragTarget = '),
     script.indexOf('const findLayoutComponentToolbar = ')
 );
-[
-    'input',
-    'textarea',
-    'button',
-    'select',
-    'a',
-    '[contenteditable]',
-].forEach((selector) => {
-    assert.ok(
-        ignoreDragTargetBody.includes(`'${selector}'`),
-        `drag ignore list must include ${selector}`
-    );
-});
+['input', 'textarea', 'button', 'select', 'a', '[contenteditable]'].forEach(
+    (selector) => {
+        assert.ok(
+            ignoreDragTargetBody.includes(`'${selector}'`),
+            `drag ignore list must include ${selector}`
+        );
+    }
+);
 assert.match(
     script,
     /const finalizeLayoutItemDrag = [\s\S]*?snapTileLayoutToGrid[\s\S]*?saveLayoutToStorage[\s\S]*?hideSnapPreview/,
@@ -338,15 +329,9 @@ const componentToolbarMatch = style.match(
     /\.layout-component-toolbar\s*\{(?<body>[\s\S]*?)\}/
 );
 assert.ok(toolbarMatch, 'page-level layout toolbar style must exist');
-assert.ok(
-    secondaryActionsMatch,
-    'secondary topbar actions style must exist'
-);
+assert.ok(secondaryActionsMatch, 'secondary topbar actions style must exist');
 assert.ok(toolButtonMatch, 'layout action button style must exist');
-assert.ok(
-    componentToolbarMatch,
-    'component floating toolbar style must exist'
-);
+assert.ok(componentToolbarMatch, 'component floating toolbar style must exist');
 assert.match(
     script,
     /page-layout-topbar/,

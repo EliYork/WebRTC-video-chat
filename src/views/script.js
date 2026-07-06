@@ -149,12 +149,10 @@ const PAGE_LAYOUT_STORAGE_KEY_PREFIX = 'voicePageLayout:v2';
 const PAGE_COMPONENT_TYPES = {
     SIDEBAR_PANEL: 'sidebarPanel',
     CHAT_PANEL: 'chatPanel',
-    CHAT_INPUT: 'chatInput',
 };
 const PAGE_SINGLETON_TYPES = new Set([
     PAGE_COMPONENT_TYPES.SIDEBAR_PANEL,
     PAGE_COMPONENT_TYPES.CHAT_PANEL,
-    PAGE_COMPONENT_TYPES.CHAT_INPUT,
 ]);
 const REAL_DOM_PAGE_TYPES = PAGE_SINGLETON_TYPES;
 const PAGE_TILE_MIN_WIDTH = 160;
@@ -162,7 +160,6 @@ const PAGE_TILE_MIN_HEIGHT = 80;
 const PAGE_COMPONENT_LABELS = {
     [PAGE_COMPONENT_TYPES.SIDEBAR_PANEL]: '左侧频道栏',
     [PAGE_COMPONENT_TYPES.CHAT_PANEL]: '聊天消息',
-    [PAGE_COMPONENT_TYPES.CHAT_INPUT]: '消息输入',
 };
 let pageLayoutBoard;
 const LAYOUT_ITEM_TYPES = {
@@ -409,7 +406,6 @@ const PL_WARN = (...args) => console.warn('[page-layout]', ...args);
 const CORE_PAGE_TYPES = [
     PAGE_COMPONENT_TYPES.SIDEBAR_PANEL,
     PAGE_COMPONENT_TYPES.CHAT_PANEL,
-    PAGE_COMPONENT_TYPES.CHAT_INPUT,
 ];
 
 const validatePageLayout = () => {
@@ -529,16 +525,12 @@ const validateDetachedPageLayoutBoard = (board) => {
         PAGE_COMPONENT_TYPES.SIDEBAR_PANEL
     );
     const chat = getPageTileDiagnostics(board, PAGE_COMPONENT_TYPES.CHAT_PANEL);
-    const chatInputTile = getPageTileDiagnostics(
-        board,
-        PAGE_COMPONENT_TYPES.CHAT_INPUT
-    );
     const chatInputHasTextControl = Boolean(
-        chatInputTile.tile?.querySelector('textarea, input')
+        chat.tile?.querySelector('textarea, input')
     );
     const chatInputHasSendButton = Boolean(
-        chatInputTile.tile &&
-            Array.from(chatInputTile.tile.querySelectorAll('button')).some(
+        chat.tile &&
+            Array.from(chat.tile.querySelectorAll('button')).some(
                 (button) =>
                     button.type === 'submit' ||
                     button.textContent.includes('发送')
@@ -570,17 +562,10 @@ const validateDetachedPageLayoutBoard = (board) => {
     if (
         !chat.tile ||
         !chatHasMessageArea ||
-        chat.tile.querySelector('#chatForm, .chat-form')
-    ) {
-        failures.push('chatPanel is not isolated to the message area');
-    }
-
-    if (
-        !chatInputTile.tile ||
         !chatInputHasTextControl ||
         !chatInputHasSendButton
     ) {
-        failures.push('chatInput is missing input controls');
+        failures.push('chatPanel is missing chat content');
     }
 
     return {
@@ -670,18 +655,11 @@ const initPageLayoutBoard = () => {
             type: PAGE_COMPONENT_TYPES.CHAT_PANEL,
             node: chatPanelEl,
         },
-        {
-            type: PAGE_COMPONENT_TYPES.CHAT_INPUT,
-            node: chatFormEl,
-        },
     ].map((entry) => {
         const placeholder = document.createComment(
             `page-layout-placeholder:${entry.type}`
         );
         entry.node.before(placeholder);
-        if (entry.type === PAGE_COMPONENT_TYPES.CHAT_INPUT) {
-            entry.node.classList.add('chat-input');
-        }
         return { ...entry, placeholder };
     });
 
@@ -2926,72 +2904,6 @@ const serializeLayoutItems = () => {
     return items;
 };
 
-const addLegacyChatInputLayout = (items) => {
-    const chatPanelItem = items.find(
-        (item) => item.type === PAGE_COMPONENT_TYPES.CHAT_PANEL
-    );
-    const hasChatInput = items.some(
-        (item) => item.type === PAGE_COMPONENT_TYPES.CHAT_INPUT
-    );
-
-    if (!chatPanelItem || hasChatInput) {
-        return items;
-    }
-
-    const defaultChatPanel = getDefaultLayoutItems().find(
-        (item) => item.type === PAGE_COMPONENT_TYPES.CHAT_PANEL
-    );
-    const defaultChatInput = getDefaultLayoutItems().find(
-        (item) => item.type === PAGE_COMPONENT_TYPES.CHAT_INPUT
-    );
-    const { minGridH } = getLayoutGridMetrics();
-    const sourceGrid = clampGridLayout(
-        chatPanelItem.grid || defaultChatPanel?.grid || {}
-    );
-    const inputHeight = clampGridNumber(
-        defaultChatInput?.grid?.h || 4,
-        minGridH,
-        PAGE_GRID_ROWS
-    );
-    const panelHeight =
-        sourceGrid.h >= inputHeight + minGridH
-            ? sourceGrid.h - inputHeight
-            : Math.max(
-                  minGridH,
-                  Math.min(
-                      defaultChatPanel?.grid?.h || sourceGrid.h,
-                      sourceGrid.h
-                  )
-              );
-    const panelGrid = clampGridLayout({
-        ...sourceGrid,
-        h: panelHeight,
-    });
-    const inputGrid = clampGridLayout({
-        x: panelGrid.x,
-        y: Math.min(panelGrid.y + panelGrid.h, PAGE_GRID_ROWS - inputHeight),
-        w: panelGrid.w,
-        h: inputHeight,
-    });
-
-    chatPanelItem.grid = panelGrid;
-    items.push({
-        id: `page-${PAGE_COMPONENT_TYPES.CHAT_INPUT}`,
-        type: PAGE_COMPONENT_TYPES.CHAT_INPUT,
-        grid: inputGrid,
-        z: normalizeTileLayoutZIndex(
-            (chatPanelItem.z || TILE_BASE_Z_INDEX) + 1
-        ),
-        visible: chatPanelItem.visible !== false,
-        config: normalizeComponentConfig(
-            PAGE_COMPONENT_TYPES.CHAT_INPUT,
-            chatPanelItem.config
-        ),
-    });
-
-    return items;
-};
-
 const normalizeLoadedLayoutItems = (payload) => {
     if (!payload || payload.version !== PAGE_STORAGE_VERSION) {
         return [];
@@ -3065,7 +2977,7 @@ const normalizeLoadedLayoutItems = (payload) => {
         })
         .filter(Boolean);
 
-    return addLegacyChatInputLayout(normalizedItems);
+    return normalizedItems;
 };
 
 const loadLayoutFromStorage = () => {
@@ -3612,13 +3524,7 @@ const getDefaultLayoutItems = () => [
     {
         id: `page-${PAGE_COMPONENT_TYPES.CHAT_PANEL}`,
         type: PAGE_COMPONENT_TYPES.CHAT_PANEL,
-        grid: { x: 26, y: 0, w: 6, h: 14 },
-        visible: true,
-    },
-    {
-        id: `page-${PAGE_COMPONENT_TYPES.CHAT_INPUT}`,
-        type: PAGE_COMPONENT_TYPES.CHAT_INPUT,
-        grid: { x: 26, y: 14, w: 6, h: 4 },
+        grid: { x: 26, y: 0, w: 6, h: 18 },
         visible: true,
     },
     {
