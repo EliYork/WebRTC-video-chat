@@ -70,230 +70,153 @@ const roomScriptSrcs = Array.from(
     (match) => match.groups.src
 );
 const indexOfRoomScript = (src) => roomScriptSrcs.indexOf(src);
-const viewUtilsScriptIndex = indexOfRoomScript('/js/view-utils.js');
-const noiseSettingsScriptIndex = indexOfRoomScript('/js/noise-settings-ui.js');
-const controlPopoversScriptIndex = indexOfRoomScript(
-    '/js/control-popovers-ui.js'
-);
-const peerVolumeScriptIndex = indexOfRoomScript('/js/peer-volume-ui.js');
-const copyLinkScriptIndex = indexOfRoomScript('/js/copy-link-ui.js');
-const outputVolumeScriptIndex = indexOfRoomScript('/js/output-volume-ui.js');
-const fullscreenControlsScriptIndex = indexOfRoomScript(
-    '/js/fullscreen-controls.js'
-);
-const voiceJoinOverlayScriptIndex = indexOfRoomScript(
-    '/js/voice-join-overlay-ui.js'
-);
-const mainScriptIndex = indexOfRoomScript('/script.js');
+const assertScriptBefore = (scriptA, scriptB) => {
+    const scriptAIndex = indexOfRoomScript(scriptA);
+    const scriptBIndex = indexOfRoomScript(scriptB);
 
-assert.ok(viewUtilsScriptIndex >= 0, 'room index must load /js/view-utils.js');
-assert.ok(
-    noiseSettingsScriptIndex >= 0,
-    'room index must load /js/noise-settings-ui.js'
-);
-assert.ok(
-    controlPopoversScriptIndex >= 0,
-    'room index must load /js/control-popovers-ui.js'
-);
-assert.ok(
-    peerVolumeScriptIndex >= 0,
-    'room index must load /js/peer-volume-ui.js'
-);
-assert.ok(copyLinkScriptIndex >= 0, 'room index must load /js/copy-link-ui.js');
-assert.ok(
-    outputVolumeScriptIndex >= 0,
-    'room index must load /js/output-volume-ui.js'
-);
-assert.ok(
-    fullscreenControlsScriptIndex >= 0,
-    'room index must load /js/fullscreen-controls.js'
-);
-assert.ok(
-    voiceJoinOverlayScriptIndex >= 0,
-    'room index must load /js/voice-join-overlay-ui.js'
-);
-assert.ok(mainScriptIndex >= 0, 'room index must load /script.js');
-assert.ok(
-    viewUtilsScriptIndex < mainScriptIndex,
-    '/js/view-utils.js must load before /script.js'
-);
-assert.ok(
-    noiseSettingsScriptIndex < mainScriptIndex,
-    '/js/noise-settings-ui.js must load before /script.js'
-);
-assert.ok(
-    controlPopoversScriptIndex < mainScriptIndex,
-    '/js/control-popovers-ui.js must load before /script.js'
-);
-assert.ok(
-    peerVolumeScriptIndex < mainScriptIndex,
-    '/js/peer-volume-ui.js must load before /script.js'
-);
-assert.ok(
-    copyLinkScriptIndex < mainScriptIndex,
-    '/js/copy-link-ui.js must load before /script.js'
-);
-assert.ok(
-    outputVolumeScriptIndex < mainScriptIndex,
-    '/js/output-volume-ui.js must load before /script.js'
-);
-assert.ok(
-    fullscreenControlsScriptIndex < mainScriptIndex,
-    '/js/fullscreen-controls.js must load before /script.js'
-);
-assert.ok(
-    voiceJoinOverlayScriptIndex < mainScriptIndex,
-    '/js/voice-join-overlay-ui.js must load before /script.js'
-);
-
-if (noiseSettingsUi.includes('VoiceViewUtils')) {
+    assert.ok(scriptAIndex >= 0, `room index must load ${scriptA}`);
+    assert.ok(scriptBIndex >= 0, `room index must load ${scriptB}`);
     assert.ok(
-        viewUtilsScriptIndex < noiseSettingsScriptIndex,
-        '/js/view-utils.js must load before /js/noise-settings-ui.js'
+        scriptAIndex < scriptBIndex,
+        `${scriptA} must load before ${scriptB}`
     );
-}
+};
 
-if (controlPopoversUi.includes('VoiceViewUtils')) {
-    assert.ok(
-        viewUtilsScriptIndex < controlPopoversScriptIndex,
-        '/js/view-utils.js must load before /js/control-popovers-ui.js'
-    );
-}
+const assertScriptBeforeMain = (scriptPath) => {
+    assertScriptBefore(scriptPath, '/script.js');
+};
 
-if (peerVolumeUi.includes('VoiceViewUtils')) {
-    assert.ok(
-        viewUtilsScriptIndex < peerVolumeScriptIndex,
-        '/js/view-utils.js must load before /js/peer-volume-ui.js'
-    );
-}
+const assertNoForbiddenKeywords = (source, filename, keywords) => {
+    keywords.forEach((forbiddenKeyword) => {
+        assert.ok(
+            !source.includes(forbiddenKeyword),
+            `${filename} must not contain ${forbiddenKeyword}`
+        );
+    });
+};
 
-if (copyLinkUi.includes('VoiceViewUtils')) {
-    assert.ok(
-        viewUtilsScriptIndex < copyLinkScriptIndex,
-        '/js/view-utils.js must load before /js/copy-link-ui.js'
-    );
-}
+const assertSourceContains = (source, label, requiredSnippets) => {
+    requiredSnippets.forEach(({ pattern, message }) => {
+        assert.match(
+            source,
+            pattern,
+            message || `${label} must contain ${pattern}`
+        );
+    });
+};
 
-if (outputVolumeUi.includes('VoiceViewUtils')) {
-    assert.ok(
-        viewUtilsScriptIndex < outputVolumeScriptIndex,
-        '/js/view-utils.js must load before /js/output-volume-ui.js'
-    );
-}
+const uiModuleContracts = [
+    {
+        path: '/js/noise-settings-ui.js',
+        filename: 'noise-settings-ui.js',
+        source: noiseSettingsUi,
+    },
+    {
+        path: '/js/control-popovers-ui.js',
+        filename: 'control-popovers-ui.js',
+        source: controlPopoversUi,
+        forbidden: [
+            'getUserMedia',
+            'Peer',
+            'socket.emit',
+            'replaceTrack',
+            'requestAudioStream',
+            'createAudioPipeline',
+        ],
+    },
+    {
+        path: '/js/peer-volume-ui.js',
+        filename: 'peer-volume-ui.js',
+        source: peerVolumeUi,
+        forbidden: [
+            'getUserMedia',
+            'Peer',
+            'socket.emit',
+            'replaceTrack',
+            'requestAudioStream',
+            'createAudioPipeline',
+            'joinVoiceChannel',
+            'setupCallStreamHandler',
+        ],
+    },
+    {
+        path: '/js/copy-link-ui.js',
+        filename: 'copy-link-ui.js',
+        source: copyLinkUi,
+        forbidden: [
+            'Peer',
+            'socket.emit',
+            'getUserMedia',
+            'replaceTrack',
+            'requestAudioStream',
+            'createAudioPipeline',
+            'joinVoiceChannel',
+            'setupCallStreamHandler',
+        ],
+    },
+    {
+        path: '/js/output-volume-ui.js',
+        filename: 'output-volume-ui.js',
+        source: outputVolumeUi,
+        forbidden: [
+            'Peer',
+            'socket.emit',
+            'getUserMedia',
+            'replaceTrack',
+            'requestAudioStream',
+            'createAudioPipeline',
+            'joinVoiceChannel',
+            'setupCallStreamHandler',
+            'applyOutputSettingsToRemoteMedia',
+        ],
+    },
+    {
+        path: '/js/fullscreen-controls.js',
+        filename: 'fullscreen-controls.js',
+        source: fullscreenControls,
+        forbidden: [
+            'Peer',
+            'socket.emit',
+            'getUserMedia',
+            'replaceTrack',
+            'requestAudioStream',
+            'createAudioPipeline',
+            'joinVoiceChannel',
+            'setupCallStreamHandler',
+            'saveLayoutToStorage',
+            'normalizeLoadedLayoutItems',
+            'detectTileResizeDirection',
+            'startTileResize',
+        ],
+    },
+    {
+        path: '/js/voice-join-overlay-ui.js',
+        filename: 'voice-join-overlay-ui.js',
+        source: voiceJoinOverlayUi,
+        forbidden: [
+            'Peer',
+            'socket.emit',
+            'getUserMedia',
+            'replaceTrack',
+            'requestAudioStream',
+            'createAudioPipeline',
+            'joinVoiceChannel',
+            'setupCallStreamHandler',
+            'setViewingRoom',
+            'setVoiceTargetRoom',
+        ],
+    },
+];
 
-if (fullscreenControls.includes('VoiceViewUtils')) {
-    assert.ok(
-        viewUtilsScriptIndex < fullscreenControlsScriptIndex,
-        '/js/view-utils.js must load before /js/fullscreen-controls.js'
-    );
-}
+assertScriptBeforeMain('/js/view-utils.js');
+uiModuleContracts.forEach(({ path, source, forbidden = [] }) => {
+    assertScriptBeforeMain(path);
 
-if (voiceJoinOverlayUi.includes('VoiceViewUtils')) {
-    assert.ok(
-        viewUtilsScriptIndex < voiceJoinOverlayScriptIndex,
-        '/js/view-utils.js must load before /js/voice-join-overlay-ui.js'
-    );
-}
+    if (source.includes('VoiceViewUtils')) {
+        assertScriptBefore('/js/view-utils.js', path);
+    }
 
-[
-    'getUserMedia',
-    'Peer',
-    'socket.emit',
-    'replaceTrack',
-    'requestAudioStream',
-    'createAudioPipeline',
-].forEach((forbiddenKeyword) => {
-    assert.ok(
-        !controlPopoversUi.includes(forbiddenKeyword),
-        `control-popovers-ui.js must not contain ${forbiddenKeyword}`
-    );
-});
-
-[
-    'getUserMedia',
-    'Peer',
-    'socket.emit',
-    'replaceTrack',
-    'requestAudioStream',
-    'createAudioPipeline',
-    'joinVoiceChannel',
-    'setupCallStreamHandler',
-].forEach((forbiddenKeyword) => {
-    assert.ok(
-        !peerVolumeUi.includes(forbiddenKeyword),
-        `peer-volume-ui.js must not contain ${forbiddenKeyword}`
-    );
-});
-
-[
-    'Peer',
-    'socket.emit',
-    'getUserMedia',
-    'replaceTrack',
-    'requestAudioStream',
-    'createAudioPipeline',
-    'joinVoiceChannel',
-    'setupCallStreamHandler',
-].forEach((forbiddenKeyword) => {
-    assert.ok(
-        !copyLinkUi.includes(forbiddenKeyword),
-        `copy-link-ui.js must not contain ${forbiddenKeyword}`
-    );
-});
-
-[
-    'Peer',
-    'socket.emit',
-    'getUserMedia',
-    'replaceTrack',
-    'requestAudioStream',
-    'createAudioPipeline',
-    'joinVoiceChannel',
-    'setupCallStreamHandler',
-    'applyOutputSettingsToRemoteMedia',
-].forEach((forbiddenKeyword) => {
-    assert.ok(
-        !outputVolumeUi.includes(forbiddenKeyword),
-        `output-volume-ui.js must not contain ${forbiddenKeyword}`
-    );
-});
-
-[
-    'Peer',
-    'socket.emit',
-    'getUserMedia',
-    'replaceTrack',
-    'requestAudioStream',
-    'createAudioPipeline',
-    'joinVoiceChannel',
-    'setupCallStreamHandler',
-    'saveLayoutToStorage',
-    'normalizeLoadedLayoutItems',
-    'detectTileResizeDirection',
-    'startTileResize',
-].forEach((forbiddenKeyword) => {
-    assert.ok(
-        !fullscreenControls.includes(forbiddenKeyword),
-        `fullscreen-controls.js must not contain ${forbiddenKeyword}`
-    );
-});
-
-[
-    'Peer',
-    'socket.emit',
-    'getUserMedia',
-    'replaceTrack',
-    'requestAudioStream',
-    'createAudioPipeline',
-    'joinVoiceChannel',
-    'setupCallStreamHandler',
-    'setViewingRoom',
-    'setVoiceTargetRoom',
-].forEach((forbiddenKeyword) => {
-    assert.ok(
-        !voiceJoinOverlayUi.includes(forbiddenKeyword),
-        `voice-join-overlay-ui.js must not contain ${forbiddenKeyword}`
-    );
+    assertNoForbiddenKeywords(source, path.replace('/js/', ''), forbidden);
 });
 
 assert.match(
@@ -360,46 +283,40 @@ assert.match(
     /const createPageTileFromNode = /,
     'page layout must move existing DOM roots into tiles'
 );
-assert.match(
-    script,
-    /const requestAudioStream = async/,
-    'requestAudioStream must stay in script.js'
-);
-assert.match(
-    script,
-    /const createAudioPipeline = async/,
-    'createAudioPipeline must stay in script.js'
-);
-assert.match(
-    script,
-    /const joinVoiceChannel = /,
-    'joinVoiceChannel must stay in script.js'
-);
-assert.match(
-    script,
-    /const setViewingRoom = /,
-    'setViewingRoom must stay in script.js'
-);
-assert.match(
-    script,
-    /const setVoiceTargetRoom = /,
-    'setVoiceTargetRoom must stay in script.js'
-);
-assert.match(
-    script,
-    /function setupCallStreamHandler/,
-    'setupCallStreamHandler must stay in script.js'
-);
-assert.match(
-    script,
-    /const applyOutputSettings = /,
-    'applyOutputSettings must stay in script.js'
-);
-assert.match(
-    script,
-    /const applyOutputSettingsToRemoteMedia = /,
-    'applyOutputSettingsToRemoteMedia must stay in script.js'
-);
+assertSourceContains(script, 'script.js', [
+    {
+        pattern: /const requestAudioStream = async/,
+        message: 'requestAudioStream must stay in script.js',
+    },
+    {
+        pattern: /const createAudioPipeline = async/,
+        message: 'createAudioPipeline must stay in script.js',
+    },
+    {
+        pattern: /const joinVoiceChannel = /,
+        message: 'joinVoiceChannel must stay in script.js',
+    },
+    {
+        pattern: /const setViewingRoom = /,
+        message: 'setViewingRoom must stay in script.js',
+    },
+    {
+        pattern: /const setVoiceTargetRoom = /,
+        message: 'setVoiceTargetRoom must stay in script.js',
+    },
+    {
+        pattern: /function setupCallStreamHandler/,
+        message: 'setupCallStreamHandler must stay in script.js',
+    },
+    {
+        pattern: /const applyOutputSettings = /,
+        message: 'applyOutputSettings must stay in script.js',
+    },
+    {
+        pattern: /const applyOutputSettingsToRemoteMedia = /,
+        message: 'applyOutputSettingsToRemoteMedia must stay in script.js',
+    },
+]);
 assert.match(
     script,
     /const validateDetachedPageLayoutBoard = /,
