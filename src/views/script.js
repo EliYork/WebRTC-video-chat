@@ -50,6 +50,7 @@ const controlPopoversUI = window.VoiceControlPopoversUI;
 const remoteVolumeUI = window.VoiceRemoteVolumeUI;
 const copyLinkUI = window.VoiceCopyLinkUI;
 const outputVolumeUI = window.VoiceOutputVolumeUI;
+const fullscreenControls = window.VoiceFullscreenControls;
 const remoteStreams = {};
 const getAudioConstraints = () => noiseSettingsUI.getAudioConstraints();
 
@@ -2036,53 +2037,10 @@ const destroyProcessedAudioStream = () => {
     noiseGainNode = null;
 };
 
-const getFullscreenElement = () =>
-    document.fullscreenElement || document.webkitFullscreenElement;
+const getFullscreenElement = () => fullscreenControls.getFullscreenElement();
 
 const updateFullscreenButtonStates = () => {
-    const fullscreenElement = getFullscreenElement();
-
-    document.querySelectorAll('.fullscreen-btn').forEach((button) => {
-        const tile = button.closest('.video-tile');
-        const isFullscreen = tile && fullscreenElement === tile;
-        const label = isFullscreen ? '退出全屏' : '全屏';
-
-        button.textContent = label;
-        button.title = label;
-        button.setAttribute('aria-label', label);
-        button.setAttribute('aria-pressed', String(Boolean(isFullscreen)));
-        button.classList.toggle('is-exit', Boolean(isFullscreen));
-    });
-};
-
-const toggleTileFullscreen = async (tile) => {
-    const video = tile.querySelector('video');
-
-    if (!video) {
-        console.warn('Fullscreen is only available when this peer has video.');
-        return;
-    }
-
-    try {
-        if (getFullscreenElement() === tile) {
-            if (document.exitFullscreen) {
-                await document.exitFullscreen();
-            } else if (document.webkitExitFullscreen) {
-                document.webkitExitFullscreen();
-            }
-        } else if (tile.requestFullscreen) {
-            await tile.requestFullscreen();
-        } else if (tile.webkitRequestFullscreen) {
-            tile.webkitRequestFullscreen();
-        } else if (video.webkitEnterFullscreen) {
-            video.webkitEnterFullscreen();
-        } else {
-            console.warn('Fullscreen API is not available for this browser.');
-        }
-        updateFullscreenButtonStates();
-    } catch (error) {
-        console.warn('Could not toggle fullscreen for this video tile.', error);
-    }
+    fullscreenControls.updateButtonStates();
 };
 
 const addFullscreenControls = (tile) => {
@@ -2098,16 +2056,21 @@ const addFullscreenControls = (tile) => {
         return;
     }
 
-    const button = document.createElement('button');
-    button.className = 'fullscreen-btn';
-    button.type = 'button';
-    button.title = '全屏';
-    button.setAttribute('aria-label', '全屏');
-    button.textContent = '全屏';
-    button.addEventListener('click', () => toggleTileFullscreen(tile));
-
-    actions.append(button);
-    tile.ondblclick = () => toggleTileFullscreen(tile);
+    fullscreenControls.attachTileButton({
+        tile,
+        actions,
+        onUnavailable: () => {
+            console.warn(
+                'Fullscreen is only available when this tile has video.'
+            );
+        },
+        onError: (error) => {
+            console.warn(
+                'Could not toggle fullscreen for this video tile.',
+                error
+            );
+        },
+    });
     updateFullscreenButtonStates();
 };
 
@@ -5723,11 +5686,7 @@ noiseSettingsControls = noiseSettingsUI.init({
     },
 });
 
-document.addEventListener('fullscreenchange', updateFullscreenButtonStates);
-document.addEventListener(
-    'webkitfullscreenchange',
-    updateFullscreenButtonStates
-);
+fullscreenControls.bindFullscreenChange();
 
 mobileBackToChannelsBtn?.addEventListener('click', () => {
     if (currentPeer && !currentPeer.destroyed) {

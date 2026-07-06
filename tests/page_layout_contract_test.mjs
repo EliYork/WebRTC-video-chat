@@ -53,6 +53,10 @@ const outputVolumeUi = readFileSync(
     new URL('../src/views/js/output-volume-ui.js', import.meta.url),
     'utf8'
 );
+const fullscreenControls = readFileSync(
+    new URL('../src/views/js/fullscreen-controls.js', import.meta.url),
+    'utf8'
+);
 const style = loadCssWithImports(
     new URL('../src/views/style.css', import.meta.url)
 );
@@ -70,6 +74,9 @@ const controlPopoversScriptIndex = indexOfRoomScript(
 const peerVolumeScriptIndex = indexOfRoomScript('/js/peer-volume-ui.js');
 const copyLinkScriptIndex = indexOfRoomScript('/js/copy-link-ui.js');
 const outputVolumeScriptIndex = indexOfRoomScript('/js/output-volume-ui.js');
+const fullscreenControlsScriptIndex = indexOfRoomScript(
+    '/js/fullscreen-controls.js'
+);
 const mainScriptIndex = indexOfRoomScript('/script.js');
 
 assert.ok(viewUtilsScriptIndex >= 0, 'room index must load /js/view-utils.js');
@@ -89,6 +96,10 @@ assert.ok(copyLinkScriptIndex >= 0, 'room index must load /js/copy-link-ui.js');
 assert.ok(
     outputVolumeScriptIndex >= 0,
     'room index must load /js/output-volume-ui.js'
+);
+assert.ok(
+    fullscreenControlsScriptIndex >= 0,
+    'room index must load /js/fullscreen-controls.js'
 );
 assert.ok(mainScriptIndex >= 0, 'room index must load /script.js');
 assert.ok(
@@ -114,6 +125,10 @@ assert.ok(
 assert.ok(
     outputVolumeScriptIndex < mainScriptIndex,
     '/js/output-volume-ui.js must load before /script.js'
+);
+assert.ok(
+    fullscreenControlsScriptIndex < mainScriptIndex,
+    '/js/fullscreen-controls.js must load before /script.js'
 );
 
 if (noiseSettingsUi.includes('VoiceViewUtils')) {
@@ -148,6 +163,13 @@ if (outputVolumeUi.includes('VoiceViewUtils')) {
     assert.ok(
         viewUtilsScriptIndex < outputVolumeScriptIndex,
         '/js/view-utils.js must load before /js/output-volume-ui.js'
+    );
+}
+
+if (fullscreenControls.includes('VoiceViewUtils')) {
+    assert.ok(
+        viewUtilsScriptIndex < fullscreenControlsScriptIndex,
+        '/js/view-utils.js must load before /js/fullscreen-controls.js'
     );
 }
 
@@ -211,6 +233,26 @@ if (outputVolumeUi.includes('VoiceViewUtils')) {
     assert.ok(
         !outputVolumeUi.includes(forbiddenKeyword),
         `output-volume-ui.js must not contain ${forbiddenKeyword}`
+    );
+});
+
+[
+    'Peer',
+    'socket.emit',
+    'getUserMedia',
+    'replaceTrack',
+    'requestAudioStream',
+    'createAudioPipeline',
+    'joinVoiceChannel',
+    'setupCallStreamHandler',
+    'saveLayoutToStorage',
+    'normalizeLoadedLayoutItems',
+    'detectTileResizeDirection',
+    'startTileResize',
+].forEach((forbiddenKeyword) => {
+    assert.ok(
+        !fullscreenControls.includes(forbiddenKeyword),
+        `fullscreen-controls.js must not contain ${forbiddenKeyword}`
     );
 });
 
