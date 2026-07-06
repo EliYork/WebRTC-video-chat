@@ -3163,6 +3163,16 @@ const persistCurrentTileLayout = (tile) => {
     persistTileLayoutItem(tile);
 };
 
+const snapTileLayoutToGridForTile = (tile) => {
+    if (!tile) {
+        return null;
+    }
+
+    const snappedLayout = snapTileLayoutToGrid(getCurrentTileLayout(tile));
+    applyTileLayout(tile, snappedLayout);
+    return snappedLayout;
+};
+
 const markTileLayoutUserPlaced = (tile) => {
     const item = getLayoutItemForTile(tile);
 
@@ -3186,8 +3196,7 @@ const finalizeLayoutItemDrag = (tile) => {
         return;
     }
 
-    const snappedLayout = snapTileLayoutToGrid(getCurrentTileLayout(tile));
-    applyTileLayout(tile, snappedLayout);
+    snapTileLayoutToGridForTile(tile);
     markTileLayoutUserPlaced(tile);
     saveLayoutToStorage('布局已吸附');
     hideSnapPreview();
