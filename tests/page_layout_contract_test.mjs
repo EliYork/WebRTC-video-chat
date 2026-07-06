@@ -37,6 +37,10 @@ const noiseSettingsUi = readFileSync(
     new URL('../src/views/js/noise-settings-ui.js', import.meta.url),
     'utf8'
 );
+const controlPopoversUi = readFileSync(
+    new URL('../src/views/js/control-popovers-ui.js', import.meta.url),
+    'utf8'
+);
 const style = loadCssWithImports(
     new URL('../src/views/style.css', import.meta.url)
 );
@@ -48,12 +52,19 @@ const roomScriptSrcs = Array.from(
 const indexOfRoomScript = (src) => roomScriptSrcs.indexOf(src);
 const viewUtilsScriptIndex = indexOfRoomScript('/js/view-utils.js');
 const noiseSettingsScriptIndex = indexOfRoomScript('/js/noise-settings-ui.js');
+const controlPopoversScriptIndex = indexOfRoomScript(
+    '/js/control-popovers-ui.js'
+);
 const mainScriptIndex = indexOfRoomScript('/script.js');
 
 assert.ok(viewUtilsScriptIndex >= 0, 'room index must load /js/view-utils.js');
 assert.ok(
     noiseSettingsScriptIndex >= 0,
     'room index must load /js/noise-settings-ui.js'
+);
+assert.ok(
+    controlPopoversScriptIndex >= 0,
+    'room index must load /js/control-popovers-ui.js'
 );
 assert.ok(mainScriptIndex >= 0, 'room index must load /script.js');
 assert.ok(
@@ -64,6 +75,10 @@ assert.ok(
     noiseSettingsScriptIndex < mainScriptIndex,
     '/js/noise-settings-ui.js must load before /script.js'
 );
+assert.ok(
+    controlPopoversScriptIndex < mainScriptIndex,
+    '/js/control-popovers-ui.js must load before /script.js'
+);
 
 if (noiseSettingsUi.includes('VoiceViewUtils')) {
     assert.ok(
@@ -71,6 +86,27 @@ if (noiseSettingsUi.includes('VoiceViewUtils')) {
         '/js/view-utils.js must load before /js/noise-settings-ui.js'
     );
 }
+
+if (controlPopoversUi.includes('VoiceViewUtils')) {
+    assert.ok(
+        viewUtilsScriptIndex < controlPopoversScriptIndex,
+        '/js/view-utils.js must load before /js/control-popovers-ui.js'
+    );
+}
+
+[
+    'getUserMedia',
+    'Peer',
+    'socket.emit',
+    'replaceTrack',
+    'requestAudioStream',
+    'createAudioPipeline',
+].forEach((forbiddenKeyword) => {
+    assert.ok(
+        !controlPopoversUi.includes(forbiddenKeyword),
+        `control-popovers-ui.js must not contain ${forbiddenKeyword}`
+    );
+});
 
 assert.match(
     roomIndex,
@@ -145,6 +181,16 @@ assert.match(
     script,
     /const createAudioPipeline = async/,
     'createAudioPipeline must stay in script.js'
+);
+assert.match(
+    script,
+    /const joinVoiceChannel = /,
+    'joinVoiceChannel must stay in script.js'
+);
+assert.match(
+    script,
+    /function setupCallStreamHandler/,
+    'setupCallStreamHandler must stay in script.js'
 );
 assert.match(
     script,

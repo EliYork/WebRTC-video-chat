@@ -48,6 +48,7 @@ const mobilePrevTileBtn = byId('mobilePrevTile');
 const mobileNextTileBtn = byId('mobileNextTile');
 const mobileTileCount = byId('mobileTileCount');
 const noiseSettingsUI = window.VoiceNoiseSettingsUI;
+const controlPopoversUI = window.VoiceControlPopoversUI;
 const remoteStreams = {};
 const getAudioConstraints = () => noiseSettingsUI.getAudioConstraints();
 
@@ -1292,25 +1293,6 @@ const updateScreenShareButtonState = () => {
 
     if (label) {
         label.textContent = sharingNow ? '共享中' : '共享';
-    }
-};
-
-const closeControlMenus = (exceptWrap) => {
-    controlMenuToggles.forEach((toggle) => {
-        const wrap = toggle.closest('.control-button-wrap');
-        const panel = document.querySelector(
-            `[data-control-panel="${toggle.dataset.controlMenu}"]`
-        );
-
-        if (wrap && wrap !== exceptWrap) {
-            wrap.classList.remove('is-open');
-            toggle.setAttribute('aria-expanded', 'false');
-            panel?.classList.remove('is-open');
-        }
-    });
-
-    if (!exceptWrap) {
-        controlPanels.forEach((panel) => panel.classList.remove('is-open'));
     }
 };
 
@@ -5790,43 +5772,20 @@ outputVolumeInput?.addEventListener('input', () => {
     applyOutputSettingsToRemoteMedia();
 });
 
-controlMenuToggles.forEach((toggle) => {
-    toggle.addEventListener('click', (event) => {
-        event.stopPropagation();
-        const wrap = toggle.closest('.control-button-wrap');
-        const panel = document.querySelector(
-            `[data-control-panel="${toggle.dataset.controlMenu}"]`
-        );
-        const shouldOpen = !wrap?.classList.contains('is-open');
-
-        closeControlMenus(wrap);
-
-        if (!wrap) {
-            return;
-        }
-
-        wrap.classList.toggle('is-open', shouldOpen);
-        panel?.classList.toggle('is-open', shouldOpen);
-        toggle.setAttribute('aria-expanded', String(shouldOpen));
-    });
+controlPopoversUI.createController({
+    toggles: controlMenuToggles,
+    panels: controlPanels,
 });
 
 document.addEventListener('click', (event) => {
     if (!event.target.closest('.peer-volume-popover')) {
         closePeerVolumePopover();
     }
-
-    if (event.target.closest('.control-button-wrap, .control-popover')) {
-        return;
-    }
-
-    closeControlMenus();
 });
 
 document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
         closePeerVolumePopover();
-        closeControlMenus();
     }
 });
 
