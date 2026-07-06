@@ -77,6 +77,10 @@ const roomUiState = readFileSync(
     new URL('../src/views/js/room-ui-state.js', import.meta.url),
     'utf8'
 );
+const participantsListUi = readFileSync(
+    new URL('../src/views/js/participants-list-ui.js', import.meta.url),
+    'utf8'
+);
 const style = loadCssWithImports(
     new URL('../src/views/style.css', import.meta.url)
 );
@@ -339,6 +343,32 @@ const uiModuleContracts = [
             'detectTileResizeDirection',
         ],
     },
+    {
+        path: '/js/participants-list-ui.js',
+        filename: 'participants-list-ui.js',
+        source: participantsListUi,
+        forbidden: [
+            'Peer',
+            'socket.emit',
+            'socket.on',
+            'getUserMedia',
+            'replaceTrack',
+            'requestAudioStream',
+            'createAudioPipeline',
+            'joinVoiceChannel',
+            'setupCallStreamHandler',
+            'setViewingRoom',
+            'setVoiceTargetRoom',
+            'saveLayoutToStorage',
+            'loadLayoutFromStorage',
+            'startTileResize',
+            'detectTileResizeDirection',
+            'connectToNewUser',
+            'getOrderedTiles',
+            'syncPresenceTiles',
+            'applyOutputSettingsToRemoteMedia',
+        ],
+    },
 ];
 
 assertScriptBeforeMain('/js/view-utils.js');
@@ -381,6 +411,25 @@ assertSourceContains(roomUiState, 'room-ui-state.js', [
     [/renderLocalUserCard/, 'room UI state must render local user card UI'],
     [/renderMobileTileNav/, 'room UI state must render mobile tile nav UI'],
     [/renderRoomHeader/, 'room UI state must render room header UI'],
+]);
+assertSourceContains(participantsListUi, 'participants-list-ui.js', [
+    [
+        /global\.VoiceParticipantsListUI = \{/,
+        'participants list UI module must expose a browser global',
+    ],
+    [
+        /renderParticipantsList/,
+        'participants list UI must expose list rendering',
+    ],
+    [
+        /renderParticipantItem/,
+        'participants list UI must expose item rendering',
+    ],
+    [/renderEmptyParticipants/, 'participants list UI must expose empty state'],
+    [
+        /updateParticipantItemClasses/,
+        'participants list UI must expose participant class sync',
+    ],
 ]);
 const pageComponentTypesMatch = script.match(
     /const PAGE_COMPONENT_TYPES = \{(?<body>[\s\S]*?)\};/

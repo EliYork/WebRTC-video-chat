@@ -55,6 +55,7 @@ const layoutEditUI = window.PageLayoutEditUI;
 const layoutSnapUtils = window.PageLayoutSnapUtils;
 const layoutStorage = window.PageLayoutStorage;
 const roomUIState = window.VoiceRoomUIState;
+const participantsListUI = window.VoiceParticipantsListUI;
 const remoteStreams = {};
 const getAudioConstraints = () => noiseSettingsUI.getAudioConstraints();
 
@@ -1471,19 +1472,6 @@ const renderChatHistory = (messages) => {
     (Array.isArray(messages) ? messages : []).forEach(appendChatMessage);
 };
 
-const createMemberStatusIcon = ({ key, label, icon }) => {
-    const status = document.createElement('span');
-    const statusIcon = document.createElement('i');
-
-    status.className = `member-status member-status-${key}`;
-    status.title = label;
-    status.setAttribute('aria-label', label);
-    statusIcon.className = icon;
-    status.append(statusIcon);
-
-    return status;
-};
-
 const getMemberStatusIcons = (member) => {
     const statuses = [getMemberMicStatus(member)];
 
@@ -1506,6 +1494,65 @@ const getMemberStatusIcons = (member) => {
     return statuses;
 };
 
+const getMemberTileToggle = (member) => {
+    const memberPeerId = member.peerId;
+
+    if (!memberPeerId) {
+        return undefined;
+    }
+
+    if (memberPeerId === localPeerId) {
+        const localTile = document.getElementById('local-video');
+        const layoutItem = localTile?.dataset.layoutItemId
+            ? getTileLayoutItem(localTile.dataset.layoutItemId)
+            : null;
+        const isVisible =
+            layoutItem?.visible !== false &&
+            (!localTile || !localTile.classList.contains('is-layout-hidden'));
+
+        return {
+            icon: isVisible ? 'fas fa-eye' : 'fas fa-eye-slash',
+            label: '显示/隐藏我的语音组件',
+            onClick: () => toggleLocalPeerTileVisibility(),
+        };
+    }
+
+    const tileForPeer = document.getElementById(memberPeerId);
+    const layoutItemId =
+        tileForPeer?.dataset.layoutItemId ||
+        getRemoteLayoutItemId(memberPeerId, member);
+    const layoutItem = getTileLayoutItem(layoutItemId);
+    const isVisible =
+        layoutItem?.visible !== false &&
+        (!tileForPeer || !tileForPeer.classList.contains('is-layout-hidden'));
+
+    return {
+        icon: isVisible ? 'fas fa-eye' : 'fas fa-eye-slash',
+        label: '显示/隐藏组件',
+        onClick: () => toggleMemberTileVisibility(memberPeerId),
+    };
+};
+
+const getParticipantViewModel = (member) => {
+    const isLocal = Boolean(member.socketId && socket?.id === member.socketId);
+    const micStatus = getMemberMicStatus(member);
+
+    return {
+        id: member.socketId || member.peerId,
+        isConnected: Boolean(member.socketId),
+        isLocal,
+        isMuted: micStatus.key === 'muted',
+        isScreenSharing: Boolean(member.screenSharing),
+        isSpeaking: micStatus.key === 'speaking',
+        name: `${member.senderName || 'Guest'}${isLocal ? '（我）' : ''}`,
+        roomId: member.roomId,
+        roomName: getChannelName(member.roomId),
+        statusText: getMemberTileText(member),
+        statuses: getMemberStatusIcons(member),
+        tileToggle: getMemberTileToggle(member),
+    };
+};
+
 const renderPresenceState = ({ channels = [] } = {}) => {
     presenceMembersByPeerId.clear();
 
@@ -1523,7 +1570,7 @@ const renderPresenceState = ({ channels = [] } = {}) => {
                 currentChannel.slug === badge.dataset.channelCount
         );
 
-        badge.textContent = String(channel?.count || 0);
+        participantsListUI.renderChannelCountBadge(badge, channel?.count || 0);
     });
 
     channelMemberLists.forEach((list) => {
@@ -1532,7 +1579,6 @@ const renderPresenceState = ({ channels = [] } = {}) => {
         );
         const membersBySocket = new Map();
 
-        list.replaceChildren();
         (channel?.members || []).forEach((member) => {
             if (!member.socketId) {
                 return;
@@ -1541,78 +1587,10 @@ const renderPresenceState = ({ channels = [] } = {}) => {
             membersBySocket.set(member.socketId, member);
         });
 
-        membersBySocket.forEach((member) => {
-            const item = document.createElement('li');
-            const name = document.createElement('span');
-            const statuses = document.createElement('span');
-            const isMe = member.socketId && socket?.id === member.socketId;
-            const memberPeerId = member.peerId;
-
-            item.className = 'channel-member';
-            name.className = 'channel-member-name';
-            name.textContent = `${member.senderName || 'Guest'}${isMe ? '（我）' : ''}`;
-            statuses.className = 'channel-member-statuses';
-            getMemberStatusIcons(member).forEach((status) => {
-                statuses.append(createMemberStatusIcon(status));
-            });
-
-            item.append(name, statuses);
-
-            if (memberPeerId && memberPeerId !== localPeerId) {
-                const toggleBtn = document.createElement('button');
-                toggleBtn.type = 'button';
-                toggleBtn.className = 'member-toggle-tile';
-                toggleBtn.title = '显示/隐藏组件';
-                toggleBtn.setAttribute('aria-label', '显示/隐藏组件');
-                const toggleIcon = document.createElement('i');
-                const tileForPeer = document.getElementById(memberPeerId);
-                const layoutItemId =
-                    tileForPeer?.dataset.layoutItemId ||
-                    getRemoteLayoutItemId(memberPeerId, member);
-                const layoutItem = getTileLayoutItem(layoutItemId);
-                const isVisible =
-                    layoutItem?.visible !== false &&
-                    (!tileForPeer ||
-                        !tileForPeer.classList.contains('is-layout-hidden'));
-                toggleIcon.className = isVisible
-                    ? 'fas fa-eye'
-                    : 'fas fa-eye-slash';
-                toggleBtn.append(toggleIcon);
-                toggleBtn.addEventListener('click', (event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    toggleMemberTileVisibility(memberPeerId);
-                });
-                statuses.append(toggleBtn);
-            } else if (memberPeerId && memberPeerId === localPeerId) {
-                const toggleBtn = document.createElement('button');
-                toggleBtn.type = 'button';
-                toggleBtn.className = 'member-toggle-tile';
-                toggleBtn.title = '显示/隐藏我的语音组件';
-                toggleBtn.setAttribute('aria-label', '显示/隐藏我的语音组件');
-                const toggleIcon = document.createElement('i');
-                const localTile = document.getElementById('local-video');
-                const layoutItem = localTile?.dataset.layoutItemId
-                    ? getTileLayoutItem(localTile.dataset.layoutItemId)
-                    : null;
-                const isVisible =
-                    layoutItem?.visible !== false &&
-                    (!localTile ||
-                        !localTile.classList.contains('is-layout-hidden'));
-                toggleIcon.className = isVisible
-                    ? 'fas fa-eye'
-                    : 'fas fa-eye-slash';
-                toggleBtn.append(toggleIcon);
-                toggleBtn.addEventListener('click', (event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    toggleLocalPeerTileVisibility();
-                });
-                statuses.append(toggleBtn);
-            }
-
-            list.append(item);
-        });
+        participantsListUI.renderParticipantsList(
+            list,
+            Array.from(membersBySocket.values()).map(getParticipantViewModel)
+        );
     });
 
     syncPresenceTilesForJoinedRoom(channels);
