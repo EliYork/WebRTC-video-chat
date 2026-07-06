@@ -45,6 +45,10 @@ const peerVolumeUi = readFileSync(
     new URL('../src/views/js/peer-volume-ui.js', import.meta.url),
     'utf8'
 );
+const copyLinkUi = readFileSync(
+    new URL('../src/views/js/copy-link-ui.js', import.meta.url),
+    'utf8'
+);
 const style = loadCssWithImports(
     new URL('../src/views/style.css', import.meta.url)
 );
@@ -60,6 +64,7 @@ const controlPopoversScriptIndex = indexOfRoomScript(
     '/js/control-popovers-ui.js'
 );
 const peerVolumeScriptIndex = indexOfRoomScript('/js/peer-volume-ui.js');
+const copyLinkScriptIndex = indexOfRoomScript('/js/copy-link-ui.js');
 const mainScriptIndex = indexOfRoomScript('/script.js');
 
 assert.ok(viewUtilsScriptIndex >= 0, 'room index must load /js/view-utils.js');
@@ -75,6 +80,7 @@ assert.ok(
     peerVolumeScriptIndex >= 0,
     'room index must load /js/peer-volume-ui.js'
 );
+assert.ok(copyLinkScriptIndex >= 0, 'room index must load /js/copy-link-ui.js');
 assert.ok(mainScriptIndex >= 0, 'room index must load /script.js');
 assert.ok(
     viewUtilsScriptIndex < mainScriptIndex,
@@ -91,6 +97,10 @@ assert.ok(
 assert.ok(
     peerVolumeScriptIndex < mainScriptIndex,
     '/js/peer-volume-ui.js must load before /script.js'
+);
+assert.ok(
+    copyLinkScriptIndex < mainScriptIndex,
+    '/js/copy-link-ui.js must load before /script.js'
 );
 
 if (noiseSettingsUi.includes('VoiceViewUtils')) {
@@ -111,6 +121,13 @@ if (peerVolumeUi.includes('VoiceViewUtils')) {
     assert.ok(
         viewUtilsScriptIndex < peerVolumeScriptIndex,
         '/js/view-utils.js must load before /js/peer-volume-ui.js'
+    );
+}
+
+if (copyLinkUi.includes('VoiceViewUtils')) {
+    assert.ok(
+        viewUtilsScriptIndex < copyLinkScriptIndex,
+        '/js/view-utils.js must load before /js/copy-link-ui.js'
     );
 }
 
@@ -141,6 +158,22 @@ if (peerVolumeUi.includes('VoiceViewUtils')) {
     assert.ok(
         !peerVolumeUi.includes(forbiddenKeyword),
         `peer-volume-ui.js must not contain ${forbiddenKeyword}`
+    );
+});
+
+[
+    'Peer',
+    'socket.emit',
+    'getUserMedia',
+    'replaceTrack',
+    'requestAudioStream',
+    'createAudioPipeline',
+    'joinVoiceChannel',
+    'setupCallStreamHandler',
+].forEach((forbiddenKeyword) => {
+    assert.ok(
+        !copyLinkUi.includes(forbiddenKeyword),
+        `copy-link-ui.js must not contain ${forbiddenKeyword}`
     );
 });
 

@@ -50,6 +50,7 @@ const mobileTileCount = byId('mobileTileCount');
 const noiseSettingsUI = window.VoiceNoiseSettingsUI;
 const controlPopoversUI = window.VoiceControlPopoversUI;
 const remoteVolumeUI = window.VoiceRemoteVolumeUI;
+const copyLinkUI = window.VoiceCopyLinkUI;
 const remoteStreams = {};
 const getAudioConstraints = () => noiseSettingsUI.getAudioConstraints();
 
@@ -1294,24 +1295,6 @@ const updateScreenShareButtonState = () => {
 
     if (label) {
         label.textContent = sharingNow ? '共享中' : '共享';
-    }
-};
-
-const setCopyRoomLinkCopied = (isCopied) => {
-    if (!copyRoomLinkBtn) {
-        return;
-    }
-
-    const icon = copyRoomLinkBtn.querySelector('i');
-    copyRoomLinkBtn.classList.toggle('is-copied', isCopied);
-    copyRoomLinkBtn.title = isCopied ? '已复制' : '复制频道链接';
-    copyRoomLinkBtn.setAttribute(
-        'aria-label',
-        isCopied ? '已复制' : '复制频道链接'
-    );
-
-    if (icon) {
-        icon.className = isCopied ? 'fas fa-check' : 'fas fa-link';
     }
 };
 
@@ -3564,24 +3547,9 @@ const renderLayoutComponentTile = (tile) => {
         const linkIcon = document.createElement('i');
         linkIcon.className = 'fas fa-link';
         linkBtn.prepend(linkIcon);
-        linkBtn.addEventListener('click', async () => {
-            try {
-                await navigator.clipboard.writeText(
-                    getChannelUrl(getCopyRoomId())
-                );
-                linkBtn.textContent = '已复制';
-                const checkIcon = document.createElement('i');
-                checkIcon.className = 'fas fa-check';
-                linkBtn.prepend(checkIcon);
-                setTimeout(() => {
-                    linkBtn.textContent = '复制频道链接';
-                    const restoreIcon = document.createElement('i');
-                    restoreIcon.className = 'fas fa-link';
-                    linkBtn.prepend(restoreIcon);
-                }, 1500);
-            } catch {
-                // noop
-            }
+        copyLinkUI.bindCopyButton({
+            button: linkBtn,
+            getLink: () => getChannelUrl(getCopyRoomId()),
         });
         content.append(linkBtn);
     }
@@ -5818,14 +5786,10 @@ syncNoiseSettingsUI();
 joinChatRoom(viewingRoomId);
 enablePageCursorSharing();
 
-copyRoomLinkBtn?.addEventListener('click', async () => {
-    try {
-        await navigator.clipboard.writeText(getChannelUrl(getCopyRoomId()));
-        setCopyRoomLinkCopied(true);
-        setTimeout(() => {
-            setCopyRoomLinkCopied(false);
-        }, 1500);
-    } catch (error) {
+copyLinkUI.bindCopyButton({
+    button: copyRoomLinkBtn,
+    getLink: () => getChannelUrl(getCopyRoomId()),
+    onError: (error) => {
         console.warn('Could not copy channel link.', error);
-    }
+    },
 });
