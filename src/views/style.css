@@ -1400,6 +1400,15 @@ input {
     cursor: nwse-resize;
 }
 
+body.is-layout-resize-hover,
+body.is-layout-resize-hover *,
+.page-layout-board.is-layout-resize-hover,
+.page-layout-board.is-layout-resize-hover *,
+#video-grid.is-layout-resize-hover,
+#video-grid.is-layout-resize-hover * {
+    cursor: var(--layout-resize-cursor, default) !important;
+}
+
 .tile-resize-handle--ne {
     top: calc(var(--resize-hit-outset) * -1);
     right: calc(var(--resize-hit-outset) * -1);

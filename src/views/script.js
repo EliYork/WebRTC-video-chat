@@ -123,6 +123,10 @@ const TILE_MIN_WIDTH = 180;
 const TILE_MIN_HEIGHT = 120;
 const TILE_BASE_Z_INDEX = 2;
 const TILE_RESIZE_DIRECTIONS = ['n', 'e', 's', 'w', 'ne', 'nw', 'se', 'sw'];
+const LAYOUT_RESIZE_HOVER_CLASSES = [
+    'is-layout-resize-hover',
+    ...TILE_RESIZE_DIRECTIONS.map((direction) => `resize-hover-${direction}`),
+];
 const TILE_RESIZE_CURSORS = {
     n: 'ns-resize',
     s: 'ns-resize',
@@ -332,6 +336,8 @@ let layoutSaveStatusTimer;
 let layoutStorageHydrating = false;
 let activeLayoutToolbarTile;
 let snapPreviewOverlay;
+let activeResizeCursorTile;
+let activeResizeCursorBoard;
 const layoutResizeBoundBoards = new WeakSet();
 let noiseAudioContext = null;
 let noiseProcessorNode = null;
@@ -1054,6 +1060,7 @@ const setLayoutEditMode = (enabled) => {
 
     if (!layoutEditMode) {
         hideSnapPreview();
+        resetLayoutResizeCursor();
     }
 };
 
@@ -3452,6 +3459,7 @@ const finalizeLayoutItemDrag = (tile) => {
 };
 
 const finishTileLayoutInteraction = (tile) => {
+    resetLayoutResizeCursor();
     finalizeLayoutItemDrag(tile);
 };
 
@@ -4493,14 +4501,69 @@ const resetBoardResizeCursor = (board = pageLayoutBoard || videoGrid) => {
     }
 };
 
+const clearResizeHoverState = (target) => {
+    target?.classList?.remove(...LAYOUT_RESIZE_HOVER_CLASSES);
+    target?.style?.removeProperty('--layout-resize-cursor');
+};
+
+const resetLayoutResizeCursor = (board = pageLayoutBoard || videoGrid) => {
+    resetBoardResizeCursor(board);
+    resetBoardResizeCursor(activeResizeCursorBoard);
+    document.body.style.cursor = '';
+    document.body.style.removeProperty('--layout-resize-cursor');
+    clearResizeHoverState(document.body);
+    clearResizeHoverState(board);
+    clearResizeHoverState(activeResizeCursorBoard);
+    resetTileResizeCursor(activeResizeCursorTile);
+    activeResizeCursorTile = undefined;
+    activeResizeCursorBoard = undefined;
+};
+
+const applyResizeHoverState = (target, direction, cursor) => {
+    if (!target) {
+        return;
+    }
+
+    target.classList.remove(...LAYOUT_RESIZE_HOVER_CLASSES);
+    target.classList.add('is-layout-resize-hover', `resize-hover-${direction}`);
+    target.style.setProperty('--layout-resize-cursor', cursor);
+};
+
+const setLayoutResizeCursor = (hit, board = pageLayoutBoard || videoGrid) => {
+    const cursor = getTileResizeCursor(hit?.direction);
+
+    if (!cursor || !hit?.tile) {
+        resetLayoutResizeCursor(board);
+        return;
+    }
+
+    if (activeResizeCursorTile && activeResizeCursorTile !== hit.tile) {
+        resetTileResizeCursor(activeResizeCursorTile);
+    }
+
+    activeResizeCursorTile = hit.tile;
+    activeResizeCursorBoard = board;
+    hit.tile.style.cursor = cursor;
+    document.body.style.cursor = cursor;
+    document.body.style.setProperty('--layout-resize-cursor', cursor);
+    applyResizeHoverState(document.body, hit.direction, cursor);
+
+    if (board) {
+        board.style.cursor = cursor;
+        applyResizeHoverState(board, hit.direction, cursor);
+    }
+};
+
 const updateTileResizeCursor = (event, tile) => {
     if (!tile || shouldIgnoreLayoutDragTarget(event.target)) {
-        resetTileResizeCursor(tile);
+        resetLayoutResizeCursor();
         return;
     }
 
     const resizeDirection = detectTileResizeDirection(event, tile);
-    tile.style.cursor = getTileResizeCursor(resizeDirection);
+    setLayoutResizeCursor(
+        resizeDirection ? { tile, direction: resizeDirection } : null
+    );
 };
 
 const getResizeTileAtPoint = (event) => {
@@ -4527,15 +4590,11 @@ const bindLayoutResizeBoardControls = () => {
 
     board.addEventListener('pointermove', (event) => {
         const hit = getResizeTileAtPoint(event);
-
-        if (!hit) {
-            resetBoardResizeCursor(board);
-            return;
-        }
-
-        board.style.cursor = getTileResizeCursor(hit.direction);
+        setLayoutResizeCursor(hit, board);
     });
-    board.addEventListener('pointerleave', () => resetBoardResizeCursor(board));
+    board.addEventListener('pointerleave', () =>
+        resetLayoutResizeCursor(board)
+    );
     board.addEventListener('pointerdown', (event) => {
         if (event.button !== 0) {
             return;
@@ -4568,6 +4627,7 @@ const startTileDrag = (event, tile) => {
         return;
     }
 
+    resetLayoutResizeCursor();
     bringTileLayoutToFront(tile);
     const startLayout = getCurrentTileLayout(tile);
     applyTileLayout(tile, startLayout);
@@ -4663,7 +4723,7 @@ const startTileResize = (event, tile, direction = 'se') => {
     const startLayout = getCurrentTileLayout(tile);
     applyTileLayout(tile, startLayout);
     tile.classList.add('is-resizing');
-    tile.style.cursor = getTileResizeCursor(direction);
+    setLayoutResizeCursor({ tile, direction });
     tile.setPointerCapture(event.pointerId);
     event.preventDefault();
     event.stopPropagation();
@@ -4695,7 +4755,7 @@ const startTileResize = (event, tile, direction = 'se') => {
             tile.releasePointerCapture(event.pointerId);
         }
         tile.classList.remove('is-resizing');
-        resetTileResizeCursor(tile);
+        resetLayoutResizeCursor();
         finishTileLayoutInteraction(tile);
         window.removeEventListener('pointermove', onMove);
         window.removeEventListener('pointerup', onEnd);
@@ -4712,9 +4772,7 @@ const bindTileLayoutControls = (tile, header) => {
         tile.addEventListener('pointermove', (event) =>
             updateTileResizeCursor(event, tile)
         );
-        tile.addEventListener('pointerleave', () =>
-            resetTileResizeCursor(tile)
-        );
+        tile.addEventListener('pointerleave', () => resetLayoutResizeCursor());
         tile.addEventListener(
             'pointerdown',
             (event) => {
