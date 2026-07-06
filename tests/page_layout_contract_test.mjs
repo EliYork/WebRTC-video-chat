@@ -430,6 +430,75 @@ assert.match(
     /snapAllLayoutItemsToGrid/,
     'finalize editing must snap all layout items to the grid'
 );
+const syncLayoutEditModeUiBody = getSourceBetween(
+    script,
+    /const syncLayoutEditModeUI = \(\) => \{/,
+    /\nconst setLayoutEditMode = /,
+    'layout edit mode UI sync helper'
+);
+const setLayoutEditModeBody = getSourceBetween(
+    script,
+    /const setLayoutEditMode = \(enabled\) => \{/,
+    /\nconst toggleLayoutEditMode = /,
+    'layout edit mode setter'
+);
+const toggleLayoutEditModeBody = getSourceBetween(
+    script,
+    /const toggleLayoutEditMode = \(\) => \{/,
+    /\nconst getOrderedTiles = /,
+    'layout edit mode toggle'
+);
+const finalizeLayoutEditingBody = getSourceBetween(
+    script,
+    /const finalizeLayoutEditing = \(\) => \{/,
+    /\nconst getLayoutStorageKey = /,
+    'layout edit finalize helper'
+);
+assert.match(
+    syncLayoutEditModeUiBody,
+    /mainLayout\?\.classList\.toggle\('is-layout-editing',\s*layoutEditMode\)/,
+    'layout edit UI sync must toggle the main editing class from layoutEditMode'
+);
+assert.match(
+    syncLayoutEditModeUiBody,
+    /pageLayoutBoard\?\.classList\.toggle\('is-layout-editing',\s*layoutEditMode\)/,
+    'layout edit UI sync must toggle the board editing class from layoutEditMode'
+);
+assert.match(
+    syncLayoutEditModeUiBody,
+    /layoutEditModeToggle\.setAttribute\([\s\S]*?'aria-pressed'[\s\S]*?String\(layoutEditMode\)/,
+    'layout edit button pressed state must track layoutEditMode'
+);
+assert.match(
+    syncLayoutEditModeUiBody,
+    /\?\s*'完成编辑'[\s\S]*:\s*'编辑布局'/,
+    'layout edit button label must switch between Edit Layout and Done'
+);
+assert.match(
+    setLayoutEditModeBody,
+    /layoutEditMode\s*=\s*Boolean\(enabled\)[\s\S]*?syncLayoutGridMetadata\(\)[\s\S]*?syncLayoutEditModeUI\(\)/,
+    'entering or leaving layout edit mode must update state, grid metadata, and UI together'
+);
+assert.match(
+    setLayoutEditModeBody,
+    /if \(!layoutEditMode\) \{[\s\S]*?hideSnapPreview\(\)[\s\S]*?resetLayoutResizeCursor\(\)/,
+    'leaving layout edit mode must clear snap preview and resize cursor state'
+);
+assert.match(
+    toggleLayoutEditModeBody,
+    /if \(layoutEditMode\) \{[\s\S]*?finalizeLayoutEditing\(\)[\s\S]*?return;/,
+    'clicking Done must use finalizeLayoutEditing instead of directly leaving edit mode'
+);
+assert.match(
+    toggleLayoutEditModeBody,
+    /setLayoutEditMode\(true\)/,
+    'clicking Edit Layout must enter layout edit mode through setLayoutEditMode(true)'
+);
+assert.match(
+    finalizeLayoutEditingBody,
+    /snapAllLayoutItemsToGrid\(\)[\s\S]*?hideSnapPreview\(\)[\s\S]*?saveLayoutToStorage\([\s\S]*?setLayoutEditMode\(false\)/,
+    'finalizing layout edit mode must snap all items, hide preview, save, and then leave edit mode'
+);
 assert.match(
     script,
     /showSnapPreview/,
