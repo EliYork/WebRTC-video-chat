@@ -1,0 +1,25 @@
+body {
+    margin: 0;
+    padding: 0;
+    background:
+        radial-gradient(
+            circle at top left,
+            rgba(255, 214, 229, 0.95),
+            transparent 32rem
+        ),
+        var(--page);
+    color: var(--text);
+    font-family:
+        'Gill Sans', 'Gill Sans MT', Calibri, 'Trebuchet MS', sans-serif;
+}
+
+button,
+a,
+textarea,
+input {
+    font: inherit;
+}
+
+.red {
+    color: var(--danger) !important;
+}

@@ -1,0 +1,60 @@
+.voice-join-overlay {
+    position: fixed;
+    z-index: 9999;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.35);
+}
+
+.voice-join-dialog {
+    width: calc(100% - 48px);
+    max-width: 320px;
+    padding: 28px 24px 24px;
+    border-radius: 14px;
+    background: #fff;
+    box-shadow: 0 24px 48px rgba(0, 0, 0, 0.26);
+    text-align: center;
+}
+
+.voice-join-dialog h3 {
+    margin: 0 0 4px;
+    color: var(--text);
+    font-size: 20px;
+}
+
+.voice-join-dialog p {
+    margin: 0 0 22px;
+    color: var(--muted);
+    font-size: 15px;
+}
+
+.voice-join-actions {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+}
+
+.voice-join-actions button {
+    min-width: 108px;
+    padding: 11px 18px;
+    border: none;
+    border-radius: 10px;
+    font-size: 15px;
+    cursor: pointer;
+}
+
+.voice-join-confirm {
+    background: var(--accent);
+    color: #fff;
+}
+
+.voice-join-confirm:hover {
+    background: var(--accent-strong);
+}
+
+.voice-join-cancel {
+    background: var(--panel-soft);
+    color: var(--text);
+}

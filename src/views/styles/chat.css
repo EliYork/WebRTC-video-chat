@@ -1,0 +1,79 @@
+.chat-panel {
+    display: flex;
+    min-width: 0;
+    min-height: 0;
+    flex-direction: column;
+    border-left: 1px solid var(--line);
+    background-color: rgba(255, 250, 253, 0.94);
+    color: var(--text);
+}
+
+.chat-form textarea {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background-color: #fff;
+    color: var(--text);
+}
+
+.chat-messages {
+    flex: 1;
+    min-height: 0;
+    margin: 0;
+    padding: 18px;
+    list-style: none;
+    overflow-y: auto;
+}
+
+.chat-message {
+    padding: 9px 0;
+    border-bottom: 1px solid var(--line-soft);
+}
+
+.chat-message-meta {
+    margin-bottom: 4px;
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.chat-message-content {
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}
+
+.chat-form {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    padding: 14px;
+    border-top: 1px solid var(--line);
+    background-color: var(--panel-warm);
+}
+
+.chat-compact-mode .layout-component-content {
+    padding: 8px 12px;
+    gap: 4px;
+    font-size: 12px;
+}
+
+.chat-compact-mode .tile-header {
+    min-height: 28px;
+    padding: 4px 8px;
+}
+
+.chat-compact-mode .tile-footer {
+    min-height: 22px;
+    padding: 4px 8px;
+    font-size: 11px;
+}
+
+.chat-form textarea {
+    min-height: 44px;
+    max-height: 120px;
+    padding: 9px 10px;
+    resize: vertical;
+}
+
+.chat-form button {
+    align-self: stretch;
+    padding: 0 16px;
+}

@@ -1,0 +1,308 @@
+@media (max-width: 1100px) {
+    .room-layout {
+        grid-template-columns: 230px minmax(0, 1fr) 320px;
+    }
+}
+
+@media (max-width: 900px) {
+    .room-layout {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto minmax(360px, 1fr) minmax(280px, 42vh);
+        overflow-y: auto;
+    }
+
+    .room-sidebar {
+        border-right: none;
+        border-bottom: 1px solid var(--line);
+    }
+
+    .sidebar-channel-tree {
+        overflow: visible;
+    }
+
+    .chat-panel {
+        border-top: 1px solid var(--line);
+        border-left: none;
+    }
+}
+
+@media (max-width: 768px) {
+    body {
+        overflow: hidden;
+    }
+
+    #main.mobile-in-room .page-layout-board {
+        display: grid;
+        grid-template-rows: 1fr auto minmax(0, 1fr) auto;
+        height: 100dvh;
+    }
+
+    #main.mobile-in-room .page-layout-board .page-layout-tile {
+        position: static !important;
+        min-width: 0;
+        min-height: 0;
+        border: 0;
+        border-radius: 0;
+        box-shadow: none;
+    }
+
+    #main.mobile-in-room .page-layout-board .tile-header,
+    #main.mobile-in-room .page-layout-board .tile-footer,
+    #main.mobile-in-room .page-layout-board .tile-resize-handle,
+    #main.mobile-in-room .page-layout-board .tile-actions {
+        display: none !important;
+    }
+
+    .room-layout {
+        display: block;
+        height: 100dvh;
+        overflow: hidden;
+    }
+
+    .room-sidebar {
+        height: 100dvh;
+        overflow-y: auto;
+        border-right: none;
+    }
+
+    .room-stage,
+    .chat-panel,
+    #main.mobile-in-room .page-tile-chat-input {
+        display: none;
+    }
+
+    .room-layout.mobile-in-room,
+    #main.mobile-in-room {
+        display: grid;
+        grid-template-rows: 1fr auto minmax(0, 1fr) auto;
+    }
+
+    .room-layout.mobile-in-room .room-stage {
+        position: relative;
+        display: flex;
+        grid-row: 1;
+        min-height: 0;
+    }
+
+    .room-layout.mobile-in-room .chat-panel,
+    #main.mobile-in-room .page-tile-chat-panel {
+        display: flex;
+        grid-row: 3;
+        min-height: 0;
+    }
+
+    #main.mobile-in-room .page-tile-chat-input {
+        display: flex;
+        grid-row: 4;
+        min-height: 0;
+    }
+
+    .room-layout.mobile-in-room .room-sidebar,
+    #main.mobile-in-room .page-tile-sidebar-panel {
+        grid-row: 2;
+        position: static;
+        display: block;
+        height: auto;
+        padding: 0;
+        overflow: visible;
+        border: 0;
+        border-top: 1px solid var(--line);
+        background: var(--panel-warm);
+    }
+
+    .room-layout.mobile-in-room .sidebar-brand,
+    .room-layout.mobile-in-room .sidebar-channel-tree {
+        display: none;
+    }
+
+    .room-layout.mobile-in-room .local-user-card,
+    #main.mobile-in-room .page-tile-sidebar-panel .local-user-card {
+        max-height: none;
+        padding: 8px 12px;
+        margin: 0;
+        border: 0;
+        border-radius: 0;
+        box-shadow: none;
+        background: transparent;
+    }
+
+    .room-layout.mobile-in-room .local-user-header,
+    #main.mobile-in-room .page-tile-sidebar-panel .local-user-header {
+        grid-template-columns: auto minmax(0, 1fr);
+    }
+
+    .room-layout.mobile-in-room .local-avatar,
+    #main.mobile-in-room .page-tile-sidebar-panel .local-avatar {
+        width: 34px;
+        height: 34px;
+        font-size: 18px;
+    }
+
+    .room-layout.mobile-in-room .local-meta-panel,
+    #main.mobile-in-room .page-tile-sidebar-panel .local-meta-panel {
+        display: none;
+    }
+
+    .room-layout.mobile-in-room .local-controls,
+    #main.mobile-in-room .page-tile-sidebar-panel .local-controls {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        justify-content: normal;
+    }
+
+    .room-layout.mobile-in-room #shareScreen,
+    #main.mobile-in-room .page-tile-sidebar-panel #shareScreen {
+        display: none;
+    }
+
+    .room-layout.mobile-in-room .control-popover,
+    #main.mobile-in-room .page-tile-sidebar-panel .control-popover {
+        display: none;
+    }
+
+    .room-layout.mobile-in-room .control-menu-toggle,
+    #main.mobile-in-room .page-tile-sidebar-panel .control-menu-toggle {
+        display: none !important;
+    }
+
+    .room-layout.mobile-in-room .control-button-wrap,
+    #main.mobile-in-room .page-tile-sidebar-panel .control-button-wrap {
+        display: block;
+    }
+
+    .room-layout.mobile-in-room #buttons button,
+    #main.mobile-in-room .page-tile-sidebar-panel #buttons button {
+        width: 100%;
+        min-height: 34px;
+        padding: 7px 5px;
+    }
+
+    .mobile-back-button,
+    .mobile-tile-nav {
+        position: absolute;
+        z-index: 8;
+        align-items: center;
+        border: 1px solid rgba(255, 255, 255, 0.7);
+        border-radius: 999px;
+        background-color: rgba(255, 250, 253, 0.88);
+        box-shadow: 0 8px 20px rgba(120, 58, 87, 0.16);
+        color: #674356;
+    }
+
+    .room-layout.mobile-in-room .mobile-back-button {
+        display: inline-flex;
+        top: 10px;
+        left: 10px;
+        min-height: 34px;
+        padding: 0 12px;
+    }
+
+    .room-layout.mobile-in-room .mobile-tile-nav {
+        display: flex;
+        top: 10px;
+        right: 10px;
+        gap: 8px;
+        padding: 4px 8px;
+        font-size: 13px;
+    }
+
+    .mobile-tile-nav button {
+        display: grid;
+        width: 28px;
+        height: 28px;
+        place-items: center;
+        border: 0;
+        border-radius: 999px;
+        background-color: var(--accent);
+        color: #fff;
+    }
+
+    .mobile-tile-nav button:disabled {
+        cursor: default;
+        opacity: 0.38;
+    }
+
+    .stage-layout-toolbar {
+        display: none;
+    }
+
+    #canvas {
+        padding: 52px 12px 12px;
+        overflow: hidden;
+    }
+
+    #video-grid {
+        display: block;
+        width: 100%;
+        height: 100%;
+    }
+
+    #video-grid .video-tile {
+        position: static !important;
+        display: none;
+        width: 100%;
+        height: 100%;
+        left: auto !important;
+        top: auto !important;
+        min-height: 0;
+        aspect-ratio: auto;
+    }
+
+    #video-grid .video-tile.is-mobile-active {
+        display: grid;
+    }
+
+    .voice-placeholder {
+        gap: 6px;
+    }
+
+    .tile-header {
+        min-height: 34px;
+        padding: 6px 8px;
+        cursor: default;
+        touch-action: auto;
+    }
+
+    .tile-resize-handle {
+        display: none;
+    }
+
+    .tile-overlay {
+        top: 42px;
+        left: 8px;
+        max-width: calc(100% - 16px);
+    }
+
+    .tile-status-badge {
+        padding: 3px 6px;
+        font-size: 11px;
+    }
+
+    .tile-footer {
+        min-height: 25px;
+        padding: 6px 8px;
+    }
+
+    .voice-placeholder-avatar {
+        width: 50px;
+        height: 50px;
+        font-size: 21px;
+    }
+
+    .chat-messages {
+        padding: 12px;
+    }
+
+    .chat-form {
+        gap: 8px;
+        padding: 10px 10px calc(10px + env(safe-area-inset-bottom));
+    }
+
+    .chat-form textarea {
+        min-height: 42px;
+        resize: none;
+    }
+
+    .cursor-overlay {
+        display: none;
+    }
+}

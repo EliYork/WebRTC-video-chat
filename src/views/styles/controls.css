@@ -1,0 +1,135 @@
+.local-controls {
+    position: relative;
+    display: grid;
+    grid-template-columns: 56px 56px 36px 36px;
+    gap: 6px;
+    justify-content: space-between;
+}
+
+#buttons.hidden {
+    pointer-events: none;
+}
+
+.control-button-wrap {
+    position: static;
+    display: grid;
+    grid-template-columns: 36px 18px;
+    gap: 2px;
+    min-width: 0;
+}
+
+#buttons button {
+    position: relative;
+    display: grid;
+    width: 36px;
+    height: 36px;
+    min-height: 36px;
+    place-items: center;
+    padding: 0;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background-color: #fff;
+    color: #6c4357;
+    font-size: 15px;
+}
+
+#buttons button.is-off {
+    border-color: rgba(191, 82, 96, 0.18);
+    background-color: #fff6f9;
+    color: #a8657c;
+}
+
+#buttons button.is-off::after {
+    position: absolute;
+    width: 20px;
+    height: 2px;
+    border-radius: 999px;
+    background-color: #bf5260;
+    content: '';
+    pointer-events: none;
+    transform: rotate(-45deg);
+}
+
+#buttons button:hover {
+    cursor: pointer;
+    background-color: var(--panel-soft);
+}
+
+#buttons button:active {
+    transform: scale(0.97);
+}
+
+.control-button-wrap > button:first-child {
+    border-top-right-radius: 5px;
+    border-bottom-right-radius: 5px;
+}
+
+.control-menu-toggle {
+    width: 18px !important;
+    border-top-left-radius: 5px !important;
+    border-bottom-left-radius: 5px !important;
+    font-size: 10px !important;
+}
+
+.control-button-wrap.is-open .control-menu-toggle i {
+    transform: rotate(180deg);
+}
+
+.control-popover {
+    display: none;
+    grid-column: 1 / -1;
+    width: 100%;
+    gap: 6px;
+    padding: 7px 8px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background-color: rgba(255, 250, 253, 0.98);
+    box-shadow: 0 8px 18px rgba(120, 58, 87, 0.1);
+    color: var(--muted);
+    font-size: 11px;
+}
+
+.control-popover input {
+    width: 100%;
+}
+
+.control-popover.is-open {
+    display: grid;
+}
+
+.mic-volume-popover input:disabled {
+    opacity: 0.45;
+}
+
+#toggleVideo,
+#shareScreen,
+#toggleAudio,
+#toggleOutput {
+    min-width: 0;
+}
+
+#destroyPeer {
+    align-self: center;
+    width: auto;
+    height: 28px !important;
+    min-height: 28px !important;
+    padding: 0 10px !important;
+    border: 1px solid rgba(191, 82, 96, 0.24) !important;
+    border-radius: 999px !important;
+    background-color: #df6d7b !important;
+    color: #fff !important;
+    font-size: 12px !important;
+}
+
+#destroyPeer:hover {
+    background-color: #c95c6c !important;
+}
+
+.hidden {
+    display: none !important;
+}
+
+.text-center {
+    text-align: center;
+}

@@ -1,0 +1,23 @@
+* {
+    box-sizing: border-box;
+}
+
+:root {
+    --page: #fff5f8;
+    --panel: #fffafd;
+    --panel-soft: #ffeaf2;
+    --panel-warm: #fff0f5;
+    --line: #efc8d7;
+    --line-soft: rgba(210, 132, 163, 0.22);
+    --text: #5b4050;
+    --muted: #9a7183;
+    --accent: #d86f9a;
+    --accent-strong: #bd5480;
+    --accent-soft: #f8d8e5;
+    --danger: #bf5260;
+    --shadow: 0 18px 48px rgba(169, 94, 125, 0.16);
+    --resize-hit-corner: 24px;
+    --resize-hit-edge: 16px;
+    --resize-hit-inset: 8px;
+    --resize-hit-outset: 8px;
+}
