@@ -61,6 +61,10 @@ const voiceJoinOverlayUi = readFileSync(
     new URL('../src/views/js/voice-join-overlay-ui.js', import.meta.url),
     'utf8'
 );
+const pageLayoutEditUi = readFileSync(
+    new URL('../src/views/js/page-layout-edit-ui.js', import.meta.url),
+    'utf8'
+);
 const style = loadCssWithImports(
     new URL('../src/views/style.css', import.meta.url)
 );
@@ -221,6 +225,25 @@ const uiModuleContracts = [
             'setupCallStreamHandler',
             'setViewingRoom',
             'setVoiceTargetRoom',
+        ],
+    },
+    {
+        path: '/js/page-layout-edit-ui.js',
+        filename: 'page-layout-edit-ui.js',
+        source: pageLayoutEditUi,
+        forbidden: [
+            'function toggleLayoutEditMode',
+            'function setLayoutEditMode',
+            'function syncLayoutEditModeUI',
+            'function finalizeLayoutEditing',
+            'function finishTileLayoutInteraction',
+            'function finalizeLayoutItemDrag',
+            'function snapTileLayoutToGridForTile',
+            'function snapAllLayoutItemsToGrid',
+            'function snapTileLayoutToGrid',
+            'saveLayout',
+            'persist',
+            'localStorage',
         ],
     },
 ];

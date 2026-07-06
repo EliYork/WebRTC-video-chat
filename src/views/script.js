@@ -52,6 +52,7 @@ const copyLinkUI = window.VoiceCopyLinkUI;
 const outputVolumeUI = window.VoiceOutputVolumeUI;
 const fullscreenControls = window.VoiceFullscreenControls;
 const voiceJoinOverlayUI = window.VoiceJoinOverlayUI;
+const layoutEditUI = window.PageLayoutEditUI;
 const remoteStreams = {};
 const getAudioConstraints = () => noiseSettingsUI.getAudioConstraints();
 
@@ -269,9 +270,6 @@ let layoutResetConfirmTimer;
 let layoutSaveStatusTimer;
 let layoutStorageHydrating = false;
 let activeLayoutToolbarTile;
-let snapPreviewOverlay;
-let activeResizeCursorTile;
-let activeResizeCursorBoard;
 const layoutResizeBoundBoards = new WeakSet();
 let noiseAudioContext = null;
 let noiseProcessorNode = null;
@@ -2639,46 +2637,19 @@ const snapAllLayoutItemsToGrid = () => {
     });
 };
 
-const ensureSnapPreviewOverlay = () => {
-    if (!pageLayoutBoard) {
-        return null;
-    }
-
-    if (!snapPreviewOverlay) {
-        snapPreviewOverlay = document.createElement('div');
-        snapPreviewOverlay.className = 'layout-snap-preview';
-        snapPreviewOverlay.setAttribute('aria-hidden', 'true');
-        pageLayoutBoard.append(snapPreviewOverlay);
-    }
-
-    return snapPreviewOverlay;
-};
-
 const showSnapPreview = (tile, layout) => {
     if (!tile || !layout) {
         return;
     }
 
-    const overlay = ensureSnapPreviewOverlay();
-    if (!overlay) {
-        return;
-    }
-
-    const snappedLayout = snapTileLayoutToGrid(layout);
-    overlay.style.left = `${snappedLayout.x}px`;
-    overlay.style.top = `${snappedLayout.y}px`;
-    overlay.style.width = `${snappedLayout.width}px`;
-    overlay.style.height = `${snappedLayout.height}px`;
-    overlay.dataset.targetTileId = tile.id;
-    overlay.classList.add('is-visible');
+    layoutEditUI.showSnapPreview({
+        board: pageLayoutBoard,
+        tile,
+        layout: snapTileLayoutToGrid(layout),
+    });
 };
 
-const hideSnapPreview = () => {
-    if (snapPreviewOverlay) {
-        snapPreviewOverlay.classList.remove('is-visible');
-        delete snapPreviewOverlay.dataset.targetTileId;
-    }
-};
+const hideSnapPreview = () => layoutEditUI.hideSnapPreview();
 
 const finalizeLayoutEditing = () => {
     snapAllLayoutItemsToGrid();
@@ -3887,43 +3858,13 @@ const shouldIgnoreLayoutDragTarget = (target) =>
     );
 
 const findLayoutComponentToolbar = (tile) =>
-    Array.from(document.querySelectorAll('.layout-component-toolbar')).find(
-        (toolbar) => toolbar.dataset.targetTileId === tile.id
-    );
+    layoutEditUI.findLayoutComponentToolbar(tile);
 
 const positionLayoutComponentToolbar = (tile) => {
-    const toolbar = findLayoutComponentToolbar(tile);
-    const board = pageLayoutBoard || tile?.parentElement;
-
-    if (!tile || !toolbar || !board) {
-        return;
-    }
-
-    const boardRect = board.getBoundingClientRect();
-    const tileRect = tile.getBoundingClientRect();
-    const toolbarWidth = toolbar.offsetWidth || 34;
-    const toolbarHeight = toolbar.offsetHeight || 96;
-    const gap = 8;
-    const centerX = tileRect.left - boardRect.left + tileRect.width / 2;
-    const showRight = centerX < boardRect.width / 2;
-    const rawLeft = showRight
-        ? tileRect.right - boardRect.left + gap
-        : tileRect.left - boardRect.left - toolbarWidth - gap;
-    const left = clampGridNumber(
-        Math.round(rawLeft),
-        4,
-        Math.max(4, Math.round(boardRect.width - toolbarWidth - 4))
-    );
-    const top = clampGridNumber(
-        Math.round(tileRect.top - boardRect.top),
-        4,
-        Math.max(4, Math.round(boardRect.height - toolbarHeight - 4))
-    );
-
-    toolbar.classList.toggle('is-left-side', !showRight);
-    toolbar.classList.toggle('is-right-side', showRight);
-    toolbar.style.left = `${left}px`;
-    toolbar.style.top = `${top}px`;
+    layoutEditUI.positionLayoutComponentToolbar({
+        tile,
+        board: pageLayoutBoard || tile?.parentElement,
+    });
 };
 
 const setActiveLayoutToolbarTile = (tile) => {
@@ -4211,71 +4152,19 @@ const detectTileResizeDirection = (event, tile) => {
     return null;
 };
 
-const getTileResizeCursor = (direction) => TILE_RESIZE_CURSORS[direction] || '';
-
-const resetTileResizeCursor = (tile) => {
-    if (tile) {
-        tile.style.cursor = '';
-    }
-};
-
-const resetBoardResizeCursor = (board = pageLayoutBoard || videoGrid) => {
-    if (board) {
-        board.style.cursor = '';
-    }
-};
-
-const clearResizeHoverState = (target) => {
-    target?.classList?.remove(...LAYOUT_RESIZE_HOVER_CLASSES);
-    target?.style?.removeProperty('--layout-resize-cursor');
-};
-
-const resetLayoutResizeCursor = (board = pageLayoutBoard || videoGrid) => {
-    resetBoardResizeCursor(board);
-    resetBoardResizeCursor(activeResizeCursorBoard);
-    document.body.style.cursor = '';
-    document.body.style.removeProperty('--layout-resize-cursor');
-    clearResizeHoverState(document.body);
-    clearResizeHoverState(board);
-    clearResizeHoverState(activeResizeCursorBoard);
-    resetTileResizeCursor(activeResizeCursorTile);
-    activeResizeCursorTile = undefined;
-    activeResizeCursorBoard = undefined;
-};
-
-const applyResizeHoverState = (target, direction, cursor) => {
-    if (!target) {
-        return;
-    }
-
-    target.classList.remove(...LAYOUT_RESIZE_HOVER_CLASSES);
-    target.classList.add('is-layout-resize-hover', `resize-hover-${direction}`);
-    target.style.setProperty('--layout-resize-cursor', cursor);
-};
+const resetLayoutResizeCursor = (board = pageLayoutBoard || videoGrid) =>
+    layoutEditUI.resetResizeCursor({
+        board,
+        hoverClasses: LAYOUT_RESIZE_HOVER_CLASSES,
+    });
 
 const setLayoutResizeCursor = (hit, board = pageLayoutBoard || videoGrid) => {
-    const cursor = getTileResizeCursor(hit?.direction);
-
-    if (!cursor || !hit?.tile) {
-        resetLayoutResizeCursor(board);
-        return;
-    }
-
-    if (activeResizeCursorTile && activeResizeCursorTile !== hit.tile) {
-        resetTileResizeCursor(activeResizeCursorTile);
-    }
-
-    activeResizeCursorTile = hit.tile;
-    activeResizeCursorBoard = board;
-    hit.tile.style.cursor = cursor;
-    document.body.style.cursor = cursor;
-    document.body.style.setProperty('--layout-resize-cursor', cursor);
-    applyResizeHoverState(document.body, hit.direction, cursor);
-
-    if (board) {
-        board.style.cursor = cursor;
-        applyResizeHoverState(board, hit.direction, cursor);
-    }
+    layoutEditUI.setResizeCursor({
+        hit,
+        board,
+        cursors: TILE_RESIZE_CURSORS,
+        hoverClasses: LAYOUT_RESIZE_HOVER_CLASSES,
+    });
 };
 
 const updateTileResizeCursor = (event, tile) => {
