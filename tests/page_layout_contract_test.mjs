@@ -107,12 +107,34 @@ const assertNoForbiddenKeywords = (source, filename, keywords) => {
     });
 };
 
+const getSnippetPattern = (snippet) =>
+    Array.isArray(snippet) ? snippet[0] : snippet.pattern;
+
+const getSnippetMessage = (snippet) =>
+    Array.isArray(snippet) ? snippet[1] : snippet.message;
+
 const assertSourceContains = (source, label, requiredSnippets) => {
-    requiredSnippets.forEach(({ pattern, message }) => {
+    requiredSnippets.forEach((snippet) => {
+        const pattern = getSnippetPattern(snippet);
+        const message = getSnippetMessage(snippet);
+
         assert.match(
             source,
             pattern,
             message || `${label} must contain ${pattern}`
+        );
+    });
+};
+
+const assertSourceDoesNotContain = (source, label, forbiddenSnippets) => {
+    forbiddenSnippets.forEach((snippet) => {
+        const pattern = getSnippetPattern(snippet);
+        const message = getSnippetMessage(snippet);
+
+        assert.doesNotMatch(
+            source,
+            pattern,
+            message || `${label} must not contain ${pattern}`
         );
     });
 };
@@ -310,36 +332,32 @@ assert.match(
     '.chat-panel must remain intact and contain #chatForm / #chatInput'
 );
 
-assert.match(
-    script,
-    /PAGE_LAYOUT_STORAGE_KEY_PREFIX\s*=\s*'voicePageLayout:v2'/,
-    'page layout must use the v2 storage key'
-);
-
-assert.match(
-    script,
-    /SIDEBAR_PANEL:\s*'sidebarPanel'/,
-    'sidebarPanel must be a first-class page component'
-);
-assert.match(
-    script,
-    /CHAT_PANEL:\s*'chatPanel'/,
-    'chatPanel must be a first-class page component'
-);
+assertSourceContains(script, 'page layout base contract', [
+    [
+        /PAGE_LAYOUT_STORAGE_KEY_PREFIX\s*=\s*'voicePageLayout:v2'/,
+        'page layout must use the v2 storage key',
+    ],
+    [
+        /SIDEBAR_PANEL:\s*'sidebarPanel'/,
+        'sidebarPanel must be a first-class page component',
+    ],
+    [
+        /CHAT_PANEL:\s*'chatPanel'/,
+        'chatPanel must be a first-class page component',
+    ],
+]);
 const pageComponentTypesMatch = script.match(
     /const PAGE_COMPONENT_TYPES = \{(?<body>[\s\S]*?)\};/
 );
 assert.ok(pageComponentTypesMatch, 'PAGE_COMPONENT_TYPES must be inspectable');
-assert.doesNotMatch(
+assertSourceDoesNotContain(
     pageComponentTypesMatch.groups.body,
-    /CHAT_INPUT/,
-    'PAGE_COMPONENT_TYPES must not restore CHAT_INPUT'
+    'PAGE_COMPONENT_TYPES',
+    [[/CHAT_INPUT/, 'PAGE_COMPONENT_TYPES must not restore CHAT_INPUT']]
 );
-assert.doesNotMatch(
-    script,
-    /STAGE_PANEL:\s*'stagePanel'/,
-    'stagePanel must not be a page component'
-);
+assertSourceDoesNotContain(script, 'page layout base contract', [
+    [/STAGE_PANEL:\s*'stagePanel'/, 'stagePanel must not be a page component'],
+]);
 
 const defaultsMatch = script.match(
     /const getDefaultLayoutItems = \(\) => \[(?<body>[\s\S]*?)\];/
@@ -350,25 +368,23 @@ assert.ok(
 );
 const defaultBody = defaultsMatch.groups.body;
 
-assert.match(
-    defaultBody,
-    /SIDEBAR_PANEL/,
-    'default layout includes sidebarPanel'
-);
-assert.match(defaultBody, /CHAT_PANEL/, 'default layout includes chatPanel');
-assert.match(defaultBody, /LOCAL_PEER/, 'default layout includes localPeer');
-assert.doesNotMatch(
-    defaultBody,
-    /STAGE_PANEL|CHANNEL_SIDEBAR|SELF_STATUS|ROOM_INFO|CHAT_INPUT/,
-    'default page layout must not include old split components'
-);
+assertSourceContains(defaultBody, 'default page layout', [
+    [/SIDEBAR_PANEL/, 'default layout includes sidebarPanel'],
+    [/CHAT_PANEL/, 'default layout includes chatPanel'],
+    [/LOCAL_PEER/, 'default layout includes localPeer'],
+]);
+assertSourceDoesNotContain(defaultBody, 'default page layout', [
+    [
+        /STAGE_PANEL|CHANNEL_SIDEBAR|SELF_STATUS|ROOM_INFO|CHAT_INPUT/,
+        'default page layout must not include old split components',
+    ],
+]);
 
-assert.match(
-    script,
-    /const createPageTileFromNode = /,
-    'page layout must move existing DOM roots into tiles'
-);
 assertSourceContains(script, 'script.js', [
+    {
+        pattern: /const createPageTileFromNode = /,
+        message: 'page layout must move existing DOM roots into tiles',
+    },
     {
         pattern: /const requestAudioStream = async/,
         message: 'requestAudioStream must stay in script.js',
@@ -401,92 +417,65 @@ assertSourceContains(script, 'script.js', [
         pattern: /const applyOutputSettingsToRemoteMedia = /,
         message: 'applyOutputSettingsToRemoteMedia must stay in script.js',
     },
+    {
+        pattern: /const validateDetachedPageLayoutBoard = /,
+        message:
+            'page layout must validate detached board content before replacing #main',
+    },
 ]);
-assert.match(
-    script,
-    /const validateDetachedPageLayoutBoard = /,
-    'page layout must validate detached board content before replacing #main'
-);
-assert.match(
-    pageLayoutStorage,
-    /item\.type === 'stagePanel'[\s\S]*?return null;/,
-    'normalizeLoadedLayoutItems must ignore saved stagePanel entries'
-);
+assertSourceContains(pageLayoutStorage, 'page-layout-storage.js', [
+    [
+        /item\.type === 'stagePanel'[\s\S]*?return null;/,
+        'normalizeLoadedLayoutItems must ignore saved stagePanel entries',
+    ],
+]);
 assert.ok(
     script.indexOf('window.__voiceLayoutDebug = {') <
         script.indexOf('_runPageLayoutInit();'),
     'window.__voiceLayoutDebug must be defined before page layout init runs'
 );
-assert.match(
-    script,
-    /pageTiles:\s*document\.querySelectorAll/,
-    'dumpDom must report pageTiles'
-);
-assert.match(
-    script,
-    /unexpectedStagePanel/,
-    'dumpDom must flag an unexpected stagePanel'
-);
-assert.match(
-    script,
-    /REAL_DOM_PAGE_TYPES\.has\(type\)[\s\S]*?return;/,
-    'renderLayoutComponentTile must return before replacing real DOM panel bodies'
-);
-assert.match(
-    script,
-    /REAL_DOM_PAGE_TYPES\.has\(type\)[\s\S]*?savedItem[\s\S]*?savedItem\?\.config[\s\S]*?config,/,
-    'real DOM page panels must restore saved config such as freeMove while rendering'
-);
-assert.match(
-    script,
-    /showRecoveryToolbar\(\)/,
-    'debug API must expose showRecoveryToolbar()'
-);
-assert.match(
-    script,
-    /bar\.hidden = true/,
-    'recovery toolbar must be hidden by default'
-);
-assert.match(
-    script,
-    /footer\.hidden = true/,
-    'real DOM page panels must hide footer labels'
-);
-assert.match(
-    script,
-    /title\.textContent = label/,
-    'page-level panels must keep a visible title in the tile header'
-);
-assert.match(
-    script,
-    /avatar\.textContent = createTileAvatarText\(label\)/,
-    'page-level panel headers must keep a leading avatar/icon marker'
-);
-assert.match(
-    script,
-    /layout-component-toolbar/,
-    'layout controls must use an external floating component toolbar'
-);
-assert.match(
-    script,
-    /positionLayoutComponentToolbar/,
-    'component toolbar position must be recalculated from tile bounds'
-);
-assert.match(
-    script,
-    /freeMove:\s*false/,
-    'layout item config must persist a freeMove flag'
-);
-assert.match(
-    script,
-    /isTileFreeMoveEnabled/,
-    'freeMove must affect normal-mode tile movement'
-);
-assert.doesNotMatch(
-    script,
-    /actions\.prepend\(removeButton\)/,
-    'hide button must not be inserted inside the tile actions area'
-);
+assertSourceContains(script, 'page layout behavior contract', [
+    [
+        /pageTiles:\s*document\.querySelectorAll/,
+        'dumpDom must report pageTiles',
+    ],
+    [/unexpectedStagePanel/, 'dumpDom must flag an unexpected stagePanel'],
+    [
+        /REAL_DOM_PAGE_TYPES\.has\(type\)[\s\S]*?return;/,
+        'renderLayoutComponentTile must return before replacing real DOM panel bodies',
+    ],
+    [
+        /REAL_DOM_PAGE_TYPES\.has\(type\)[\s\S]*?savedItem[\s\S]*?savedItem\?\.config[\s\S]*?config,/,
+        'real DOM page panels must restore saved config such as freeMove while rendering',
+    ],
+    [/showRecoveryToolbar\(\)/, 'debug API must expose showRecoveryToolbar()'],
+    [/bar\.hidden = true/, 'recovery toolbar must be hidden by default'],
+    [/footer\.hidden = true/, 'real DOM page panels must hide footer labels'],
+    [
+        /title\.textContent = label/,
+        'page-level panels must keep a visible title in the tile header',
+    ],
+    [
+        /avatar\.textContent = createTileAvatarText\(label\)/,
+        'page-level panel headers must keep a leading avatar/icon marker',
+    ],
+    [
+        /layout-component-toolbar/,
+        'layout controls must use an external floating component toolbar',
+    ],
+    [
+        /positionLayoutComponentToolbar/,
+        'component toolbar position must be recalculated from tile bounds',
+    ],
+    [/freeMove:\s*false/, 'layout item config must persist a freeMove flag'],
+    [/isTileFreeMoveEnabled/, 'freeMove must affect normal-mode tile movement'],
+]);
+assertSourceDoesNotContain(script, 'page layout behavior contract', [
+    [
+        /actions\.prepend\(removeButton\)/,
+        'hide button must not be inserted inside the tile actions area',
+    ],
+]);
 
 assert.match(
     script,
@@ -722,21 +711,20 @@ assert.match(
     /const applySavedTileLayout = [\s\S]*?savedItem[\s\S]*?findAvailableLayoutSlot[\s\S]*?upsertTileLayoutItem/,
     'tiles without saved layout should use auto slot placement before being synced'
 );
-assert.doesNotMatch(
-    script,
-    /x:\s*13\s*\+\s*\(remoteIndex\s*%\s*3\)\s*\*\s*2/,
-    'remote peer placement must not use the old fixed x=13 stagger'
-);
-assert.doesNotMatch(
-    script,
-    /y:\s*7\s*\+\s*\(remoteIndex\s*%\s*3\)\s*\*\s*2/,
-    'remote peer placement must not use the old fixed y=7 stagger'
-);
-assert.doesNotMatch(
-    script,
-    /x:\s*8,\s*y:\s*2,\s*w:\s*16,\s*h:\s*10/,
-    'screen-share placement must not use the old fixed 16x10 slot'
-);
+assertSourceDoesNotContain(script, 'auto placement', [
+    [
+        /x:\s*13\s*\+\s*\(remoteIndex\s*%\s*3\)\s*\*\s*2/,
+        'remote peer placement must not use the old fixed x=13 stagger',
+    ],
+    [
+        /y:\s*7\s*\+\s*\(remoteIndex\s*%\s*3\)\s*\*\s*2/,
+        'remote peer placement must not use the old fixed y=7 stagger',
+    ],
+    [
+        /x:\s*8,\s*y:\s*2,\s*w:\s*16,\s*h:\s*10/,
+        'screen-share placement must not use the old fixed 16x10 slot',
+    ],
+]);
 assert.match(
     script,
     /const markTileLayoutUserPlaced = [\s\S]*?userPlaced:\s*true/,
