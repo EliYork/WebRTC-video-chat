@@ -131,20 +131,19 @@ const PAGE_STORAGE_VERSION = 1;
 const PAGE_LAYOUT_STORAGE_KEY_PREFIX = 'voicePageLayout:v2';
 const PAGE_COMPONENT_TYPES = {
     SIDEBAR_PANEL: 'sidebarPanel',
-    STAGE_PANEL: 'stagePanel',
     CHAT_PANEL: 'chatPanel',
 };
 const PAGE_SINGLETON_TYPES = new Set([
     PAGE_COMPONENT_TYPES.SIDEBAR_PANEL,
-    PAGE_COMPONENT_TYPES.STAGE_PANEL,
     PAGE_COMPONENT_TYPES.CHAT_PANEL,
 ]);
 const REAL_DOM_PAGE_TYPES = PAGE_SINGLETON_TYPES;
 const PAGE_TILE_MIN_WIDTH = 160;
 const PAGE_TILE_MIN_HEIGHT = 80;
+const TILE_RESIZE_EDGE_HIT_PX = 10;
+const TILE_RESIZE_CORNER_HIT_PX = 22;
 const PAGE_COMPONENT_LABELS = {
     [PAGE_COMPONENT_TYPES.SIDEBAR_PANEL]: '左侧频道栏',
-    [PAGE_COMPONENT_TYPES.STAGE_PANEL]: '语音舞台区',
     [PAGE_COMPONENT_TYPES.CHAT_PANEL]: '聊天面板',
 };
 let pageLayoutBoard;
@@ -157,30 +156,30 @@ const LAYOUT_ITEM_TYPES = {
     ROOM: 'room',
     CHAT: 'chat',
 };
-const LAYOUT_COMPONENT_LABELS = {
-    [LAYOUT_ITEM_TYPES.ROOM]: '房间信息组件',
-    [LAYOUT_ITEM_TYPES.CHAT]: '聊天组件',
-    [LAYOUT_ITEM_TYPES.LOCAL_PEER]: '我的语音组件',
-};
 const COMPONENT_CONFIG_DEFAULTS = {
     [LAYOUT_ITEM_TYPES.ROOM]: {
+        freeMove: false,
         showRoomName: true,
         showCopyLink: true,
         showMemberCount: true,
     },
     [LAYOUT_ITEM_TYPES.CHAT]: {
+        freeMove: false,
         compactMode: false,
         showHeader: true,
     },
     [LAYOUT_ITEM_TYPES.LOCAL_PEER]: {
+        freeMove: false,
         showSelfPreview: true,
         showControls: true,
     },
     [LAYOUT_ITEM_TYPES.REMOTE_PEER]: {
+        freeMove: false,
         keepHiddenWhenRejoin: true,
         showPeerName: true,
     },
     [LAYOUT_ITEM_TYPES.SCREEN_SHARE]: {
+        freeMove: false,
         autoShowScreenShare: true,
         showScreenHeader: true,
     },
@@ -195,7 +194,7 @@ let layoutPreferences = { ...LAYOUT_PREFERENCE_DEFAULTS };
 
 const getDefaultComponentConfig = (type) => {
     const defaults = COMPONENT_CONFIG_DEFAULTS[type];
-    return defaults ? { ...defaults } : {};
+    return defaults ? { ...defaults } : { freeMove: false };
 };
 
 const normalizeComponentConfig = (type, config = {}) => {
@@ -209,14 +208,6 @@ const normalizeComponentConfig = (type, config = {}) => {
         }
     }
     return result;
-};
-
-const getLayoutItemConfig = (itemId) => {
-    const item = getTileLayoutItem(itemId);
-    if (!item) {
-        return {};
-    }
-    return normalizeComponentConfig(item.type, item.config);
 };
 
 const updateLayoutItemConfig = (id, patch) => {
@@ -242,13 +233,6 @@ const normalizeLayoutPreferences = (prefs = {}) => {
             typeof prefs[key] === 'boolean' ? prefs[key] : defaults[key];
     }
     return result;
-};
-
-const updateLayoutPreference = (key, value) => {
-    const prefs = { ...layoutPreferences };
-    prefs[key] = Boolean(value);
-    layoutPreferences = prefs;
-    saveLayoutToStorage('偏好已保存');
 };
 
 const readLayoutPreferencesFromStorage = () => {
@@ -318,6 +302,8 @@ let layoutSaveStatus;
 let layoutResetConfirmTimer;
 let layoutSaveStatusTimer;
 let layoutStorageHydrating = false;
+let activeLayoutToolbarTile;
+let snapPreviewOverlay;
 let noiseAudioContext = null;
 let noiseProcessorNode = null;
 // eslint-disable-next-line no-unused-vars
@@ -387,7 +373,6 @@ const PL_WARN = (...args) => console.warn('[page-layout]', ...args);
 
 const CORE_PAGE_TYPES = [
     PAGE_COMPONENT_TYPES.SIDEBAR_PANEL,
-    PAGE_COMPONENT_TYPES.STAGE_PANEL,
     PAGE_COMPONENT_TYPES.CHAT_PANEL,
 ];
 
@@ -476,7 +461,8 @@ const createPageTileFromNode = (type, node) => {
     }
 
     body.append(node);
-    footer.textContent = label;
+    footer.textContent = '';
+    footer.hidden = true;
 
     const itemId = `page-${sanitizeLayoutIdPart(type)}`;
     tile.dataset.layoutItemId = itemId;
@@ -506,10 +492,6 @@ const validateDetachedPageLayoutBoard = (board) => {
         board,
         PAGE_COMPONENT_TYPES.SIDEBAR_PANEL
     );
-    const stage = getPageTileDiagnostics(
-        board,
-        PAGE_COMPONENT_TYPES.STAGE_PANEL
-    );
     const chat = getPageTileDiagnostics(board, PAGE_COMPONENT_TYPES.CHAT_PANEL);
     const failures = [];
 
@@ -526,8 +508,8 @@ const validateDetachedPageLayoutBoard = (board) => {
         failures.push('sidebarPanel is missing channel content');
     }
 
-    if (!stage.tile || stage.childCount === 0 || !stage.text) {
-        failures.push('stagePanel is empty');
+    if (!board.querySelector('#video-grid')) {
+        failures.push('runtime video grid is missing');
     }
 
     if (
@@ -567,6 +549,7 @@ const initPageLayoutBoard = () => {
     const sidebarEl = mainLayout.querySelector('.room-sidebar');
     const stageEl = mainLayout.querySelector('.room-stage');
     const chatPanelEl = mainLayout.querySelector('.chat-panel');
+    const runtimeVideoGrid = mainLayout.querySelector('#video-grid');
 
     PL_LOG('source nodes', {
         sidebar: Boolean(sidebarEl),
@@ -580,7 +563,7 @@ const initPageLayoutBoard = () => {
         ),
         stage: Boolean(stageEl),
         stageHasCanvas: Boolean(stageEl?.querySelector('#canvas')),
-        stageHasVideoGrid: Boolean(stageEl?.querySelector('#video-grid')),
+        stageHasVideoGrid: Boolean(runtimeVideoGrid),
         chatPanel: Boolean(chatPanelEl),
         chatPanelHasMessages: Boolean(
             chatPanelEl?.querySelector('.chat-messages, #chatMessages')
@@ -592,7 +575,7 @@ const initPageLayoutBoard = () => {
 
     const missingSelectors = [
         ['.room-sidebar', sidebarEl],
-        ['.room-stage', stageEl],
+        ['#video-grid', runtimeVideoGrid],
         ['.chat-panel', chatPanelEl],
     ]
         .filter(([, node]) => !node)
@@ -600,7 +583,7 @@ const initPageLayoutBoard = () => {
 
     if (missingSelectors.length > 0) {
         console.error('[page-layout] missing source nodes:', missingSelectors);
-        _bootstrapRecoveryToolbar();
+        _bootstrapRecoveryToolbar({ visible: true });
         return undefined;
     }
 
@@ -608,10 +591,6 @@ const initPageLayoutBoard = () => {
         {
             type: PAGE_COMPONENT_TYPES.SIDEBAR_PANEL,
             node: sidebarEl,
-        },
-        {
-            type: PAGE_COMPONENT_TYPES.STAGE_PANEL,
-            node: stageEl,
         },
         {
             type: PAGE_COMPONENT_TYPES.CHAT_PANEL,
@@ -630,6 +609,7 @@ const initPageLayoutBoard = () => {
     board.className = 'page-layout-board';
 
     PL_LOG('Board created, moving full DOM panels');
+    board.append(runtimeVideoGrid);
     entries.forEach(({ type, node }) => {
         board.append(createPageTileFromNode(type, node));
     });
@@ -641,7 +621,7 @@ const initPageLayoutBoard = () => {
             detachedValidation.failures
         );
         restoreMovedPagePanelNodes(entries);
-        _bootstrapRecoveryToolbar();
+        _bootstrapRecoveryToolbar({ visible: true });
         return undefined;
     }
 
@@ -681,15 +661,19 @@ const initPageLayoutBoard = () => {
 
 const _originalMainSnapshot = mainLayout ? mainLayout.cloneNode(true) : null;
 
-const _bootstrapRecoveryToolbar = () => {
-    if (document.querySelector('.layout-recovery-toolbar')) {
-        return;
+const _bootstrapRecoveryToolbar = ({ visible = false } = {}) => {
+    const existing = document.querySelector('.layout-recovery-toolbar');
+    if (existing) {
+        existing.hidden = !visible;
+        return existing;
     }
     const bar = document.createElement('div');
     bar.className = 'layout-recovery-toolbar';
+    bar.hidden = true;
     bar.innerHTML =
         '<button id="layoutRecoveryReset" type="button">重置布局</button>' +
         '<button id="layoutRecoveryRestore" type="button">恢复原始页面</button>';
+    bar.hidden = !visible;
     document.body.append(bar);
     bar.querySelector('#layoutRecoveryReset').addEventListener('click', () => {
         localStorage.removeItem(getLayoutStorageKey());
@@ -701,6 +685,7 @@ const _bootstrapRecoveryToolbar = () => {
             restoreOriginalStaticLayout();
         }
     );
+    return bar;
 };
 
 const restoreOriginalStaticLayout = () => {
@@ -745,6 +730,12 @@ window.__voiceLayoutDebug = {
             window.location.reload();
         }
     },
+    showRecoveryToolbar() {
+        _bootstrapRecoveryToolbar({ visible: true });
+    },
+    hideRecoveryToolbar() {
+        _bootstrapRecoveryToolbar({ visible: false });
+    },
     dumpDom() {
         const result = {
             main: Boolean(document.getElementById('main')),
@@ -757,6 +748,25 @@ window.__voiceLayoutDebug = {
                     '.layout-recovery-toolbar, .stage-layout-toolbar'
                 )
             ),
+            unexpectedStagePanel: Boolean(
+                document.getElementById('page-tile-stagePanel')
+            ),
+            remotePeerCount: document.querySelectorAll(
+                '.video-tile[data-layout-item-type="remote-peer"]'
+            ).length,
+            localPeer: {
+                exists: Boolean(document.getElementById('local-video')),
+                hidden: Boolean(
+                    document
+                        .getElementById('local-video')
+                        ?.classList.contains('is-layout-hidden')
+                ),
+            },
+            hasFooterLabels: Array.from(
+                document.querySelectorAll(
+                    '.page-layout-tile > .tile-footer:not([hidden])'
+                )
+            ).some((footer) => footer.textContent.trim().length > 0),
         };
         const types = CORE_PAGE_TYPES;
         types.forEach((t) => {
@@ -835,7 +845,7 @@ const _detectBrokenBoard = () => {
 const _runPageLayoutInit = () => {
     if (_detectBrokenBoard()) {
         restoreOriginalStaticLayout();
-        _bootstrapRecoveryToolbar();
+        _bootstrapRecoveryToolbar({ visible: true });
         return;
     }
 
@@ -844,7 +854,7 @@ const _runPageLayoutInit = () => {
     } catch (err) {
         console.error('[page-layout] init failed', err);
         restoreOriginalStaticLayout();
-        _bootstrapRecoveryToolbar();
+        _bootstrapRecoveryToolbar({ visible: true });
     }
 };
 
@@ -865,11 +875,16 @@ const ensureLayoutEditModeToggle = () => {
     const resetLabel = document.createElement('span');
     const menu = document.createElement('div');
     const status = document.createElement('span');
+    const primaryAction = document.createElement('div');
+    const secondaryActions = document.createElement('div');
 
-    toolbar.className = 'stage-layout-toolbar';
+    toolbar.className =
+        'stage-layout-toolbar page-layout-toolbar page-layout-topbar';
     toolbar.setAttribute('aria-label', '布局工具');
+    primaryAction.className = 'layout-edit-primary-action';
+    secondaryActions.className = 'layout-edit-secondary-actions';
     button.id = 'layoutEditModeToggle';
-    button.className = 'layout-edit-toggle';
+    button.className = 'layout-edit-toggle layout-edit-primary-button';
     button.type = 'button';
     button.setAttribute('aria-pressed', 'false');
     icon.className = 'fas fa-border-all';
@@ -902,7 +917,9 @@ const ensureLayoutEditModeToggle = () => {
     status.className = 'layout-save-status';
     status.textContent = '已保存';
 
-    toolbar.append(button, addButton, resetButton, status, menu);
+    primaryAction.append(button);
+    secondaryActions.append(addButton, resetButton, status, menu);
+    toolbar.append(primaryAction, secondaryActions);
     mainLayout.prepend(toolbar);
 
     layoutEditModeToggle = button;
@@ -945,7 +962,11 @@ const syncLayoutEditModeUI = () => {
         closePeerVolumePopover();
         renderLayoutComponentMenu();
         ensureLayoutComponentActions();
+        if (activeLayoutToolbarTile) {
+            setActiveLayoutToolbarTile(activeLayoutToolbarTile);
+        }
     } else {
+        setActiveLayoutToolbarTile(undefined);
         closeLayoutComponentMenu();
         closeLayoutComponentConfig();
     }
@@ -955,10 +976,19 @@ const setLayoutEditMode = (enabled) => {
     layoutEditMode = Boolean(enabled);
     syncLayoutGridMetadata();
     syncLayoutEditModeUI();
+
+    if (!layoutEditMode) {
+        hideSnapPreview();
+    }
 };
 
 const toggleLayoutEditMode = () => {
-    setLayoutEditMode(!layoutEditMode);
+    if (layoutEditMode) {
+        finalizeLayoutEditing();
+        return;
+    }
+
+    setLayoutEditMode(true);
 };
 
 const getOrderedTiles = () => {
@@ -2389,6 +2419,99 @@ const snapTileLayoutToGrid = (layout) =>
         zIndex: layout.zIndex,
     });
 
+const findTileForLayoutItem = (item) =>
+    item?.elementId
+        ? document.getElementById(item.elementId)
+        : getVideoTiles().find(
+              (tile) =>
+                  tile.dataset.layoutItemId === item?.id ||
+                  tile.dataset.layoutId === item?.id
+          );
+
+const snapLayoutItemToGrid = (item) => {
+    if (!item?.id) {
+        return null;
+    }
+
+    const tile = findTileForLayoutItem(item);
+    const layoutSource =
+        tile && !tile.classList.contains('is-layout-hidden')
+            ? getCurrentTileLayout(tile)
+            : item.layout || convertGridLayoutToPixels(item.grid || {});
+    const snappedLayout = snapTileLayoutToGrid(layoutSource);
+    const snappedGrid = convertTileLayoutToGrid(snappedLayout);
+    const nextItem = {
+        ...item,
+        layout: snappedLayout,
+        grid: snappedGrid,
+        positioned: true,
+    };
+
+    layoutItemsById.set(nextItem.id, nextItem);
+
+    if (tile) {
+        applyTileLayoutItemToElement(tile, nextItem, {
+            applyPosition: true,
+        });
+    }
+
+    return nextItem;
+};
+
+const snapAllLayoutItemsToGrid = () => {
+    layoutItemsById.forEach((item) => {
+        snapLayoutItemToGrid(item);
+    });
+};
+
+const ensureSnapPreviewOverlay = () => {
+    if (!pageLayoutBoard) {
+        return null;
+    }
+
+    if (!snapPreviewOverlay) {
+        snapPreviewOverlay = document.createElement('div');
+        snapPreviewOverlay.className = 'layout-snap-preview';
+        snapPreviewOverlay.setAttribute('aria-hidden', 'true');
+        pageLayoutBoard.append(snapPreviewOverlay);
+    }
+
+    return snapPreviewOverlay;
+};
+
+const showSnapPreview = (tile, layout) => {
+    if (!tile || !layout) {
+        return;
+    }
+
+    const overlay = ensureSnapPreviewOverlay();
+    if (!overlay) {
+        return;
+    }
+
+    const snappedLayout = snapTileLayoutToGrid(layout);
+    overlay.style.left = `${snappedLayout.x}px`;
+    overlay.style.top = `${snappedLayout.y}px`;
+    overlay.style.width = `${snappedLayout.width}px`;
+    overlay.style.height = `${snappedLayout.height}px`;
+    overlay.dataset.targetTileId = tile.id;
+    overlay.classList.add('is-visible');
+};
+
+const hideSnapPreview = () => {
+    if (snapPreviewOverlay) {
+        snapPreviewOverlay.classList.remove('is-visible');
+        delete snapPreviewOverlay.dataset.targetTileId;
+    }
+};
+
+const finalizeLayoutEditing = () => {
+    snapAllLayoutItemsToGrid();
+    hideSnapPreview();
+    saveLayoutToStorage('布局已吸附');
+    setLayoutEditMode(false);
+};
+
 const getLayoutStorageKey = () =>
     `${PAGE_LAYOUT_STORAGE_KEY_PREFIX}:${String(
         viewingRoomId || selectedVoiceRoomId || 'default'
@@ -2449,6 +2572,10 @@ const normalizeLoadedLayoutItems = (payload) => {
 
     return (Array.isArray(payload.items) ? payload.items : [])
         .map((item) => {
+            if (item && item.type === 'stagePanel') {
+                return null;
+            }
+
             if (!item?.id || !knownTypes.has(item.type) || seen.has(item.id)) {
                 return null;
             }
@@ -2648,8 +2775,12 @@ const upsertTileLayoutItem = (tile, updates = {}) => {
     const previous = getTileLayoutItem(id);
     const layout =
         updates.layout || previous?.layout || getCurrentTileLayout(tile);
+    const tileConfig = tile.classList.contains('is-free-move-enabled')
+        ? { freeMove: true }
+        : {};
     const mergedConfig = {
         ...(previous?.config || {}),
+        ...tileConfig,
         ...(updates.config || {}),
     };
     const item = createTileLayoutItem({
@@ -2683,6 +2814,10 @@ const applyTileLayoutItemToElement = (
     tile.dataset.layoutGridW = String(item.grid.w);
     tile.dataset.layoutGridH = String(item.grid.h);
     tile.classList.toggle('is-layout-hidden', !item.visible);
+    tile.classList.toggle(
+        'is-free-move-enabled',
+        item.config?.freeMove === true
+    );
 
     if (applyPosition) {
         applyTileLayout(tile, item.layout, { syncItem: false });
@@ -2776,6 +2911,8 @@ const applyTileLayout = (tile, layout, { syncItem = true } = {}) => {
             positioned: true,
         });
     }
+
+    positionLayoutComponentToolbar(tile);
 };
 
 const getCurrentTileLayout = (tile) => {
@@ -2796,12 +2933,21 @@ const persistCurrentTileLayout = (tile) => {
     persistTileLayoutItem(tile);
 };
 
-const finishTileLayoutInteraction = (tile) => {
-    if (layoutEditMode) {
-        applyTileLayout(tile, snapTileLayoutToGrid(getCurrentTileLayout(tile)));
+const finalizeLayoutItemDrag = (tile) => {
+    if (!tile) {
+        hideSnapPreview();
+        return;
     }
 
-    persistCurrentTileLayout(tile);
+    const snappedLayout = snapTileLayoutToGrid(getCurrentTileLayout(tile));
+    applyTileLayout(tile, snappedLayout);
+    saveLayoutToStorage('布局已吸附');
+    hideSnapPreview();
+    positionLayoutComponentToolbar(tile);
+};
+
+const finishTileLayoutInteraction = (tile) => {
+    finalizeLayoutItemDrag(tile);
 };
 
 const clampPositionedTileLayouts = () => {
@@ -2823,20 +2969,61 @@ const applySavedTileLayout = (tile) => {
     }
 
     const savedItem = getSavedLayoutItemPreference(tile.dataset.layoutId);
+    const item = getTileLayoutItem(tile.dataset.layoutItemId);
+    const type =
+        item?.type || getLayoutItemTypeForTile(tile, tile.dataset.tileType);
+    const defaultItem = getDefaultLayoutItems().find(
+        (candidate) => candidate.type === type
+    );
+    const remoteIndex = Math.max(
+        0,
+        Array.from(document.querySelectorAll('.video-tile[data-peer-id]'))
+            .filter((candidate) => candidate.id !== 'local-video')
+            .findIndex((candidate) => candidate === tile)
+    );
+    const generatedGrid =
+        type === LAYOUT_ITEM_TYPES.REMOTE_PEER
+            ? {
+                  x: 13 + (remoteIndex % 3) * 2,
+                  y: 7 + (remoteIndex % 3) * 2,
+                  w: 5,
+                  h: 4,
+              }
+            : type === LAYOUT_ITEM_TYPES.SCREEN_SHARE
+              ? { x: 8, y: 2, w: 16, h: 10 }
+              : null;
+    const layoutItem =
+        savedItem ||
+        defaultItem ||
+        (generatedGrid
+            ? {
+                  grid: generatedGrid,
+                  z: getNextTileLayoutZIndex(),
+                  visible: true,
+              }
+            : null);
 
-    if (savedItem) {
-        applyTileLayout(
-            tile,
-            convertGridLayoutToPixels({
-                ...savedItem.grid,
-                zIndex: savedItem.z,
-            })
-        );
+    if (layoutItem) {
+        const nextLayout = convertGridLayoutToPixels({
+            ...layoutItem.grid,
+            zIndex: layoutItem.z || getNextTileLayoutZIndex(),
+        });
+
+        applyTileLayout(tile, nextLayout);
+        const syncedItem = upsertTileLayoutItem(tile, {
+            layout: nextLayout,
+            visible: layoutItem.visible,
+            positioned: true,
+            config: layoutItem.config,
+        });
+        applyTileLayoutItemToElement(tile, syncedItem, {
+            applyPosition: false,
+        });
         setTileLayoutItemVisibility(
             tile.dataset.layoutItemId,
-            savedItem.visible
+            layoutItem.visible
         );
-        tile.classList.toggle('is-layout-hidden', !savedItem.visible);
+        tile.classList.toggle('is-layout-hidden', !layoutItem.visible);
     }
 };
 
@@ -2851,15 +3038,15 @@ const getDefaultLayoutItems = () => [
         visible: true,
     },
     {
-        id: `page-${PAGE_COMPONENT_TYPES.STAGE_PANEL}`,
-        type: PAGE_COMPONENT_TYPES.STAGE_PANEL,
-        grid: { x: 5, y: 0, w: 21, h: 18 },
-        visible: true,
-    },
-    {
         id: `page-${PAGE_COMPONENT_TYPES.CHAT_PANEL}`,
         type: PAGE_COMPONENT_TYPES.CHAT_PANEL,
         grid: { x: 26, y: 0, w: 6, h: 18 },
+        visible: true,
+    },
+    {
+        id: 'local-peer-default',
+        type: LAYOUT_ITEM_TYPES.LOCAL_PEER,
+        grid: { x: 13, y: 7, w: 5, h: 4 },
         visible: true,
     },
 ];
@@ -2921,18 +3108,27 @@ const renderLayoutComponentTile = (tile) => {
     if (REAL_DOM_PAGE_TYPES.has(type)) {
         const itemId = tile.dataset.layoutItemId || tile.dataset.layoutId;
         const item = getTileLayoutItem(itemId);
+        const savedItem = getSavedLayoutItemPreference(itemId || '');
         const nextLayoutId = getTileLayoutId(tile);
+        const config = normalizeComponentConfig(
+            type,
+            item?.config || savedItem?.config
+        );
 
         tile.dataset.tileType = type;
         tile.dataset.peerLabel = getPagePanelLabel(type);
         tile.classList.add('layout-component-tile');
         tile.classList.toggle('is-layout-editing', layoutEditMode);
         tile.dataset.layoutId = nextLayoutId;
-        syncTileLayoutItemFromElement(tile, {
+        const syncedItem = syncTileLayoutItemFromElement(tile, {
             id: nextLayoutId,
             type,
             visible: item?.visible !== false,
             positioned: tile.classList.contains('is-positioned'),
+            config,
+        });
+        applyTileLayoutItemToElement(tile, syncedItem, {
+            applyPosition: false,
         });
 
         if (layoutEditMode) {
@@ -3048,7 +3244,8 @@ const renderLayoutComponentTile = (tile) => {
         }
     }
 
-    footer.textContent = state.footer;
+    footer.textContent = '';
+    footer.hidden = true;
 
     const nextLayoutId = getTileLayoutId(tile);
     tile.dataset.layoutId = nextLayoutId;
@@ -3130,6 +3327,7 @@ const hideLayoutComponent = (tile) => {
 
     setTileLayoutItemVisibility(tile.dataset.layoutItemId, false);
     tile.classList.add('is-layout-hidden');
+    findLayoutComponentToolbar(tile)?.classList.remove('is-visible');
     closePeerVolumePopover();
     saveLayoutToStorage('布局已更新');
     renderLayoutComponentMenu();
@@ -3229,13 +3427,21 @@ const applyPageLayoutItemToPanel = (item) => {
         return;
     }
 
-    applyTileLayout(
-        tile,
-        convertGridLayoutToPixels({
-            ...item.grid,
-            zIndex: item.z || getNextTileLayoutZIndex(),
-        })
-    );
+    const nextLayout = convertGridLayoutToPixels({
+        ...item.grid,
+        zIndex: item.z || getNextTileLayoutZIndex(),
+    });
+
+    applyTileLayout(tile, nextLayout);
+    const syncedItem = upsertTileLayoutItem(tile, {
+        layout: nextLayout,
+        visible: item.visible,
+        positioned: true,
+        config: item.config,
+    });
+    applyTileLayoutItemToElement(tile, syncedItem, {
+        applyPosition: false,
+    });
     setTileLayoutItemVisibility(tile.dataset.layoutItemId, item.visible);
     tile.classList.toggle('is-layout-hidden', !item.visible);
 };
@@ -3280,223 +3486,6 @@ function closeLayoutComponentConfig() {
     const panel = document.querySelector('.layout-config-panel');
     if (panel) {
         panel.remove();
-    }
-}
-
-function toggleLayoutComponentConfig(tile) {
-    const existingPanel = document.querySelector('.layout-config-panel');
-    const isSameTile =
-        existingPanel &&
-        existingPanel.dataset.targetLayoutId ===
-            (tile.dataset.layoutItemId || tile.dataset.layoutId);
-
-    if (existingPanel && isSameTile) {
-        closeLayoutComponentConfig();
-        return;
-    }
-
-    closeLayoutComponentConfig();
-
-    const itemId = tile.dataset.layoutItemId || tile.dataset.layoutId;
-    if (!itemId) {
-        return;
-    }
-
-    const item = getTileLayoutItem(itemId);
-    if (!item) {
-        return;
-    }
-
-    const config = normalizeComponentConfig(item.type, item.config);
-    const panel = document.createElement('div');
-    panel.className = 'layout-config-panel';
-    panel.dataset.targetLayoutId = itemId;
-
-    const headerEl = document.createElement('div');
-    headerEl.className = 'layout-config-header';
-    headerEl.textContent =
-        PAGE_COMPONENT_LABELS[item.type] ||
-        LAYOUT_COMPONENT_LABELS[item.type] ||
-        item.type;
-    const closeButton = document.createElement('button');
-    closeButton.className = 'layout-config-close';
-    closeButton.type = 'button';
-    closeButton.setAttribute('aria-label', '关闭设置');
-    closeButton.textContent = '\u00D7';
-    closeButton.addEventListener('click', closeLayoutComponentConfig);
-    headerEl.append(closeButton);
-    panel.append(headerEl);
-
-    const options = document.createElement('div');
-    options.className = 'layout-config-options';
-
-    const defaults = getDefaultComponentConfig(item.type);
-
-    for (const key of Object.keys(defaults)) {
-        const label = document.createElement('label');
-        label.className = 'layout-config-option';
-
-        const checkbox = document.createElement('input');
-        checkbox.type = 'checkbox';
-        checkbox.checked = Boolean(config[key]);
-
-        const labelText = document.createElement('span');
-        labelText.className = 'layout-config-option-label';
-        labelText.textContent = getConfigKeyLabel(key);
-
-        label.append(checkbox, labelText);
-
-        checkbox.addEventListener('change', () => {
-            updateLayoutItemConfig(itemId, { [key]: checkbox.checked });
-            checkbox.checked = Boolean(getLayoutItemConfig(itemId)[key]);
-            applyComponentConfigToTile(tile, itemId);
-        });
-
-        options.append(label);
-    }
-
-    if (item.type === LAYOUT_ITEM_TYPES.LOCAL_PEER) {
-        const prefsLabel = document.createElement('label');
-        prefsLabel.className = 'layout-config-option';
-        const prefsCheckbox = document.createElement('input');
-        prefsCheckbox.type = 'checkbox';
-        prefsCheckbox.checked = getLayoutPreference('autoShowLocalPeer');
-        const prefsLabelText = document.createElement('span');
-        prefsLabelText.className = 'layout-config-option-label';
-        prefsLabelText.textContent = '初始化时自动显示';
-        prefsLabel.append(prefsCheckbox, prefsLabelText);
-        prefsCheckbox.addEventListener('change', () => {
-            updateLayoutPreference('autoShowLocalPeer', prefsCheckbox.checked);
-        });
-        options.append(prefsLabel);
-    }
-
-    if (item.type === LAYOUT_ITEM_TYPES.REMOTE_PEER) {
-        const prefsLabel1 = document.createElement('label');
-        prefsLabel1.className = 'layout-config-option';
-        const prefsCheckbox1 = document.createElement('input');
-        prefsCheckbox1.type = 'checkbox';
-        prefsCheckbox1.checked = getLayoutPreference('autoShowRemotePeers');
-        const prefsText1 = document.createElement('span');
-        prefsText1.className = 'layout-config-option-label';
-        prefsText1.textContent = '远端进入时自动显示组件';
-        prefsLabel1.append(prefsCheckbox1, prefsText1);
-        prefsCheckbox1.addEventListener('change', () => {
-            updateLayoutPreference(
-                'autoShowRemotePeers',
-                prefsCheckbox1.checked
-            );
-        });
-        options.append(prefsLabel1);
-
-        const prefsLabel2 = document.createElement('label');
-        prefsLabel2.className = 'layout-config-option';
-        const prefsCheckbox2 = document.createElement('input');
-        prefsCheckbox2.type = 'checkbox';
-        prefsCheckbox2.checked = getLayoutPreference('keepHiddenRemotePeers');
-        const prefsText2 = document.createElement('span');
-        prefsText2.className = 'layout-config-option-label';
-        prefsText2.textContent = '隐藏后保持隐藏（重连后）';
-        prefsLabel2.append(prefsCheckbox2, prefsText2);
-        prefsCheckbox2.addEventListener('change', () => {
-            updateLayoutPreference(
-                'keepHiddenRemotePeers',
-                prefsCheckbox2.checked
-            );
-        });
-        options.append(prefsLabel2);
-    }
-
-    if (item.type === LAYOUT_ITEM_TYPES.SCREEN_SHARE) {
-        const prefsLabel = document.createElement('label');
-        prefsLabel.className = 'layout-config-option';
-        const prefsCheckbox = document.createElement('input');
-        prefsCheckbox.type = 'checkbox';
-        prefsCheckbox.checked = getLayoutPreference('autoShowScreenShare');
-        const prefsLabelText = document.createElement('span');
-        prefsLabelText.className = 'layout-config-option-label';
-        prefsLabelText.textContent = '屏幕共享时自动弹出大组件';
-        prefsLabel.append(prefsCheckbox, prefsLabelText);
-        prefsCheckbox.addEventListener('change', () => {
-            updateLayoutPreference(
-                'autoShowScreenShare',
-                prefsCheckbox.checked
-            );
-        });
-        options.append(prefsLabel);
-    }
-
-    panel.append(options);
-
-    const settingsButton = tile.querySelector('.layout-component-settings');
-    const tileRect = tile.getBoundingClientRect();
-    panel.style.position = 'fixed';
-    panel.style.left = `${Math.min(
-        tileRect.right - 10,
-        window.innerWidth - 240
-    )}px`;
-    panel.style.top = `${Math.min(tileRect.top, window.innerHeight - 300)}px`;
-
-    document.body.append(panel);
-
-    const closeOnClickOutside = (event) => {
-        if (
-            !panel.contains(event.target) &&
-            event.target !== settingsButton &&
-            !settingsButton?.contains(event.target)
-        ) {
-            closeLayoutComponentConfig();
-            document.removeEventListener('click', closeOnClickOutside, true);
-        }
-    };
-    setTimeout(() => {
-        document.addEventListener('click', closeOnClickOutside, true);
-    }, 0);
-}
-
-function getConfigKeyLabel(key) {
-    const labels = {
-        showRoomName: '显示房间名称',
-        showCopyLink: '显示复制链接',
-        showMemberCount: '显示在线人数',
-        compactMode: '紧凑模式',
-        showHeader: '显示标题栏',
-        showSelfPreview: '显示视频/占位预览',
-        showControls: '显示组件内控制区',
-        keepHiddenWhenRejoin: '重连后保持隐藏',
-        showPeerName: '显示成员名称',
-        autoShowScreenShare: '屏幕共享时自动弹出',
-        showScreenHeader: '显示标题栏',
-    };
-    return labels[key] || key;
-}
-
-function applyComponentConfigToTile(tile, itemId) {
-    if (!tile || !itemId) {
-        return;
-    }
-
-    if (tile.dataset.layoutComponentType) {
-        renderLayoutComponentTile(tile);
-        return;
-    }
-
-    const item = getTileLayoutItem(itemId);
-    if (!item) {
-        return;
-    }
-
-    if (item.type === LAYOUT_ITEM_TYPES.REMOTE_PEER) {
-        const config = normalizeComponentConfig(item.type, item.config);
-        const { header } = ensureTileStructure(tile);
-        const title = header.querySelector('.tile-title');
-        if (title) {
-            title.style.display = config.showPeerName ? '' : 'none';
-        }
-        const avatar = header.querySelector('.tile-avatar');
-        if (avatar) {
-            avatar.style.display = config.showPeerName ? '' : 'none';
-        }
     }
 }
 
@@ -3549,50 +3538,198 @@ const toggleLayoutComponentMenu = () => {
     );
 };
 
+const getLayoutItemForTile = (tile) =>
+    getTileLayoutItem(tile?.dataset.layoutItemId || tile?.dataset.layoutId);
+
+const isTileFreeMoveEnabled = (tile) =>
+    getLayoutItemForTile(tile)?.config?.freeMove === true;
+
+const canDragLayoutItem = (item) =>
+    layoutEditMode || item?.config?.freeMove === true;
+
+const shouldIgnoreLayoutDragTarget = (target) =>
+    Boolean(
+        target?.closest?.(
+            [
+                'input',
+                'textarea',
+                'button',
+                'select',
+                'a',
+                '[contenteditable]',
+                '.no-drag',
+                '.chat-form',
+                '.page-chat-form',
+                '.channel-button',
+                '[data-channel-room]',
+                '.layout-component-toolbar',
+                '.layout-component-remove',
+                '.layout-component-settings',
+                '.fullscreen-btn',
+            ].join(', ')
+        )
+    );
+
+const findLayoutComponentToolbar = (tile) =>
+    Array.from(document.querySelectorAll('.layout-component-toolbar')).find(
+        (toolbar) => toolbar.dataset.targetTileId === tile.id
+    );
+
+const positionLayoutComponentToolbar = (tile) => {
+    const toolbar = findLayoutComponentToolbar(tile);
+    const board = pageLayoutBoard || tile?.parentElement;
+
+    if (!tile || !toolbar || !board) {
+        return;
+    }
+
+    const boardRect = board.getBoundingClientRect();
+    const tileRect = tile.getBoundingClientRect();
+    const toolbarWidth = toolbar.offsetWidth || 34;
+    const toolbarHeight = toolbar.offsetHeight || 96;
+    const gap = 8;
+    const centerX = tileRect.left - boardRect.left + tileRect.width / 2;
+    const showRight = centerX < boardRect.width / 2;
+    const rawLeft = showRight
+        ? tileRect.right - boardRect.left + gap
+        : tileRect.left - boardRect.left - toolbarWidth - gap;
+    const left = clampGridNumber(
+        Math.round(rawLeft),
+        4,
+        Math.max(4, Math.round(boardRect.width - toolbarWidth - 4))
+    );
+    const top = clampGridNumber(
+        Math.round(tileRect.top - boardRect.top),
+        4,
+        Math.max(4, Math.round(boardRect.height - toolbarHeight - 4))
+    );
+
+    toolbar.classList.toggle('is-left-side', !showRight);
+    toolbar.classList.toggle('is-right-side', showRight);
+    toolbar.style.left = `${left}px`;
+    toolbar.style.top = `${top}px`;
+};
+
+const setActiveLayoutToolbarTile = (tile) => {
+    activeLayoutToolbarTile = tile;
+    document
+        .querySelectorAll('.video-tile.is-layout-selected')
+        .forEach((activeTile) =>
+            activeTile.classList.remove('is-layout-selected')
+        );
+    document
+        .querySelectorAll('.layout-component-toolbar')
+        .forEach((toolbar) => toolbar.classList.remove('is-visible'));
+
+    if (!layoutEditMode || !tile) {
+        return;
+    }
+
+    tile.classList.add('is-layout-selected');
+    const toolbar = findLayoutComponentToolbar(tile);
+    if (toolbar) {
+        toolbar.classList.add('is-visible');
+        positionLayoutComponentToolbar(tile);
+    }
+};
+
+const syncLayoutComponentToolbarState = (tile) => {
+    const toolbar = findLayoutComponentToolbar(tile);
+    const freeMoveButton = toolbar?.querySelector('.layout-toolbar-free-move');
+    const enabled = isTileFreeMoveEnabled(tile);
+
+    tile.classList.toggle('is-free-move-enabled', enabled);
+
+    if (freeMoveButton) {
+        freeMoveButton.setAttribute('aria-pressed', String(enabled));
+        freeMoveButton.title = enabled ? '关闭自由移动' : '开启自由移动';
+    }
+};
+
+const toggleTileFreeMove = (tile) => {
+    const item = getLayoutItemForTile(tile);
+
+    if (!item) {
+        return;
+    }
+
+    const nextFreeMove = !isTileFreeMoveEnabled(tile);
+    updateLayoutItemConfig(item.id, { freeMove: nextFreeMove });
+    syncLayoutComponentToolbarState(tile);
+    positionLayoutComponentToolbar(tile);
+};
+
+const ensureLayoutComponentToolbar = (tile) => {
+    if (!pageLayoutBoard || !tile.id) {
+        return null;
+    }
+
+    let toolbar = findLayoutComponentToolbar(tile);
+
+    if (!toolbar) {
+        toolbar = document.createElement('div');
+        toolbar.className = 'layout-component-toolbar';
+        toolbar.dataset.targetTileId = tile.id;
+
+        const hideButton = document.createElement('button');
+        hideButton.type = 'button';
+        hideButton.className = 'layout-toolbar-button layout-toolbar-hide';
+        hideButton.title = '隐藏组件';
+        hideButton.setAttribute('aria-label', '隐藏组件');
+        hideButton.textContent = '\u00D7';
+        hideButton.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            hideLayoutComponent(tile);
+            toolbar.classList.remove('is-visible');
+        });
+
+        const freeMoveButton = document.createElement('button');
+        freeMoveButton.type = 'button';
+        freeMoveButton.className =
+            'layout-toolbar-button layout-toolbar-free-move';
+        freeMoveButton.setAttribute('aria-label', '自由移动');
+        freeMoveButton.textContent = '移';
+        freeMoveButton.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            toggleTileFreeMove(tile);
+        });
+
+        const helpWrap = document.createElement('span');
+        helpWrap.className = 'layout-toolbar-help-wrap';
+        const helpButton = document.createElement('button');
+        helpButton.type = 'button';
+        helpButton.className = 'layout-toolbar-button layout-toolbar-help';
+        helpButton.setAttribute('aria-label', '自由移动说明');
+        helpButton.textContent = '?';
+        const tooltip = document.createElement('span');
+        tooltip.className = 'layout-toolbar-tooltip';
+        tooltip.textContent =
+            '开启自由移动后，退出编辑模式也可以拖动这个组件。';
+        helpWrap.append(helpButton, tooltip);
+
+        toolbar.append(hideButton, freeMoveButton, helpWrap);
+        toolbar.addEventListener('mouseenter', () =>
+            setActiveLayoutToolbarTile(tile)
+        );
+        pageLayoutBoard.append(toolbar);
+    }
+
+    syncLayoutComponentToolbarState(tile);
+    positionLayoutComponentToolbar(tile);
+    return toolbar;
+};
+
 const ensureLayoutComponentActions = () => {
     getVideoTiles().forEach((tile) => {
         const { actions } = ensureTileStructure(tile);
-        let removeButton = actions.querySelector('.layout-component-remove');
-
-        if (!removeButton) {
-            removeButton = document.createElement('button');
-            removeButton.className = 'layout-component-remove';
-            removeButton.type = 'button';
-            removeButton.title = '隐藏组件';
-            removeButton.setAttribute('aria-label', '隐藏组件');
-            removeButton.textContent = '\u00D7';
-            removeButton.addEventListener('click', (event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                hideLayoutComponent(tile);
-            });
-            actions.prepend(removeButton);
-        }
-
-        let settingsButton = actions.querySelector(
-            '.layout-component-settings'
-        );
-
-        if (!settingsButton) {
-            settingsButton = document.createElement('button');
-            settingsButton.className = 'layout-component-settings';
-            settingsButton.type = 'button';
-            settingsButton.title = '组件设置';
-            settingsButton.setAttribute('aria-label', '组件设置');
-            const gearIcon = document.createElement('i');
-            gearIcon.className = 'fas fa-gear';
-            settingsButton.append(gearIcon);
-            settingsButton.addEventListener('click', (event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                toggleLayoutComponentConfig(tile);
-            });
-            if (removeButton) {
-                removeButton.after(settingsButton);
-            } else {
-                actions.prepend(settingsButton);
-            }
-        }
+        actions
+            .querySelectorAll(
+                '.layout-component-remove, .layout-component-settings'
+            )
+            .forEach((button) => button.remove());
+        ensureLayoutComponentToolbar(tile);
     });
 };
 
@@ -3670,18 +3807,75 @@ const ensureTileStructure = (tile) => {
     return { header, body, overlay, actions, footer };
 };
 
+const detectTileResizeDirection = (event, tile) => {
+    if (
+        !layoutEditMode ||
+        !tile ||
+        isMobileLayout() ||
+        getFullscreenElement()
+    ) {
+        return null;
+    }
+
+    const rect = tile.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    const nearLeftCorner = x <= TILE_RESIZE_CORNER_HIT_PX;
+    const nearRightCorner = x >= rect.width - TILE_RESIZE_CORNER_HIT_PX;
+    const nearTopCorner = y <= TILE_RESIZE_CORNER_HIT_PX;
+    const nearBottomCorner = y >= rect.height - TILE_RESIZE_CORNER_HIT_PX;
+    const nearLeftEdge = x <= TILE_RESIZE_EDGE_HIT_PX;
+    const nearRightEdge = x >= rect.width - TILE_RESIZE_EDGE_HIT_PX;
+    const nearTopEdge = y <= TILE_RESIZE_EDGE_HIT_PX;
+    const nearBottomEdge = y >= rect.height - TILE_RESIZE_EDGE_HIT_PX;
+
+    if (nearTopCorner && nearLeftCorner) {
+        return 'nw';
+    }
+
+    if (nearTopCorner && nearRightCorner) {
+        return 'ne';
+    }
+
+    if (nearBottomCorner && nearLeftCorner) {
+        return 'sw';
+    }
+
+    if (nearBottomCorner && nearRightCorner) {
+        return 'se';
+    }
+
+    if (nearTopEdge) {
+        return 'n';
+    }
+
+    if (nearRightEdge) {
+        return 'e';
+    }
+
+    if (nearBottomEdge) {
+        return 's';
+    }
+
+    if (nearLeftEdge) {
+        return 'w';
+    }
+
+    return null;
+};
+
 const isTilePointerDisabled = (event) =>
     isMobileLayout() ||
     getFullscreenElement() ||
     event.button !== 0 ||
     event.target.closest('.tile-resize-handle') ||
-    event.target.closest('.layout-component-remove') ||
-    event.target.closest('.layout-component-settings') ||
-    (!layoutEditMode &&
-        event.target.closest('button, input, textarea, a, .fullscreen-btn'));
+    shouldIgnoreLayoutDragTarget(event.target);
 
 const startTileDrag = (event, tile) => {
-    if (isTilePointerDisabled(event)) {
+    if (
+        isTilePointerDisabled(event) ||
+        !canDragLayoutItem(getLayoutItemForTile(tile))
+    ) {
         return;
     }
 
@@ -3695,26 +3889,39 @@ const startTileDrag = (event, tile) => {
 
     const startX = event.clientX;
     const startY = event.clientY;
+    showSnapPreview(tile, startLayout);
+    let finished = false;
 
     const onMove = (moveEvent) => {
-        applyTileLayout(tile, {
+        const nextLayout = {
             ...startLayout,
             x: startLayout.x + moveEvent.clientX - startX,
             y: startLayout.y + moveEvent.clientY - startY,
-        });
+        };
+        applyTileLayout(tile, nextLayout);
+        showSnapPreview(tile, nextLayout);
+        positionLayoutComponentToolbar(tile);
     };
 
     const onEnd = () => {
+        if (finished) {
+            return;
+        }
+
+        finished = true;
+        if (tile.hasPointerCapture?.(event.pointerId)) {
+            tile.releasePointerCapture(event.pointerId);
+        }
         tile.classList.remove('is-dragging');
         finishTileLayoutInteraction(tile);
-        tile.removeEventListener('pointermove', onMove);
-        tile.removeEventListener('pointerup', onEnd);
-        tile.removeEventListener('pointercancel', onEnd);
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onEnd);
+        window.removeEventListener('pointercancel', onEnd);
     };
 
-    tile.addEventListener('pointermove', onMove);
-    tile.addEventListener('pointerup', onEnd);
-    tile.addEventListener('pointercancel', onEnd);
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onEnd);
+    window.addEventListener('pointercancel', onEnd);
 };
 
 const resolveTileResizeLayout = (startLayout, direction, deltaX, deltaY) => {
@@ -3767,30 +3974,40 @@ const startTileResize = (event, tile, direction = 'se') => {
 
     const startX = event.clientX;
     const startY = event.clientY;
+    showSnapPreview(tile, startLayout);
+    let finished = false;
 
     const onMove = (moveEvent) => {
-        applyTileLayout(
-            tile,
-            resolveTileResizeLayout(
-                startLayout,
-                direction,
-                moveEvent.clientX - startX,
-                moveEvent.clientY - startY
-            )
+        const nextLayout = resolveTileResizeLayout(
+            startLayout,
+            direction,
+            moveEvent.clientX - startX,
+            moveEvent.clientY - startY
         );
+        applyTileLayout(tile, nextLayout);
+        showSnapPreview(tile, nextLayout);
+        positionLayoutComponentToolbar(tile);
     };
 
     const onEnd = () => {
+        if (finished) {
+            return;
+        }
+
+        finished = true;
+        if (tile.hasPointerCapture?.(event.pointerId)) {
+            tile.releasePointerCapture(event.pointerId);
+        }
         tile.classList.remove('is-resizing');
         finishTileLayoutInteraction(tile);
-        tile.removeEventListener('pointermove', onMove);
-        tile.removeEventListener('pointerup', onEnd);
-        tile.removeEventListener('pointercancel', onEnd);
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onEnd);
+        window.removeEventListener('pointercancel', onEnd);
     };
 
-    tile.addEventListener('pointermove', onMove);
-    tile.addEventListener('pointerup', onEnd);
-    tile.addEventListener('pointercancel', onEnd);
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onEnd);
+    window.addEventListener('pointercancel', onEnd);
 };
 
 const bindTileLayoutControls = (tile, header) => {
@@ -3798,9 +4015,25 @@ const bindTileLayoutControls = (tile, header) => {
         tile.addEventListener(
             'pointerdown',
             (event) => {
-                bringTileLayoutToFront(tile);
+                if (shouldIgnoreLayoutDragTarget(event.target)) {
+                    return;
+                }
 
                 if (layoutEditMode) {
+                    const resizeDirection = detectTileResizeDirection(
+                        event,
+                        tile
+                    );
+
+                    if (resizeDirection) {
+                        setActiveLayoutToolbarTile(tile);
+                        startTileResize(event, tile, resizeDirection);
+                        return;
+                    }
+                }
+
+                if (canDragLayoutItem(getLayoutItemForTile(tile))) {
+                    setActiveLayoutToolbarTile(tile);
                     startTileDrag(event, tile);
                 }
             },
@@ -3808,6 +4041,7 @@ const bindTileLayoutControls = (tile, header) => {
         );
         tile.addEventListener('click', (event) => {
             bringTileLayoutToFront(tile);
+            setActiveLayoutToolbarTile(tile);
 
             if (layoutEditMode) {
                 event.preventDefault();
@@ -3816,7 +4050,12 @@ const bindTileLayoutControls = (tile, header) => {
         });
         header.addEventListener(
             'pointerdown',
-            (event) => !layoutEditMode && startTileDrag(event, tile)
+            (event) =>
+                canDragLayoutItem(getLayoutItemForTile(tile)) &&
+                startTileDrag(event, tile)
+        );
+        tile.addEventListener('mouseenter', () =>
+            setActiveLayoutToolbarTile(tile)
         );
         tile.addEventListener('contextmenu', (event) =>
             showPeerVolumePopover(event, tile)
@@ -3853,7 +4092,7 @@ try {
 } catch (err) {
     console.error('[page-layout] critical init failure', err);
     restoreOriginalStaticLayout();
-    _bootstrapRecoveryToolbar();
+    _bootstrapRecoveryToolbar({ visible: true });
 }
 
 const closePeerVolumePopover = () => {
@@ -5128,6 +5367,9 @@ window.addEventListener('resize', () => {
     updateMobileRoomState();
     updateMobileTileView();
     clampPositionedTileLayouts();
+    if (activeLayoutToolbarTile) {
+        positionLayoutComponentToolbar(activeLayoutToolbarTile);
+    }
 });
 
 updateChannelIndicators();
