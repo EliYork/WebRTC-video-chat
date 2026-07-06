@@ -48,7 +48,7 @@ input {
 
 #main {
     min-height: 100vh;
-    background: transparent;
+    background-color: #fffafd;
 }
 
 #main.is-layout-editing {
@@ -56,32 +56,49 @@ input {
 }
 
 .page-layout-board {
+    --layout-grid-line-opacity: 0.045;
+    --layout-grid-line-color: rgba(
+        216,
+        111,
+        154,
+        var(--layout-grid-line-opacity)
+    );
+    --layout-grid-size-x: calc(100% / var(--layout-grid-columns, 32));
+    --layout-grid-size-y: calc(100% / var(--layout-grid-rows, 18));
     position: relative;
     width: 100%;
     height: 100vh;
     min-height: 100vh;
     overflow: hidden;
     display: block;
-    background:
+    border: 1px solid transparent;
+    background-color: #fffafd;
+    background-image:
+        linear-gradient(var(--layout-grid-line-color) 1px, transparent 1px),
+        linear-gradient(
+            90deg,
+            var(--layout-grid-line-color) 1px,
+            transparent 1px
+        ),
         linear-gradient(
             180deg,
             rgba(255, 240, 247, 0.94),
             rgba(255, 250, 253, 0.98)
-        ),
-        var(--panel);
+        );
+    background-position:
+        0 0,
+        0 0,
+        0 0;
+    background-size:
+        var(--layout-grid-size-x) var(--layout-grid-size-y),
+        var(--layout-grid-size-x) var(--layout-grid-size-y),
+        auto;
 }
 
 .page-layout-board.is-layout-editing {
-    border: 1px dashed rgba(216, 111, 154, 0.34);
-    background-color: rgba(255, 255, 255, 0.42);
-    background-image:
-        linear-gradient(rgba(216, 111, 154, 0.11) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(216, 111, 154, 0.11) 1px, transparent 1px);
-    background-size:
-        calc(100% / var(--layout-grid-columns, 32))
-            calc(100% / var(--layout-grid-rows, 18)),
-        calc(100% / var(--layout-grid-columns, 32))
-            calc(100% / var(--layout-grid-rows, 18));
+    --layout-grid-line-opacity: 0.105;
+    border-color: rgba(216, 111, 154, 0.34);
+    border-style: dashed;
 }
 
 .page-layout-tile {
@@ -105,8 +122,12 @@ input {
 }
 
 .page-layout-tile .tile-header {
-    display: none;
+    display: grid;
     flex: 0 0 auto;
+    min-height: 34px;
+    padding: 6px 10px;
+    border-bottom-color: rgba(216, 111, 154, 0.14);
+    background-color: rgba(255, 252, 254, 0.86);
     cursor: default;
 }
 
@@ -149,7 +170,8 @@ input {
 }
 
 .page-layout-board.is-layout-editing .tile-header {
-    display: grid;
+    border-bottom-color: rgba(216, 111, 154, 0.2);
+    background-color: rgba(255, 248, 252, 0.94);
     cursor: grab;
 }
 
@@ -768,13 +790,18 @@ input {
     top: 0;
     right: 126px;
     display: flex;
+    width: max-content;
+    max-width: calc(100vw - 170px);
     align-items: flex-start;
+    justify-content: flex-end;
+    flex-wrap: nowrap;
     gap: 8px;
 }
 
 .layout-edit-toggle,
 .layout-tool-button {
     display: inline-flex;
+    flex: 0 0 auto;
     align-items: center;
     gap: 7px;
     min-height: 34px;
@@ -786,6 +813,7 @@ input {
     color: var(--accent-strong);
     font-size: 13px;
     font-weight: 700;
+    white-space: nowrap;
 }
 
 .layout-edit-primary-button {
