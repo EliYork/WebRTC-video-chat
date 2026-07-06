@@ -65,6 +65,10 @@ const pageLayoutEditUi = readFileSync(
     new URL('../src/views/js/page-layout-edit-ui.js', import.meta.url),
     'utf8'
 );
+const pageLayoutSnapUtils = readFileSync(
+    new URL('../src/views/js/page-layout-snap-utils.js', import.meta.url),
+    'utf8'
+);
 const style = loadCssWithImports(
     new URL('../src/views/style.css', import.meta.url)
 );
@@ -244,6 +248,25 @@ const uiModuleContracts = [
             'saveLayout',
             'persist',
             'localStorage',
+        ],
+    },
+    {
+        path: '/js/page-layout-snap-utils.js',
+        filename: 'page-layout-snap-utils.js',
+        source: pageLayoutSnapUtils,
+        forbidden: [
+            'function toggleLayoutEditMode',
+            'function setLayoutEditMode',
+            'function syncLayoutEditModeUI',
+            'function finalizeLayoutEditing',
+            'function finishTileLayoutInteraction',
+            'function finalizeLayoutItemDrag',
+            'saveLayout',
+            'loadLayout',
+            'persist',
+            'localStorage',
+            'addEventListener("pointer',
+            "addEventListener('pointer",
         ],
     },
 ];
@@ -519,7 +542,7 @@ assert.match(
 );
 assert.match(
     finalizeLayoutEditingBody,
-    /snapAllLayoutItemsToGrid\(\)[\s\S]*?hideSnapPreview\(\)[\s\S]*?saveLayoutToStorage\([\s\S]*?setLayoutEditMode\(false\)/,
+    /layoutSnapUtils\.snapAllLayoutItemsToGrid\([\s\S]*?hideSnapPreview\(\)[\s\S]*?saveLayoutToStorage\([\s\S]*?setLayoutEditMode\(false\)/,
     'finalizing layout edit mode must snap all items, hide preview, save, and then leave edit mode'
 );
 assert.match(
@@ -536,6 +559,11 @@ assert.doesNotMatch(
     showSnapPreviewBody,
     /layoutEditMode/,
     'snap preview must also be available for normal-mode freeMove dragging'
+);
+assert.match(
+    showSnapPreviewBody,
+    /layoutSnapUtils\.snapTileLayoutToGrid\([\s\S]*?layoutEditUI\.showSnapPreview/,
+    'snap preview must pass a snapped layout to the edit UI helper'
 );
 assert.match(
     script,
@@ -594,8 +622,8 @@ const finishTileLayoutInteractionBody = getSourceBetween(
 );
 assert.match(
     singleTileSnapBody,
-    /snapTileLayoutToGrid\(/,
-    'single-tile snap helper must reuse the shared snapTileLayoutToGrid() rule'
+    /layoutSnapUtils\.snapTileLayoutToGridForTile\(/,
+    'single-tile snap helper must delegate to PageLayoutSnapUtils'
 );
 assert.match(
     finalizeLayoutItemDragBody,

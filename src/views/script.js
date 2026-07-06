@@ -53,6 +53,7 @@ const outputVolumeUI = window.VoiceOutputVolumeUI;
 const fullscreenControls = window.VoiceFullscreenControls;
 const voiceJoinOverlayUI = window.VoiceJoinOverlayUI;
 const layoutEditUI = window.PageLayoutEditUI;
+const layoutSnapUtils = window.PageLayoutSnapUtils;
 const remoteStreams = {};
 const getAudioConstraints = () => noiseSettingsUI.getAudioConstraints();
 
@@ -2310,103 +2311,33 @@ const bringTileLayoutToFront = (tile) => {
     }
 };
 
-const getTileBounds = () => {
-    const board = pageLayoutBoard || videoGrid;
-    const boardRect = board.getBoundingClientRect();
-    const fallbackWidth = boardRect.width || board.parentElement?.offsetWidth;
-    const fallbackHeight =
-        boardRect.height || board.parentElement?.offsetHeight;
+const getLayoutSnapContext = () => ({
+    board: pageLayoutBoard || videoGrid,
+    columns: PAGE_GRID_COLUMNS,
+    rows: PAGE_GRID_ROWS,
+    minGridW: LAYOUT_MIN_GRID_W,
+    minGridH: LAYOUT_MIN_GRID_H,
+    minTileWidth: PAGE_TILE_MIN_WIDTH,
+    minTileHeight: PAGE_TILE_MIN_HEIGHT,
+    normalizeZIndex: normalizeTileLayoutZIndex,
+    findTileForLayoutItem,
+    getCurrentTileLayout,
+    applyTileLayout,
+    applyTileLayoutItemToElement,
+    setLayoutItem: (item) => layoutItemsById.set(item.id, item),
+});
 
-    return {
-        width: Math.max(
-            PAGE_TILE_MIN_WIDTH,
-            fallbackWidth || PAGE_TILE_MIN_WIDTH
-        ),
-        height: Math.max(
-            PAGE_TILE_MIN_HEIGHT,
-            fallbackHeight || PAGE_TILE_MIN_HEIGHT
-        ),
-    };
-};
+const getTileBounds = () =>
+    layoutSnapUtils.getTileBounds(getLayoutSnapContext());
 
-const clampGridNumber = (value, min, max) =>
-    Math.min(Math.max(min, value), max);
+const clampGridLayout = (layout) =>
+    layoutSnapUtils.clampGridLayout(layout, getLayoutSnapContext());
 
-const getLayoutGridMetrics = () => {
-    const bounds = getTileBounds();
-    const cellWidth = bounds.width / PAGE_GRID_COLUMNS;
-    const cellHeight = bounds.height / PAGE_GRID_ROWS;
+const convertTileLayoutToGrid = (layout) =>
+    layoutSnapUtils.convertTileLayoutToGrid(layout, getLayoutSnapContext());
 
-    return {
-        bounds,
-        cellWidth,
-        cellHeight,
-        minGridW: Math.max(
-            LAYOUT_MIN_GRID_W,
-            Math.ceil(PAGE_TILE_MIN_WIDTH / cellWidth)
-        ),
-        minGridH: Math.max(
-            LAYOUT_MIN_GRID_H,
-            Math.ceil(PAGE_TILE_MIN_HEIGHT / cellHeight)
-        ),
-    };
-};
-
-const clampGridLayout = ({ x, y, w, h }) => {
-    const { minGridW, minGridH } = getLayoutGridMetrics();
-    const nextW = clampGridNumber(
-        Math.round(Number(w) || minGridW),
-        minGridW,
-        PAGE_GRID_COLUMNS
-    );
-    const nextH = clampGridNumber(
-        Math.round(Number(h) || minGridH),
-        minGridH,
-        PAGE_GRID_ROWS
-    );
-    const nextX = clampGridNumber(
-        Math.round(Number(x) || 0),
-        0,
-        PAGE_GRID_COLUMNS - nextW
-    );
-    const nextY = clampGridNumber(
-        Math.round(Number(y) || 0),
-        0,
-        PAGE_GRID_ROWS - nextH
-    );
-
-    return { x: nextX, y: nextY, w: nextW, h: nextH };
-};
-
-const convertTileLayoutToGrid = ({ x, y, width, height }) => {
-    const { cellWidth, cellHeight } = getLayoutGridMetrics();
-
-    return clampGridLayout({
-        x: Math.round(x / cellWidth),
-        y: Math.round(y / cellHeight),
-        w: Math.round(width / cellWidth),
-        h: Math.round(height / cellHeight),
-    });
-};
-
-const convertGridLayoutToPixels = ({ x, y, w, h, zIndex }) => {
-    const grid = clampGridLayout({ x, y, w, h });
-    const { cellWidth, cellHeight } = getLayoutGridMetrics();
-
-    return clampTileLayout({
-        x: grid.x * cellWidth,
-        y: grid.y * cellHeight,
-        width: grid.w * cellWidth,
-        height: grid.h * cellHeight,
-        zIndex,
-    });
-};
-
-const snapTileLayoutToGrid = (layout) =>
-    convertGridLayoutToPixels({
-        ...convertTileLayoutToGrid(layout),
-        zIndex: layout.zIndex,
-    });
+const convertGridLayoutToPixels = (layout) =>
+    layoutSnapUtils.convertGridLayoutToPixels(layout, getLayoutSnapContext());
 
 const isAutoPlacedLayoutType = (type) => Boolean(AUTO_LAYOUT_GRID_SIZES[type]);
 
@@ -2601,58 +2532,30 @@ const findTileForLayoutItem = (item) =>
                   tile.dataset.layoutId === item?.id
           );
 
-const snapLayoutItemToGrid = (item) => {
-    if (!item?.id) {
-        return null;
-    }
-
-    const tile = findTileForLayoutItem(item);
-    const layoutSource =
-        tile && !tile.classList.contains('is-layout-hidden')
-            ? getCurrentTileLayout(tile)
-            : item.layout || convertGridLayoutToPixels(item.grid || {});
-    const snappedLayout = snapTileLayoutToGrid(layoutSource);
-    const snappedGrid = convertTileLayoutToGrid(snappedLayout);
-    const nextItem = {
-        ...item,
-        layout: snappedLayout,
-        grid: snappedGrid,
-        positioned: true,
-    };
-
-    layoutItemsById.set(nextItem.id, nextItem);
-
-    if (tile) {
-        applyTileLayoutItemToElement(tile, nextItem, {
-            applyPosition: true,
-        });
-    }
-
-    return nextItem;
-};
-
-const snapAllLayoutItemsToGrid = () => {
-    layoutItemsById.forEach((item) => {
-        snapLayoutItemToGrid(item);
-    });
-};
-
 const showSnapPreview = (tile, layout) => {
     if (!tile || !layout) {
         return;
     }
 
+    const snappedLayout = layoutSnapUtils.snapTileLayoutToGrid(
+        layout,
+        getLayoutSnapContext()
+    );
+
     layoutEditUI.showSnapPreview({
         board: pageLayoutBoard,
         tile,
-        layout: snapTileLayoutToGrid(layout),
+        layout: snappedLayout,
     });
 };
 
 const hideSnapPreview = () => layoutEditUI.hideSnapPreview();
 
 const finalizeLayoutEditing = () => {
-    snapAllLayoutItemsToGrid();
+    layoutSnapUtils.snapAllLayoutItemsToGrid(
+        layoutItemsById,
+        getLayoutSnapContext()
+    );
     hideSnapPreview();
     saveLayoutToStorage('布局已吸附');
     setLayoutEditMode(false);
@@ -2854,21 +2757,8 @@ const clearSavedLayout = () => {
 
 refreshSavedLayoutItems();
 
-const clampTileLayout = ({ x, y, width, height, zIndex }) => {
-    const bounds = getTileBounds();
-    const minW = PAGE_TILE_MIN_WIDTH;
-    const minH = PAGE_TILE_MIN_HEIGHT;
-    const nextWidth = Math.min(Math.max(width, minW), bounds.width);
-    const nextHeight = Math.min(Math.max(height, minH), bounds.height);
-
-    return {
-        x: Math.min(Math.max(0, x), Math.max(0, bounds.width - nextWidth)),
-        y: Math.min(Math.max(0, y), Math.max(0, bounds.height - nextHeight)),
-        width: nextWidth,
-        height: nextHeight,
-        zIndex: normalizeTileLayoutZIndex(zIndex),
-    };
-};
+const clampTileLayout = (layout) =>
+    layoutSnapUtils.clampTileLayout(layout, getLayoutSnapContext());
 
 const normalizeTileLayout = (layout = {}) => {
     if (layout.grid && !Number.isFinite(Number(layout.x))) {
@@ -3135,13 +3025,10 @@ const persistCurrentTileLayout = (tile) => {
 };
 
 const snapTileLayoutToGridForTile = (tile) => {
-    if (!tile) {
-        return null;
-    }
-
-    const snappedLayout = snapTileLayoutToGrid(getCurrentTileLayout(tile));
-    applyTileLayout(tile, snappedLayout);
-    return snappedLayout;
+    return layoutSnapUtils.snapTileLayoutToGridForTile(
+        tile,
+        getLayoutSnapContext()
+    );
 };
 
 const markTileLayoutUserPlaced = (tile) => {
