@@ -6,6 +6,28 @@
     const queryAll = (selector, root = global.document) =>
         Array.from(root.querySelectorAll(selector));
 
+    const setText = (element, value = '') => {
+        if (element) {
+            element.textContent = value;
+        }
+    };
+
+    const setHidden = (element, hidden = true) => {
+        element?.classList.toggle('hidden', hidden);
+    };
+
+    const toggleClass = (element, className, force) => {
+        if (!element) {
+            return false;
+        }
+
+        if (force === undefined) {
+            return element.classList.toggle(className);
+        }
+
+        return element.classList.toggle(className, force);
+    };
+
     const createGuestName = () =>
         `Guest-${Math.floor(1000 + Math.random() * 9000)}`;
 
@@ -65,6 +87,9 @@
         readJsonStorage,
         safeStorageGet,
         safeStorageSet,
+        setHidden,
+        setText,
+        toggleClass,
         writeJsonStorage,
     };
 })(window);

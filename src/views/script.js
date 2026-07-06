@@ -11,6 +11,9 @@ const {
     readJsonStorage,
     safeStorageGet,
     safeStorageSet,
+    setHidden,
+    setText,
+    toggleClass,
     writeJsonStorage,
 } = window.VoiceViewUtils;
 
@@ -73,9 +76,7 @@ const updateNoiseToggleUI = () => {
         toggle.setAttribute('aria-pressed', String(enabled));
     }
 
-    if (status) {
-        status.textContent = enabled ? '开' : '关';
-    }
+    setText(status, enabled ? '开' : '关');
 };
 
 const updateAiExperimentToggleUI = () => {
@@ -89,34 +90,32 @@ const updateAiExperimentToggleUI = () => {
     }
 
     if (!supported) {
-        toggle.classList.add('na');
+        toggleClass(toggle, 'na', true);
         toggle.setAttribute('aria-pressed', 'false');
         toggle.setAttribute('title', '当前浏览器/设备不支持');
         toggle.style.cursor = 'default';
 
-        if (status) {
-            status.textContent = toggle.dataset.notSupportedLabel || 'N/A';
-        }
+        setText(status, toggle.dataset.notSupportedLabel || 'N/A');
 
         return;
     }
 
-    toggle.classList.remove('na');
+    toggleClass(toggle, 'na', false);
     toggle.setAttribute('aria-pressed', String(enabled));
     toggle.removeAttribute('title');
     toggle.style.cursor = '';
 
     if (status) {
         if (!enabled) {
-            status.textContent = '关';
+            setText(status, '关');
         } else if (noiseMode === 'rnnoise') {
-            status.textContent = 'RNNoise';
+            setText(status, 'RNNoise');
         } else if (noiseMode === 'passthrough') {
-            status.textContent = '直通';
+            setText(status, '直通');
         } else if (noiseMode === 'fallback') {
-            status.textContent = '回退';
+            setText(status, '回退');
         } else {
-            status.textContent = '开';
+            setText(status, '开');
         }
     }
 };
@@ -373,13 +372,13 @@ viewingRoomId = ROOM_ID;
 selectedVoiceRoomId = ROOM_ID;
 
 const showCallControls = () => {
-    callControls?.classList.remove('hidden');
-    destroyPeerBtn?.classList.remove('hidden');
+    setHidden(callControls, false);
+    setHidden(destroyPeerBtn, false);
 };
 
 const hideCallControls = () => {
-    callControls?.classList.add('hidden');
-    destroyPeerBtn?.classList.add('hidden');
+    setHidden(callControls);
+    setHidden(destroyPeerBtn);
 };
 
 const isMobileLayout = () => window.innerWidth <= MOBILE_BREAKPOINT;
@@ -1134,7 +1133,7 @@ const updateCallDuration = () => {
         return;
     }
 
-    callDuration.textContent = formatDuration(Date.now() - callStartedAt);
+    setText(callDuration, formatDuration(Date.now() - callStartedAt));
 };
 
 const startCallTimer = () => {
@@ -1149,9 +1148,7 @@ const stopCallTimer = () => {
     callDurationTimer = undefined;
     callStartedAt = undefined;
 
-    if (callDuration) {
-        callDuration.textContent = '00:00';
-    }
+    setText(callDuration, '00:00');
 };
 
 const hasLiveCameraTrack = () =>
@@ -1278,25 +1275,21 @@ const getCallStatusLabel = () => {
 };
 
 const updateLocalUserCard = () => {
-    if (localUserName) {
-        localUserName.textContent = getChatName();
-    }
+    setText(localUserName, getChatName());
 
-    if (localVoiceChannelName) {
-        localVoiceChannelName.textContent = getChannelName(
-            joinedVoiceRoomId || viewingRoomId
-        );
-    }
+    setText(
+        localVoiceChannelName,
+        getChannelName(joinedVoiceRoomId || viewingRoomId)
+    );
 
-    if (callStatusText) {
-        callStatusText.textContent = isConnectingToPeer
-            ? '正在连接语音'
-            : getCallStatusLabel();
-    }
+    setText(
+        callStatusText,
+        isConnectingToPeer ? '正在连接语音' : getCallStatusLabel()
+    );
 
     if (screenStatusText) {
-        screenStatusText.textContent = '';
-        screenStatusText.classList.add('hidden');
+        setText(screenStatusText);
+        setHidden(screenStatusText);
     }
 
     updateNoiseToggleUI();
