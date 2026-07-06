@@ -100,7 +100,7 @@
 .page-layout-board.is-layout-editing .video-tile {
     border-color: rgba(216, 111, 154, 0.55);
     box-shadow:
-        0 0 0 2px rgba(216, 111, 154, 0.1),
+        inset 0 0 0 2px rgba(216, 111, 154, 0.1),
         var(--shadow);
     cursor: move;
 }
