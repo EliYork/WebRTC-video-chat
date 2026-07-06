@@ -178,13 +178,15 @@ input {
 }
 
 .page-tile-sidebar-panel .tile-body,
-.page-tile-chat-panel .tile-body {
+.page-tile-chat-panel .tile-body,
+.page-tile-chat-input .tile-body {
     place-items: stretch;
     background-color: transparent;
 }
 
 .page-layout-tile .room-sidebar,
-.page-layout-tile .chat-panel {
+.page-layout-tile .chat-panel,
+.page-layout-tile .chat-form.chat-input {
     width: 100%;
     height: 100%;
     min-height: 0;
@@ -196,6 +198,23 @@ input {
 
 .page-layout-tile .chat-panel {
     border-left: 0;
+}
+
+.page-tile-chat-panel .chat-messages {
+    height: auto;
+    flex: 1;
+    min-height: 0;
+}
+
+.page-tile-chat-input .chat-form {
+    border-top: 0;
+    box-sizing: border-box;
+    padding: 10px;
+}
+
+.page-tile-chat-input .chat-form textarea {
+    min-height: 0;
+    resize: none;
 }
 
 .page-chat-form {
@@ -1929,7 +1948,7 @@ input {
 
     #main.mobile-in-room .page-layout-board {
         display: grid;
-        grid-template-rows: 1fr auto 1fr;
+        grid-template-rows: 1fr auto minmax(0, 1fr) auto;
         height: 100dvh;
     }
 
@@ -1962,14 +1981,15 @@ input {
     }
 
     .room-stage,
-    .chat-panel {
+    .chat-panel,
+    #main.mobile-in-room .page-tile-chat-input {
         display: none;
     }
 
     .room-layout.mobile-in-room,
     #main.mobile-in-room {
         display: grid;
-        grid-template-rows: 1fr auto 1fr;
+        grid-template-rows: 1fr auto minmax(0, 1fr) auto;
     }
 
     .room-layout.mobile-in-room .room-stage {
@@ -1983,6 +2003,12 @@ input {
     #main.mobile-in-room .page-tile-chat-panel {
         display: flex;
         grid-row: 3;
+        min-height: 0;
+    }
+
+    #main.mobile-in-room .page-tile-chat-input {
+        display: flex;
+        grid-row: 4;
         min-height: 0;
     }
 

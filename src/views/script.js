@@ -145,17 +145,20 @@ const PAGE_LAYOUT_STORAGE_KEY_PREFIX = 'voicePageLayout:v2';
 const PAGE_COMPONENT_TYPES = {
     SIDEBAR_PANEL: 'sidebarPanel',
     CHAT_PANEL: 'chatPanel',
+    CHAT_INPUT: 'chatInput',
 };
 const PAGE_SINGLETON_TYPES = new Set([
     PAGE_COMPONENT_TYPES.SIDEBAR_PANEL,
     PAGE_COMPONENT_TYPES.CHAT_PANEL,
+    PAGE_COMPONENT_TYPES.CHAT_INPUT,
 ]);
 const REAL_DOM_PAGE_TYPES = PAGE_SINGLETON_TYPES;
 const PAGE_TILE_MIN_WIDTH = 160;
 const PAGE_TILE_MIN_HEIGHT = 80;
 const PAGE_COMPONENT_LABELS = {
     [PAGE_COMPONENT_TYPES.SIDEBAR_PANEL]: '左侧频道栏',
-    [PAGE_COMPONENT_TYPES.CHAT_PANEL]: '聊天面板',
+    [PAGE_COMPONENT_TYPES.CHAT_PANEL]: '聊天消息',
+    [PAGE_COMPONENT_TYPES.CHAT_INPUT]: '消息输入',
 };
 let pageLayoutBoard;
 const LAYOUT_ITEM_TYPES = {
@@ -400,6 +403,7 @@ const PL_WARN = (...args) => console.warn('[page-layout]', ...args);
 const CORE_PAGE_TYPES = [
     PAGE_COMPONENT_TYPES.SIDEBAR_PANEL,
     PAGE_COMPONENT_TYPES.CHAT_PANEL,
+    PAGE_COMPONENT_TYPES.CHAT_INPUT,
 ];
 
 const validatePageLayout = () => {
@@ -519,6 +523,25 @@ const validateDetachedPageLayoutBoard = (board) => {
         PAGE_COMPONENT_TYPES.SIDEBAR_PANEL
     );
     const chat = getPageTileDiagnostics(board, PAGE_COMPONENT_TYPES.CHAT_PANEL);
+    const chatInputTile = getPageTileDiagnostics(
+        board,
+        PAGE_COMPONENT_TYPES.CHAT_INPUT
+    );
+    const chatInputHasTextControl = Boolean(
+        chatInputTile.tile?.querySelector('textarea, input')
+    );
+    const chatInputHasSendButton = Boolean(
+        chatInputTile.tile &&
+            Array.from(chatInputTile.tile.querySelectorAll('button')).some(
+                (button) =>
+                    button.type === 'submit' ||
+                    button.textContent.includes('发送')
+            )
+    );
+    const chatHasMessageArea = Boolean(
+        chat.tile?.querySelector('#chatMessages, .chat-messages') ||
+            chat.tile?.querySelector('.chat-panel')?.children.length
+    );
     const failures = [];
 
     if (tileCount < CORE_PAGE_TYPES.length) {
@@ -540,12 +563,18 @@ const validateDetachedPageLayoutBoard = (board) => {
 
     if (
         !chat.tile ||
-        !chat.tile.querySelector('textarea, input') ||
-        !Array.from(chat.tile.querySelectorAll('button')).some((button) =>
-            button.textContent.includes('发送')
-        )
+        !chatHasMessageArea ||
+        chat.tile.querySelector('#chatForm, .chat-form')
     ) {
-        failures.push('chatPanel is missing input controls');
+        failures.push('chatPanel is not isolated to the message area');
+    }
+
+    if (
+        !chatInputTile.tile ||
+        !chatInputHasTextControl ||
+        !chatInputHasSendButton
+    ) {
+        failures.push('chatInput is missing input controls');
     }
 
     return {
@@ -575,7 +604,21 @@ const initPageLayoutBoard = () => {
     const sidebarEl = mainLayout.querySelector('.room-sidebar');
     const stageEl = mainLayout.querySelector('.room-stage');
     const chatPanelEl = mainLayout.querySelector('.chat-panel');
+    const chatMessagesEl = chatPanelEl?.querySelector(
+        '#chatMessages, .chat-messages'
+    );
+    const chatFormEl = chatPanelEl?.querySelector('#chatForm, .chat-form');
     const runtimeVideoGrid = mainLayout.querySelector('#video-grid');
+    const chatFormHasControls = Boolean(
+        chatFormEl?.querySelector('textarea, input') &&
+            chatFormEl.querySelector('button')
+    );
+
+    if (chatPanelEl && !chatMessagesEl) {
+        PL_WARN(
+            'Chat messages container was not found; keeping remaining chat panel content after input extraction.'
+        );
+    }
 
     PL_LOG('source nodes', {
         sidebar: Boolean(sidebarEl),
@@ -591,18 +634,17 @@ const initPageLayoutBoard = () => {
         stageHasCanvas: Boolean(stageEl?.querySelector('#canvas')),
         stageHasVideoGrid: Boolean(runtimeVideoGrid),
         chatPanel: Boolean(chatPanelEl),
-        chatPanelHasMessages: Boolean(
-            chatPanelEl?.querySelector('.chat-messages, #chatMessages')
-        ),
-        chatPanelHasForm: Boolean(
-            chatPanelEl?.querySelector('.chat-form, #chatForm')
-        ),
+        chatPanelHasMessages: Boolean(chatMessagesEl),
+        chatPanelHasForm: Boolean(chatFormEl),
+        chatFormHasControls,
     });
 
     const missingSelectors = [
         ['.room-sidebar', sidebarEl],
         ['#video-grid', runtimeVideoGrid],
         ['.chat-panel', chatPanelEl],
+        ['#chatForm or .chat-form', chatFormEl],
+        ['chat input controls', chatFormHasControls ? chatFormEl : null],
     ]
         .filter(([, node]) => !node)
         .map(([selector]) => selector);
@@ -622,11 +664,18 @@ const initPageLayoutBoard = () => {
             type: PAGE_COMPONENT_TYPES.CHAT_PANEL,
             node: chatPanelEl,
         },
+        {
+            type: PAGE_COMPONENT_TYPES.CHAT_INPUT,
+            node: chatFormEl,
+        },
     ].map((entry) => {
         const placeholder = document.createComment(
             `page-layout-placeholder:${entry.type}`
         );
         entry.node.before(placeholder);
+        if (entry.type === PAGE_COMPONENT_TYPES.CHAT_INPUT) {
+            entry.node.classList.add('chat-input');
+        }
         return { ...entry, placeholder };
     });
 
@@ -2870,6 +2919,72 @@ const serializeLayoutItems = () => {
     return items;
 };
 
+const addLegacyChatInputLayout = (items) => {
+    const chatPanelItem = items.find(
+        (item) => item.type === PAGE_COMPONENT_TYPES.CHAT_PANEL
+    );
+    const hasChatInput = items.some(
+        (item) => item.type === PAGE_COMPONENT_TYPES.CHAT_INPUT
+    );
+
+    if (!chatPanelItem || hasChatInput) {
+        return items;
+    }
+
+    const defaultChatPanel = getDefaultLayoutItems().find(
+        (item) => item.type === PAGE_COMPONENT_TYPES.CHAT_PANEL
+    );
+    const defaultChatInput = getDefaultLayoutItems().find(
+        (item) => item.type === PAGE_COMPONENT_TYPES.CHAT_INPUT
+    );
+    const { minGridH } = getLayoutGridMetrics();
+    const sourceGrid = clampGridLayout(
+        chatPanelItem.grid || defaultChatPanel?.grid || {}
+    );
+    const inputHeight = clampGridNumber(
+        defaultChatInput?.grid?.h || 4,
+        minGridH,
+        PAGE_GRID_ROWS
+    );
+    const panelHeight =
+        sourceGrid.h >= inputHeight + minGridH
+            ? sourceGrid.h - inputHeight
+            : Math.max(
+                  minGridH,
+                  Math.min(
+                      defaultChatPanel?.grid?.h || sourceGrid.h,
+                      sourceGrid.h
+                  )
+              );
+    const panelGrid = clampGridLayout({
+        ...sourceGrid,
+        h: panelHeight,
+    });
+    const inputGrid = clampGridLayout({
+        x: panelGrid.x,
+        y: Math.min(panelGrid.y + panelGrid.h, PAGE_GRID_ROWS - inputHeight),
+        w: panelGrid.w,
+        h: inputHeight,
+    });
+
+    chatPanelItem.grid = panelGrid;
+    items.push({
+        id: `page-${PAGE_COMPONENT_TYPES.CHAT_INPUT}`,
+        type: PAGE_COMPONENT_TYPES.CHAT_INPUT,
+        grid: inputGrid,
+        z: normalizeTileLayoutZIndex(
+            (chatPanelItem.z || TILE_BASE_Z_INDEX) + 1
+        ),
+        visible: chatPanelItem.visible !== false,
+        config: normalizeComponentConfig(
+            PAGE_COMPONENT_TYPES.CHAT_INPUT,
+            chatPanelItem.config
+        ),
+    });
+
+    return items;
+};
+
 const normalizeLoadedLayoutItems = (payload) => {
     if (!payload || payload.version !== PAGE_STORAGE_VERSION) {
         return [];
@@ -2886,16 +3001,21 @@ const normalizeLoadedLayoutItems = (payload) => {
 
     const knownTypes = getKnownLayoutItemTypes();
     const seen = new Set();
+    const seenSingletonTypes = new Set();
 
-    return (Array.isArray(payload.items) ? payload.items : [])
+    const normalizedItems = (Array.isArray(payload.items) ? payload.items : [])
         .map((item) => {
             if (item && item.type === 'stagePanel') {
                 return null;
             }
 
+            if (!item?.id) {
+                return null;
+            }
+
             const type = normalizeLayoutItemType(item?.type);
             const peerId =
-                typeof item.config?.peerId === 'string'
+                typeof item?.config?.peerId === 'string'
                     ? item.config.peerId
                     : getLegacyRemoteLayoutPeerId(item.id);
             const itemId =
@@ -2905,11 +3025,18 @@ const normalizeLoadedLayoutItems = (payload) => {
                       })
                     : String(item.id);
 
-            if (!item?.id || !knownTypes.has(type) || seen.has(itemId)) {
+            if (
+                !knownTypes.has(type) ||
+                seen.has(itemId) ||
+                (PAGE_SINGLETON_TYPES.has(type) && seenSingletonTypes.has(type))
+            ) {
                 return null;
             }
 
             seen.add(itemId);
+            if (PAGE_SINGLETON_TYPES.has(type)) {
+                seenSingletonTypes.add(type);
+            }
             const grid = normalizeAutoLayoutGrid(type, {
                 x: item.x,
                 y: item.y,
@@ -2930,6 +3057,8 @@ const normalizeLoadedLayoutItems = (payload) => {
             };
         })
         .filter(Boolean);
+
+    return addLegacyChatInputLayout(normalizedItems);
 };
 
 const loadLayoutFromStorage = () => {
@@ -3475,7 +3604,13 @@ const getDefaultLayoutItems = () => [
     {
         id: `page-${PAGE_COMPONENT_TYPES.CHAT_PANEL}`,
         type: PAGE_COMPONENT_TYPES.CHAT_PANEL,
-        grid: { x: 26, y: 0, w: 6, h: 18 },
+        grid: { x: 26, y: 0, w: 6, h: 14 },
+        visible: true,
+    },
+    {
+        id: `page-${PAGE_COMPONENT_TYPES.CHAT_INPUT}`,
+        type: PAGE_COMPONENT_TYPES.CHAT_INPUT,
+        grid: { x: 26, y: 14, w: 6, h: 4 },
         visible: true,
     },
     {
