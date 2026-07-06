@@ -1316,10 +1316,13 @@ input {
     .tile-resize-handle,
 .page-layout-board.is-layout-editing
     .video-tile.is-resizing
-    .tile-resize-handle,
-.video-tile.is-free-move-enabled:hover .tile-resize-handle {
+    .tile-resize-handle {
     opacity: 0.22;
     pointer-events: auto;
+}
+
+.video-tile.is-free-move-enabled:hover .tile-resize-handle {
+    opacity: 0.14;
 }
 
 .tile-resize-handle:hover {

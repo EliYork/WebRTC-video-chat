@@ -156,30 +156,38 @@ const LAYOUT_ITEM_TYPES = {
     ROOM: 'room',
     CHAT: 'chat',
 };
+const AUTO_LAYOUT_GRID_SIZES = {
+    [LAYOUT_ITEM_TYPES.LOCAL_PEER]: { w: 5, h: 4 },
+    [LAYOUT_ITEM_TYPES.REMOTE_PEER]: { w: 5, h: 4 },
+    [LAYOUT_ITEM_TYPES.SCREEN_SHARE]: { w: 14, h: 9 },
+};
 const COMPONENT_CONFIG_DEFAULTS = {
     [LAYOUT_ITEM_TYPES.ROOM]: {
-        freeMove: false,
+        freeMove: true,
         showRoomName: true,
         showCopyLink: true,
         showMemberCount: true,
     },
     [LAYOUT_ITEM_TYPES.CHAT]: {
-        freeMove: false,
+        freeMove: true,
         compactMode: false,
         showHeader: true,
     },
     [LAYOUT_ITEM_TYPES.LOCAL_PEER]: {
-        freeMove: false,
+        freeMove: true,
+        userPlaced: false,
         showSelfPreview: true,
         showControls: true,
     },
     [LAYOUT_ITEM_TYPES.REMOTE_PEER]: {
-        freeMove: false,
+        freeMove: true,
+        userPlaced: false,
         keepHiddenWhenRejoin: true,
         showPeerName: true,
     },
     [LAYOUT_ITEM_TYPES.SCREEN_SHARE]: {
-        freeMove: false,
+        freeMove: true,
+        userPlaced: false,
         autoShowScreenShare: true,
         showScreenHeader: true,
     },
@@ -194,7 +202,7 @@ let layoutPreferences = { ...LAYOUT_PREFERENCE_DEFAULTS };
 
 const getDefaultComponentConfig = (type) => {
     const defaults = COMPONENT_CONFIG_DEFAULTS[type];
-    return defaults ? { ...defaults } : { freeMove: false };
+    return defaults ? { ...defaults } : { freeMove: true };
 };
 
 const normalizeComponentConfig = (type, config = {}) => {
@@ -2419,6 +2427,115 @@ const snapTileLayoutToGrid = (layout) =>
         zIndex: layout.zIndex,
     });
 
+const isAutoPlacedLayoutType = (type) => Boolean(AUTO_LAYOUT_GRID_SIZES[type]);
+
+const getAutoLayoutGridSize = (type) =>
+    clampGridLayout({
+        x: 0,
+        y: 0,
+        ...(AUTO_LAYOUT_GRID_SIZES[type] || {
+            w: LAYOUT_MIN_GRID_W,
+            h: LAYOUT_MIN_GRID_H,
+        }),
+    });
+
+const isRectWithinGrid = (rect) =>
+    rect &&
+    rect.x >= 0 &&
+    rect.y >= 0 &&
+    rect.w > 0 &&
+    rect.h > 0 &&
+    rect.x + rect.w <= PAGE_GRID_COLUMNS &&
+    rect.y + rect.h <= PAGE_GRID_ROWS;
+
+const rectOverlapArea = (a, b) => {
+    if (!a || !b) {
+        return 0;
+    }
+
+    const overlapW = Math.max(
+        0,
+        Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)
+    );
+    const overlapH = Math.max(
+        0,
+        Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y)
+    );
+
+    return overlapW * overlapH;
+};
+
+const getOccupiedLayoutRects = (excludeId) => {
+    const rects = [];
+
+    layoutItemsById.forEach((item) => {
+        if (!item?.id || item.id === excludeId || item.visible === false) {
+            return;
+        }
+
+        const grid = clampGridLayout(item.grid || item.layout || {});
+        if (isRectWithinGrid(grid)) {
+            rects.push({
+                id: item.id,
+                type: item.type,
+                ...grid,
+            });
+        }
+    });
+
+    return rects;
+};
+
+const scoreLayoutSlot = (rect, occupiedRects, options = {}) => {
+    const centerX = options.centerX ?? PAGE_GRID_COLUMNS / 2;
+    const centerY = options.centerY ?? PAGE_GRID_ROWS / 2;
+    const rectCenterX = rect.x + rect.w / 2;
+    const rectCenterY = rect.y + rect.h / 2;
+    const overlapArea = occupiedRects.reduce(
+        (total, occupied) => total + rectOverlapArea(rect, occupied),
+        0
+    );
+    const distanceFromCenter =
+        Math.abs(rectCenterX - centerX) + Math.abs(rectCenterY - centerY);
+    const edgePenalty =
+        (rect.x === 0 ? 2 : 0) +
+        (rect.y === 0 ? 1 : 0) +
+        (rect.x + rect.w === PAGE_GRID_COLUMNS ? 2 : 0) +
+        (rect.y + rect.h === PAGE_GRID_ROWS ? 1 : 0);
+
+    return overlapArea * 1000 + distanceFromCenter * 10 + edgePenalty;
+};
+
+const findAvailableLayoutSlot = (type, preferredSize, options = {}) => {
+    const size = clampGridLayout({
+        x: 0,
+        y: 0,
+        ...(preferredSize || getAutoLayoutGridSize(type)),
+    });
+    const occupiedRects = getOccupiedLayoutRects(options.excludeId);
+    let bestSlot = null;
+    let bestScore = Number.POSITIVE_INFINITY;
+
+    for (let y = 0; y <= PAGE_GRID_ROWS - size.h; y += 1) {
+        for (let x = 0; x <= PAGE_GRID_COLUMNS - size.w; x += 1) {
+            const candidate = { x, y, w: size.w, h: size.h };
+
+            if (!isRectWithinGrid(candidate)) {
+                continue;
+            }
+
+            const score = scoreLayoutSlot(candidate, occupiedRects, options);
+
+            if (score < bestScore) {
+                bestScore = score;
+                bestSlot = candidate;
+            }
+        }
+    }
+
+    return bestSlot || clampGridLayout({ x: 0, y: 0, w: size.w, h: size.h });
+};
+
 const findTileForLayoutItem = (item) =>
     item?.elementId
         ? document.getElementById(item.elementId)
@@ -2816,7 +2933,7 @@ const applyTileLayoutItemToElement = (
     tile.classList.toggle('is-layout-hidden', !item.visible);
     tile.classList.toggle(
         'is-free-move-enabled',
-        item.config?.freeMove === true
+        item.config?.freeMove !== false
     );
 
     if (applyPosition) {
@@ -2933,6 +3050,23 @@ const persistCurrentTileLayout = (tile) => {
     persistTileLayoutItem(tile);
 };
 
+const markTileLayoutUserPlaced = (tile) => {
+    const item = getLayoutItemForTile(tile);
+
+    if (!item || !isAutoPlacedLayoutType(item.type)) {
+        return;
+    }
+
+    item.config = normalizeComponentConfig(item.type, {
+        ...item.config,
+        userPlaced: true,
+    });
+    layoutItemsById.set(item.id, item);
+    applyTileLayoutItemToElement(tile, item, {
+        applyPosition: false,
+    });
+};
+
 const finalizeLayoutItemDrag = (tile) => {
     if (!tile) {
         hideSnapPreview();
@@ -2941,6 +3075,7 @@ const finalizeLayoutItemDrag = (tile) => {
 
     const snappedLayout = snapTileLayoutToGrid(getCurrentTileLayout(tile));
     applyTileLayout(tile, snappedLayout);
+    markTileLayoutUserPlaced(tile);
     saveLayoutToStorage('布局已吸附');
     hideSnapPreview();
     positionLayoutComponentToolbar(tile);
@@ -2975,31 +3110,24 @@ const applySavedTileLayout = (tile) => {
     const defaultItem = getDefaultLayoutItems().find(
         (candidate) => candidate.type === type
     );
-    const remoteIndex = Math.max(
-        0,
-        Array.from(document.querySelectorAll('.video-tile[data-peer-id]'))
-            .filter((candidate) => candidate.id !== 'local-video')
-            .findIndex((candidate) => candidate === tile)
-    );
     const generatedGrid =
-        type === LAYOUT_ITEM_TYPES.REMOTE_PEER
-            ? {
-                  x: 13 + (remoteIndex % 3) * 2,
-                  y: 7 + (remoteIndex % 3) * 2,
-                  w: 5,
-                  h: 4,
-              }
-            : type === LAYOUT_ITEM_TYPES.SCREEN_SHARE
-              ? { x: 8, y: 2, w: 16, h: 10 }
-              : null;
+        !savedItem && isAutoPlacedLayoutType(type)
+            ? findAvailableLayoutSlot(type, getAutoLayoutGridSize(type), {
+                  excludeId:
+                      item?.id ||
+                      tile.dataset.layoutItemId ||
+                      tile.dataset.layoutId,
+              })
+            : null;
     const layoutItem =
         savedItem ||
-        defaultItem ||
+        (isAutoPlacedLayoutType(type) ? null : defaultItem) ||
         (generatedGrid
             ? {
                   grid: generatedGrid,
                   z: getNextTileLayoutZIndex(),
                   visible: true,
+                  config: getDefaultComponentConfig(type),
               }
             : null);
 
@@ -3416,6 +3544,14 @@ const applyStoredLayoutToExistingTile = (item) => {
             zIndex: item.z || getNextTileLayoutZIndex(),
         })
     );
+    const syncedItem = upsertTileLayoutItem(tile, {
+        visible: item.visible,
+        positioned: true,
+        config: item.config,
+    });
+    applyTileLayoutItemToElement(tile, syncedItem, {
+        applyPosition: false,
+    });
     setTileLayoutItemVisibility(tile.dataset.layoutItemId, item.visible);
     tile.classList.toggle('is-layout-hidden', !item.visible);
 };
@@ -3542,10 +3678,13 @@ const getLayoutItemForTile = (tile) =>
     getTileLayoutItem(tile?.dataset.layoutItemId || tile?.dataset.layoutId);
 
 const isTileFreeMoveEnabled = (tile) =>
-    getLayoutItemForTile(tile)?.config?.freeMove === true;
+    getLayoutItemForTile(tile)?.config?.freeMove !== false;
 
 const canDragLayoutItem = (item) =>
-    layoutEditMode || item?.config?.freeMove === true;
+    layoutEditMode || item?.config?.freeMove !== false;
+
+const canResizeLayoutItem = (item) =>
+    layoutEditMode || item?.config?.freeMove !== false;
 
 const shouldIgnoreLayoutDragTarget = (target) =>
     Boolean(
@@ -3556,9 +3695,12 @@ const shouldIgnoreLayoutDragTarget = (target) =>
                 'button',
                 'select',
                 'a',
+                'form',
+                'label',
                 '[contenteditable]',
                 '.no-drag',
                 '.chat-form',
+                '.chat-input',
                 '.page-chat-form',
                 '.channel-button',
                 '[data-channel-room]',
@@ -3809,10 +3951,10 @@ const ensureTileStructure = (tile) => {
 
 const detectTileResizeDirection = (event, tile) => {
     if (
-        !layoutEditMode ||
         !tile ||
         isMobileLayout() ||
-        getFullscreenElement()
+        getFullscreenElement() ||
+        !canResizeLayoutItem(getLayoutItemForTile(tile))
     ) {
         return null;
     }
@@ -3960,7 +4102,13 @@ const resolveTileResizeLayout = (startLayout, direction, deltaX, deltaY) => {
 };
 
 const startTileResize = (event, tile, direction = 'se') => {
-    if (isMobileLayout() || getFullscreenElement() || event.button !== 0) {
+    if (
+        isMobileLayout() ||
+        getFullscreenElement() ||
+        event.button !== 0 ||
+        shouldIgnoreLayoutDragTarget(event.target) ||
+        !canResizeLayoutItem(getLayoutItemForTile(tile))
+    ) {
         return;
     }
 
@@ -4019,17 +4167,12 @@ const bindTileLayoutControls = (tile, header) => {
                     return;
                 }
 
-                if (layoutEditMode) {
-                    const resizeDirection = detectTileResizeDirection(
-                        event,
-                        tile
-                    );
+                const resizeDirection = detectTileResizeDirection(event, tile);
 
-                    if (resizeDirection) {
-                        setActiveLayoutToolbarTile(tile);
-                        startTileResize(event, tile, resizeDirection);
-                        return;
-                    }
+                if (resizeDirection) {
+                    setActiveLayoutToolbarTile(tile);
+                    startTileResize(event, tile, resizeDirection);
+                    return;
                 }
 
                 if (canDragLayoutItem(getLayoutItemForTile(tile))) {
@@ -4051,6 +4194,7 @@ const bindTileLayoutControls = (tile, header) => {
         header.addEventListener(
             'pointerdown',
             (event) =>
+                !shouldIgnoreLayoutDragTarget(event.target) &&
                 canDragLayoutItem(getLayoutItemForTile(tile)) &&
                 startTileDrag(event, tile)
         );
