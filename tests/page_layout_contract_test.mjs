@@ -73,6 +73,10 @@ const pageLayoutStorage = readFileSync(
     new URL('../src/views/js/page-layout-storage.js', import.meta.url),
     'utf8'
 );
+const roomUiState = readFileSync(
+    new URL('../src/views/js/room-ui-state.js', import.meta.url),
+    'utf8'
+);
 const style = loadCssWithImports(
     new URL('../src/views/style.css', import.meta.url)
 );
@@ -313,6 +317,28 @@ const uiModuleContracts = [
             'socket.on',
         ],
     },
+    {
+        path: '/js/room-ui-state.js',
+        filename: 'room-ui-state.js',
+        source: roomUiState,
+        forbidden: [
+            'Peer',
+            'socket.emit',
+            'socket.on',
+            'getUserMedia',
+            'replaceTrack',
+            'requestAudioStream',
+            'createAudioPipeline',
+            'joinVoiceChannel',
+            'setupCallStreamHandler',
+            'setViewingRoom',
+            'setVoiceTargetRoom',
+            'saveLayoutToStorage',
+            'loadLayoutFromStorage',
+            'startTileResize',
+            'detectTileResizeDirection',
+        ],
+    },
 ];
 
 assertScriptBeforeMain('/js/view-utils.js');
@@ -345,6 +371,16 @@ assertSourceContains(script, 'page layout base contract', [
         /CHAT_PANEL:\s*'chatPanel'/,
         'chatPanel must be a first-class page component',
     ],
+]);
+assertSourceContains(roomUiState, 'room-ui-state.js', [
+    [
+        /global\.VoiceRoomUIState = \{/,
+        'room UI state module must expose a browser global',
+    ],
+    [/renderCallTimer/, 'room UI state must render call timer UI'],
+    [/renderLocalUserCard/, 'room UI state must render local user card UI'],
+    [/renderMobileTileNav/, 'room UI state must render mobile tile nav UI'],
+    [/renderRoomHeader/, 'room UI state must render room header UI'],
 ]);
 const pageComponentTypesMatch = script.match(
     /const PAGE_COMPONENT_TYPES = \{(?<body>[\s\S]*?)\};/

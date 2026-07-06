@@ -5,14 +5,12 @@ let socket;
 const {
     byId,
     createGuestName,
-    formatDuration,
     formatTime,
     queryAll,
     readJsonStorage,
     safeStorageGet,
     safeStorageSet,
     setHidden,
-    setText,
     writeJsonStorage,
 } = window.VoiceViewUtils;
 
@@ -33,6 +31,7 @@ const treeChannels = queryAll('[data-channel-room]');
 const channelMemberLists = queryAll('[data-members-for]');
 const channelCountBadges = queryAll('[data-channel-count]');
 const chatTitle = byId('chatTitle');
+const localUserCard = document.querySelector('.local-user-card');
 const localUserName = byId('localUserName');
 const localVoiceChannelName = byId('localVoiceChannelName');
 const callStatusText = byId('callStatusText');
@@ -55,6 +54,7 @@ const voiceJoinOverlayUI = window.VoiceJoinOverlayUI;
 const layoutEditUI = window.PageLayoutEditUI;
 const layoutSnapUtils = window.PageLayoutSnapUtils;
 const layoutStorage = window.PageLayoutStorage;
+const roomUIState = window.VoiceRoomUIState;
 const remoteStreams = {};
 const getAudioConstraints = () => noiseSettingsUI.getAudioConstraints();
 
@@ -1018,34 +1018,25 @@ const updateMobileTileView = () => {
         activeMobileTileIndex = Math.min(activeMobileTileIndex, totalTiles - 1);
     }
 
-    getVideoTiles().forEach((tile) =>
-        tile.classList.remove('is-mobile-active')
-    );
-
     const activeTile = orderedTiles[activeMobileTileIndex];
 
-    if (activeTile) {
-        activeTile.classList.add('is-mobile-active');
-    }
-
-    if (mobileTileCount) {
-        mobileTileCount.textContent =
-            totalTiles === 0
-                ? '0 / 0'
-                : `${activeMobileTileIndex + 1} / ${totalTiles}`;
-    }
-
-    if (mobilePrevTileBtn) {
-        mobilePrevTileBtn.disabled = totalTiles <= 1;
-    }
-
-    if (mobileNextTileBtn) {
-        mobileNextTileBtn.disabled = totalTiles <= 1;
-    }
+    roomUIState.renderMobileTileNav({
+        refs: {
+            count: mobileTileCount,
+            mainLayout,
+            nextButton: mobileNextTileBtn,
+            previousButton: mobilePrevTileBtn,
+        },
+        activeIndex: activeMobileTileIndex,
+        activeTile,
+        allTiles: getVideoTiles(),
+        isInRoom: mainLayout?.classList.contains('mobile-in-room'),
+        totalTiles,
+    });
 };
 
 const setMobileRoomView = (isInRoom) => {
-    mainLayout?.classList.toggle('mobile-in-room', isInRoom);
+    roomUIState.toggleClass(mainLayout, 'mobile-in-room', isInRoom);
     updateMobileTileView();
 };
 
@@ -1058,7 +1049,10 @@ const updateCallDuration = () => {
         return;
     }
 
-    setText(callDuration, formatDuration(Date.now() - callStartedAt));
+    roomUIState.renderCallTimer({
+        refs: { duration: callDuration },
+        elapsedMs: Date.now() - callStartedAt,
+    });
 };
 
 const startCallTimer = () => {
@@ -1073,7 +1067,10 @@ const stopCallTimer = () => {
     callDurationTimer = undefined;
     callStartedAt = undefined;
 
-    setText(callDuration, '00:00');
+    roomUIState.renderCallTimer({
+        refs: { duration: callDuration },
+        text: '00:00',
+    });
 };
 
 const hasLiveCameraTrack = () =>
@@ -1177,12 +1174,12 @@ const getMemberTileText = (member = {}) => {
     return '未开麦';
 };
 
-const getCallStatusLabel = () => {
+const getCallStatusLabel = (
+    micStatus = getMemberMicStatus(getLocalPresenceMember())
+) => {
     if (!joinedVoiceRoomId) {
         return '未进入频道';
     }
-
-    const micStatus = getMemberMicStatus(getLocalPresenceMember());
 
     if (micStatus.key === 'speaking') {
         return '正在语音中';
@@ -1200,22 +1197,28 @@ const getCallStatusLabel = () => {
 };
 
 const updateLocalUserCard = () => {
-    setText(localUserName, getChatName());
+    const micStatus = getMemberMicStatus(getLocalPresenceMember());
 
-    setText(
-        localVoiceChannelName,
-        getChannelName(joinedVoiceRoomId || viewingRoomId)
-    );
-
-    setText(
-        callStatusText,
-        isConnectingToPeer ? '正在连接语音' : getCallStatusLabel()
-    );
-
-    if (screenStatusText) {
-        setText(screenStatusText);
-        setHidden(screenStatusText);
-    }
+    roomUIState.renderLocalUserCard({
+        refs: {
+            card: localUserCard,
+            channelName: localVoiceChannelName,
+            name: localUserName,
+            screenStatus: screenStatusText,
+            statusText: callStatusText,
+        },
+        channelName: getChannelName(joinedVoiceRoomId || viewingRoomId),
+        connected: Boolean(joinedVoiceRoomId),
+        connecting: isConnectingToPeer,
+        displayName: getChatName(),
+        micStatusKey: micStatus.key,
+        muted: micStatus.key === 'muted',
+        screenHidden: true,
+        speaking: micStatus.key === 'speaking',
+        statusText: isConnectingToPeer
+            ? '正在连接语音'
+            : getCallStatusLabel(micStatus),
+    });
 
     syncNoiseSettingsUI();
     updateAllVideoTileStatus();
@@ -1324,10 +1327,10 @@ const updateChannelIndicators = () => {
     });
 
     const viewingName = getChannelName(viewingRoomId);
-
-    if (chatTitle) {
-        chatTitle.textContent = `${viewingName}聊天`;
-    }
+    roomUIState.renderRoomHeader({
+        refs: { chatTitle },
+        channelName: viewingName,
+    });
 
     updateLocalUserCard();
     updateMobileRoomState();
