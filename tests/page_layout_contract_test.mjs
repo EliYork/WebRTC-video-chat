@@ -618,6 +618,9 @@ const boardMatch = style.match(/\.page-layout-board\s*\{(?<body>[\s\S]*?)\}/);
 const boardEditingMatch = style.match(
     /\.page-layout-board\.is-layout-editing\s*\{(?<body>[\s\S]*?)\}/
 );
+const editingTileMatch = style.match(
+    /\.page-layout-board\.is-layout-editing\s+\.video-tile\s*\{(?<body>[\s\S]*?)\}/
+);
 const mainMatch = style.match(/#main\s*\{(?<body>[\s\S]*?)\}/);
 const getBackgroundSize = (body) =>
     body.match(/background-size:\s*(?<value>[\s\S]*?);/)?.groups.value.trim();
@@ -634,6 +637,7 @@ const pageTileFooterMatch = style.match(
 assert.ok(mainMatch, '#main base style must exist');
 assert.ok(boardMatch, 'page layout board base style must exist');
 assert.ok(boardEditingMatch, 'page layout board editing style must exist');
+assert.ok(editingTileMatch, 'editing tile style must exist');
 assert.ok(pageTileHeaderMatch, 'page tile header base style must exist');
 assert.ok(pageTileFooterMatch, 'page tile footer base style must exist');
 assert.doesNotMatch(
@@ -700,6 +704,16 @@ assert.match(
     boardEditingMatch.groups.body,
     /--layout-grid-line-opacity:\s*0\.1[0-9]+/,
     'editing mode should enhance the same grid by changing opacity only'
+);
+assert.match(
+    editingTileMatch.groups.body,
+    /box-shadow:[\s\S]*?\binset\s+0\s+0\s+0\s+2px/,
+    'editing tile highlight must use inset box-shadow so visual bounds do not exceed saved layout bounds'
+);
+assert.doesNotMatch(
+    editingTileMatch.groups.body,
+    /box-shadow:[\s\S]*?(?<!inset\s)0\s+0\s+0\s+2px/,
+    'editing tile highlight must not use an outer 0 0 0 2px box-shadow that exceeds the true layout boundary'
 );
 assert.doesNotMatch(
     boardEditingMatch.groups.body,
