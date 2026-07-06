@@ -69,6 +69,10 @@ const pageLayoutSnapUtils = readFileSync(
     new URL('../src/views/js/page-layout-snap-utils.js', import.meta.url),
     'utf8'
 );
+const pageLayoutStorage = readFileSync(
+    new URL('../src/views/js/page-layout-storage.js', import.meta.url),
+    'utf8'
+);
 const style = loadCssWithImports(
     new URL('../src/views/style.css', import.meta.url)
 );
@@ -269,6 +273,24 @@ const uiModuleContracts = [
             "addEventListener('pointer",
         ],
     },
+    {
+        path: '/js/page-layout-storage.js',
+        filename: 'page-layout-storage.js',
+        source: pageLayoutStorage,
+        forbidden: [
+            'function toggleLayoutEditMode',
+            'function setLayoutEditMode',
+            'function syncLayoutEditModeUI',
+            'function finalizeLayoutEditing',
+            'function finishTileLayoutInteraction',
+            'function finalizeLayoutItemDrag',
+            'addEventListener("pointer',
+            "addEventListener('pointer",
+            'getUserMedia',
+            'RTCPeerConnection',
+            'socket.on',
+        ],
+    },
 ];
 
 assertScriptBeforeMain('/js/view-utils.js');
@@ -386,7 +408,7 @@ assert.match(
     'page layout must validate detached board content before replacing #main'
 );
 assert.match(
-    script,
+    pageLayoutStorage,
     /item\.type === 'stagePanel'[\s\S]*?return null;/,
     'normalizeLoadedLayoutItems must ignore saved stagePanel entries'
 );
@@ -544,6 +566,16 @@ assert.match(
     finalizeLayoutEditingBody,
     /layoutSnapUtils\.snapAllLayoutItemsToGrid\([\s\S]*?hideSnapPreview\(\)[\s\S]*?saveLayoutToStorage\([\s\S]*?setLayoutEditMode\(false\)/,
     'finalizing layout edit mode must snap all items, hide preview, save, and then leave edit mode'
+);
+assert.match(
+    script,
+    /const saveLayoutToStorage = \(message = '已保存'\) => \{[\s\S]*?layoutStorage\.saveLayoutToStorage\(/,
+    'saveLayoutToStorage wrapper must delegate persistence to PageLayoutStorage'
+);
+assert.match(
+    script,
+    /const loadLayoutFromStorage = \(\) =>[\s\S]*?layoutStorage\.loadLayoutFromStorage\(/,
+    'loadLayoutFromStorage wrapper must delegate loading to PageLayoutStorage'
 );
 assert.match(
     script,

@@ -54,6 +54,7 @@ const fullscreenControls = window.VoiceFullscreenControls;
 const voiceJoinOverlayUI = window.VoiceJoinOverlayUI;
 const layoutEditUI = window.PageLayoutEditUI;
 const layoutSnapUtils = window.PageLayoutSnapUtils;
+const layoutStorage = window.PageLayoutStorage;
 const remoteStreams = {};
 const getAudioConstraints = () => noiseSettingsUI.getAudioConstraints();
 
@@ -209,16 +210,11 @@ const normalizeLayoutPreferences = (prefs = {}) => {
 };
 
 const readLayoutPreferencesFromStorage = () => {
-    try {
-        const raw = localStorage.getItem(getLayoutStorageKey());
-        if (!raw) {
-            return getDefaultLayoutPreferences();
-        }
-        const payload = JSON.parse(raw);
-        return normalizeLayoutPreferences(payload.preferences);
-    } catch {
-        return getDefaultLayoutPreferences();
-    }
+    return layoutStorage.readLayoutPreferencesFromStorage({
+        storageKey: getLayoutStorageKey(),
+        normalizeLayoutPreferences,
+        getDefaultLayoutPreferences,
+    });
 };
 
 const getLayoutPreference = (key) => {
@@ -674,7 +670,7 @@ const _bootstrapRecoveryToolbar = ({ visible = false } = {}) => {
     bar.hidden = !visible;
     document.body.append(bar);
     bar.querySelector('#layoutRecoveryReset').addEventListener('click', () => {
-        localStorage.removeItem(getLayoutStorageKey());
+        clearSavedLayout();
         window.location.reload();
     });
     bar.querySelector('#layoutRecoveryRestore').addEventListener(
@@ -714,7 +710,7 @@ const restoreOriginalStaticLayout = () => {
 window.__voiceLayoutDebug = {
     bootTime: new Date().toISOString(),
     resetLayout() {
-        localStorage.removeItem(getLayoutStorageKey());
+        clearSavedLayout();
         document.getElementById('page-layout-board')?.remove();
         if (typeof initPageLayoutBoard === 'function') {
             pageLayoutBoard = undefined;
@@ -2562,9 +2558,10 @@ const finalizeLayoutEditing = () => {
 };
 
 const getLayoutStorageKey = () =>
-    `${PAGE_LAYOUT_STORAGE_KEY_PREFIX}:${String(
-        viewingRoomId || selectedVoiceRoomId || 'default'
-    ).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+    layoutStorage.getLayoutStorageKey({
+        prefix: PAGE_LAYOUT_STORAGE_KEY_PREFIX,
+        roomId: viewingRoomId || selectedVoiceRoomId || 'default',
+    });
 
 const getKnownLayoutItemTypes = () =>
     new Set([
@@ -2572,129 +2569,40 @@ const getKnownLayoutItemTypes = () =>
         ...Object.values(PAGE_COMPONENT_TYPES),
     ]);
 
-const serializeLayoutItems = () => {
-    const seen = new Set();
-    const items = [];
-
-    layoutItemsById.forEach((item) => {
-        if (!item?.id || seen.has(item.id)) {
-            return;
-        }
-
-        const grid = clampGridLayout(item.grid || item.layout || {});
-        seen.add(item.id);
-        items.push({
-            id: item.id,
-            type: item.type,
-            x: grid.x,
-            y: grid.y,
-            w: grid.w,
-            h: grid.h,
-            z: normalizeTileLayoutZIndex(item.layout?.zIndex),
-            visible: item.visible !== false,
-            config: {
-                ...normalizeComponentConfig(item.type, item.config),
-                peerId: item.peerId || null,
-            },
-        });
+const serializeLayoutItems = () =>
+    layoutStorage.serializeLayoutItems(layoutItemsById, {
+        clampGridLayout,
+        normalizeZIndex: normalizeTileLayoutZIndex,
+        normalizeComponentConfig,
     });
 
-    return items;
-};
+const normalizeLoadedLayoutItems = (payload) =>
+    layoutStorage.normalizeLoadedLayoutItems(payload, {
+        version: PAGE_STORAGE_VERSION,
+        columns: PAGE_GRID_COLUMNS,
+        rows: PAGE_GRID_ROWS,
+        getKnownLayoutItemTypes,
+        normalizeLayoutItemType,
+        getLegacyRemoteLayoutPeerId,
+        normalizeRemotePeerLayoutId,
+        remotePeerType: LAYOUT_ITEM_TYPES.REMOTE_PEER,
+        singletonTypes: PAGE_SINGLETON_TYPES,
+        normalizeAutoLayoutGrid,
+        normalizeZIndex: normalizeTileLayoutZIndex,
+        normalizeComponentConfig,
+    });
 
-const normalizeLoadedLayoutItems = (payload) => {
-    if (!payload || payload.version !== PAGE_STORAGE_VERSION) {
-        return [];
-    }
-
-    if (
-        payload.grid &&
-        (Number(payload.grid.columns) !== PAGE_GRID_COLUMNS ||
-            Number(payload.grid.rows) !== PAGE_GRID_ROWS)
-    ) {
-        // Grid changes are still normalized below; incompatible payloads should
-        // never be applied raw.
-    }
-
-    const knownTypes = getKnownLayoutItemTypes();
-    const seen = new Set();
-    const seenSingletonTypes = new Set();
-
-    const normalizedItems = (Array.isArray(payload.items) ? payload.items : [])
-        .map((item) => {
-            if (item && item.type === 'stagePanel') {
-                return null;
-            }
-
-            if (!item?.id) {
-                return null;
-            }
-
-            const type = normalizeLayoutItemType(item?.type);
-            const peerId =
-                typeof item?.config?.peerId === 'string'
-                    ? item.config.peerId
-                    : getLegacyRemoteLayoutPeerId(item.id);
-            const itemId =
-                type === LAYOUT_ITEM_TYPES.REMOTE_PEER
-                    ? normalizeRemotePeerLayoutId(item.id, peerId, {
-                          peerId,
-                      })
-                    : String(item.id);
-
-            if (
-                !knownTypes.has(type) ||
-                seen.has(itemId) ||
-                (PAGE_SINGLETON_TYPES.has(type) && seenSingletonTypes.has(type))
-            ) {
-                return null;
-            }
-
-            seen.add(itemId);
-            if (PAGE_SINGLETON_TYPES.has(type)) {
-                seenSingletonTypes.add(type);
-            }
-            const grid = normalizeAutoLayoutGrid(type, {
-                x: item.x,
-                y: item.y,
-                w: item.w,
-                h: item.h,
-            });
-
-            return {
-                id: itemId,
-                type,
-                grid,
-                z: normalizeTileLayoutZIndex(item.z),
-                visible: item.visible !== false,
-                config: {
-                    ...normalizeComponentConfig(type, item.config),
-                    peerId: peerId || null,
-                },
-            };
-        })
-        .filter(Boolean);
-
-    return normalizedItems;
-};
-
-const loadLayoutFromStorage = () => {
-    try {
-        const raw = localStorage.getItem(getLayoutStorageKey());
-
-        if (!raw) {
-            return [];
-        }
-
-        return normalizeLoadedLayoutItems(JSON.parse(raw));
-    } catch (error) {
-        console.warn(
-            '[layout] saved layout is invalid; using defaults.',
-            error
-        );
-        return [];
-    }
-};
+const loadLayoutFromStorage = () =>
+    layoutStorage.loadLayoutFromStorage({
+        storageKey: getLayoutStorageKey(),
+        normalize: normalizeLoadedLayoutItems,
+        onInvalid: (error) => {
+            console.warn(
+                '[layout] saved layout is invalid; using defaults.',
+                error
+            );
+        },
+    });
 
 const savedLayoutItemsById = new Map();
 
@@ -2726,18 +2634,16 @@ const showLayoutSaveStatus = (message) => {
     }, 1800);
 };
 
-const buildLayoutStoragePayload = () => ({
-    version: PAGE_STORAGE_VERSION,
-    updatedAt: new Date().toISOString(),
-    grid: {
+const buildLayoutStoragePayload = () =>
+    layoutStorage.buildLayoutStoragePayload({
+        version: PAGE_STORAGE_VERSION,
         columns: PAGE_GRID_COLUMNS,
         rows: PAGE_GRID_ROWS,
-    },
-    items: serializeLayoutItems(),
-    preferences: layoutPreferences
-        ? { ...layoutPreferences }
-        : getDefaultLayoutPreferences(),
-});
+        items: serializeLayoutItems(),
+        preferences: layoutPreferences
+            ? { ...layoutPreferences }
+            : getDefaultLayoutPreferences(),
+    });
 
 const saveLayoutToStorage = (message = '已保存') => {
     if (layoutStorageHydrating) {
@@ -2745,13 +2651,18 @@ const saveLayoutToStorage = (message = '已保存') => {
     }
 
     const payload = buildLayoutStoragePayload();
-    localStorage.setItem(getLayoutStorageKey(), JSON.stringify(payload));
+    layoutStorage.saveLayoutToStorage({
+        storageKey: getLayoutStorageKey(),
+        payload,
+    });
     refreshSavedLayoutItems();
     showLayoutSaveStatus(message);
 };
 
 const clearSavedLayout = () => {
-    localStorage.removeItem(getLayoutStorageKey());
+    layoutStorage.clearSavedLayout({
+        storageKey: getLayoutStorageKey(),
+    });
     refreshSavedLayoutItems();
 };
 
