@@ -49,6 +49,10 @@ const copyLinkUi = readFileSync(
     new URL('../src/views/js/copy-link-ui.js', import.meta.url),
     'utf8'
 );
+const outputVolumeUi = readFileSync(
+    new URL('../src/views/js/output-volume-ui.js', import.meta.url),
+    'utf8'
+);
 const style = loadCssWithImports(
     new URL('../src/views/style.css', import.meta.url)
 );
@@ -65,6 +69,7 @@ const controlPopoversScriptIndex = indexOfRoomScript(
 );
 const peerVolumeScriptIndex = indexOfRoomScript('/js/peer-volume-ui.js');
 const copyLinkScriptIndex = indexOfRoomScript('/js/copy-link-ui.js');
+const outputVolumeScriptIndex = indexOfRoomScript('/js/output-volume-ui.js');
 const mainScriptIndex = indexOfRoomScript('/script.js');
 
 assert.ok(viewUtilsScriptIndex >= 0, 'room index must load /js/view-utils.js');
@@ -81,6 +86,10 @@ assert.ok(
     'room index must load /js/peer-volume-ui.js'
 );
 assert.ok(copyLinkScriptIndex >= 0, 'room index must load /js/copy-link-ui.js');
+assert.ok(
+    outputVolumeScriptIndex >= 0,
+    'room index must load /js/output-volume-ui.js'
+);
 assert.ok(mainScriptIndex >= 0, 'room index must load /script.js');
 assert.ok(
     viewUtilsScriptIndex < mainScriptIndex,
@@ -101,6 +110,10 @@ assert.ok(
 assert.ok(
     copyLinkScriptIndex < mainScriptIndex,
     '/js/copy-link-ui.js must load before /script.js'
+);
+assert.ok(
+    outputVolumeScriptIndex < mainScriptIndex,
+    '/js/output-volume-ui.js must load before /script.js'
 );
 
 if (noiseSettingsUi.includes('VoiceViewUtils')) {
@@ -128,6 +141,13 @@ if (copyLinkUi.includes('VoiceViewUtils')) {
     assert.ok(
         viewUtilsScriptIndex < copyLinkScriptIndex,
         '/js/view-utils.js must load before /js/copy-link-ui.js'
+    );
+}
+
+if (outputVolumeUi.includes('VoiceViewUtils')) {
+    assert.ok(
+        viewUtilsScriptIndex < outputVolumeScriptIndex,
+        '/js/view-utils.js must load before /js/output-volume-ui.js'
     );
 }
 
@@ -174,6 +194,23 @@ if (copyLinkUi.includes('VoiceViewUtils')) {
     assert.ok(
         !copyLinkUi.includes(forbiddenKeyword),
         `copy-link-ui.js must not contain ${forbiddenKeyword}`
+    );
+});
+
+[
+    'Peer',
+    'socket.emit',
+    'getUserMedia',
+    'replaceTrack',
+    'requestAudioStream',
+    'createAudioPipeline',
+    'joinVoiceChannel',
+    'setupCallStreamHandler',
+    'applyOutputSettingsToRemoteMedia',
+].forEach((forbiddenKeyword) => {
+    assert.ok(
+        !outputVolumeUi.includes(forbiddenKeyword),
+        `output-volume-ui.js must not contain ${forbiddenKeyword}`
     );
 });
 
@@ -260,6 +297,16 @@ assert.match(
     script,
     /function setupCallStreamHandler/,
     'setupCallStreamHandler must stay in script.js'
+);
+assert.match(
+    script,
+    /const applyOutputSettings = /,
+    'applyOutputSettings must stay in script.js'
+);
+assert.match(
+    script,
+    /const applyOutputSettingsToRemoteMedia = /,
+    'applyOutputSettingsToRemoteMedia must stay in script.js'
 );
 assert.match(
     script,

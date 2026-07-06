@@ -38,8 +38,6 @@ const localVoiceChannelName = byId('localVoiceChannelName');
 const callStatusText = byId('callStatusText');
 const callDuration = byId('callDuration');
 const screenStatusText = byId('screenStatusText');
-const toggleOutputBtn = byId('toggleOutput');
-const outputVolumeInput = byId('outputVolume');
 const shareScreenBtn = byId('shareScreen');
 const controlMenuToggles = queryAll('[data-control-menu]');
 const controlPanels = queryAll('[data-control-panel]');
@@ -51,6 +49,7 @@ const noiseSettingsUI = window.VoiceNoiseSettingsUI;
 const controlPopoversUI = window.VoiceControlPopoversUI;
 const remoteVolumeUI = window.VoiceRemoteVolumeUI;
 const copyLinkUI = window.VoiceCopyLinkUI;
+const outputVolumeUI = window.VoiceOutputVolumeUI;
 const remoteStreams = {};
 const getAudioConstraints = () => noiseSettingsUI.getAudioConstraints();
 
@@ -1267,20 +1266,7 @@ const applyOutputSettingsToRemoteMedia = () => {
 };
 
 const updateOutputButtonState = () => {
-    const icon = toggleOutputBtn?.querySelector('i');
-    const label = toggleOutputBtn?.querySelector('span');
-
-    if (!icon) {
-        return;
-    }
-
-    icon.className = 'fas fa-volume-up';
-    toggleOutputBtn?.classList.toggle('is-off', outputMuted);
-    toggleOutputBtn?.setAttribute('aria-pressed', String(outputMuted));
-
-    if (label) {
-        label.textContent = outputMuted ? '已静音' : '听筒';
-    }
+    outputVolumeUI.renderState({ muted: outputMuted, volume: outputVolume });
 };
 
 const updateScreenShareButtonState = () => {
@@ -5695,15 +5681,20 @@ chatInput?.addEventListener('keydown', (event) => {
     sendChatMessage();
 });
 
-toggleOutputBtn?.addEventListener('click', () => {
-    outputMuted = !outputMuted;
-    updateOutputButtonState();
-    applyOutputSettingsToRemoteMedia();
-});
-
-outputVolumeInput?.addEventListener('input', () => {
-    outputVolume = Number(outputVolumeInput.value);
-    applyOutputSettingsToRemoteMedia();
+outputVolumeUI.init({
+    getState: () => ({ muted: outputMuted, volume: outputVolume }),
+    onToggleMuted: () => {
+        outputMuted = !outputMuted;
+        applyOutputSettingsToRemoteMedia();
+    },
+    onVolumeInput: (nextVolume) => {
+        outputVolume = nextVolume;
+        applyOutputSettingsToRemoteMedia();
+    },
+    onVolumeCommit: (nextVolume) => {
+        outputVolume = nextVolume;
+        applyOutputSettingsToRemoteMedia();
+    },
 });
 
 controlPopoversUI.createController({
