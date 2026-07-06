@@ -55,7 +55,18 @@ const layoutEditUI = window.PageLayoutEditUI;
 const layoutSnapUtils = window.PageLayoutSnapUtils;
 const layoutStorage = window.PageLayoutStorage;
 const roomUIState = window.VoiceRoomUIState;
+const presenceViewModel = window.VoicePresenceViewModel;
 const participantsListUI = window.VoiceParticipantsListUI;
+const tileStatusUI = window.VoiceTileStatusUI;
+const chatMessageUI = window.VoiceChatMessageUI;
+const channelSidebarUI = window.VoiceChannelSidebarUI;
+const cursorShareUI = window.VoiceCursorShareUI;
+const {
+    buildParticipantViewModel,
+    getMemberMicStatus,
+    getMemberStatusIcons,
+    getMemberTileText,
+} = presenceViewModel;
 const remoteStreams = {};
 const getAudioConstraints = () => noiseSettingsUI.getAudioConstraints();
 
@@ -1121,60 +1132,6 @@ const emitLocalPresenceUpdate = (extra = {}) => {
     updateAllVideoTileStatus();
 };
 
-const getMemberMicStatus = (member = {}) => {
-    if (member.micPermissionDenied) {
-        return {
-            key: 'denied',
-            label: '未授权',
-            icon: 'fas fa-triangle-exclamation',
-        };
-    }
-
-    if (!member.hasMic) {
-        return {
-            key: 'no-mic',
-            label: '未开麦',
-            icon: 'fas fa-microphone-slash',
-        };
-    }
-
-    if (member.muted) {
-        return {
-            key: 'muted',
-            label: '静音',
-            icon: 'fas fa-microphone-slash',
-        };
-    }
-
-    return {
-        key: 'speaking',
-        label: '开麦',
-        icon: 'fas fa-microphone',
-    };
-};
-
-const getMemberTileText = (member = {}) => {
-    const micStatus = getMemberMicStatus(member);
-
-    if (member.screenSharing) {
-        return '正在共享屏幕';
-    }
-
-    if (micStatus.key === 'speaking') {
-        return '正在语音';
-    }
-
-    if (micStatus.key === 'muted') {
-        return '静音中';
-    }
-
-    if (micStatus.key === 'denied') {
-        return '麦克风未授权';
-    }
-
-    return '未开麦';
-};
-
 const getCallStatusLabel = (
     micStatus = getMemberMicStatus(getLocalPresenceMember())
 ) => {
@@ -1317,14 +1274,10 @@ const getChannelUrl = (roomId) => `${window.location.origin}/room/${roomId}`;
 const getCopyRoomId = () => joinedVoiceRoomId || viewingRoomId;
 
 const updateChannelIndicators = () => {
-    treeChannels.forEach((channel) => {
-        const roomId = channel.dataset.channelRoom;
-        channel.classList.toggle('is-viewing', roomId === viewingRoomId);
-        channel.classList.toggle('is-voice', roomId === joinedVoiceRoomId);
-        channel.classList.toggle(
-            'is-voice-target',
-            !joinedVoiceRoomId && roomId === selectedVoiceRoomId
-        );
+    channelSidebarUI.renderChannelListState(treeChannels, {
+        joinedRoomId: joinedVoiceRoomId,
+        selectedRoomId: selectedVoiceRoomId,
+        viewingRoomId,
     });
 
     const viewingName = getChannelName(viewingRoomId);
@@ -1435,6 +1388,16 @@ const saveChatName = () => {
     safeStorageSet(CHAT_NAME_STORAGE_KEY, name);
 };
 
+const getChatMessageViewModel = (message) => ({
+    content: message.content,
+    isLocal: message.senderName === getChatName(),
+    isSystem: message.type === 'system',
+    roomId: message.roomId,
+    senderName: message.senderName,
+    timeText: formatTime(message.createdAt),
+    type: message.type || 'normal',
+});
+
 const appendChatMessage = (message) => {
     if (!chatMessages || !message?.content) {
         return;
@@ -1444,23 +1407,10 @@ const appendChatMessage = (message) => {
         return;
     }
 
-    const item = document.createElement('li');
-    const meta = document.createElement('div');
-    const content = document.createElement('div');
-    const senderName =
-        message.senderName === getChatName()
-            ? `${message.senderName} (我)`
-            : message.senderName;
-
-    item.className = 'chat-message';
-    meta.className = 'chat-message-meta';
-    content.className = 'chat-message-content';
-    meta.textContent = `${senderName} · ${formatTime(message.createdAt)}`;
-    content.textContent = message.content;
-
-    item.append(meta, content);
-    chatMessages.append(item);
-    chatMessages.scrollTop = chatMessages.scrollHeight;
+    chatMessageUI.appendChatMessage(
+        chatMessages,
+        getChatMessageViewModel(message)
+    );
 };
 
 const renderChatHistory = (messages) => {
@@ -1468,30 +1418,14 @@ const renderChatHistory = (messages) => {
         return;
     }
 
-    chatMessages.replaceChildren();
-    (Array.isArray(messages) ? messages : []).forEach(appendChatMessage);
-};
-
-const getMemberStatusIcons = (member) => {
-    const statuses = [getMemberMicStatus(member)];
-
-    if (member.cameraOn) {
-        statuses.push({
-            key: 'camera',
-            label: '摄像头开启',
-            icon: 'fas fa-video',
-        });
-    }
-
-    if (member.screenSharing) {
-        statuses.push({
-            key: 'screen',
-            label: '共享中',
-            icon: 'far fa-newspaper',
-        });
-    }
-
-    return statuses;
+    chatMessageUI.renderChatHistory(
+        chatMessages,
+        (Array.isArray(messages) ? messages : [])
+            .filter(
+                (message) => !message.roomId || message.roomId === viewingRoomId
+            )
+            .map(getChatMessageViewModel)
+    );
 };
 
 const getMemberTileToggle = (member) => {
@@ -1535,22 +1469,12 @@ const getMemberTileToggle = (member) => {
 
 const getParticipantViewModel = (member) => {
     const isLocal = Boolean(member.socketId && socket?.id === member.socketId);
-    const micStatus = getMemberMicStatus(member);
 
-    return {
-        id: member.socketId || member.peerId,
-        isConnected: Boolean(member.socketId),
+    return buildParticipantViewModel(member, {
         isLocal,
-        isMuted: micStatus.key === 'muted',
-        isScreenSharing: Boolean(member.screenSharing),
-        isSpeaking: micStatus.key === 'speaking',
-        name: `${member.senderName || 'Guest'}${isLocal ? '（我）' : ''}`,
-        roomId: member.roomId,
         roomName: getChannelName(member.roomId),
-        statusText: getMemberTileText(member),
-        statuses: getMemberStatusIcons(member),
         tileToggle: getMemberTileToggle(member),
-    };
+    });
 };
 
 const renderPresenceState = ({ channels = [] } = {}) => {
@@ -1712,29 +1636,6 @@ const sendChatMessage = () => {
 const clampCursorPosition = (position) =>
     Math.min(1, Math.max(0, Number(position) || 0));
 
-const getCursorOverlay = () => {
-    let overlay = document.getElementById('cursorOverlay');
-
-    if (!overlay) {
-        overlay = document.createElement('div');
-        overlay.id = 'cursorOverlay';
-        overlay.className = 'cursor-overlay';
-        document.body.append(overlay);
-    }
-
-    return overlay;
-};
-
-const setCursorIdle = (socketId) => {
-    const cursor = document.querySelector(
-        `.shared-cursor[data-socket-id="${socketId}"]`
-    );
-
-    if (cursor) {
-        cursor.classList.add('is-idle');
-    }
-};
-
 const clearCursorIdleTimer = (socketId) => {
     if (!cursorIdleTimers[socketId]) {
         return;
@@ -1747,7 +1648,7 @@ const clearCursorIdleTimer = (socketId) => {
 const scheduleCursorIdle = (socketId) => {
     clearCursorIdleTimer(socketId);
     cursorIdleTimers[socketId] = setTimeout(
-        () => setCursorIdle(socketId),
+        () => cursorShareUI.setCursorIdle(socketId),
         CURSOR_IDLE_MS
     );
 };
@@ -1762,31 +1663,13 @@ const renderRemoteCursor = ({ roomId, socketId, x, y, senderName, color }) => {
         return;
     }
 
-    const overlay = getCursorOverlay();
-    let cursor = overlay.querySelector(
-        `.shared-cursor[data-socket-id="${socketId}"]`
-    );
-
-    if (!cursor) {
-        cursor = document.createElement('div');
-        const pointer = document.createElement('div');
-        const label = document.createElement('div');
-
-        cursor.className = 'shared-cursor';
-        cursor.dataset.socketId = socketId;
-        pointer.className = 'shared-cursor-pointer';
-        label.className = 'shared-cursor-label';
-
-        cursor.append(pointer, label);
-        overlay.append(cursor);
-    }
-
-    cursor.style.left = `${clampCursorPosition(x) * 100}vw`;
-    cursor.style.top = `${clampCursorPosition(y) * 100}vh`;
-    cursor.style.setProperty('--cursor-color', color);
-    cursor.querySelector('.shared-cursor-label').textContent =
-        senderName || 'Guest';
-    cursor.classList.remove('is-idle');
+    cursorShareUI.renderRemoteCursor({
+        color,
+        senderName,
+        socketId,
+        x: clampCursorPosition(x),
+        y: clampCursorPosition(y),
+    });
     scheduleCursorIdle(socketId);
 };
 
@@ -1801,28 +1684,24 @@ const markRemoteCursorIdle = ({ roomId, socketId }) => {
     }
 
     clearCursorIdleTimer(socketId);
-    setCursorIdle(socketId);
+    cursorShareUI.setCursorIdle(socketId);
 };
 
 const removeRemoteCursor = ({ socketId }) => {
     clearCursorIdleTimer(socketId);
-    document
-        .querySelectorAll(`.shared-cursor[data-socket-id="${socketId}"]`)
-        .forEach((cursor) => cursor.remove());
+    cursorShareUI.removeRemoteCursor(socketId);
 };
 
 const clearRemoteCursors = () => {
     Object.keys(cursorIdleTimers).forEach(clearCursorIdleTimer);
-    document.querySelectorAll('.shared-cursor').forEach((cursor) => {
-        cursor.remove();
-    });
+    cursorShareUI.clearRemoteCursors();
 };
 
 const shouldDisablePageCursorSharing = () => cursorSharingMedia.matches;
 
 const removeCursorOverlay = () => {
     clearRemoteCursors();
-    document.getElementById('cursorOverlay')?.remove();
+    cursorShareUI.removeCursorOverlay();
 };
 
 const getViewportCursorPosition = (event) => {
@@ -1874,7 +1753,7 @@ const sendCursorLeave = () => {
 
 const enablePageCursorSharing = () => {
     if (!shouldDisablePageCursorSharing()) {
-        getCursorOverlay();
+        cursorShareUI.getCursorOverlay();
     }
 
     document.addEventListener('pointermove', sendCursorMove);
@@ -1883,7 +1762,7 @@ const enablePageCursorSharing = () => {
         if (shouldDisablePageCursorSharing()) {
             removeCursorOverlay();
         } else {
-            getCursorOverlay();
+            cursorShareUI.getCursorOverlay();
         }
     });
 };
@@ -4288,7 +4167,7 @@ const updateVideoTileStatus = (tile) => {
     const isLocal = tile.id === 'local-video';
     const hasVideo = Boolean(tile.querySelector('video'));
     const displayName = member.senderName || (isLocal ? getChatName() : 'Peer');
-    const { header, overlay, footer } = ensureTileStructure(tile);
+    ensureTileStructure(tile);
     const tileType = getTileType(tile, hasVideo, member);
     const peerId = tile.dataset.peerId;
     const previousLayoutItem = getLayoutItemForTile(tile);
@@ -4332,10 +4211,6 @@ const updateVideoTileStatus = (tile) => {
             applyPosition: false,
         });
     }
-    tile.classList.toggle('has-video', hasVideo);
-    tile.classList.toggle('is-audio-only', !hasVideo);
-    tile.classList.toggle('is-screen-share', tileType === 'screen-share');
-    tile.classList.toggle('is-layout-editing', layoutEditMode);
     if (layoutEditMode) {
         ensureLayoutComponentActions();
     }
@@ -4346,19 +4221,8 @@ const updateVideoTileStatus = (tile) => {
         delete tile.dataset.socketId;
     }
 
-    const avatar = header.querySelector('.tile-avatar');
-    const title = header.querySelector('.tile-title');
-    const badges = header.querySelector('.tile-badges');
-
-    if (avatar) {
-        avatar.textContent = createTileAvatarText(displayName);
-    }
-
-    if (title) {
-        title.textContent = isLocal ? `${displayName}（我）` : displayName;
-    }
-
     const remoteConfigItem = getTileLayoutItem(tile.dataset.layoutItemId);
+    let showPeerName = true;
     if (
         remoteConfigItem &&
         remoteConfigItem.type === LAYOUT_ITEM_TYPES.REMOTE_PEER
@@ -4367,76 +4231,23 @@ const updateVideoTileStatus = (tile) => {
             LAYOUT_ITEM_TYPES.REMOTE_PEER,
             remoteConfigItem.config
         );
-        if (avatar) {
-            avatar.style.display = remoteConfig.showPeerName ? '' : 'none';
-        }
-        if (title) {
-            title.style.display = remoteConfig.showPeerName ? '' : 'none';
-        }
-    } else {
-        if (avatar && !tile.dataset.layoutComponentType) {
-            avatar.style.display = '';
-        }
-        if (title && !tile.dataset.layoutComponentType) {
-            title.style.display = '';
-        }
+
+        showPeerName = remoteConfig.showPeerName;
     }
 
-    if (badges) {
-        badges.replaceChildren();
-    }
+    const titleText = isLocal ? `${displayName}（我）` : displayName;
+    const statusText = getMemberTileText(member);
 
-    overlay.replaceChildren();
-    getMemberStatusIcons(member).forEach((status) => {
-        const badge = document.createElement('span');
-        const icon = document.createElement('i');
-
-        badge.className = `tile-status-badge tile-status-${status.key}`;
-        badge.title = status.label;
-        icon.className = status.icon;
-        badge.append(icon, document.createTextNode(status.label));
-        overlay.append(badge);
-
-        if (badges) {
-            const compactBadge = document.createElement('span');
-            const compactIcon = document.createElement('i');
-
-            compactBadge.className = `tile-badge tile-badge-${status.key}`;
-            compactBadge.title = status.label;
-            compactIcon.className = status.icon;
-            compactBadge.append(compactIcon);
-            badges.append(compactBadge);
-        }
+    tileStatusUI.renderTileStatus(tile, {
+        avatarText: createTileAvatarText(displayName),
+        hasVideo,
+        isLayoutEditing: layoutEditMode,
+        isScreenShare: tileType === 'screen-share',
+        showNameLabel: showPeerName,
+        statuses: getMemberStatusIcons(member),
+        statusText,
+        titleText,
     });
-
-    const placeholder = tile.querySelector('.voice-placeholder');
-    if (placeholder && !tile.querySelector('video')) {
-        const placeholderAvatar = placeholder.querySelector(
-            '.voice-placeholder-avatar'
-        );
-        const placeholderTitle = placeholder.querySelector(
-            '.voice-placeholder-title'
-        );
-        const placeholderStatus = placeholder.querySelector(
-            '.voice-placeholder-status'
-        );
-
-        if (placeholderAvatar) {
-            placeholderAvatar.textContent = createTileAvatarText(displayName);
-        }
-
-        if (placeholderTitle) {
-            placeholderTitle.textContent = isLocal
-                ? `${displayName}（我）`
-                : displayName;
-        }
-
-        if (placeholderStatus) {
-            placeholderStatus.textContent = getMemberTileText(member);
-        }
-    }
-
-    footer.textContent = getMemberTileText(member);
 };
 
 const updateAllVideoTileStatus = () => {

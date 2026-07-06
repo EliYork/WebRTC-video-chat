@@ -77,8 +77,28 @@ const roomUiState = readFileSync(
     new URL('../src/views/js/room-ui-state.js', import.meta.url),
     'utf8'
 );
+const presenceViewModel = readFileSync(
+    new URL('../src/views/js/presence-view-model.js', import.meta.url),
+    'utf8'
+);
 const participantsListUi = readFileSync(
     new URL('../src/views/js/participants-list-ui.js', import.meta.url),
+    'utf8'
+);
+const tileStatusUi = readFileSync(
+    new URL('../src/views/js/tile-status-ui.js', import.meta.url),
+    'utf8'
+);
+const chatMessageUi = readFileSync(
+    new URL('../src/views/js/chat-message-ui.js', import.meta.url),
+    'utf8'
+);
+const channelSidebarUi = readFileSync(
+    new URL('../src/views/js/channel-sidebar-ui.js', import.meta.url),
+    'utf8'
+);
+const cursorShareUi = readFileSync(
+    new URL('../src/views/js/cursor-share-ui.js', import.meta.url),
     'utf8'
 );
 const style = loadCssWithImports(
@@ -344,6 +364,35 @@ const uiModuleContracts = [
         ],
     },
     {
+        path: '/js/presence-view-model.js',
+        filename: 'presence-view-model.js',
+        source: presenceViewModel,
+        forbidden: [
+            'Peer',
+            'socket.emit',
+            'socket.on',
+            'document',
+            'querySelector',
+            'localStorage',
+            'getUserMedia',
+            'replaceTrack',
+            'requestAudioStream',
+            'createAudioPipeline',
+            'joinVoiceChannel',
+            'setupCallStreamHandler',
+            'setViewingRoom',
+            'setVoiceTargetRoom',
+            'saveLayoutToStorage',
+            'loadLayoutFromStorage',
+            'startTileResize',
+            'detectTileResizeDirection',
+            'connectToNewUser',
+            'getOrderedTiles',
+            'syncPresenceTiles',
+            'applyOutputSettingsToRemoteMedia',
+        ],
+    },
+    {
         path: '/js/participants-list-ui.js',
         filename: 'participants-list-ui.js',
         source: participantsListUi,
@@ -367,6 +416,122 @@ const uiModuleContracts = [
             'getOrderedTiles',
             'syncPresenceTiles',
             'applyOutputSettingsToRemoteMedia',
+        ],
+    },
+    {
+        path: '/js/tile-status-ui.js',
+        filename: 'tile-status-ui.js',
+        source: tileStatusUi,
+        forbidden: [
+            'Peer',
+            'socket.emit',
+            'socket.on',
+            'getUserMedia',
+            'replaceTrack',
+            'requestAudioStream',
+            'createAudioPipeline',
+            'joinVoiceChannel',
+            'setupCallStreamHandler',
+            'setViewingRoom',
+            'setVoiceTargetRoom',
+            'saveLayoutToStorage',
+            'loadLayoutFromStorage',
+            'startTileResize',
+            'detectTileResizeDirection',
+            'connectToNewUser',
+            'getOrderedTiles',
+            'syncPresenceTiles',
+            'applyOutputSettingsToRemoteMedia',
+            'attachStream',
+            'addTrack',
+            'removeTrack',
+        ],
+    },
+    {
+        path: '/js/chat-message-ui.js',
+        filename: 'chat-message-ui.js',
+        source: chatMessageUi,
+        forbidden: [
+            'Peer',
+            'socket.emit',
+            'socket.on',
+            'getUserMedia',
+            'replaceTrack',
+            'requestAudioStream',
+            'createAudioPipeline',
+            'joinVoiceChannel',
+            'setupCallStreamHandler',
+            'setViewingRoom',
+            'setVoiceTargetRoom',
+            'saveLayoutToStorage',
+            'loadLayoutFromStorage',
+            'startTileResize',
+            'detectTileResizeDirection',
+            'connectToNewUser',
+            'getOrderedTiles',
+            'syncPresenceTiles',
+            'applyOutputSettingsToRemoteMedia',
+            'chat:send',
+            'chat:join',
+            'chatForm',
+            'chatInput',
+        ],
+    },
+    {
+        path: '/js/channel-sidebar-ui.js',
+        filename: 'channel-sidebar-ui.js',
+        source: channelSidebarUi,
+        forbidden: [
+            'Peer',
+            'socket.emit',
+            'socket.on',
+            'getUserMedia',
+            'replaceTrack',
+            'requestAudioStream',
+            'createAudioPipeline',
+            'joinVoiceChannel',
+            'setupCallStreamHandler',
+            'setViewingRoom',
+            'setVoiceTargetRoom',
+            'saveLayoutToStorage',
+            'loadLayoutFromStorage',
+            'startTileResize',
+            'detectTileResizeDirection',
+            'connectToNewUser',
+            'getOrderedTiles',
+            'syncPresenceTiles',
+            'applyOutputSettingsToRemoteMedia',
+            'voiceJoinOverlay',
+        ],
+    },
+    {
+        path: '/js/cursor-share-ui.js',
+        filename: 'cursor-share-ui.js',
+        source: cursorShareUi,
+        forbidden: [
+            'Peer',
+            'socket.emit',
+            'socket.on',
+            'getUserMedia',
+            'replaceTrack',
+            'requestAudioStream',
+            'createAudioPipeline',
+            'joinVoiceChannel',
+            'setupCallStreamHandler',
+            'setViewingRoom',
+            'setVoiceTargetRoom',
+            'saveLayoutToStorage',
+            'loadLayoutFromStorage',
+            'startTileResize',
+            'detectTileResizeDirection',
+            'connectToNewUser',
+            'getOrderedTiles',
+            'syncPresenceTiles',
+            'applyOutputSettingsToRemoteMedia',
+            'cursor:move',
+            'cursor:leave',
+            'cursor:remove',
+            'addEventListener',
         ],
     },
 ];
@@ -412,6 +577,28 @@ assertSourceContains(roomUiState, 'room-ui-state.js', [
     [/renderMobileTileNav/, 'room UI state must render mobile tile nav UI'],
     [/renderRoomHeader/, 'room UI state must render room header UI'],
 ]);
+assertSourceContains(presenceViewModel, 'presence-view-model.js', [
+    [
+        /global\.VoicePresenceViewModel = \{/,
+        'presence view model module must expose a browser global',
+    ],
+    [
+        /getMemberMicStatus/,
+        'presence view model must expose mic status mapping',
+    ],
+    [
+        /getMemberTileText/,
+        'presence view model must expose tile status text mapping',
+    ],
+    [
+        /getMemberStatusIcons/,
+        'presence view model must expose status icon mapping',
+    ],
+    [
+        /buildParticipantViewModel/,
+        'presence view model must expose participant view model mapping',
+    ],
+]);
 assertSourceContains(participantsListUi, 'participants-list-ui.js', [
     [
         /global\.VoiceParticipantsListUI = \{/,
@@ -430,6 +617,54 @@ assertSourceContains(participantsListUi, 'participants-list-ui.js', [
         /updateParticipantItemClasses/,
         'participants list UI must expose participant class sync',
     ],
+]);
+assertSourceContains(tileStatusUi, 'tile-status-ui.js', [
+    [
+        /global\.VoiceTileStatusUI = \{/,
+        'tile status UI module must expose a browser global',
+    ],
+    [/renderTileStatus/, 'tile status UI must expose status rendering'],
+    [/updateTileStatusClasses/, 'tile status UI must expose class syncing'],
+    [/renderTileBadges/, 'tile status UI must expose badge rendering'],
+    [
+        /renderTilePlaceholder/,
+        'tile status UI must expose placeholder rendering',
+    ],
+]);
+assertSourceContains(chatMessageUi, 'chat-message-ui.js', [
+    [
+        /global\.VoiceChatMessageUI = \{/,
+        'chat message UI module must expose a browser global',
+    ],
+    [/renderChatMessageItem/, 'chat message UI must expose item rendering'],
+    [/appendChatMessage/, 'chat message UI must expose append rendering'],
+    [/renderChatHistory/, 'chat message UI must expose history rendering'],
+    [/scrollToBottom/, 'chat message UI may own scroll-to-bottom UI sync'],
+]);
+assertSourceContains(channelSidebarUi, 'channel-sidebar-ui.js', [
+    [
+        /global\.VoiceChannelSidebarUI = \{/,
+        'channel sidebar UI module must expose a browser global',
+    ],
+    [
+        /renderChannelItemState/,
+        'channel sidebar UI must expose item state rendering',
+    ],
+    [
+        /renderChannelListState/,
+        'channel sidebar UI must expose list state rendering',
+    ],
+    [/aria-current/, 'channel sidebar UI may own current-channel aria sync'],
+]);
+assertSourceContains(cursorShareUi, 'cursor-share-ui.js', [
+    [
+        /global\.VoiceCursorShareUI = \{/,
+        'cursor share UI module must expose a browser global',
+    ],
+    [/getCursorOverlay/, 'cursor share UI must expose overlay creation'],
+    [/renderRemoteCursor/, 'cursor share UI must expose cursor rendering'],
+    [/setCursorIdle/, 'cursor share UI must expose idle class syncing'],
+    [/removeRemoteCursor/, 'cursor share UI must expose cursor removal'],
 ]);
 const pageComponentTypesMatch = script.match(
     /const PAGE_COMPONENT_TYPES = \{(?<body>[\s\S]*?)\};/
