@@ -2,42 +2,53 @@
 console.info('[page-layout] script boot v2 ' + new Date().toISOString());
 let socket;
 
-const videoGrid = document.getElementById('video-grid');
-const mainLayout = document.getElementById('main');
+const {
+    byId,
+    createGuestName,
+    formatDuration,
+    formatTime,
+    queryAll,
+    readJsonStorage,
+    safeStorageGet,
+    safeStorageSet,
+    writeJsonStorage,
+} = window.VoiceViewUtils;
+
+const videoGrid = byId('video-grid');
+const mainLayout = byId('main');
 const myVideo = document.createElement('video');
 myVideo.muted = true; // ensures that we do not hear ourselves
 myVideo.playsInline = 'true';
 
-const callControls = document.getElementById('buttons');
-const destroyPeerBtn = document.getElementById('destroyPeer');
-const copyRoomLinkBtn = document.getElementById('copyRoomLink');
-const chatNameInput = document.getElementById('chatName');
-const chatMessages = document.getElementById('chatMessages');
-const chatForm = document.getElementById('chatForm');
-const chatInput = document.getElementById('chatInput');
-const treeChannels = document.querySelectorAll('[data-channel-room]');
-const channelMemberLists = document.querySelectorAll('[data-members-for]');
-const channelCountBadges = document.querySelectorAll('[data-channel-count]');
-const chatTitle = document.getElementById('chatTitle');
-const localUserName = document.getElementById('localUserName');
-const localVoiceChannelName = document.getElementById('localVoiceChannelName');
-const callStatusText = document.getElementById('callStatusText');
-const callDuration = document.getElementById('callDuration');
-const screenStatusText = document.getElementById('screenStatusText');
-const toggleOutputBtn = document.getElementById('toggleOutput');
-const outputVolumeInput = document.getElementById('outputVolume');
-const shareScreenBtn = document.getElementById('shareScreen');
-const controlMenuToggles = document.querySelectorAll('[data-control-menu]');
-const controlPanels = document.querySelectorAll('[data-control-panel]');
-const mobileBackToChannelsBtn = document.getElementById('mobileBackToChannels');
-const mobilePrevTileBtn = document.getElementById('mobilePrevTile');
-const mobileNextTileBtn = document.getElementById('mobileNextTile');
-const mobileTileCount = document.getElementById('mobileTileCount');
+const callControls = byId('buttons');
+const destroyPeerBtn = byId('destroyPeer');
+const copyRoomLinkBtn = byId('copyRoomLink');
+const chatNameInput = byId('chatName');
+const chatMessages = byId('chatMessages');
+const chatForm = byId('chatForm');
+const chatInput = byId('chatInput');
+const treeChannels = queryAll('[data-channel-room]');
+const channelMemberLists = queryAll('[data-members-for]');
+const channelCountBadges = queryAll('[data-channel-count]');
+const chatTitle = byId('chatTitle');
+const localUserName = byId('localUserName');
+const localVoiceChannelName = byId('localVoiceChannelName');
+const callStatusText = byId('callStatusText');
+const callDuration = byId('callDuration');
+const screenStatusText = byId('screenStatusText');
+const toggleOutputBtn = byId('toggleOutput');
+const outputVolumeInput = byId('outputVolume');
+const shareScreenBtn = byId('shareScreen');
+const controlMenuToggles = queryAll('[data-control-menu]');
+const controlPanels = queryAll('[data-control-panel]');
+const mobileBackToChannelsBtn = byId('mobileBackToChannels');
+const mobilePrevTileBtn = byId('mobilePrevTile');
+const mobileNextTileBtn = byId('mobileNextTile');
+const mobileTileCount = byId('mobileTileCount');
 const remoteStreams = {};
 const getAudioConstraints = () => {
-    const noiseEnabled =
-        localStorage.getItem(NOISE_SUPPRESSION_KEY) !== 'false';
-    const aiEnabled = localStorage.getItem(AI_NOISE_EXPERIMENT_KEY) === 'true';
+    const noiseEnabled = safeStorageGet(NOISE_SUPPRESSION_KEY) !== 'false';
+    const aiEnabled = safeStorageGet(AI_NOISE_EXPERIMENT_KEY) === 'true';
 
     return {
         echoCancellation: true,
@@ -47,16 +58,16 @@ const getAudioConstraints = () => {
     };
 };
 const getNoiseSuppressionEnabled = () =>
-    localStorage.getItem(NOISE_SUPPRESSION_KEY) !== 'false';
+    safeStorageGet(NOISE_SUPPRESSION_KEY) !== 'false';
 
 const setNoiseSuppressionEnabled = (enabled) => {
-    localStorage.setItem(NOISE_SUPPRESSION_KEY, String(enabled));
+    safeStorageSet(NOISE_SUPPRESSION_KEY, enabled);
 };
 
 const updateNoiseToggleUI = () => {
     const enabled = getNoiseSuppressionEnabled();
-    const toggle = document.getElementById('noiseToggle');
-    const status = document.getElementById('noiseStatusText');
+    const toggle = byId('noiseToggle');
+    const status = byId('noiseStatusText');
 
     if (toggle) {
         toggle.setAttribute('aria-pressed', String(enabled));
@@ -70,8 +81,8 @@ const updateNoiseToggleUI = () => {
 const updateAiExperimentToggleUI = () => {
     const supported = isAiExperimentSupported();
     const enabled = getAiExperimentEnabled();
-    const toggle = document.getElementById('aiNoiseToggle');
-    const status = document.getElementById('aiNoiseStatusText');
+    const toggle = byId('aiNoiseToggle');
+    const status = byId('aiNoiseStatusText');
 
     if (!toggle) {
         return;
@@ -294,10 +305,10 @@ const isAiExperimentSupported = () =>
     !isMobileLayout();
 
 const getAiExperimentEnabled = () =>
-    localStorage.getItem(AI_NOISE_EXPERIMENT_KEY) === 'true';
+    safeStorageGet(AI_NOISE_EXPERIMENT_KEY) === 'true';
 
 const setAiExperimentEnabled = (enabled) => {
-    localStorage.setItem(AI_NOISE_EXPERIMENT_KEY, String(enabled));
+    safeStorageSet(AI_NOISE_EXPERIMENT_KEY, enabled);
 };
 let myVideoStream;
 let activeStream;
@@ -346,13 +357,13 @@ let noiseGainNode = null;
 let micPermissionDenied = false;
 
 const getMicGain = () => {
-    const val = Number(localStorage.getItem(MIC_GAIN_KEY));
+    const val = Number(safeStorageGet(MIC_GAIN_KEY));
     return !Number.isNaN(val) && val >= 0 && val <= 150 ? val : 100;
 };
 
 const ensureDefaultMicGain = () => {
-    if (localStorage.getItem(MIC_GAIN_KEY) === null) {
-        localStorage.setItem(MIC_GAIN_KEY, '100');
+    if (safeStorageGet(MIC_GAIN_KEY) === null) {
+        safeStorageSet(MIC_GAIN_KEY, '100');
     }
 };
 
@@ -1118,13 +1129,6 @@ const updateMobileRoomState = () => {
     setMobileRoomView(Boolean(joinedVoiceRoomId) && isMobileLayout());
 };
 
-const formatDuration = (durationMs) => {
-    const totalSeconds = Math.max(0, Math.floor(durationMs / 1000));
-    const minutes = String(Math.floor(totalSeconds / 60)).padStart(2, '0');
-    const seconds = String(totalSeconds % 60).padStart(2, '0');
-    return `${minutes}:${seconds}`;
-};
-
 const updateCallDuration = () => {
     if (!callStartedAt || !callDuration) {
         return;
@@ -1299,13 +1303,7 @@ const updateLocalUserCard = () => {
     updateAllVideoTileStatus();
 };
 
-const getPeerVolumes = () => {
-    try {
-        return JSON.parse(localStorage.getItem(PEER_VOLUME_STORAGE_KEY)) || {};
-    } catch {
-        return {};
-    }
-};
+const getPeerVolumes = () => readJsonStorage(PEER_VOLUME_STORAGE_KEY, {}) || {};
 
 const getPeerVolume = (peerId) => {
     const value = Number(getPeerVolumes()[peerId]);
@@ -1320,7 +1318,7 @@ const setPeerVolume = (peerId, volume) => {
 
     const volumes = getPeerVolumes();
     volumes[peerId] = Math.min(1, Math.max(0, Number(volume)));
-    localStorage.setItem(PEER_VOLUME_STORAGE_KEY, JSON.stringify(volumes));
+    writeJsonStorage(PEER_VOLUME_STORAGE_KEY, volumes);
 };
 
 const applyOutputSettings = (mediaElement, isRemote) => {
@@ -1538,18 +1536,15 @@ const bindVoiceSocketHandlers = (activeSocket) => {
     activeSocket.on('removeUserVideo', handleSocketRemoveUserVideo);
 };
 
-const createGuestName = () =>
-    `Guest-${Math.floor(1000 + Math.random() * 9000)}`;
-
 const getStoredChatName = () => {
-    const storedName = localStorage.getItem(CHAT_NAME_STORAGE_KEY);
+    const storedName = safeStorageGet(CHAT_NAME_STORAGE_KEY);
 
     if (storedName) {
         return storedName;
     }
 
     const guestName = createGuestName();
-    localStorage.setItem(CHAT_NAME_STORAGE_KEY, guestName);
+    safeStorageSet(CHAT_NAME_STORAGE_KEY, guestName);
     return guestName;
 };
 
@@ -1565,14 +1560,8 @@ const saveChatName = () => {
 
     const name = chatNameInput.value.trim().slice(0, 32) || createGuestName();
     chatNameInput.value = name;
-    localStorage.setItem(CHAT_NAME_STORAGE_KEY, name);
+    safeStorageSet(CHAT_NAME_STORAGE_KEY, name);
 };
-
-const formatChatTime = (createdAt) =>
-    new Date(createdAt).toLocaleTimeString([], {
-        hour: '2-digit',
-        minute: '2-digit',
-    });
 
 const appendChatMessage = (message) => {
     if (!chatMessages || !message?.content) {
@@ -1594,7 +1583,7 @@ const appendChatMessage = (message) => {
     item.className = 'chat-message';
     meta.className = 'chat-message-meta';
     content.className = 'chat-message-content';
-    meta.textContent = `${senderName} · ${formatChatTime(message.createdAt)}`;
+    meta.textContent = `${senderName} · ${formatTime(message.createdAt)}`;
     content.textContent = message.content;
 
     item.append(meta, content);
@@ -5922,7 +5911,7 @@ document.addEventListener('keydown', (event) => {
     }
 });
 
-const noiseToggleEl = document.getElementById('noiseToggle');
+const noiseToggleEl = byId('noiseToggle');
 let restartNoticeTimer;
 
 const showRestartEffectNotice = () => {
@@ -5962,7 +5951,7 @@ noiseToggleEl?.addEventListener('keydown', (event) => {
     }
 });
 
-const aiNoiseToggleEl = document.getElementById('aiNoiseToggle');
+const aiNoiseToggleEl = byId('aiNoiseToggle');
 
 aiNoiseToggleEl?.addEventListener('click', () => {
     if (!isAiExperimentSupported()) {
@@ -5983,14 +5972,14 @@ aiNoiseToggleEl?.addEventListener('keydown', (event) => {
     }
 });
 
-const micGainSlider = document.getElementById('micGainSlider');
-const micGainValueEl = document.getElementById('micGainValue');
+const micGainSlider = byId('micGainSlider');
+const micGainValueEl = byId('micGainValue');
 
 ensureDefaultMicGain();
 
 const setMicGain = (percent) => {
     const clamped = Math.max(0, Math.min(150, Math.round(percent)));
-    localStorage.setItem(MIC_GAIN_KEY, String(clamped));
+    safeStorageSet(MIC_GAIN_KEY, clamped);
 
     if (micGainSlider) {
         micGainSlider.value = String(clamped);
@@ -6025,7 +6014,7 @@ document.addEventListener(
 
 mobileBackToChannelsBtn?.addEventListener('click', () => {
     if (currentPeer && !currentPeer.destroyed) {
-        document.getElementById('destroyPeer')?.click();
+        byId('destroyPeer')?.click();
     }
 
     setMobileRoomView(false);
