@@ -105,6 +105,23 @@ const assertSourceContains = (source, label, requiredSnippets) => {
     });
 };
 
+const getSourceBetween = (source, startPattern, endPattern, label) => {
+    const startMatch = source.match(startPattern);
+
+    assert.ok(startMatch, `${label} start must be inspectable`);
+
+    const startIndex = startMatch.index;
+    const rest = source.slice(startIndex + startMatch[0].length);
+    const endMatch = rest.match(endPattern);
+
+    assert.ok(endMatch, `${label} end must be inspectable`);
+
+    return source.slice(
+        startIndex,
+        startIndex + startMatch[0].length + endMatch.index
+    );
+};
+
 const uiModuleContracts = [
     {
         path: '/js/noise-settings-ui.js',
@@ -464,6 +481,39 @@ assert.match(
     script,
     /const finalizeLayoutItemDrag = [\s\S]*?snapTileLayoutToGrid[\s\S]*?saveLayoutToStorage[\s\S]*?hideSnapPreview/,
     'drag finish must snap, save, and hide the preview through one path'
+);
+const singleTileSnapBody = getSourceBetween(
+    script,
+    /const snapTileLayoutToGridForTile = \(tile\) => \{/,
+    /\nconst markTileLayoutUserPlaced = /,
+    'single-tile snap helper'
+);
+const finalizeLayoutItemDragBody = getSourceBetween(
+    script,
+    /const finalizeLayoutItemDrag = \(tile\) => \{/,
+    /\nconst finishTileLayoutInteraction = /,
+    'drag finish helper'
+);
+const finishTileLayoutInteractionBody = getSourceBetween(
+    script,
+    /const finishTileLayoutInteraction = \(tile\) => \{/,
+    /\nconst clampPositionedTileLayouts = /,
+    'layout interaction finish helper'
+);
+assert.match(
+    singleTileSnapBody,
+    /snapTileLayoutToGrid\(/,
+    'single-tile snap helper must reuse the shared snapTileLayoutToGrid() rule'
+);
+assert.match(
+    finalizeLayoutItemDragBody,
+    /snapTileLayoutToGridForTile\(tile\)/,
+    'drag finish must snap the single tile before saving after normal or editing drag'
+);
+assert.match(
+    finishTileLayoutInteractionBody,
+    /finalizeLayoutItemDrag\(tile\)/,
+    'normal and editing drag/resize finish must enter the shared single-tile snap path'
 );
 assert.match(
     script,
