@@ -69,6 +69,24 @@ const MODULE_SCRIPTS = [
             'requestAudioStream',
             'createAudioPipeline',
         ],
+        requiredExports: [
+            [
+                /createController/,
+                'control popovers UI must expose a controller factory',
+            ],
+            [
+                /aria-expanded/,
+                'control popovers UI must own expanded state sync',
+            ],
+            [
+                /closeAllPopovers\(\{ exceptWrap: wrap \}\)/,
+                'control popovers UI must close sibling popovers before opening one',
+            ],
+            [
+                /event\.key === 'Escape'/,
+                'control popovers UI must close popovers on Escape',
+            ],
+        ],
     },
     {
         path: '/js/peer-volume-ui.js',
@@ -102,6 +120,29 @@ const MODULE_SCRIPTS = [
             'createAudioPipeline',
             'joinVoiceChannel',
             'setupCallStreamHandler',
+        ],
+        requiredExports: [
+            [/bindCopyButton/, 'copy link UI must expose copy button binding'],
+            [
+                /writeClipboardText/,
+                'copy link UI must expose clipboard writing helper',
+            ],
+            [
+                /navigator\.clipboard\.writeText\(String\(text\)\)/,
+                'copy link UI must preserve clipboard text coercion',
+            ],
+            [
+                /timersByButton = new WeakMap\(\)/,
+                'copy link UI must keep restore timers scoped per button',
+            ],
+            [
+                /setAttribute\('aria-label', label\)/,
+                'copy link UI must preserve accessible button labels',
+            ],
+            [
+                /classList\.toggle\([\s\S]*?'is-copied'/,
+                'copy link UI must preserve copied state class sync',
+            ],
         ],
     },
     {
