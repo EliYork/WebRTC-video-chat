@@ -140,13 +140,15 @@
         }
 
         const tile = context.findTileForLayoutItem?.(item);
+        const itemContext =
+            (tile && context.getContextForTile?.(tile)) || context;
         const layoutSource =
             tile && !tile.classList.contains('is-layout-hidden')
-                ? context.getCurrentTileLayout(tile)
+                ? itemContext.getCurrentTileLayout(tile)
                 : item.layout ||
-                  convertGridLayoutToPixels(item.grid || {}, context);
-        const snappedLayout = snapTileLayoutToGrid(layoutSource, context);
-        const snappedGrid = convertTileLayoutToGrid(snappedLayout, context);
+                  convertGridLayoutToPixels(item.grid || {}, itemContext);
+        const snappedLayout = snapTileLayoutToGrid(layoutSource, itemContext);
+        const snappedGrid = convertTileLayoutToGrid(snappedLayout, itemContext);
         const nextItem = {
             ...item,
             layout: snappedLayout,

@@ -2,8 +2,10 @@
     'use strict';
 
     const PAGE_COMPONENT_LABELS = {
-        sidebarPanel: '左侧频道栏',
-        chatPanel: '聊天消息',
+        sidebarPanel: '侧边栏 Sidebar',
+        membersPanel: '房间 Room',
+        mediaControlsPanel: '媒体控制 Media',
+        chatPanel: '聊天 Chat',
     };
 
     const createRuntime = (options = {}) => {
@@ -13,10 +15,16 @@
         const mainLayout = refs.mainLayout;
         const videoGrid = refs.videoGrid;
         const pageComponentTypes = options.pageComponentTypes || {};
-        const corePageTypes = [
-            pageComponentTypes.SIDEBAR_PANEL,
-            pageComponentTypes.CHAT_PANEL,
-        ].filter(Boolean);
+        const panelRegistry =
+            typeof options.getPanelRegistry === 'function'
+                ? options.getPanelRegistry()
+                : [];
+        const corePageTypes = panelRegistry.length
+            ? panelRegistry.map((panel) => panel.id)
+            : [
+                  pageComponentTypes.SIDEBAR_PANEL,
+                  pageComponentTypes.CHAT_PANEL,
+              ].filter(Boolean);
         let board = options.initialBoard;
         const originalMainSnapshot = mainLayout
             ? mainLayout.cloneNode(true)
@@ -36,17 +44,135 @@
         const createPageLayoutTile = (type) => {
             const tile = documentRef.createElement('div');
             tile.id = `page-tile-${type}`;
-            tile.className = 'video-tile page-layout-tile';
+            tile.className = 'video-tile page-layout-tile panel-shell';
             tile.dataset.pageLayoutType = type;
             tile.dataset.layoutComponentType = type;
+            tile.dataset.panelId = type;
             tile.style.overflow = 'hidden';
+            const panelConfig = options.getPanelConfig?.(type);
+            if (panelConfig) {
+                tile.dataset.panelTitle = panelConfig.title;
+                tile.dataset.panelCanHide = String(panelConfig.canHide);
+                tile.dataset.panelCanCollapse = String(panelConfig.canCollapse);
+                tile.dataset.panelCanPin = String(panelConfig.canPin);
+                tile.style.minWidth = `${panelConfig.minWidth}px`;
+                tile.style.minHeight = `${panelConfig.minHeight}px`;
+            }
             return tile;
         };
 
         const getPageComponentId = (type) => `page-tile-${type}`;
 
-        const getPagePanelLabel = (type) =>
-            PAGE_COMPONENT_LABELS[type] || type;
+        const getPagePanelLabel = (type) => PAGE_COMPONENT_LABELS[type] || type;
+
+        const createPanelActionButton = ({ action, iconClassName, label }) => {
+            const button = documentRef.createElement('button');
+            const icon = documentRef.createElement('i');
+
+            button.type = 'button';
+            button.className = `panel-action-button panel-action-${action} no-drag`;
+            button.dataset.panelAction = action;
+            button.title = label;
+            button.setAttribute('aria-label', label);
+            icon.className = iconClassName;
+            icon.setAttribute('aria-hidden', 'true');
+            button.append(icon);
+            return button;
+        };
+
+        const stopPanelActionEvent = (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+        };
+
+        const syncPanelActions = (tile) => {
+            const actions = tile?.querySelector('.panel-shell-actions');
+
+            if (!actions) {
+                return;
+            }
+
+            const collapsed = tile.classList.contains('is-panel-collapsed');
+            const pinned = tile.classList.contains('is-panel-pinned');
+            const collapseButton = actions.querySelector(
+                '[data-panel-action="collapse"]'
+            );
+            const pinButton = actions.querySelector(
+                '[data-panel-action="pin"]'
+            );
+
+            if (collapseButton) {
+                collapseButton.title = collapsed ? '展开面板' : '收起面板';
+                collapseButton.setAttribute(
+                    'aria-label',
+                    collapsed ? '展开面板' : '收起面板'
+                );
+                collapseButton.setAttribute('aria-pressed', String(collapsed));
+            }
+
+            if (pinButton) {
+                pinButton.title = pinned ? '取消固定' : '固定置顶';
+                pinButton.setAttribute(
+                    'aria-label',
+                    pinned ? '取消固定' : '固定置顶'
+                );
+                pinButton.setAttribute('aria-pressed', String(pinned));
+            }
+        };
+
+        const ensurePanelShellActions = (tile, type) => {
+            const panelConfig = options.getPanelConfig?.(type);
+            const header = tile?.querySelector('.tile-header');
+
+            if (!panelConfig || !header) {
+                return;
+            }
+
+            let actions = header.querySelector('.panel-shell-actions');
+
+            if (!actions) {
+                actions = documentRef.createElement('div');
+                actions.className = 'panel-shell-actions no-drag';
+                header.append(actions);
+            }
+
+            actions.replaceChildren();
+
+            if (panelConfig.canPin !== false) {
+                const pinButton = createPanelActionButton({
+                    action: 'pin',
+                    iconClassName: 'fas fa-thumbtack',
+                    label: '固定置顶',
+                });
+                pinButton.addEventListener('pointerdown', stopPanelActionEvent);
+                pinButton.addEventListener('click', (event) => {
+                    stopPanelActionEvent(event);
+                    options.onTogglePanelPin?.(tile);
+                    syncPanelActions(tile);
+                });
+                actions.append(pinButton);
+            }
+
+            if (panelConfig.canCollapse !== false) {
+                const collapseButton = createPanelActionButton({
+                    action: 'collapse',
+                    iconClassName: 'fas fa-window-minimize',
+                    label: '收起面板',
+                });
+                collapseButton.addEventListener(
+                    'pointerdown',
+                    stopPanelActionEvent
+                );
+                collapseButton.addEventListener('click', (event) => {
+                    stopPanelActionEvent(event);
+                    options.onTogglePanelCollapse?.(tile);
+                    syncPanelActions(tile);
+                });
+                actions.append(collapseButton);
+            }
+
+            syncPanelActions(tile);
+        };
 
         const syncLayoutGridMetadata = () => {
             const targetBoard = board || videoGrid;
@@ -121,11 +247,12 @@
                         zIndex: options.getNextTileLayoutZIndex(),
                     })
                 );
+                const visible = defaultItem.visible !== false;
                 options.setTileLayoutItemVisibility(
                     tile.dataset.layoutItemId,
-                    true
+                    visible
                 );
-                tile.classList.remove('is-layout-hidden');
+                tile.classList.toggle('is-layout-hidden', !visible);
             });
 
             syncLayoutGridMetadata();
@@ -145,9 +272,7 @@
             const badges = header.querySelector('.tile-badges');
             const label = getPagePanelLabel(type);
 
-            if (avatar) {
-                avatar.textContent = options.createTileAvatarText(label);
-            }
+            avatar?.remove();
 
             if (title) {
                 title.textContent = label;
@@ -157,6 +282,7 @@
                 badges.replaceChildren();
             }
 
+            ensurePanelShellActions(tile, type);
             body.append(node);
             footer.textContent = '';
             footer.hidden = true;
@@ -193,6 +319,14 @@
                 targetBoard,
                 pageComponentTypes.SIDEBAR_PANEL
             );
+            const members = getPageTileDiagnostics(
+                targetBoard,
+                pageComponentTypes.MEMBERS_PANEL
+            );
+            const mediaControls = getPageTileDiagnostics(
+                targetBoard,
+                pageComponentTypes.MEDIA_CONTROLS_PANEL
+            );
             const chat = getPageTileDiagnostics(
                 targetBoard,
                 pageComponentTypes.CHAT_PANEL
@@ -221,16 +355,28 @@
             if (
                 !sidebar.tile ||
                 !sidebar.text.includes('朋友语音房间') ||
-                !/大厅|游戏开黑/.test(sidebar.text) ||
-                !sidebar.tile.querySelector(
-                    '[data-channel-room], .tree-channel'
-                )
+                !sidebar.tile.querySelector('.sidebar-brand')
             ) {
-                failures.push('sidebarPanel is missing channel content');
+                failures.push('sidebarPanel is missing brand content');
             }
 
-            if (!targetBoard.querySelector('#video-grid')) {
-                failures.push('runtime video grid is missing');
+            if (
+                !members.tile ||
+                !/大厅|游戏开黑/.test(members.text) ||
+                !members.tile.querySelector(
+                    '[data-channel-room], .tree-channel'
+                ) ||
+                !members.tile.querySelector('.local-user-card') ||
+                !members.tile.querySelector('#localUserName')
+            ) {
+                failures.push('membersPanel is missing room content');
+            }
+
+            if (
+                !mediaControls.tile ||
+                !mediaControls.tile.querySelector('#buttons')
+            ) {
+                failures.push('mediaControlsPanel is missing media controls');
             }
 
             if (
@@ -279,8 +425,11 @@
             }
 
             const sidebarEl = mainLayout.querySelector('.room-sidebar');
-            const stageEl = mainLayout.querySelector('.room-stage');
             const chatPanelEl = mainLayout.querySelector('.chat-panel');
+            const sidebarBrandEl = sidebarEl?.querySelector('.sidebar-brand');
+            const membersEl = sidebarEl?.querySelector('.sidebar-channel-tree');
+            const roomInfoEl = sidebarEl?.querySelector('.local-user-card');
+            const mediaControlsEl = roomInfoEl?.querySelector('#buttons');
             const chatMessagesEl = chatPanelEl?.querySelector(
                 '#chatMessages, .chat-messages'
             );
@@ -302,17 +451,10 @@
             log('source nodes', {
                 sidebar: Boolean(sidebarEl),
                 sidebarChildren: sidebarEl?.children.length || 0,
-                sidebarHasBrand: Boolean(
-                    sidebarEl?.querySelector('.sidebar-brand')
-                ),
-                sidebarHasTree: Boolean(
-                    sidebarEl?.querySelector('.sidebar-channel-tree')
-                ),
-                sidebarHasUserCard: Boolean(
-                    sidebarEl?.querySelector('.local-user-card')
-                ),
-                stage: Boolean(stageEl),
-                stageHasCanvas: Boolean(stageEl?.querySelector('#canvas')),
+                sidebarHasBrand: Boolean(sidebarBrandEl),
+                sidebarHasTree: Boolean(membersEl),
+                sidebarHasUserCard: Boolean(roomInfoEl),
+                mediaControls: Boolean(mediaControlsEl),
                 stageHasVideoGrid: Boolean(runtimeVideoGrid),
                 chatPanel: Boolean(chatPanelEl),
                 chatPanelHasMessages: Boolean(chatMessagesEl),
@@ -321,11 +463,17 @@
             });
 
             const missingSelectors = [
-                ['.room-sidebar', sidebarEl],
+                ['.sidebar-brand', sidebarBrandEl],
+                ['.sidebar-channel-tree', membersEl],
+                ['.local-user-card', roomInfoEl],
+                ['#buttons', mediaControlsEl],
                 ['#video-grid', runtimeVideoGrid],
                 ['.chat-panel', chatPanelEl],
                 ['#chatForm or .chat-form', chatFormEl],
-                ['chat input controls', chatFormHasControls ? chatFormEl : null],
+                [
+                    'chat input controls',
+                    chatFormHasControls ? chatFormEl : null,
+                ],
             ]
                 .filter(([, node]) => !node)
                 .map(([selector]) => selector);
@@ -336,10 +484,24 @@
                 return undefined;
             }
 
+            const roomPanelContent = documentRef.createElement('section');
+            roomPanelContent.className = 'room-panel-content';
+            roomPanelContent.setAttribute('aria-label', '房间 Room');
+            membersEl.before(roomPanelContent);
+            roomPanelContent.append(membersEl, roomInfoEl);
+
             const entries = [
                 {
                     type: pageComponentTypes.SIDEBAR_PANEL,
-                    node: sidebarEl,
+                    node: sidebarBrandEl,
+                },
+                {
+                    type: pageComponentTypes.MEMBERS_PANEL,
+                    node: roomPanelContent,
+                },
+                {
+                    type: pageComponentTypes.MEDIA_CONTROLS_PANEL,
+                    node: mediaControlsEl,
                 },
                 {
                     type: pageComponentTypes.CHAT_PANEL,
@@ -358,6 +520,10 @@
             nextBoard.className = 'page-layout-board';
 
             log('Board created, moving full DOM panels');
+            const videoGridPlaceholder = documentRef.createComment(
+                'page-layout-placeholder:video-grid'
+            );
+            runtimeVideoGrid.before(videoGridPlaceholder);
             nextBoard.append(runtimeVideoGrid);
             entries.forEach(({ type, node }) => {
                 nextBoard.append(createPageTileFromNode(type, node));
@@ -370,6 +536,12 @@
                     'detached board validation failed:',
                     detachedValidation.failures
                 );
+                restoreMovedPagePanelNodes([
+                    {
+                        node: runtimeVideoGrid,
+                        placeholder: videoGridPlaceholder,
+                    },
+                ]);
                 restoreMovedPagePanelNodes(entries);
                 bootstrapRecoveryToolbar({ visible: true });
                 return undefined;
@@ -398,7 +570,9 @@
                     missing.length > 0 ||
                     missing.length === corePageTypes.length
                 ) {
-                    warn('Saved layout missing core components, using defaults');
+                    warn(
+                        'Saved layout missing core components, using defaults'
+                    );
                     ensureDefaultPageLayout();
                 } else {
                     options.initializeLayoutFromStorage();
@@ -408,7 +582,11 @@
             options.ensureLayoutEditModeToggle();
             options.syncLayoutEditModeUI();
 
-            log('Board initialized with', options.getVideoTiles().length, 'tiles');
+            log(
+                'Board initialized with',
+                options.getVideoTiles().length,
+                'tiles'
+            );
             return nextBoard;
         };
 
@@ -483,9 +661,7 @@
                 bootTime: new Date().toISOString(),
                 resetLayout() {
                     options.clearSavedLayout();
-                    documentRef
-                        .getElementById('page-layout-board')
-                        ?.remove();
+                    documentRef.getElementById('page-layout-board')?.remove();
                     setBoard(undefined);
                     try {
                         initPageLayoutBoard();
@@ -514,9 +690,7 @@
                                 '.layout-recovery-toolbar, .stage-layout-toolbar'
                             )
                         ),
-                        unexpectedStagePanel: Boolean(
-                            documentRef.getElementById('page-tile-stagePanel')
-                        ),
+                        panelRegistry: corePageTypes,
                         remotePeerCount: documentRef.querySelectorAll(
                             '.video-tile[data-layout-item-type="remotePeer"]'
                         ).length,
@@ -551,8 +725,8 @@
                                   ),
                                   childCount: tile.children.length,
                                   bodyChildren:
-                                      tile.querySelector('.tile-body')
-                                          ?.children.length || 0,
+                                      tile.querySelector('.tile-body')?.children
+                                          .length || 0,
                                   textPreview: tile.textContent
                                       .trim()
                                       .slice(0, 80),
@@ -608,6 +782,7 @@
             initPageLayoutBoard,
             restoreOriginalStaticLayout,
             syncLayoutGridMetadata,
+            syncPanelActions,
             validateDetachedPageLayoutBoard,
             validatePageLayout,
         };

@@ -79,6 +79,7 @@
             hideButton.title = '隐藏组件';
             hideButton.setAttribute('aria-label', '隐藏组件');
             hideButton.textContent = '\u00D7';
+            hideButton.hidden = tile.dataset.panelCanHide === 'false';
             hideButton.addEventListener('click', (event) => {
                 event.preventDefault();
                 event.stopPropagation();
@@ -116,6 +117,8 @@
             board.append(toolbar);
         }
 
+        toolbar.querySelector('.layout-toolbar-hide').hidden =
+            tile.dataset.panelCanHide === 'false';
         syncToolbarState({ tile, freeMoveEnabled });
         positionToolbar({ tile, board });
         return toolbar;

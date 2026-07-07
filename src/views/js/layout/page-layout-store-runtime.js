@@ -12,7 +12,8 @@
             return options.layoutStorage.readLayoutPreferencesFromStorage({
                 storageKey: options.getLayoutStorageKey(),
                 normalizeLayoutPreferences: options.normalizeLayoutPreferences,
-                getDefaultLayoutPreferences: options.getDefaultLayoutPreferences,
+                getDefaultLayoutPreferences:
+                    options.getDefaultLayoutPreferences,
             });
         };
 
@@ -23,7 +24,7 @@
         const getKnownLayoutItemTypes = () =>
             new Set([
                 ...Object.values(options.layoutItemTypes),
-                ...Object.values(options.pageComponentTypes),
+                ...options.getSingletonTypes(),
             ]);
 
         const serialize = () =>

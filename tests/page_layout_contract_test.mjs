@@ -1,5 +1,6 @@
 ﻿import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { runInNewContext } from 'node:vm';
 
 const loadCssWithImports = (fileUrl, seen = new Set()) => {
     const key = fileUrl.href;
@@ -26,6 +27,15 @@ const loadCssWithImports = (fileUrl, seen = new Set()) => {
 };
 
 const readText = (path) => readFileSync(new URL(path, import.meta.url), 'utf8');
+const pageLayoutRuntime = readText(
+    '../src/views/js/layout/page-layout-runtime.js'
+);
+const pageLayoutEditorRuntime = readText(
+    '../src/views/js/layout/page-layout-editor-runtime.js'
+);
+const pageLayoutComponentRuntime = readText(
+    '../src/views/js/layout/page-layout-component-runtime.js'
+);
 
 const MEDIA_ORCHESTRATION_FORBIDDEN_KEYWORDS = [
     'new Peer',
@@ -645,8 +655,39 @@ const MODULE_SCRIPTS = [
         ],
         requiredExports: [
             [
-                /item\.type === 'stagePanel'[\s\S]*?return null;/,
-                'normalizeLoadedLayoutItems must ignore saved stagePanel entries',
+                /knownTypes\.has\(type\)/,
+                'normalizeLoadedLayoutItems must filter unknown or retired panel types',
+            ],
+        ],
+    },
+    {
+        path: '/js/layout/page-layout-store-runtime.js',
+        sourcePath: '../src/views/js/layout/page-layout-store-runtime.js',
+        namespace: 'PageLayoutStoreRuntime',
+        mustLoadBeforeMain: true,
+        dependsOnViewUtils: false,
+        forbiddenKeywords: [
+            'navigator.mediaDevices',
+            'getUserMedia',
+            'getDisplayMedia',
+            'new Peer',
+            'Peer(',
+            'socket.emit',
+            'socket.on',
+            'querySelectorAll',
+        ],
+        requiredExports: [
+            [
+                /\.\.\.options\.getSingletonTypes\(\)/,
+                'known page panel types must come from the current panel registry',
+            ],
+            [
+                /loadLayoutFromStorage/,
+                'store runtime must expose layout storage loading',
+            ],
+            [
+                /saveLayoutToStorage/,
+                'store runtime must expose layout storage saving',
             ],
         ],
     },
@@ -697,6 +738,19 @@ const MODULE_SCRIPTS = [
             [
                 /LAYOUT_PREFERENCE_DEFAULTS/,
                 'layout config must expose layout preference defaults',
+            ],
+            [/PANEL_REGISTRY/, 'layout config must expose the panel registry'],
+            [
+                /PANEL_COLLAPSED_HEIGHT/,
+                'layout config must expose the shared collapsed panel height',
+            ],
+            [
+                /PANEL_COMPONENT_CONFIG_DEFAULTS/,
+                'layout config must expose panel state config defaults',
+            ],
+            [
+                /getPanelRegistry/,
+                'layout config must expose panel registry lookup',
             ],
             [
                 /getDefaultComponentConfig/,
@@ -938,12 +992,12 @@ const MODULE_SCRIPTS = [
                 'layout components must expose component tile rendering',
             ],
             [
-                /SIDEBAR_PANEL[\s\S]*?grid:\s*\{\s*x:\s*0,\s*y:\s*0,\s*w:\s*5,\s*h:\s*18\s*\}/,
-                'default sidebarPanel layout must stay unchanged',
+                /getPanelRegistry\(\)\.map/,
+                'default page panels must be generated from the panel registry',
             ],
             [
-                /CHAT_PANEL[\s\S]*?grid:\s*\{\s*x:\s*26,\s*y:\s*0,\s*w:\s*6,\s*h:\s*18\s*\}/,
-                'default chatPanel layout must stay unchanged',
+                /grid:\s*\{\s*\.\.\.panel\.defaultLayout\s*\}/,
+                'default page panel grids must come from registered defaults',
             ],
             [
                 /LOCAL_PEER[\s\S]*?grid:\s*\{\s*x:\s*13,\s*y:\s*7,\s*w:\s*5,\s*h:\s*4\s*\}/,
@@ -993,6 +1047,10 @@ const MODULE_SCRIPTS = [
             [
                 /renderResetConfirmState/,
                 'layout toolbar UI must expose reset confirmation rendering',
+            ],
+            [
+                /layoutLockToggle/,
+                'layout toolbar UI must expose the optional layout lock toggle',
             ],
         ],
     },
@@ -1533,6 +1591,9 @@ const getModuleSource = (path) => moduleSources.get(path);
 const script = readText('../src/views/script.js');
 const roomIndex = readText('../src/views/room/index.ejs');
 const pageLayoutStorage = getModuleSource('/js/layout/page-layout-storage.js');
+const pageLayoutStoreRuntime = getModuleSource(
+    '/js/layout/page-layout-store-runtime.js'
+);
 const pageLayoutConfig = getModuleSource('/js/layout/page-layout-config.js');
 const pageLayoutIds = getModuleSource('/js/layout/page-layout-ids.js');
 const pageLayoutPlacementUtils = getModuleSource(
@@ -1720,8 +1781,8 @@ assert.match(
 
 assertSourceContains(script, 'page layout base contract', [
     [
-        /PAGE_LAYOUT_STORAGE_KEY_PREFIX\s*=\s*'voicePageLayout:v2'/,
-        'page layout must use the v2 storage key',
+        /PAGE_LAYOUT_STORAGE_KEY_PREFIX\s*=\s*'voicePageLayout:v3'/,
+        'page layout must use the v3 storage key',
     ],
     [
         /const layoutConfig = window\.PageLayoutConfig/,
@@ -1746,8 +1807,40 @@ assertSourceContains(pageLayoutConfig, 'page layout config contract', [
         'sidebarPanel must be a first-class page component',
     ],
     [
+        /MEMBERS_PANEL:\s*'membersPanel'/,
+        'membersPanel must be a first-class page component',
+    ],
+    [
+        /MEDIA_CONTROLS_PANEL:\s*'mediaControlsPanel'/,
+        'mediaControlsPanel must be a first-class page component',
+    ],
+    [
         /CHAT_PANEL:\s*'chatPanel'/,
         'chatPanel must be a first-class page component',
+    ],
+    [
+        /PANEL_REGISTRY[\s\S]*?minWidth[\s\S]*?minHeight[\s\S]*?canDrag[\s\S]*?canResize/,
+        'panel registry must define shared shell layout capabilities',
+    ],
+    [
+        /MEMBERS_PANEL[\s\S]*?title:\s*'房间 Room'/,
+        'membersPanel must be presented as the room panel',
+    ],
+    [
+        /SIDEBAR_PANEL[\s\S]*?defaultVisible:\s*false[\s\S]*?MEDIA_CONTROLS_PANEL[\s\S]*?defaultVisible:\s*false/,
+        'sidebarPanel and mediaControlsPanel must start hidden by default',
+    ],
+    [
+        /PANEL_REGISTRY[\s\S]*?canHide[\s\S]*?canCollapse[\s\S]*?canPin/,
+        'panel registry must define shared action capabilities',
+    ],
+    [
+        /PANEL_COLLAPSED_HEIGHT\s*=\s*42/,
+        'panel collapse must use one shared collapsed height',
+    ],
+    [
+        /PANEL_COMPONENT_CONFIG_DEFAULTS[\s\S]*?collapsed:\s*false[\s\S]*?pinned:\s*false[\s\S]*?expandedHeight:\s*0/,
+        'panel config defaults must persist collapsed, pinned, and expanded height state',
     ],
 ]);
 const pageComponentTypesMatch = pageLayoutConfig.match(
@@ -1757,13 +1850,25 @@ assert.ok(pageComponentTypesMatch, 'PAGE_COMPONENT_TYPES must be inspectable');
 assertSourceDoesNotContain(
     pageComponentTypesMatch.groups.body,
     'PAGE_COMPONENT_TYPES',
-    [[/CHAT_INPUT/, 'PAGE_COMPONENT_TYPES must not restore CHAT_INPUT']]
+    [
+        [/CHAT_INPUT/, 'PAGE_COMPONENT_TYPES must not restore CHAT_INPUT'],
+        [
+            /STAGE_PANEL|stagePanel/,
+            'PAGE_COMPONENT_TYPES must not restore stagePanel',
+        ],
+        [
+            /ROOM_INFO_PANEL|roomInfoPanel/,
+            'PAGE_COMPONENT_TYPES must not restore standalone roomInfoPanel',
+        ],
+    ]
 );
-assertSourceDoesNotContain(script, 'page layout base contract', [
-    [/STAGE_PANEL:\s*'stagePanel'/, 'stagePanel must not be a page component'],
-]);
 assertSourceDoesNotContain(pageLayoutConfig, 'page layout config contract', [
-    [/STAGE_PANEL:\s*'stagePanel'/, 'stagePanel must not be a page component'],
+    [/stagePanel/, 'PANEL_REGISTRY must not include stagePanel'],
+    [/舞台 Stage/, 'PANEL_REGISTRY must not expose the Stage panel label'],
+    [
+        /roomInfoPanel/,
+        'PANEL_REGISTRY must not expose standalone roomInfoPanel',
+    ],
 ]);
 assertSourceContains(pageLayoutIds, 'page-layout-ids.js', [
     [
@@ -1804,22 +1909,39 @@ assert.ok(
 const defaultBody = defaultsMatch.groups.body;
 
 assertSourceContains(defaultBody, 'default page layout', [
-    [/SIDEBAR_PANEL/, 'default layout includes sidebarPanel'],
-    [/CHAT_PANEL/, 'default layout includes chatPanel'],
+    [/getPanelRegistry\(\)\.map/, 'default layout uses panel registry'],
+    [/defaultLayout/, 'default layout comes from registered panel defaults'],
+    [
+        /visible:\s*panel\.defaultVisible !== false/,
+        'default panel visibility must come from the panel registry',
+    ],
     [/LOCAL_PEER/, 'default layout includes localPeer'],
 ]);
 assertSourceDoesNotContain(defaultBody, 'default page layout', [
     [
-        /STAGE_PANEL|CHANNEL_SIDEBAR|SELF_STATUS|ROOM_INFO|CHAT_INPUT/,
-        'default page layout must not include old split components',
+        /STAGE_PANEL|stagePanel|ROOM_INFO_PANEL|roomInfoPanel|CHANNEL_SIDEBAR|SELF_STATUS|CHAT_INPUT/,
+        'default page layout must not include retired split component ids',
     ],
 ]);
 
-assertSourceContains(script, 'script.js', [
+assertSourceContains(pageLayoutRuntime, 'page-layout-runtime.js', [
     {
         pattern: /const createPageTileFromNode = /,
         message: 'page layout must move existing DOM roots into tiles',
     },
+    {
+        pattern: /const validateDetachedPageLayoutBoard = /,
+        message:
+            'page layout must validate detached board content before replacing #main',
+    },
+]);
+assert.match(
+    pageLayoutRuntime,
+    /const visible = defaultItem\.visible !== false;[\s\S]*?setTileLayoutItemVisibility\([\s\S]*?visible[\s\S]*?classList\.toggle\('is-layout-hidden', !visible\)/,
+    'default page layout initialization must keep hidden-by-default panels hidden'
+);
+
+assertSourceContains(script, 'script.js', [
     {
         pattern: /const requestAudioStream = async/,
         message: 'requestAudioStream must stay in script.js',
@@ -1868,29 +1990,193 @@ assertSourceContains(script, 'script.js', [
         pattern: /const applyOutputSettingsToRemoteMedia = /,
         message: 'applyOutputSettingsToRemoteMedia must stay in script.js',
     },
-    {
-        pattern: /const validateDetachedPageLayoutBoard = /,
-        message:
-            'page layout must validate detached board content before replacing #main',
-    },
 ]);
 assertSourceContains(pageLayoutStorage, 'page-layout-storage.js', [
     [
-        /item\.type === 'stagePanel'[\s\S]*?return null;/,
-        'normalizeLoadedLayoutItems must ignore saved stagePanel entries',
+        /knownTypes\.has\(type\)/,
+        'normalizeLoadedLayoutItems must filter unknown or retired panel types',
     ],
 ]);
-assert.ok(
-    script.indexOf('window.__voiceLayoutDebug = {') <
-        script.indexOf('_runPageLayoutInit();'),
-    'window.__voiceLayoutDebug must be defined before page layout init runs'
+assertSourceContains(pageLayoutStoreRuntime, 'page-layout-store-runtime.js', [
+    [
+        /\.\.\.options\.getSingletonTypes\(\)/,
+        'known page panel types must come from the current panel registry',
+    ],
+]);
+
+const storageState = new Map();
+const storageWindow = {
+    localStorage: {
+        getItem: (key) => storageState.get(key) || null,
+        removeItem: (key) => storageState.delete(key),
+        setItem: (key, value) => storageState.set(key, String(value)),
+    },
+};
+runInNewContext(pageLayoutStorage, { window: storageWindow });
+const storageApi = storageWindow.PageLayoutStorage;
+const v2StorageKey = storageApi.getLayoutStorageKey({
+    prefix: 'voicePageLayout:v2',
+    roomId: 'contract-room',
+});
+const v3StorageKey = storageApi.getLayoutStorageKey({
+    prefix: 'voicePageLayout:v3',
+    roomId: 'contract-room',
+});
+storageState.set(
+    v2StorageKey,
+    JSON.stringify({
+        version: 1,
+        items: [
+            {
+                id: 'page-stagePanel',
+                type: 'stagePanel',
+                visible: true,
+                x: 0,
+                y: 0,
+                w: 12,
+                h: 8,
+            },
+        ],
+    })
+);
+assert.equal(
+    storageApi.loadLayoutFromStorage({
+        storageKey: v3StorageKey,
+        normalize: (payload) => payload.items,
+    }).length,
+    0,
+    'v3 layout loading must ignore old v2 payloads that contain stagePanel'
+);
+const normalizedLegacyPanelItems = storageApi.normalizeLoadedLayoutItems(
+    {
+        version: 1,
+        items: [
+            {
+                id: 'page-stagePanel',
+                type: 'stagePanel',
+                visible: true,
+                x: 0,
+                y: 0,
+                w: 12,
+                h: 8,
+            },
+            {
+                id: 'page-roomInfoPanel',
+                type: 'roomInfoPanel',
+                visible: true,
+                x: 0,
+                y: 8,
+                w: 6,
+                h: 3,
+            },
+            {
+                id: 'page-membersPanel',
+                type: 'membersPanel',
+                visible: true,
+                x: 0,
+                y: 0,
+                w: 6,
+                h: 14,
+            },
+        ],
+    },
+    {
+        version: 1,
+        columns: 32,
+        rows: 18,
+        getKnownLayoutItemTypes: () =>
+            new Set(['membersPanel', 'mediaControlsPanel', 'chatPanel']),
+        normalizeLayoutItemType: (type) => type,
+        getLegacyRemoteLayoutPeerId: () => null,
+        normalizeRemotePeerLayoutId: (id) => id,
+        remotePeerType: 'remotePeer',
+        singletonTypes: new Set([
+            'membersPanel',
+            'mediaControlsPanel',
+            'chatPanel',
+        ]),
+        normalizeAutoLayoutGrid: (type, grid) => grid,
+        normalizeZIndex: (z) => Number(z) || 0,
+        normalizeComponentConfig: () => ({}),
+    }
+);
+assert.deepEqual(
+    Array.from(normalizedLegacyPanelItems, (item) => item.type),
+    ['membersPanel'],
+    'saved stagePanel and standalone roomInfoPanel entries must be filtered before rendering'
+);
+assert.match(
+    pageLayoutRuntime,
+    /installDebugRuntime\(\);\s*return\s*\{\s*bootstrap,/,
+    'window.__voiceLayoutDebug must be installed before runtime bootstrap is returned'
+);
+assertSourceContains(
+    pageLayoutRuntime,
+    'page layout runtime behavior contract',
+    [
+        [
+            /pageTiles:\s*documentRef\.querySelectorAll/,
+            'dumpDom must report pageTiles',
+        ],
+        [
+            /showRecoveryToolbar\(\)/,
+            'debug API must expose showRecoveryToolbar()',
+        ],
+        [
+            /footer\.hidden = true/,
+            'real DOM page panels must hide footer labels',
+        ],
+        [
+            /title\.textContent = label/,
+            'page-level panels must keep a visible title in the tile header',
+        ],
+        [
+            /avatar\?\.remove\(\)/,
+            'page-level panel headers must remove the leading avatar/icon marker',
+        ],
+        [
+            /const ensurePanelShellActions = \(tile, type\) => \{[\s\S]*?panelConfig\.canPin[\s\S]*?panelConfig\.canCollapse/,
+            'panel shell actions must be generated from registry pin/collapse capabilities',
+        ],
+        [
+            /action:\s*'pin'[\s\S]*?onTogglePanelPin[\s\S]*?action:\s*'collapse'[\s\S]*?onTogglePanelCollapse/,
+            'panel shell actions must include unified pin and collapse controls',
+        ],
+        [
+            /pointerdown[\s\S]*?stopPanelActionEvent[\s\S]*?click[\s\S]*?stopPanelActionEvent/,
+            'panel action buttons must block pointerdown and click from starting panel drag',
+        ],
+        [
+            /roomPanelContent\.append\(membersEl,\s*roomInfoEl\)/,
+            'membersPanel must merge channel/member content with local room status content',
+        ],
+        [
+            /node:\s*mediaControlsEl/,
+            'mediaControlsPanel must move the real #buttons node instead of cloning controls',
+        ],
+        [
+            /nextBoard\.append\(runtimeVideoGrid\)/,
+            '#video-grid must be moved as the direct workspace video layer',
+        ],
+    ]
+);
+assertSourceDoesNotContain(
+    pageLayoutRuntime,
+    'page layout runtime behavior contract',
+    [
+        [/stagePanel/, 'runtime must not create or debug a stagePanel'],
+        [/舞台 Stage/, 'runtime must not expose the Stage panel label'],
+        [
+            /ROOM_INFO_PANEL|roomInfoPanel/,
+            'runtime must not create a standalone roomInfoPanel',
+        ],
+        [
+            /action:\s*'hide'/,
+            'panel shell titlebar must not render hide action',
+        ],
+    ]
 );
 assertSourceContains(script, 'page layout behavior contract', [
-    [
-        /pageTiles:\s*document\.querySelectorAll/,
-        'dumpDom must report pageTiles',
-    ],
-    [/unexpectedStagePanel/, 'dumpDom must flag an unexpected stagePanel'],
     [
         /REAL_DOM_PAGE_TYPES\.has\(type\)[\s\S]*?return;/,
         'renderLayoutComponentTile must return before replacing real DOM panel bodies',
@@ -1899,16 +2185,6 @@ assertSourceContains(script, 'page layout behavior contract', [
         /REAL_DOM_PAGE_TYPES\.has\(type\)[\s\S]*?savedItem[\s\S]*?savedItem\?\.config[\s\S]*?config,/,
         'real DOM page panels must restore saved config such as freeMove while rendering',
     ],
-    [/showRecoveryToolbar\(\)/, 'debug API must expose showRecoveryToolbar()'],
-    [/footer\.hidden = true/, 'real DOM page panels must hide footer labels'],
-    [
-        /title\.textContent = label/,
-        'page-level panels must keep a visible title in the tile header',
-    ],
-    [
-        /avatar\.textContent = createTileAvatarText\(label\)/,
-        'page-level panel headers must keep a leading avatar/icon marker',
-    ],
     [
         /layout-component-toolbar/,
         'layout controls must use an external floating component toolbar',
@@ -1916,6 +2192,18 @@ assertSourceContains(script, 'page layout behavior contract', [
     [
         /positionLayoutComponentToolbar/,
         'component toolbar position must be recalculated from tile bounds',
+    ],
+    [
+        /const togglePanelCollapse = \(tile\) => \{[\s\S]*?expandedHeight[\s\S]*?PANEL_COLLAPSED_HEIGHT[\s\S]*?savePanelItemState/,
+        'collapse must preserve expanded height and save panel state through the shared path',
+    ],
+    [
+        /const togglePanelPin = \(tile\) => \{[\s\S]*?const currentLayout = item\.layout \|\| getCurrentTileLayout\(tile\)[\s\S]*?getNextTileLayoutZIndexForBand\(nextPinned\)[\s\S]*?savePanelItemState/,
+        'pin must save state without remeasuring panel coordinates',
+    ],
+    [
+        /const setLayoutLocked = \(locked\) => \{[\s\S]*?layoutLocked = Boolean\(locked\)[\s\S]*?syncLayoutEditModeUI\(\)/,
+        'layout lock must be optional session state wired through the layout UI',
     ],
     [/freeMove:\s*false/, 'layout item config must persist a freeMove flag'],
     [/isTileFreeMoveEnabled/, 'freeMove must affect normal-mode tile movement'],
@@ -1936,6 +2224,17 @@ assertSourceDoesNotContain(script, 'page layout behavior contract', [
         'hide button must not be inserted inside the tile actions area',
     ],
 ]);
+const togglePanelPinBody = getSourceBetween(
+    script,
+    /const togglePanelPin = \(tile\) => \{/,
+    /\nconst isTileFreeMoveEnabled = /,
+    'panel pin toggle helper'
+);
+assert.doesNotMatch(
+    togglePanelPinBody,
+    /applyTileLayout\(/,
+    'pin/unpin must not apply left/top/width/height while toggling z-index'
+);
 
 assert.match(
     script,
@@ -1948,21 +2247,21 @@ assert.match(
     'finalize editing must snap all layout items to the grid'
 );
 const syncLayoutEditModeUiBody = getSourceBetween(
-    script,
-    /const syncLayoutEditModeUI = \(\) => \{/,
-    /\nconst setLayoutEditMode = /,
+    pageLayoutEditorRuntime,
+    /const syncEditModeUI = \(\) => \{/,
+    /\n\s*const setEditMode = /,
     'layout edit mode UI sync helper'
 );
 const setLayoutEditModeBody = getSourceBetween(
-    script,
-    /const setLayoutEditMode = \(enabled\) => \{/,
-    /\nconst toggleLayoutEditMode = /,
+    pageLayoutEditorRuntime,
+    /const setEditMode = \(enabled\) => \{/,
+    /\n\s*const toggleEditMode = /,
     'layout edit mode setter'
 );
 const toggleLayoutEditModeBody = getSourceBetween(
-    script,
-    /const toggleLayoutEditMode = \(\) => \{/,
-    /\nconst updateMobileTileView = /,
+    pageLayoutEditorRuntime,
+    /const toggleEditMode = \(\) => \{/,
+    /\n\s*const showSaveStatus = /,
     'layout edit mode toggle'
 );
 const finalizeLayoutEditingBody = getSourceBetween(
@@ -1973,27 +2272,27 @@ const finalizeLayoutEditingBody = getSourceBetween(
 );
 assert.match(
     syncLayoutEditModeUiBody,
-    /layoutToolbarUI\.renderToolbarState\(\{[\s\S]*?editMode:\s*layoutEditMode[\s\S]*?mainLayout[\s\S]*?pageLayoutBoard/,
+    /toolbarUI\.renderToolbarState\(\{[\s\S]*?editMode[\s\S]*?mainLayout[\s\S]*?pageLayoutBoard/,
     'layout edit UI sync must delegate toolbar state rendering from layoutEditMode'
 );
 assert.match(
     setLayoutEditModeBody,
-    /layoutEditMode\s*=\s*Boolean\(enabled\)[\s\S]*?syncLayoutGridMetadata\(\)[\s\S]*?syncLayoutEditModeUI\(\)/,
+    /setEditModeState\(enabled\)[\s\S]*?options\.syncLayoutGridMetadata\(\)[\s\S]*?syncEditModeUI\(\)/,
     'entering or leaving layout edit mode must update state, grid metadata, and UI together'
 );
 assert.match(
-    setLayoutEditModeBody,
-    /if \(!layoutEditMode\) \{[\s\S]*?hideSnapPreview\(\)[\s\S]*?resetLayoutResizeCursor\(\)/,
+    script,
+    /onExitEditMode:\s*\(\) => \{[\s\S]*?hideSnapPreview\(\)[\s\S]*?resetLayoutResizeCursor\(\)/,
     'leaving layout edit mode must clear snap preview and resize cursor state'
 );
 assert.match(
     toggleLayoutEditModeBody,
-    /if \(layoutEditMode\) \{[\s\S]*?finalizeLayoutEditing\(\)[\s\S]*?return;/,
+    /if \(editMode\) \{[\s\S]*?options\.onFinalizeLayoutEditing\(\)[\s\S]*?return;/,
     'clicking Done must use finalizeLayoutEditing instead of directly leaving edit mode'
 );
 assert.match(
     toggleLayoutEditModeBody,
-    /setLayoutEditMode\(true\)/,
+    /setEditMode\(true\)/,
     'clicking Edit Layout must enter layout edit mode through setLayoutEditMode(true)'
 );
 assert.match(
@@ -2003,13 +2302,13 @@ assert.match(
 );
 assert.match(
     script,
-    /const saveLayoutToStorage = \(message = '已保存'\) => \{[\s\S]*?layoutStorage\.saveLayoutToStorage\(/,
-    'saveLayoutToStorage wrapper must delegate persistence to PageLayoutStorage'
+    /const saveLayoutToStorage = \(message = '已保存'\) => \{[\s\S]*?pageLayoutStoreRuntime\?\.saveLayoutToStorage\(message\)/,
+    'saveLayoutToStorage wrapper must delegate persistence to PageLayoutStoreRuntime'
 );
 assert.match(
     script,
-    /const loadLayoutFromStorage = \(\) =>[\s\S]*?layoutStorage\.loadLayoutFromStorage\(/,
-    'loadLayoutFromStorage wrapper must delegate loading to PageLayoutStorage'
+    /const loadLayoutFromStorage = \(\) =>[\s\S]*?pageLayoutStoreRuntime\?\.loadLayoutFromStorage\(\)/,
+    'loadLayoutFromStorage wrapper must delegate loading to PageLayoutStoreRuntime'
 );
 assert.match(
     script,
@@ -2043,8 +2342,13 @@ assert.match(
 );
 assert.match(
     script,
-    /const canDragLayoutItem = [\s\S]*?layoutEditMode[\s\S]*?\|\|[\s\S]*?freeMove\s*===\s*true/,
-    'freeMove=true must allow normal-mode dragging'
+    /const canDragLayoutItem = [\s\S]*?!layoutLocked[\s\S]*?layoutEditMode[\s\S]*?\|\|[\s\S]*?freeMove\s*===\s*true/,
+    'panels must be draggable by default unless locked, while freeMove=true still allows normal-mode tile dragging'
+);
+assert.match(
+    script,
+    /const canResizeLayoutItem = [\s\S]*?!layoutLocked[\s\S]*?layoutEditMode[\s\S]*?canResize/,
+    'layout lock must disable panel resize while edit mode still gates resizing'
 );
 assert.match(
     script,
@@ -2055,14 +2359,20 @@ const ignoreDragTargetBody = script.slice(
     script.indexOf('const shouldIgnoreLayoutDragTarget = '),
     script.indexOf('const findLayoutComponentToolbar = ')
 );
-['input', 'textarea', 'button', 'select', 'a', '[contenteditable]'].forEach(
-    (selector) => {
-        assert.ok(
-            ignoreDragTargetBody.includes(`'${selector}'`),
-            `drag ignore list must include ${selector}`
-        );
-    }
-);
+[
+    'input',
+    'textarea',
+    'button',
+    'select',
+    'a',
+    '[contenteditable]',
+    '.panel-action-button',
+].forEach((selector) => {
+    assert.ok(
+        ignoreDragTargetBody.includes(`'${selector}'`),
+        `drag ignore list must include ${selector}`
+    );
+});
 assert.match(
     script,
     /const finalizeLayoutItemDrag = [\s\S]*?snapTileLayoutToGrid[\s\S]*?saveLayoutToStorage[\s\S]*?hideSnapPreview/,
@@ -2107,7 +2417,7 @@ assert.match(
     'saved layout config such as freeMove must be restored when a tile is loaded'
 );
 assert.match(
-    script,
+    pageLayoutComponentRuntime,
     /const applyPageLayoutItemToPanel = [\s\S]*?upsertTileLayoutItem[\s\S]*?config:\s*item\.config/,
     'page-level saved layout config must be restored during storage initialization'
 );
@@ -2186,7 +2496,7 @@ assert.match(
     'drag finish must persist the userPlaced flag before saving'
 );
 assert.match(
-    script,
+    pageLayoutComponentRuntime,
     /const applyStoredLayoutToExistingTile = [\s\S]*?if \(!tile\) \{[\s\S]*?return;/,
     'saved remote/screen-share layout must not create fake online tiles'
 );
@@ -2223,6 +2533,31 @@ assert.match(
     'secondary layout actions must not affect primary button coordinates'
 );
 assert.match(
+    pageLayoutToolbarUi,
+    /layoutLockToggle[\s\S]*?aria-pressed[\s\S]*?锁定布局/,
+    'toolbar must expose an optional layout lock toggle without making it the default mode'
+);
+assert.match(
+    pageLayoutToolbarUi,
+    /labelText:\s*'编辑'/,
+    'normal layout toolbar state must expose only the concise Edit entry'
+);
+assert.match(
+    pageLayoutToolbarUi,
+    /setButtonLabel\(editModeToggle,\s*editMode \? '完成' : '编辑'\)/,
+    'edit toggle must switch between Edit and Done without keeping Edit Layout visible'
+);
+assert.match(
+    pageLayoutToolbarUi,
+    /addComponentToggle\.hidden = !editMode[\s\S]*?lockLayoutToggle\.hidden = !editMode[\s\S]*?resetDefaultButton\.hidden = !editMode/,
+    'components, lock, and reset controls must only appear while editing'
+);
+assert.match(
+    pageLayoutEditorRuntime,
+    /toggleComponentMenu[\s\S]*?if \(!toolbarRefs\.componentMenu\)[\s\S]*?renderComponentMenu/,
+    'components menu must remain available as the unified restore entry for hidden panels'
+);
+assert.match(
     toolbarMatch.groups.body,
     /position:\s*fixed/,
     'page-level layout toolbar must be fixed to the viewport'
@@ -2253,6 +2588,36 @@ assert.match(
     style,
     /\.layout-snap-preview/,
     'style must define a visible snap preview overlay'
+);
+assert.match(
+    style,
+    /\.panel-shell-actions[\s\S]*?\.panel-action-button/,
+    'style must define unified panel action buttons'
+);
+assert.match(
+    style,
+    /\.panel-shell-actions[\s\S]*?opacity:\s*0[\s\S]*?pointer-events:\s*none/,
+    'panel shell actions must stay hidden until hover/focus/editing'
+);
+assert.match(
+    style,
+    /\.page-layout-tile:hover \.panel-shell-actions[\s\S]*?\.page-layout-board\.is-layout-editing \.panel-shell-actions[\s\S]*?opacity:\s*1[\s\S]*?pointer-events:\s*auto/,
+    'panel shell actions must show on hover, focus, selection, or layout editing'
+);
+assert.match(
+    style,
+    /\.page-layout-tile \.tile-avatar[\s\S]*?display:\s*none/,
+    'page panel headers must hide the leading avatar marker'
+);
+assert.match(
+    style,
+    /\.page-layout-tile\.is-panel-collapsed[\s\S]*?\.tile-body[\s\S]*?display:\s*none/,
+    'collapsed panels must hide content while preserving the shell header'
+);
+assert.doesNotMatch(
+    style,
+    /page-tile-stage-panel|\.page-layout-tile \.room-stage/,
+    'stage must stay as the direct workspace video layer, not a panel shell'
 );
 const boardMatch = style.match(/\.page-layout-board\s*\{(?<body>[\s\S]*?)\}/);
 const boardEditingMatch = style.match(

@@ -56,10 +56,6 @@
 
         return (Array.isArray(payload.items) ? payload.items : [])
             .map((item) => {
-                if (item && item.type === 'stagePanel') {
-                    return null;
-                }
-
                 if (!item?.id) {
                     return null;
                 }

@@ -79,12 +79,14 @@ const {
     LAYOUT_ITEM_TYPES,
     LEGACY_LAYOUT_ITEM_TYPES,
     AUTO_LAYOUT_GRID_SIZES,
-    LAYOUT_PREFERENCE_DEFAULTS,
+    PANEL_COLLAPSED_HEIGHT,
     getDefaultComponentConfig,
     normalizeComponentConfig,
     getDefaultLayoutPreferences,
     normalizeLayoutPreferences,
     getLayoutPreferenceValue,
+    getPanelRegistry,
+    getPanelConfig,
 } = layoutConfig;
 const layoutIds = window.PageLayoutIds;
 const {
@@ -125,11 +127,11 @@ const LAYOUT_MIN_GRID_H = 2;
 const PAGE_GRID_COLUMNS = 32;
 const PAGE_GRID_ROWS = 18;
 const PAGE_STORAGE_VERSION = 1;
-const PAGE_LAYOUT_STORAGE_KEY_PREFIX = 'voicePageLayout:v2';
-const PAGE_SINGLETON_TYPES = new Set([
-    PAGE_COMPONENT_TYPES.SIDEBAR_PANEL,
-    PAGE_COMPONENT_TYPES.CHAT_PANEL,
-]);
+const PAGE_LAYOUT_STORAGE_KEY_PREFIX = 'voicePageLayout:v3';
+const PINNED_TILE_Z_INDEX_BASE = 10000;
+const PAGE_SINGLETON_TYPES = new Set(
+    getPanelRegistry().map((panel) => panel.id)
+);
 const REAL_DOM_PAGE_TYPES = PAGE_SINGLETON_TYPES;
 const PAGE_TILE_MIN_WIDTH = 160;
 const PAGE_TILE_MIN_HEIGHT = 80;
@@ -185,6 +187,7 @@ const peersWithCallHandler = new WeakSet();
 const presenceMembersByPeerId = new Map();
 let tileLayoutZIndex = TILE_BASE_Z_INDEX;
 let layoutEditMode = false;
+let layoutLocked = false;
 let pageLayoutEditorRuntime;
 let pageLayoutComponentRuntime;
 const layoutResizeBoundBoards = new WeakSet();
@@ -254,10 +257,7 @@ const mobileRoomController = mobileRoomState.createMobileRoomState({
     toggleRoomClass: roomUIState.toggleClass,
 });
 
-const CORE_PAGE_TYPES = [
-    PAGE_COMPONENT_TYPES.SIDEBAR_PANEL,
-    PAGE_COMPONENT_TYPES.CHAT_PANEL,
-];
+const CORE_PAGE_TYPES = getPanelRegistry().map((panel) => panel.id);
 
 const getPagePanelLabel = (type) =>
     pageLayoutRuntime?.getPagePanelLabel(type) || type;
@@ -273,11 +273,22 @@ const restoreOriginalStaticLayout = () => {
 const ensureLayoutEditModeToggle = () =>
     pageLayoutEditorRuntime?.ensureToolbar().editModeToggle;
 
-const syncLayoutEditModeUI = () =>
-    pageLayoutEditorRuntime?.syncEditModeUI();
+const syncLayoutEditModeUI = () => pageLayoutEditorRuntime?.syncEditModeUI();
 
 const setLayoutEditMode = (enabled) =>
     pageLayoutEditorRuntime?.setEditMode(enabled);
+
+const setLayoutLocked = (locked) => {
+    layoutLocked = Boolean(locked);
+    mainLayout?.classList.toggle('is-layout-locked', layoutLocked);
+    pageLayoutBoard?.classList.toggle('is-layout-locked', layoutLocked);
+    resetLayoutResizeCursor();
+    syncLayoutEditModeUI();
+};
+
+const toggleLayoutLocked = () => {
+    setLayoutLocked(!layoutLocked);
+};
 
 const updateMobileTileView = () => mobileRoomController.updateTileView();
 
@@ -1264,36 +1275,84 @@ const getTileLayoutId = (tile, member) => {
 const getTileLayoutItemId = (tile) =>
     tile.dataset.layoutItemId || tile.dataset.layoutId || getTileLayoutId(tile);
 
-const normalizeTileLayoutZIndex = (value) => {
-    const zIndex = Number(value);
+const isPanelTilePinned = (tile) => {
+    if (!tile?.dataset?.pageLayoutType) {
+        return false;
+    }
 
-    return Number.isFinite(zIndex) && zIndex >= TILE_BASE_Z_INDEX
-        ? Math.round(zIndex)
-        : TILE_BASE_Z_INDEX;
+    return (
+        tile.classList.contains('is-panel-pinned') ||
+        getTileLayoutItem(tile.dataset.layoutItemId)?.config?.pinned === true
+    );
 };
 
-const saveTileLayout = (layoutId, layout) => {
-    pageLayoutStoreRuntime?.saveTileLayout(layoutId, layout);
+const normalizeTileLayoutZIndex = (value, { pinned = false } = {}) => {
+    const zIndex = Number(value);
+    const baseZIndex = pinned ? PINNED_TILE_Z_INDEX_BASE : TILE_BASE_Z_INDEX;
+
+    return Number.isFinite(zIndex) && zIndex >= baseZIndex
+        ? Math.round(zIndex)
+        : baseZIndex;
 };
 
 const getTileLayoutZIndex = (tile) =>
     normalizeTileLayoutZIndex(
-        tile.style.zIndex || window.getComputedStyle(tile).zIndex
+        tile.style.zIndex || window.getComputedStyle(tile).zIndex,
+        { pinned: isPanelTilePinned(tile) }
     );
 
 const applyTileLayoutZIndex = (tile, zIndex) => {
-    tile.style.zIndex = String(normalizeTileLayoutZIndex(zIndex));
+    tile.style.zIndex = String(
+        normalizeTileLayoutZIndex(zIndex, {
+            pinned: isPanelTilePinned(tile),
+        })
+    );
 };
 
-const getNextTileLayoutZIndex = () => {
-    const highestTileZIndex = getVideoTiles().reduce(
-        (highest, tile) => Math.max(highest, getTileLayoutZIndex(tile)),
-        TILE_BASE_Z_INDEX
-    );
+const getNextTileLayoutZIndexForBand = (pinned = false) => {
+    const baseZIndex = pinned ? PINNED_TILE_Z_INDEX_BASE : TILE_BASE_Z_INDEX;
+    const highestTileZIndex = getVideoTiles().reduce((highest, candidate) => {
+        const candidateZIndex = getTileLayoutZIndex(candidate);
+
+        if (pinned) {
+            return isPanelTilePinned(candidate)
+                ? Math.max(highest, candidateZIndex)
+                : highest;
+        }
+
+        return candidateZIndex < PINNED_TILE_Z_INDEX_BASE
+            ? Math.max(highest, candidateZIndex)
+            : highest;
+    }, baseZIndex);
 
     tileLayoutZIndex = Math.max(tileLayoutZIndex, highestTileZIndex) + 1;
 
     return tileLayoutZIndex;
+};
+
+const getNextTileLayoutZIndex = (tile) =>
+    getNextTileLayoutZIndexForBand(isPanelTilePinned(tile));
+
+const getLayoutBoardForTile = (tile) => {
+    if (tile && !tile.dataset.pageLayoutType && videoGrid?.contains(tile)) {
+        return videoGrid;
+    }
+
+    return pageLayoutBoard || videoGrid;
+};
+
+const getTileMinimumSize = (tile) => {
+    const panelConfig = getPanelConfig(tile?.dataset?.pageLayoutType);
+    const collapsed =
+        tile?.classList?.contains('is-panel-collapsed') ||
+        tile?.dataset?.panelCollapsing === 'true';
+
+    return {
+        width: panelConfig?.minWidth || PAGE_TILE_MIN_WIDTH,
+        height: collapsed
+            ? PANEL_COLLAPSED_HEIGHT
+            : panelConfig?.minHeight || PAGE_TILE_MIN_HEIGHT,
+    };
 };
 
 const bringTileLayoutToFront = (tile) => {
@@ -1301,7 +1360,7 @@ const bringTileLayoutToFront = (tile) => {
         return;
     }
 
-    applyTileLayoutZIndex(tile, getNextTileLayoutZIndex());
+    applyTileLayoutZIndex(tile, getNextTileLayoutZIndex(tile));
     syncTileLayoutItemFromElement(tile, {
         layout: {
             ...getCurrentTileLayout(tile),
@@ -1316,24 +1375,29 @@ const bringTileLayoutToFront = (tile) => {
     }
 };
 
-const getLayoutSnapContext = () => ({
-    board: pageLayoutBoard || videoGrid,
-    columns: PAGE_GRID_COLUMNS,
-    rows: PAGE_GRID_ROWS,
-    minGridW: LAYOUT_MIN_GRID_W,
-    minGridH: LAYOUT_MIN_GRID_H,
-    minTileWidth: PAGE_TILE_MIN_WIDTH,
-    minTileHeight: PAGE_TILE_MIN_HEIGHT,
-    normalizeZIndex: normalizeTileLayoutZIndex,
-    findTileForLayoutItem,
-    getCurrentTileLayout,
-    applyTileLayout,
-    applyTileLayoutItemToElement,
-    setLayoutItem: setTileLayoutItem,
-});
+const getLayoutSnapContext = (tile) => {
+    const minimumSize = getTileMinimumSize(tile);
 
-const getTileBounds = () =>
-    layoutSnapUtils.getTileBounds(getLayoutSnapContext());
+    return {
+        board: getLayoutBoardForTile(tile),
+        columns: PAGE_GRID_COLUMNS,
+        rows: PAGE_GRID_ROWS,
+        minGridW: LAYOUT_MIN_GRID_W,
+        minGridH: LAYOUT_MIN_GRID_H,
+        minTileWidth: minimumSize.width,
+        minTileHeight: minimumSize.height,
+        normalizeZIndex: normalizeTileLayoutZIndex,
+        findTileForLayoutItem,
+        getCurrentTileLayout,
+        applyTileLayout,
+        applyTileLayoutItemToElement,
+        setLayoutItem: setTileLayoutItem,
+        getContextForTile: getLayoutSnapContext,
+    };
+};
+
+const getTileBounds = (tile) =>
+    layoutSnapUtils.getTileBounds(getLayoutSnapContext(tile));
 
 const clampGridLayout = (layout) =>
     layoutSnapUtils.clampGridLayout(layout, getLayoutSnapContext());
@@ -1430,11 +1494,11 @@ const showSnapPreview = (tile, layout) => {
 
     const snappedLayout = layoutSnapUtils.snapTileLayoutToGrid(
         layout,
-        getLayoutSnapContext()
+        getLayoutSnapContext(tile)
     );
 
     layoutEditUI.showSnapPreview({
-        board: pageLayoutBoard,
+        board: getLayoutBoardForTile(tile),
         tile,
         layout: snappedLayout,
     });
@@ -1482,6 +1546,9 @@ const clearSavedLayout = () => {
 
 const clampTileLayout = (layout) =>
     layoutSnapUtils.clampTileLayout(layout, getLayoutSnapContext());
+
+const clampTileLayoutForTile = (tile, layout) =>
+    layoutSnapUtils.clampTileLayout(layout, getLayoutSnapContext(tile));
 
 const normalizeTileLayout = (layout = {}) => {
     if (layout.grid && !Number.isFinite(Number(layout.x))) {
@@ -1542,8 +1609,7 @@ const forEachTileLayoutItem = (callback) => {
     pageLayoutStoreRuntime?.forEachItem(callback);
 };
 
-const getTileLayoutItemsRegistry = () =>
-    pageLayoutStoreRuntime?.getRegistry();
+const getTileLayoutItemsRegistry = () => pageLayoutStoreRuntime?.getRegistry();
 
 const upsertTileLayoutItem = (tile, updates = {}) =>
     pageLayoutStoreRuntime?.upsertTileLayoutItem(tile, updates);
@@ -1565,12 +1631,27 @@ const applyTileLayoutItemToElement = (
         'is-free-move-enabled',
         item.config?.freeMove === true
     );
+    tile.classList.toggle(
+        'is-panel-collapsed',
+        item.config?.collapsed === true
+    );
+    tile.classList.toggle('is-panel-pinned', item.config?.pinned === true);
+    tile.dataset.panelCollapsed = String(item.config?.collapsed === true);
+    tile.dataset.panelPinned = String(item.config?.pinned === true);
 
     if (applyPosition) {
-        applyTileLayout(tile, item.layout, { syncItem: false });
+        applyTileLayout(
+            tile,
+            item.config?.collapsed === true
+                ? { ...item.layout, height: PANEL_COLLAPSED_HEIGHT }
+                : item.layout,
+            { syncItem: false }
+        );
     } else {
         applyTileLayoutZIndex(tile, item.layout.zIndex);
     }
+
+    pageLayoutRuntime?.syncPanelActions(tile);
 };
 
 const syncTileLayoutItemFromElement = (tile, updates = {}) =>
@@ -1610,7 +1691,7 @@ const retirePreviousTileLayoutItem = (tile, nextItemId) => {
 };
 
 const applyTileLayout = (tile, layout, { syncItem = true } = {}) => {
-    const next = clampTileLayout(layout);
+    const next = clampTileLayoutForTile(tile, layout);
 
     tile.classList.add('is-positioned');
     tile.style.left = `${next.x}px`;
@@ -1630,11 +1711,11 @@ const applyTileLayout = (tile, layout, { syncItem = true } = {}) => {
 };
 
 const getCurrentTileLayout = (tile) => {
-    const board = pageLayoutBoard || videoGrid;
+    const board = getLayoutBoardForTile(tile);
     const tileRect = tile.getBoundingClientRect();
     const boardRect = board.getBoundingClientRect();
 
-    return clampTileLayout({
+    return clampTileLayoutForTile(tile, {
         x: tileRect.left - boardRect.left + board.scrollLeft,
         y: tileRect.top - boardRect.top + board.scrollTop,
         width: tileRect.width,
@@ -1650,7 +1731,7 @@ const persistCurrentTileLayout = (tile) => {
 const snapTileLayoutToGridForTile = (tile) => {
     return layoutSnapUtils.snapTileLayoutToGridForTile(
         tile,
-        getLayoutSnapContext()
+        getLayoutSnapContext(tile)
     );
 };
 
@@ -1925,8 +2006,15 @@ const getExistingLayoutComponentTile = (type) =>
 const addLayoutComponent = (type) =>
     pageLayoutComponentRuntime?.addLayoutComponent(type);
 
-const hideLayoutComponent = (tile) =>
+const hideLayoutComponent = (tile) => {
+    const panelConfig = getPanelConfig(tile?.dataset?.pageLayoutType);
+
+    if (panelConfig?.canHide === false) {
+        return;
+    }
+
     pageLayoutComponentRuntime?.hideLayoutComponent(tile);
+};
 
 const applyDefaultLayout = () =>
     pageLayoutComponentRuntime?.applyDefaultLayout();
@@ -1934,26 +2022,121 @@ const applyDefaultLayout = () =>
 const initializeLayoutFromStorage = () =>
     pageLayoutComponentRuntime?.initializeLayoutFromStorage();
 
-const closeLayoutComponentMenu = () =>
-    pageLayoutEditorRuntime?.closeComponentMenu();
-
-const closeLayoutComponentConfig = () =>
-    pageLayoutEditorRuntime?.closeComponentConfig();
-
 const renderLayoutComponentMenu = () =>
     pageLayoutEditorRuntime?.renderComponentMenu();
 
 const getLayoutItemForTile = (tile) =>
     getTileLayoutItem(tile?.dataset.layoutItemId || tile?.dataset.layoutId);
 
+const isRegisteredPanelItem = (item) => PAGE_SINGLETON_TYPES.has(item?.type);
+
+const getPanelConfigForTile = (tile) =>
+    getPanelConfig(tile?.dataset?.pageLayoutType);
+
+const savePanelItemState = (tile, { config, layout, message } = {}) => {
+    const item = getLayoutItemForTile(tile);
+
+    if (!tile || !item || !isRegisteredPanelItem(item)) {
+        return null;
+    }
+
+    const nextLayout = layout || getCurrentTileLayout(tile);
+    const nextConfig = normalizeComponentConfig(item.type, {
+        ...item.config,
+        ...config,
+    });
+    const nextItem = upsertTileLayoutItem(tile, {
+        layout: nextLayout,
+        visible: item.visible !== false,
+        positioned: true,
+        config: nextConfig,
+    });
+
+    applyTileLayoutItemToElement(tile, nextItem, {
+        applyPosition: false,
+    });
+    saveLayoutToStorage(message || '布局已更新');
+    positionLayoutComponentToolbar(tile);
+    return nextItem;
+};
+
+const togglePanelCollapse = (tile) => {
+    const panelConfig = getPanelConfigForTile(tile);
+    const item = getLayoutItemForTile(tile);
+
+    if (!panelConfig || panelConfig.canCollapse === false || !item) {
+        return;
+    }
+
+    const currentLayout = getCurrentTileLayout(tile);
+    const collapsed = item.config?.collapsed === true;
+    const expandedHeight = Math.max(
+        panelConfig.minHeight || PAGE_TILE_MIN_HEIGHT,
+        Number(item.config?.expandedHeight) || currentLayout.height
+    );
+    const nextLayout = collapsed
+        ? { ...currentLayout, height: expandedHeight }
+        : { ...currentLayout, height: PANEL_COLLAPSED_HEIGHT };
+
+    tile.dataset.panelCollapsing = String(!collapsed);
+    applyTileLayout(tile, nextLayout, { syncItem: false });
+    savePanelItemState(tile, {
+        layout: nextLayout,
+        config: {
+            collapsed: !collapsed,
+            expandedHeight: collapsed ? expandedHeight : currentLayout.height,
+        },
+        message: collapsed ? '面板已展开' : '面板已收起',
+    });
+    delete tile.dataset.panelCollapsing;
+};
+
+const togglePanelPin = (tile) => {
+    const panelConfig = getPanelConfigForTile(tile);
+    const item = getLayoutItemForTile(tile);
+
+    if (!panelConfig || panelConfig.canPin === false || !item) {
+        return;
+    }
+
+    const pinned = item.config?.pinned === true;
+    const nextPinned = !pinned;
+    const nextConfig = { pinned: nextPinned };
+    const currentLayout = item.layout || getCurrentTileLayout(tile);
+    const nextLayout = {
+        ...currentLayout,
+        zIndex: getNextTileLayoutZIndexForBand(nextPinned),
+    };
+
+    savePanelItemState(tile, {
+        layout: nextLayout,
+        config: nextConfig,
+        message: pinned ? '已取消固定' : '已固定置顶',
+    });
+};
+
 const isTileFreeMoveEnabled = (tile) =>
     getLayoutItemForTile(tile)?.config?.freeMove === true;
 
-const canDragLayoutItem = (item) =>
-    layoutEditMode || item?.config?.freeMove === true;
+const canDragLayoutItem = (item) => {
+    if (isRegisteredPanelItem(item)) {
+        return !layoutLocked && getPanelConfig(item.type)?.canDrag !== false;
+    }
 
-const canResizeLayoutItem = (item) =>
-    layoutEditMode || item?.config?.freeMove === true;
+    return layoutEditMode || item?.config?.freeMove === true;
+};
+
+const canResizeLayoutItem = (item) => {
+    if (isRegisteredPanelItem(item)) {
+        return (
+            !layoutLocked &&
+            layoutEditMode &&
+            getPanelConfig(item.type)?.canResize !== false
+        );
+    }
+
+    return layoutEditMode || item?.config?.freeMove === true;
+};
 
 const shouldIgnoreLayoutDragTarget = (target) =>
     Boolean(
@@ -1976,6 +2159,8 @@ const shouldIgnoreLayoutDragTarget = (target) =>
                 '.layout-component-toolbar',
                 '.layout-component-remove',
                 '.layout-component-settings',
+                '.panel-shell-actions',
+                '.panel-action-button',
                 '.fullscreen-btn',
             ].join(', ')
         )
@@ -2100,6 +2285,12 @@ const getResizeTileAtPoint = (event) => {
 
     return getVideoTiles()
         .filter((tile) => !tile.classList.contains('is-layout-hidden'))
+        .filter(
+            (tile) =>
+                !layoutEditMode ||
+                tile.parentElement === pageLayoutBoard ||
+                tile.dataset.pageLayoutType
+        )
         .sort((a, b) => getTileLayoutZIndex(b) - getTileLayoutZIndex(a))
         .map((tile) => ({
             tile,
@@ -2201,18 +2392,25 @@ const startTileDrag = (event, tile) => {
     window.addEventListener('pointercancel', onEnd);
 };
 
-const resolveTileResizeLayout = (startLayout, direction, deltaX, deltaY) => {
+const resolveTileResizeLayout = (
+    tile,
+    startLayout,
+    direction,
+    deltaX,
+    deltaY
+) => {
+    const minimumSize = getTileMinimumSize(tile);
     const nextLayout = layoutResizeUtils.resolveTileResizeLayout({
-        bounds: getTileBounds(),
+        bounds: getTileBounds(tile),
         deltaX,
         deltaY,
         direction,
-        minHeight: PAGE_TILE_MIN_HEIGHT,
-        minWidth: PAGE_TILE_MIN_WIDTH,
+        minHeight: minimumSize.height,
+        minWidth: minimumSize.width,
         startLayout,
     });
 
-    return clampTileLayout(nextLayout);
+    return clampTileLayoutForTile(tile, nextLayout);
 };
 
 const startTileResize = (event, tile, direction = 'se') => {
@@ -2242,6 +2440,7 @@ const startTileResize = (event, tile, direction = 'se') => {
 
     const onMove = (moveEvent) => {
         const nextLayout = resolveTileResizeLayout(
+            tile,
             startLayout,
             direction,
             moveEvent.clientX - startX,
@@ -2428,6 +2627,8 @@ pageLayoutEditorRuntime = layoutEditorRuntime.createEditorRuntime({
     onAddComponent: addLayoutComponent,
     onHideComponent: hideLayoutComponent,
     onToggleFreeMove: toggleTileFreeMove,
+    onToggleLayoutLock: toggleLayoutLocked,
+    isLayoutLocked: () => layoutLocked,
     isTileFreeMoveEnabled,
     ensureTileStructure,
     syncLayoutGridMetadata,
@@ -2454,6 +2655,8 @@ pageLayoutRuntime = window.PageLayoutRuntime.createRuntime({
     },
     layoutRecoveryUI,
     pageComponentTypes: PAGE_COMPONENT_TYPES,
+    getPanelRegistry,
+    getPanelConfig,
     pageGridColumns: PAGE_GRID_COLUMNS,
     pageGridRows: PAGE_GRID_ROWS,
     getDefaultLayoutItems,
@@ -2466,6 +2669,9 @@ pageLayoutRuntime = window.PageLayoutRuntime.createRuntime({
     getNextTileLayoutZIndex,
     setTileLayoutItemVisibility,
     saveLayoutToStorage,
+    onHidePanel: hideLayoutComponent,
+    onTogglePanelCollapse: togglePanelCollapse,
+    onTogglePanelPin: togglePanelPin,
     loadLayoutFromStorage,
     clearSavedLayout,
     initializeLayoutFromStorage,

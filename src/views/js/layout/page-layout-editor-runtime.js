@@ -137,7 +137,7 @@
         };
 
         const toggleComponentMenu = () => {
-            if (!toolbarRefs.componentMenu || !editMode) {
+            if (!toolbarRefs.componentMenu) {
                 return;
             }
 
@@ -153,6 +153,8 @@
                 addComponentToggle: toolbarRefs.addComponentToggle,
                 editMode,
                 editModeToggle: toolbarRefs.editModeToggle,
+                layoutLocked: options.isLayoutLocked?.() || false,
+                lockLayoutToggle: toolbarRefs.lockLayoutToggle,
                 mainLayout: refs.mainLayout,
                 pageLayoutBoard: options.getPageLayoutBoard(),
                 resetDefaultButton: toolbarRefs.resetDefaultButton,
@@ -235,6 +237,7 @@
         const bindToolbarEvents = ({
             onEditToggle = toggleEditMode,
             onComponentMenuToggle = toggleComponentMenu,
+            onLockToggle = options.onToggleLayoutLock,
             onResetDefault = handleResetDefaultClick,
         } = {}) => {
             const nextRefs = ensureToolbar();
@@ -242,6 +245,9 @@
             nextRefs.addComponentToggle?.addEventListener(
                 'click',
                 onComponentMenuToggle
+            );
+            nextRefs.lockLayoutToggle?.addEventListener('click', () =>
+                onLockToggle?.()
             );
             nextRefs.resetDefaultButton?.addEventListener(
                 'click',

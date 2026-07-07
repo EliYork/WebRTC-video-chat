@@ -2,7 +2,7 @@
     'use strict';
 
     const layoutConfig = global.PageLayoutConfig;
-    const { PAGE_COMPONENT_TYPES, LAYOUT_ITEM_TYPES } = layoutConfig;
+    const { LAYOUT_ITEM_TYPES } = layoutConfig;
 
     const getLayoutComponentId = (type) =>
         type === LAYOUT_ITEM_TYPES.LOCAL_PEER
@@ -10,18 +10,16 @@
             : `page-tile-${type}`;
 
     const getDefaultLayoutItems = () => [
-        {
-            id: `page-${PAGE_COMPONENT_TYPES.SIDEBAR_PANEL}`,
-            type: PAGE_COMPONENT_TYPES.SIDEBAR_PANEL,
-            grid: { x: 0, y: 0, w: 5, h: 18 },
-            visible: true,
-        },
-        {
-            id: `page-${PAGE_COMPONENT_TYPES.CHAT_PANEL}`,
-            type: PAGE_COMPONENT_TYPES.CHAT_PANEL,
-            grid: { x: 26, y: 0, w: 6, h: 18 },
-            visible: true,
-        },
+        ...layoutConfig.getPanelRegistry().map((panel) => ({
+            id: `page-${panel.id}`,
+            type: panel.id,
+            grid: { ...panel.defaultLayout },
+            visible: panel.defaultVisible !== false,
+            config: {
+                collapsed: false,
+                pinned: false,
+            },
+        })),
         {
             id: 'local-peer-default',
             type: LAYOUT_ITEM_TYPES.LOCAL_PEER,

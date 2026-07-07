@@ -3,8 +3,73 @@
 
     const PAGE_COMPONENT_TYPES = {
         SIDEBAR_PANEL: 'sidebarPanel',
+        MEMBERS_PANEL: 'membersPanel',
+        MEDIA_CONTROLS_PANEL: 'mediaControlsPanel',
         CHAT_PANEL: 'chatPanel',
     };
+    const PANEL_COLLAPSED_HEIGHT = 42;
+
+    const PANEL_REGISTRY = [
+        {
+            id: PAGE_COMPONENT_TYPES.SIDEBAR_PANEL,
+            title: '侧边栏 Sidebar',
+            defaultLayout: { x: 0, y: 0, w: 6, h: 5 },
+            defaultVisible: false,
+            minWidth: 240,
+            minHeight: 180,
+            canDrag: true,
+            canResize: true,
+            canHide: true,
+            canCollapse: true,
+            canPin: true,
+        },
+        {
+            id: PAGE_COMPONENT_TYPES.MEMBERS_PANEL,
+            title: '房间 Room',
+            defaultLayout: { x: 0, y: 0, w: 6, h: 14 },
+            minWidth: 260,
+            minHeight: 220,
+            canDrag: true,
+            canResize: true,
+            canHide: true,
+            canCollapse: true,
+            canPin: true,
+        },
+        {
+            id: PAGE_COMPONENT_TYPES.MEDIA_CONTROLS_PANEL,
+            title: '媒体控制 Media',
+            defaultLayout: { x: 0, y: 14, w: 6, h: 4 },
+            defaultVisible: false,
+            minWidth: 280,
+            minHeight: 96,
+            canDrag: true,
+            canResize: true,
+            canHide: true,
+            canCollapse: true,
+            canPin: true,
+        },
+        {
+            id: PAGE_COMPONENT_TYPES.CHAT_PANEL,
+            title: '聊天 Chat',
+            defaultLayout: { x: 26, y: 0, w: 6, h: 18 },
+            minWidth: 280,
+            minHeight: 240,
+            canDrag: true,
+            canResize: true,
+            canHide: true,
+            canCollapse: true,
+            canPin: true,
+        },
+    ];
+
+    const getPanelRegistry = () =>
+        PANEL_REGISTRY.map((panel) => ({
+            ...panel,
+            defaultLayout: { ...panel.defaultLayout },
+        }));
+
+    const getPanelConfig = (id) =>
+        getPanelRegistry().find((panel) => panel.id === id) || null;
 
     const LAYOUT_ITEM_TYPES = {
         LOCAL: 'local',
@@ -62,6 +127,18 @@
         },
     };
 
+    const PANEL_COMPONENT_CONFIG_DEFAULTS = Object.fromEntries(
+        PANEL_REGISTRY.map((panel) => [
+            panel.id,
+            {
+                freeMove: true,
+                collapsed: false,
+                pinned: false,
+                expandedHeight: 0,
+            },
+        ])
+    );
+
     const LAYOUT_PREFERENCE_DEFAULTS = {
         autoShowLocalPeer: true,
         autoShowRemotePeers: true,
@@ -70,7 +147,9 @@
     };
 
     const getDefaultComponentConfig = (type) => {
-        const defaults = COMPONENT_CONFIG_DEFAULTS[type];
+        const defaults =
+            COMPONENT_CONFIG_DEFAULTS[type] ||
+            PANEL_COMPONENT_CONFIG_DEFAULTS[type];
         return defaults ? { ...defaults } : { freeMove: true };
     };
 
@@ -110,12 +189,17 @@
 
     global.PageLayoutConfig = {
         PAGE_COMPONENT_TYPES,
+        PANEL_REGISTRY,
+        PANEL_COLLAPSED_HEIGHT,
         LAYOUT_ITEM_TYPES,
         LEGACY_LAYOUT_ITEM_TYPES,
         REMOTE_PEER_LAYOUT_ID_PREFIX,
         AUTO_LAYOUT_GRID_SIZES,
         COMPONENT_CONFIG_DEFAULTS,
+        PANEL_COMPONENT_CONFIG_DEFAULTS,
         LAYOUT_PREFERENCE_DEFAULTS,
+        getPanelRegistry,
+        getPanelConfig,
         getDefaultComponentConfig,
         normalizeComponentConfig,
         getDefaultLayoutPreferences,

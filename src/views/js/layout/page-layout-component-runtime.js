@@ -49,14 +49,19 @@
                 layoutItem &&
                 (savedItem || !tile.classList.contains('is-positioned'))
             ) {
-                options.applyTileLayout(
-                    tile,
-                    options.convertGridLayoutToPixels({
-                        ...layoutItem.grid,
-                        zIndex:
-                            layoutItem.z || options.getNextTileLayoutZIndex(),
-                    })
-                );
+                const nextLayout = options.convertGridLayoutToPixels({
+                    ...layoutItem.grid,
+                    zIndex: layoutItem.z || options.getNextTileLayoutZIndex(),
+                });
+                const syncedItem = options.upsertTileLayoutItem(tile, {
+                    layout: nextLayout,
+                    visible: layoutItem.visible !== false,
+                    positioned: true,
+                    config: layoutItem.config,
+                });
+                options.applyTileLayoutItemToElement(tile, syncedItem, {
+                    applyPosition: true,
+                });
             }
 
             const hydrating = options.isLayoutStorageHydrating();
@@ -72,9 +77,7 @@
                 visible
             );
             options.bringTileLayoutToFront(tile);
-            options.saveLayoutToStorage(
-                visible ? '布局已更新' : '布局已更新'
-            );
+            options.saveLayoutToStorage(visible ? '布局已更新' : '布局已更新');
             refreshComponentLifecycleUI();
 
             return tile;
@@ -135,6 +138,14 @@
                         zIndex: options.getNextTileLayoutZIndex(),
                     })
                 );
+                const syncedItem = options.upsertTileLayoutItem(tile, {
+                    visible: item.visible,
+                    positioned: true,
+                    config: item.config,
+                });
+                options.applyTileLayoutItemToElement(tile, syncedItem, {
+                    applyPosition: false,
+                });
                 options.setTileLayoutItemVisibility(
                     tile.dataset.layoutItemId,
                     item.visible
@@ -207,7 +218,7 @@
                 config: item.config,
             });
             options.applyTileLayoutItemToElement(tile, syncedItem, {
-                applyPosition: false,
+                applyPosition: true,
             });
             options.setTileLayoutItemVisibility(
                 tile.dataset.layoutItemId,

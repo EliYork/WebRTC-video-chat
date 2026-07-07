@@ -42,13 +42,19 @@
             id: 'layoutEditModeToggle',
             className: 'layout-edit-toggle layout-edit-primary-button',
             iconClassName: 'fas fa-border-all',
-            labelText: '编辑布局',
+            labelText: '编辑',
         });
         const addComponentToggle = createButton({
             id: 'layoutAddComponentToggle',
             className: 'layout-tool-button',
             iconClassName: 'fas fa-plus',
-            labelText: '添加组件',
+            labelText: '组件',
+        });
+        const lockLayoutToggle = createButton({
+            id: 'layoutLockToggle',
+            className: 'layout-tool-button layout-lock-toggle',
+            iconClassName: 'fas fa-lock-open',
+            labelText: '锁定布局',
         });
         const resetDefaultButton = createButton({
             id: 'layoutResetDefault',
@@ -76,6 +82,7 @@
         primaryAction.append(editModeToggle);
         secondaryActions.append(
             addComponentToggle,
+            lockLayoutToggle,
             resetDefaultButton,
             saveStatus,
             componentMenu
@@ -87,6 +94,7 @@
             addComponentToggle,
             componentMenu,
             editModeToggle,
+            lockLayoutToggle,
             resetDefaultButton,
             saveStatus,
             toolbar,
@@ -99,22 +107,41 @@
         editMode = false,
         editModeToggle,
         addComponentToggle,
+        lockLayoutToggle,
         resetDefaultButton,
         saveStatus,
+        layoutLocked = false,
     } = {}) => {
         mainLayout?.classList.toggle('is-layout-editing', editMode);
+        mainLayout?.classList.toggle('is-layout-locked', layoutLocked);
         pageLayoutBoard?.classList.toggle('is-layout-editing', editMode);
+        pageLayoutBoard?.classList.toggle('is-layout-locked', layoutLocked);
 
         if (editModeToggle) {
             editModeToggle.setAttribute('aria-pressed', String(editMode));
-            setButtonLabel(editModeToggle, editMode ? '完成编辑' : '编辑布局');
+            setButtonLabel(editModeToggle, editMode ? '完成' : '编辑');
         }
 
-        [addComponentToggle, resetDefaultButton].forEach((button) => {
-            if (button) {
-                button.hidden = !editMode;
-            }
-        });
+        if (lockLayoutToggle) {
+            lockLayoutToggle.setAttribute('aria-pressed', String(layoutLocked));
+            lockLayoutToggle.title = layoutLocked ? '解除布局锁定' : '锁定布局';
+            setButtonLabel(
+                lockLayoutToggle,
+                layoutLocked ? '解除锁定' : '锁定布局'
+            );
+        }
+
+        if (addComponentToggle) {
+            addComponentToggle.hidden = !editMode;
+        }
+
+        if (lockLayoutToggle) {
+            lockLayoutToggle.hidden = !editMode;
+        }
+
+        if (resetDefaultButton) {
+            resetDefaultButton.hidden = !editMode;
+        }
 
         if (saveStatus) {
             saveStatus.hidden = !editMode;

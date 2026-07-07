@@ -76,10 +76,68 @@
 .page-layout-tile .tile-header {
     display: grid;
     flex: 0 0 auto;
+    grid-template-columns: minmax(0, 1fr) auto;
     min-height: 34px;
     padding: 6px 10px;
     border-bottom-color: rgba(216, 111, 154, 0.14);
     background-color: rgba(255, 252, 254, 0.86);
+    cursor: default;
+}
+
+.page-layout-tile .tile-avatar {
+    display: none;
+}
+
+.panel-shell-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 120ms ease;
+}
+
+.page-layout-tile:hover .panel-shell-actions,
+.page-layout-tile:focus-within .panel-shell-actions,
+.page-layout-tile.is-layout-selected .panel-shell-actions,
+.page-layout-board.is-layout-editing .panel-shell-actions {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.panel-action-button {
+    display: grid;
+    width: 24px;
+    height: 24px;
+    min-width: 24px;
+    place-items: center;
+    padding: 0;
+    border: 1px solid rgba(216, 111, 154, 0.18);
+    border-radius: 999px;
+    background-color: rgba(255, 255, 255, 0.74);
+    color: var(--accent-strong);
+    cursor: pointer;
+    font-size: 11px;
+    line-height: 1;
+}
+
+.panel-action-button:hover,
+.panel-action-button[aria-pressed='true'] {
+    border-color: rgba(216, 111, 154, 0.4);
+    background-color: var(--accent-soft);
+}
+
+.page-layout-tile.is-panel-collapsed {
+    min-height: 42px !important;
+}
+
+.page-layout-tile.is-panel-collapsed .tile-body,
+.page-layout-tile.is-panel-collapsed .tile-footer,
+.page-layout-tile.is-panel-collapsed .tile-overlay {
+    display: none;
+}
+
+.page-layout-board.is-layout-locked .page-layout-tile .tile-header {
     cursor: default;
 }
 
@@ -128,13 +186,18 @@
 }
 
 .page-tile-sidebar-panel .tile-body,
+.page-tile-members-panel .tile-body,
+.page-tile-media-controls-panel .tile-body,
 .page-tile-chat-panel .tile-body,
 .page-tile-chat-input .tile-body {
     place-items: stretch;
     background-color: transparent;
 }
 
-.page-layout-tile .room-sidebar,
+.page-layout-tile .sidebar-brand,
+.page-layout-tile .sidebar-channel-tree,
+.page-layout-tile .local-user-card,
+.page-layout-tile .room-panel-content,
 .page-layout-tile .chat-panel,
 .page-layout-tile .chat-form.chat-input {
     width: 100%;
@@ -142,12 +205,48 @@
     min-height: 0;
 }
 
-.page-layout-tile .room-sidebar {
-    border-right: 0;
+.page-layout-tile .sidebar-brand,
+.page-layout-tile .sidebar-channel-tree,
+.page-layout-tile .local-user-card,
+.page-layout-tile .room-panel-content {
+    margin: 0;
+    box-sizing: border-box;
+}
+
+.page-layout-tile .sidebar-brand {
+    min-height: 0;
 }
 
 .page-layout-tile .chat-panel {
     border-left: 0;
+}
+
+.page-tile-members-panel .sidebar-channel-tree {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.page-tile-members-panel .room-panel-content {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    overflow: hidden;
+}
+
+.page-tile-members-panel .local-user-card {
+    flex: 0 0 auto;
+    height: auto;
+    max-height: 40%;
+    overflow: auto;
+}
+
+.page-tile-media-controls-panel #buttons {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 100%;
+    padding: 10px;
+    align-content: center;
 }
 
 .page-tile-chat-panel .chat-messages {
