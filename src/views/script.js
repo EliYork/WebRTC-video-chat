@@ -52,6 +52,9 @@ const mediaControlsUI = window.VoiceMediaControlsUI;
 const fullscreenControls = window.VoiceFullscreenControls;
 const voiceJoinOverlayUI = window.VoiceJoinOverlayUI;
 const layoutEditUI = window.PageLayoutEditUI;
+const layoutToolbarUI = window.PageLayoutToolbarUI;
+const layoutComponentMenuUI = window.PageLayoutComponentMenuUI;
+const layoutRecoveryUI = window.PageLayoutRecoveryUI;
 const layoutSnapUtils = window.PageLayoutSnapUtils;
 const layoutStorage = window.PageLayoutStorage;
 const roomUIState = window.VoiceRoomUIState;
@@ -277,7 +280,6 @@ let layoutResetDefaultButton;
 let layoutComponentMenu;
 let layoutSaveStatus;
 let layoutResetConfirmTimer;
-let layoutSaveStatusTimer;
 let layoutStorageHydrating = false;
 let activeLayoutToolbarTile;
 const layoutResizeBoundBoards = new WeakSet();
@@ -675,32 +677,17 @@ const initPageLayoutBoard = () => {
 
 const _originalMainSnapshot = mainLayout ? mainLayout.cloneNode(true) : null;
 
-const _bootstrapRecoveryToolbar = ({ visible = false } = {}) => {
-    const existing = document.querySelector('.layout-recovery-toolbar');
-    if (existing) {
-        existing.hidden = !visible;
-        return existing;
-    }
-    const bar = document.createElement('div');
-    bar.className = 'layout-recovery-toolbar';
-    bar.hidden = true;
-    bar.innerHTML =
-        '<button id="layoutRecoveryReset" type="button">重置布局</button>' +
-        '<button id="layoutRecoveryRestore" type="button">恢复原始页面</button>';
-    bar.hidden = !visible;
-    document.body.append(bar);
-    bar.querySelector('#layoutRecoveryReset').addEventListener('click', () => {
-        clearSavedLayout();
-        window.location.reload();
-    });
-    bar.querySelector('#layoutRecoveryRestore').addEventListener(
-        'click',
-        () => {
+const _bootstrapRecoveryToolbar = ({ visible = false } = {}) =>
+    layoutRecoveryUI.ensureRecoveryToolbar({
+        onReset: () => {
+            clearSavedLayout();
+            window.location.reload();
+        },
+        onRestore: () => {
             restoreOriginalStaticLayout();
-        }
-    );
-    return bar;
-};
+        },
+        visible,
+    });
 
 const restoreOriginalStaticLayout = () => {
     if (!mainLayout) return;
@@ -805,13 +792,13 @@ window.__voiceLayoutDebug = {
                 : { exists: false };
         });
         result.totalTiles = document.querySelectorAll('.video-tile').length;
-        console.table(result);
+        layoutRecoveryUI.printDebugTable(result);
         return result;
     },
     dumpLayout() {
         if (typeof serializeLayoutItems === 'function') {
             const items = serializeLayoutItems();
-            console.table(
+            layoutRecoveryUI.printDebugTable(
                 items.map((item) => ({
                     id: item.id,
                     type: item.type,
@@ -877,96 +864,26 @@ const ensureLayoutEditModeToggle = () => {
         return layoutEditModeToggle;
     }
 
-    const toolbar = document.createElement('div');
-    const button = document.createElement('button');
-    const icon = document.createElement('i');
-    const label = document.createElement('span');
-    const addButton = document.createElement('button');
-    const addIcon = document.createElement('i');
-    const addLabel = document.createElement('span');
-    const resetButton = document.createElement('button');
-    const resetIcon = document.createElement('i');
-    const resetLabel = document.createElement('span');
-    const menu = document.createElement('div');
-    const status = document.createElement('span');
-    const primaryAction = document.createElement('div');
-    const secondaryActions = document.createElement('div');
+    const toolbarRefs = layoutToolbarUI.ensureToolbar({ mainLayout });
 
-    toolbar.className =
-        'stage-layout-toolbar page-layout-toolbar page-layout-topbar';
-    toolbar.setAttribute('aria-label', '布局工具');
-    primaryAction.className = 'layout-edit-primary-action';
-    secondaryActions.className = 'layout-edit-secondary-actions';
-    button.id = 'layoutEditModeToggle';
-    button.className = 'layout-edit-toggle layout-edit-primary-button';
-    button.type = 'button';
-    button.setAttribute('aria-pressed', 'false');
-    icon.className = 'fas fa-border-all';
-    icon.setAttribute('aria-hidden', 'true');
-    label.textContent = '编辑布局';
-    button.append(icon, label);
-
-    addButton.id = 'layoutAddComponentToggle';
-    addButton.className = 'layout-tool-button';
-    addButton.type = 'button';
-    addButton.setAttribute('aria-expanded', 'false');
-    addIcon.className = 'fas fa-plus';
-    addIcon.setAttribute('aria-hidden', 'true');
-    addLabel.textContent = '添加组件';
-    addButton.append(addIcon, addLabel);
-
-    resetButton.id = 'layoutResetDefault';
-    resetButton.className = 'layout-tool-button';
-    resetButton.type = 'button';
-    resetIcon.className = 'fas fa-undo';
-    resetIcon.setAttribute('aria-hidden', 'true');
-    resetLabel.textContent = '恢复默认布局';
-    resetButton.append(resetIcon, resetLabel);
-
-    menu.className = 'layout-component-menu';
-    menu.hidden = true;
-    menu.setAttribute('role', 'menu');
-    menu.setAttribute('aria-label', '添加布局组件');
-
-    status.className = 'layout-save-status';
-    status.textContent = '已保存';
-
-    primaryAction.append(button);
-    secondaryActions.append(addButton, resetButton, status, menu);
-    toolbar.append(primaryAction, secondaryActions);
-    mainLayout.prepend(toolbar);
-
-    layoutEditModeToggle = button;
-    layoutAddComponentToggle = addButton;
-    layoutResetDefaultButton = resetButton;
-    layoutComponentMenu = menu;
-    layoutSaveStatus = status;
+    layoutEditModeToggle = toolbarRefs.editModeToggle;
+    layoutAddComponentToggle = toolbarRefs.addComponentToggle;
+    layoutResetDefaultButton = toolbarRefs.resetDefaultButton;
+    layoutComponentMenu = toolbarRefs.componentMenu;
+    layoutSaveStatus = toolbarRefs.saveStatus;
     return layoutEditModeToggle;
 };
 
 const syncLayoutEditModeUI = () => {
-    mainLayout?.classList.toggle('is-layout-editing', layoutEditMode);
-    pageLayoutBoard?.classList.toggle('is-layout-editing', layoutEditMode);
-
-    if (layoutEditModeToggle) {
-        layoutEditModeToggle.setAttribute(
-            'aria-pressed',
-            String(layoutEditMode)
-        );
-        layoutEditModeToggle.querySelector('span').textContent = layoutEditMode
-            ? '完成编辑'
-            : '编辑布局';
-    }
-
-    [layoutAddComponentToggle, layoutResetDefaultButton].forEach((button) => {
-        if (button) {
-            button.hidden = !layoutEditMode;
-        }
+    layoutToolbarUI.renderToolbarState({
+        addComponentToggle: layoutAddComponentToggle,
+        editMode: layoutEditMode,
+        editModeToggle: layoutEditModeToggle,
+        mainLayout,
+        pageLayoutBoard,
+        resetDefaultButton: layoutResetDefaultButton,
+        saveStatus: layoutSaveStatus,
     });
-
-    if (layoutSaveStatus) {
-        layoutSaveStatus.hidden = !layoutEditMode;
-    }
 
     getVideoTiles().forEach((tile) => {
         tile.classList.toggle('is-layout-editing', layoutEditMode);
@@ -2517,15 +2434,10 @@ const getSavedRemoteLayoutItemPreference = (peerId, member, preferredId) =>
         .find(Boolean);
 
 const showLayoutSaveStatus = (message) => {
-    if (!layoutSaveStatus) {
-        return;
-    }
-
-    layoutSaveStatus.textContent = message;
-    clearTimeout(layoutSaveStatusTimer);
-    layoutSaveStatusTimer = setTimeout(() => {
-        layoutSaveStatus.textContent = '已保存';
-    }, 1800);
+    layoutToolbarUI.showSaveStatus({
+        message,
+        saveStatus: layoutSaveStatus,
+    });
 };
 
 const buildLayoutStoragePayload = () =>
@@ -3303,24 +3215,26 @@ const resetDefaultLayout = () => {
     const confirmed = layoutResetDefaultButton?.dataset.confirmReset === 'true';
 
     if (!confirmed) {
-        if (layoutResetDefaultButton) {
-            layoutResetDefaultButton.dataset.confirmReset = 'true';
-            layoutResetDefaultButton.querySelector('span').textContent =
-                '再次点击确认';
-            clearTimeout(layoutResetConfirmTimer);
-            layoutResetConfirmTimer = setTimeout(() => {
-                delete layoutResetDefaultButton.dataset.confirmReset;
-                layoutResetDefaultButton.querySelector('span').textContent =
-                    '恢复默认布局';
-            }, 2400);
-        }
+        layoutToolbarUI.renderResetConfirmState({
+            confirming: true,
+            resetDefaultButton: layoutResetDefaultButton,
+        });
+        clearTimeout(layoutResetConfirmTimer);
+        layoutResetConfirmTimer = setTimeout(() => {
+            layoutToolbarUI.renderResetConfirmState({
+                confirming: false,
+                resetDefaultButton: layoutResetDefaultButton,
+            });
+        }, 2400);
 
         return;
     }
 
     clearTimeout(layoutResetConfirmTimer);
-    delete layoutResetDefaultButton.dataset.confirmReset;
-    layoutResetDefaultButton.querySelector('span').textContent = '恢复默认布局';
+    layoutToolbarUI.renderResetConfirmState({
+        confirming: false,
+        resetDefaultButton: layoutResetDefaultButton,
+    });
     clearSavedLayout();
 
     const defaultItems = getDefaultLayoutItems();
@@ -3446,13 +3360,10 @@ const initializeLayoutFromStorage = () => {
 };
 
 function closeLayoutComponentMenu() {
-    if (layoutComponentMenu) {
-        layoutComponentMenu.hidden = true;
-    }
-
-    if (layoutAddComponentToggle) {
-        layoutAddComponentToggle.setAttribute('aria-expanded', 'false');
-    }
+    layoutComponentMenuUI.closeMenu({
+        menu: layoutComponentMenu,
+        toggleButton: layoutAddComponentToggle,
+    });
 }
 
 function closeLayoutComponentConfig() {
@@ -3467,34 +3378,29 @@ function renderLayoutComponentMenu() {
         return;
     }
 
-    layoutComponentMenu.replaceChildren();
-
-    const componentTypes = CORE_PAGE_TYPES;
-
-    componentTypes.forEach((type) => {
+    const items = CORE_PAGE_TYPES.map((type) => {
         const tile = getExistingLayoutComponentTile(type);
         const item = tile?.dataset.layoutItemId
             ? getTileLayoutItem(tile.dataset.layoutItemId)
             : null;
         const exists = Boolean(tile);
         const visible = exists && !tile.classList.contains('is-layout-hidden');
-        const button = document.createElement('button');
-        const status = document.createElement('span');
 
-        button.type = 'button';
-        button.className = 'layout-component-menu-item';
-        button.dataset.layoutComponentType = type;
-        button.setAttribute('role', 'menuitem');
-        button.disabled = Boolean(exists && visible && item?.visible !== false);
-        button.textContent = PAGE_COMPONENT_LABELS[type] || type;
-        status.className = 'layout-component-menu-status';
-        status.textContent = visible ? '已显示' : exists ? '重新显示' : '添加';
-        button.append(status);
-        button.addEventListener('click', () => {
+        return {
+            disabled: Boolean(exists && visible && item?.visible !== false),
+            label: PAGE_COMPONENT_LABELS[type] || type,
+            statusText: visible ? '已显示' : exists ? '重新显示' : '添加',
+            type,
+        };
+    });
+
+    layoutComponentMenuUI.renderMenu({
+        items,
+        menu: layoutComponentMenu,
+        onSelect: (type) => {
             addLayoutComponent(type);
             closeLayoutComponentMenu();
-        });
-        layoutComponentMenu.append(button);
+        },
     });
 }
 
@@ -3504,11 +3410,10 @@ const toggleLayoutComponentMenu = () => {
     }
 
     renderLayoutComponentMenu();
-    layoutComponentMenu.hidden = !layoutComponentMenu.hidden;
-    layoutAddComponentToggle?.setAttribute(
-        'aria-expanded',
-        String(!layoutComponentMenu.hidden)
-    );
+    layoutComponentMenuUI.toggleMenu({
+        menu: layoutComponentMenu,
+        toggleButton: layoutAddComponentToggle,
+    });
 };
 
 const getLayoutItemForTile = (tile) =>

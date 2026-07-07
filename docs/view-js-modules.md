@@ -15,19 +15,24 @@ module boundary changes.
 4. `/js/peer-volume-ui.js`
 5. `/js/copy-link-ui.js`
 6. `/js/output-volume-ui.js`
-7. `/js/fullscreen-controls.js`
-8. `/js/voice-join-overlay-ui.js`
-9. `/js/page-layout-snap-utils.js`
-10. `/js/page-layout-edit-ui.js`
-11. `/js/page-layout-storage.js`
-12. `/js/room-ui-state.js`
-13. `/js/presence-view-model.js`
-14. `/js/participants-list-ui.js`
-15. `/js/tile-status-ui.js`
-16. `/js/chat-message-ui.js`
-17. `/js/channel-sidebar-ui.js`
-18. `/js/cursor-share-ui.js`
-19. `/script.js`
+7. `/js/media-controls-ui.js`
+8. `/js/fullscreen-controls.js`
+9. `/js/voice-join-overlay-ui.js`
+10. `/js/page-layout-snap-utils.js`
+11. `/js/page-layout-edit-ui.js`
+12. `/js/page-layout-storage.js`
+13. `/js/page-layout-toolbar-ui.js`
+14. `/js/page-layout-component-menu-ui.js`
+15. `/js/page-layout-recovery-ui.js`
+16. `/js/room-ui-state.js`
+17. `/js/presence-view-model.js`
+18. `/js/participants-list-ui.js`
+19. `/js/tile-status-ui.js`
+20. `/js/chat-message-ui.js`
+21. `/js/chat-form-ui.js`
+22. `/js/channel-sidebar-ui.js`
+23. `/js/cursor-share-ui.js`
+24. `/script.js`
 
 Modules that use `window.VoiceViewUtils` must load after `view-utils.js` and
 before `/script.js`.
@@ -76,6 +81,19 @@ mode, finalize layout interactions, or persist layout data.
 normalization, load/save/clear, and malformed-storage fallback. Its storage key,
 payload shape, item fields, and normalize/load/save/clear semantics are part of
 the contract.
+
+`page-layout-toolbar-ui.js` owns the layout edit toolbar DOM, edit/add/reset
+button visual state, save status text, and reset confirmation text. It must not
+clear storage, apply layouts, or decide edit-mode transitions.
+
+`page-layout-component-menu-ui.js` owns layout component menu rendering,
+closing, and expanded state. It receives menu items and callbacks from
+`script.js`; it must not decide which component types are allowed or add
+components directly.
+
+`page-layout-recovery-ui.js` owns the layout recovery toolbar DOM, toolbar
+visibility, and debug table printing. It must not clear storage, reload the
+page, restore the static layout, or initialize/validate the layout board.
 
 `room-ui-state.js` owns room header, local user card, call timer, and mobile
 tile nav rendering. It should receive state snapshots from `script.js` rather
