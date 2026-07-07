@@ -45,17 +45,19 @@ window namespaces, module exports, or the ownership boundaries below.
 22. `/js/layout/page-layout-component-menu-ui.js`
 23. `/js/layout/page-layout-recovery-ui.js`
 24. `/js/layout/page-layout-runtime.js`
-25. `/js/room/room-ui-state.js`
-26. `/js/room/mobile-room-state.js`
-27. `/js/room/presence-view-model.js`
-28. `/js/room/participants-list-ui.js`
-29. `/js/room/tile-status-ui.js`
-30. `/js/room/video-tile-structure-ui.js`
-31. `/js/chat/chat-message-ui.js`
-32. `/js/chat/chat-form-ui.js`
-33. `/js/room/channel-sidebar-ui.js`
-34. `/js/room/cursor-share-ui.js`
-35. `/script.js`
+25. `/js/layout/page-layout-editor-runtime.js`
+26. `/js/layout/page-layout-component-runtime.js`
+27. `/js/room/room-ui-state.js`
+28. `/js/room/mobile-room-state.js`
+29. `/js/room/presence-view-model.js`
+30. `/js/room/participants-list-ui.js`
+31. `/js/room/tile-status-ui.js`
+32. `/js/room/video-tile-structure-ui.js`
+33. `/js/chat/chat-message-ui.js`
+34. `/js/chat/chat-form-ui.js`
+35. `/js/room/channel-sidebar-ui.js`
+36. `/js/room/cursor-share-ui.js`
+37. `/script.js`
 
 Modules that use `window.VoiceViewUtils` must load after
 `/js/shared/view-utils.js` and before `/script.js`. All view modules must load
@@ -147,6 +149,27 @@ helpers from `script.js`; it must not own WebRTC, media, socket, PeerJS, chat
 socket flow, tile drag/resize lifecycles, or output-volume/media-element
 application. This move is a large runtime migration, not a test closeout.
 
+`layout/page-layout-editor-runtime.js` owns the page-layout editor runtime UI
+glue: topbar creation and event binding, edit-mode button state sync,
+component menu rendering/open/close, reset-default confirmation flow, save
+status display, edit-mode enter/exit UI orchestration, selected component
+toolbar state, and batch component-toolbar ensure. It receives DOM refs,
+state getters/setters, and business callbacks from `script.js`; it must not
+own layout storage writes, default-layout application, drag/resize lifecycles,
+WebRTC, media, socket, PeerJS, or chat socket flow. This move is a large
+runtime migration, not a test closeout.
+
+`layout/page-layout-component-runtime.js` owns page-layout component lifecycle
+orchestration: restoring/showing existing real DOM page panels, hiding
+components, applying the default layout, applying saved layout items to
+existing tiles, applying page-panel layout items, initializing layout from
+storage with the hydration guard, and refreshing component-menu/mobile tile UI
+after lifecycle changes. It receives layout apply/save/storage helpers, DOM
+lookup helpers, and UI refresh callbacks from `script.js`; it must not own
+`layoutItemsById`, saved item maps, drag/resize lifecycles, WebRTC, media,
+socket, PeerJS, or chat socket flow. This move is a large component lifecycle
+migration, not a test closeout.
+
 ## Chat
 
 `chat/chat-name-state.js` owns the chat display-name storage key, stored-name
@@ -234,7 +257,8 @@ explicitly opens a new boundary and adds tests first:
 - `requestAudioStream()`, `createAudioPipeline()`,
   `setupCallStreamHandler()`, and `joinVoiceChannel()`.
 - Main page orchestration and page-layout dependency wiring.
-- Page layout resize/drag orchestration and storage migration.
+- Page layout low-level apply/save/storage, resize/drag orchestration, and
+  storage migration.
 - Chat socket flow, including message payload decisions and history handling.
 - Screen-share and cursor-share network flow.
 - Output-device application to remote media.
@@ -254,5 +278,6 @@ New modules should follow these rules:
   `/js/shared/view-utils.js`.
 - New modules normally update `tests/page_layout_contract_test.mjs` with load
   order, namespace, required exports, and forbidden keyword contracts. The
-  `page-layout-runtime.js` migration intentionally deferred that contract
-  sync because it was a large runtime move, not a test closeout.
+  `page-layout-runtime.js`, `page-layout-editor-runtime.js`, and
+  `page-layout-component-runtime.js` migrations intentionally deferred that
+  contract sync because they were large runtime moves, not test closeouts.

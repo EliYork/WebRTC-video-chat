@@ -54,6 +54,8 @@ const layoutStorage = window.PageLayoutStorage;
 const layoutConfig = window.PageLayoutConfig;
 const layoutComponents = window.PageLayoutComponents;
 const layoutPlacementUtils = window.PageLayoutPlacementUtils;
+const layoutEditorRuntime = window.PageLayoutEditorRuntime;
+const layoutComponentRuntime = window.PageLayoutComponentRuntime;
 const roomUIState = window.VoiceRoomUIState;
 const mobileRoomState = window.VoiceMobileRoomState;
 const presenceViewModel = window.VoicePresenceViewModel;
@@ -192,14 +194,9 @@ const presenceMembersByPeerId = new Map();
 const layoutItemsById = new Map();
 let tileLayoutZIndex = TILE_BASE_Z_INDEX;
 let layoutEditMode = false;
-let layoutEditModeToggle;
-let layoutAddComponentToggle;
-let layoutResetDefaultButton;
-let layoutComponentMenu;
-let layoutSaveStatus;
-let layoutResetConfirmTimer;
 let layoutStorageHydrating = false;
-let activeLayoutToolbarTile;
+let pageLayoutEditorRuntime;
+let pageLayoutComponentRuntime;
 const layoutResizeBoundBoards = new WeakSet();
 let noiseAudioContext = null;
 let noiseProcessorNode = null;
@@ -267,8 +264,6 @@ const mobileRoomController = mobileRoomState.createMobileRoomState({
     toggleRoomClass: roomUIState.toggleClass,
 });
 
-const PL_WARN = (...args) => console.warn('[page-layout]', ...args);
-
 const CORE_PAGE_TYPES = [
     PAGE_COMPONENT_TYPES.SIDEBAR_PANEL,
     PAGE_COMPONENT_TYPES.CHAT_PANEL,
@@ -285,69 +280,14 @@ const restoreOriginalStaticLayout = () => {
     pageLayoutRuntime?.restoreOriginalStaticLayout();
 };
 
-const ensureLayoutEditModeToggle = () => {
-    if (!mainLayout || layoutEditModeToggle) {
-        return layoutEditModeToggle;
-    }
+const ensureLayoutEditModeToggle = () =>
+    pageLayoutEditorRuntime?.ensureToolbar().editModeToggle;
 
-    const toolbarRefs = layoutToolbarUI.ensureToolbar({ mainLayout });
+const syncLayoutEditModeUI = () =>
+    pageLayoutEditorRuntime?.syncEditModeUI();
 
-    layoutEditModeToggle = toolbarRefs.editModeToggle;
-    layoutAddComponentToggle = toolbarRefs.addComponentToggle;
-    layoutResetDefaultButton = toolbarRefs.resetDefaultButton;
-    layoutComponentMenu = toolbarRefs.componentMenu;
-    layoutSaveStatus = toolbarRefs.saveStatus;
-    return layoutEditModeToggle;
-};
-
-const syncLayoutEditModeUI = () => {
-    layoutToolbarUI.renderToolbarState({
-        addComponentToggle: layoutAddComponentToggle,
-        editMode: layoutEditMode,
-        editModeToggle: layoutEditModeToggle,
-        mainLayout,
-        pageLayoutBoard,
-        resetDefaultButton: layoutResetDefaultButton,
-        saveStatus: layoutSaveStatus,
-    });
-
-    getVideoTiles().forEach((tile) => {
-        tile.classList.toggle('is-layout-editing', layoutEditMode);
-    });
-
-    if (layoutEditMode) {
-        closePeerVolumePopover();
-        renderLayoutComponentMenu();
-        ensureLayoutComponentActions();
-        if (activeLayoutToolbarTile) {
-            setActiveLayoutToolbarTile(activeLayoutToolbarTile);
-        }
-    } else {
-        setActiveLayoutToolbarTile(undefined);
-        closeLayoutComponentMenu();
-        closeLayoutComponentConfig();
-    }
-};
-
-const setLayoutEditMode = (enabled) => {
-    layoutEditMode = Boolean(enabled);
-    syncLayoutGridMetadata();
-    syncLayoutEditModeUI();
-
-    if (!layoutEditMode) {
-        hideSnapPreview();
-        resetLayoutResizeCursor();
-    }
-};
-
-const toggleLayoutEditMode = () => {
-    if (layoutEditMode) {
-        finalizeLayoutEditing();
-        return;
-    }
-
-    setLayoutEditMode(true);
-};
+const setLayoutEditMode = (enabled) =>
+    pageLayoutEditorRuntime?.setEditMode(enabled);
 
 const updateMobileTileView = () => mobileRoomController.updateTileView();
 
@@ -1599,12 +1539,8 @@ const getSavedRemoteLayoutItemPreference = (peerId, member, preferredId) =>
         .map((aliasId) => savedLayoutItemsById.get(aliasId))
         .find(Boolean);
 
-const showLayoutSaveStatus = (message) => {
-    layoutToolbarUI.showSaveStatus({
-        message,
-        saveStatus: layoutSaveStatus,
-    });
-};
+const showLayoutSaveStatus = (message) =>
+    pageLayoutEditorRuntime?.showSaveStatus(message);
 
 const buildLayoutStoragePayload = () =>
     layoutStorage.buildLayoutStoragePayload({
@@ -2179,282 +2115,29 @@ const renderLayoutComponentTile = (tile) => {
     }
 };
 
-const getExistingLayoutComponentTile = (type) => {
-    if (type === LAYOUT_ITEM_TYPES.LOCAL_PEER) {
-        return document.getElementById('local-video');
-    }
+const getExistingLayoutComponentTile = (type) =>
+    pageLayoutComponentRuntime?.getExistingLayoutComponentTile(type);
 
-    return document.getElementById(getLayoutComponentId(type));
-};
+const addLayoutComponent = (type) =>
+    pageLayoutComponentRuntime?.addLayoutComponent(type);
 
-const addLayoutComponent = (type) => {
-    const allowedTypes = PAGE_SINGLETON_TYPES;
+const hideLayoutComponent = (tile) =>
+    pageLayoutComponentRuntime?.hideLayoutComponent(tile);
 
-    if (!allowedTypes.has(type)) {
-        return null;
-    }
+const applyDefaultLayout = () =>
+    pageLayoutComponentRuntime?.applyDefaultLayout();
 
-    const tile = getExistingLayoutComponentTile(type);
+const initializeLayoutFromStorage = () =>
+    pageLayoutComponentRuntime?.initializeLayoutFromStorage();
 
-    if (!tile) {
-        PL_WARN('Cannot recreate missing real DOM page panel:', type);
-        return null;
-    }
+const closeLayoutComponentMenu = () =>
+    pageLayoutEditorRuntime?.closeComponentMenu();
 
-    const layoutId = getTileLayoutId(tile);
-    const savedItem = getSavedLayoutItemPreference(layoutId);
-    const defaultItem = getDefaultLayoutItems().find(
-        (item) => item.type === type
-    );
-    const layoutItem = savedItem || defaultItem;
+const closeLayoutComponentConfig = () =>
+    pageLayoutEditorRuntime?.closeComponentConfig();
 
-    if (
-        layoutItem &&
-        (savedItem || !tile.classList.contains('is-positioned'))
-    ) {
-        applyTileLayout(
-            tile,
-            convertGridLayoutToPixels({
-                ...layoutItem.grid,
-                zIndex: layoutItem.z || getNextTileLayoutZIndex(),
-            })
-        );
-    }
-
-    const visible =
-        layoutStorageHydrating && savedItem
-            ? savedItem.visible
-            : layoutStorageHydrating
-              ? true
-              : true;
-    tile.classList.toggle('is-layout-hidden', !visible);
-    setTileLayoutItemVisibility(tile.dataset.layoutItemId, visible);
-    bringTileLayoutToFront(tile);
-    saveLayoutToStorage(visible ? '布局已更新' : '布局已更新');
-    renderLayoutComponentMenu();
-    updateMobileTileView();
-
-    return tile;
-};
-
-const hideLayoutComponent = (tile) => {
-    if (!tile) {
-        return;
-    }
-
-    setTileLayoutItemVisibility(tile.dataset.layoutItemId, false);
-    tile.classList.add('is-layout-hidden');
-    findLayoutComponentToolbar(tile)?.classList.remove('is-visible');
-    closePeerVolumePopover();
-    saveLayoutToStorage('布局已更新');
-    renderLayoutComponentMenu();
-    updateMobileTileView();
-};
-
-const resetDefaultLayout = () => {
-    const confirmed = layoutResetDefaultButton?.dataset.confirmReset === 'true';
-
-    if (!confirmed) {
-        layoutToolbarUI.renderResetConfirmState({
-            confirming: true,
-            resetDefaultButton: layoutResetDefaultButton,
-        });
-        clearTimeout(layoutResetConfirmTimer);
-        layoutResetConfirmTimer = setTimeout(() => {
-            layoutToolbarUI.renderResetConfirmState({
-                confirming: false,
-                resetDefaultButton: layoutResetDefaultButton,
-            });
-        }, 2400);
-
-        return;
-    }
-
-    clearTimeout(layoutResetConfirmTimer);
-    layoutToolbarUI.renderResetConfirmState({
-        confirming: false,
-        resetDefaultButton: layoutResetDefaultButton,
-    });
-    clearSavedLayout();
-
-    const defaultItems = getDefaultLayoutItems();
-    const pageTypes = CORE_PAGE_TYPES;
-
-    pageTypes.forEach((type) => {
-        addLayoutComponent(type);
-    });
-
-    defaultItems.forEach((item) => {
-        const tile =
-            item.type === LAYOUT_ITEM_TYPES.LOCAL_PEER
-                ? document.getElementById('local-video')
-                : document.getElementById(getLayoutComponentId(item.type)) ||
-                  getVideoTiles().find(
-                      (candidate) => getTileLayoutId(candidate) === item.id
-                  );
-
-        if (!tile) {
-            return;
-        }
-
-        tile.classList.remove('is-layout-hidden');
-        applyTileLayout(
-            tile,
-            convertGridLayoutToPixels({
-                ...item.grid,
-                zIndex: getNextTileLayoutZIndex(),
-            })
-        );
-        setTileLayoutItemVisibility(tile.dataset.layoutItemId, item.visible);
-    });
-
-    saveLayoutToStorage('已恢复默认');
-    renderLayoutComponentMenu();
-    updateMobileTileView();
-};
-
-const getInitialLayoutItems = () => {
-    const savedItems = Array.from(savedLayoutItemsById.values());
-
-    return savedItems.length ? savedItems : getDefaultLayoutItems();
-};
-
-const applyStoredLayoutToExistingTile = (item) => {
-    const tile = getVideoTiles().find(
-        (candidate) => getTileLayoutId(candidate) === item.id
-    );
-
-    if (!tile) {
-        return;
-    }
-
-    applyTileLayout(
-        tile,
-        convertGridLayoutToPixels({
-            ...item.grid,
-            zIndex: item.z || getNextTileLayoutZIndex(),
-        })
-    );
-    const syncedItem = upsertTileLayoutItem(tile, {
-        visible: item.visible,
-        positioned: true,
-        config: item.config,
-    });
-    applyTileLayoutItemToElement(tile, syncedItem, {
-        applyPosition: false,
-    });
-    setTileLayoutItemVisibility(tile.dataset.layoutItemId, item.visible);
-    tile.classList.toggle('is-layout-hidden', !item.visible);
-};
-
-const applyPageLayoutItemToPanel = (item) => {
-    const tile = getExistingLayoutComponentTile(item.type);
-
-    if (!tile) {
-        return;
-    }
-
-    const nextLayout = convertGridLayoutToPixels({
-        ...item.grid,
-        zIndex: item.z || getNextTileLayoutZIndex(),
-    });
-
-    applyTileLayout(tile, nextLayout);
-    const syncedItem = upsertTileLayoutItem(tile, {
-        layout: nextLayout,
-        visible: item.visible,
-        positioned: true,
-        config: item.config,
-    });
-    applyTileLayoutItemToElement(tile, syncedItem, {
-        applyPosition: false,
-    });
-    setTileLayoutItemVisibility(tile.dataset.layoutItemId, item.visible);
-    tile.classList.toggle('is-layout-hidden', !item.visible);
-};
-
-const initializeLayoutFromStorage = () => {
-    const initialItems = getInitialLayoutItems();
-
-    layoutStorageHydrating = true;
-    try {
-        initialItems.forEach((item) => {
-            if (PAGE_SINGLETON_TYPES.has(item.type)) {
-                const existing = getExistingLayoutComponentTile(item.type);
-                if (!existing) {
-                    addLayoutComponent(item.type);
-                } else {
-                    applyPageLayoutItemToPanel(item);
-                }
-                return;
-            }
-
-            applyStoredLayoutToExistingTile(item);
-        });
-    } finally {
-        layoutStorageHydrating = false;
-    }
-
-    renderLayoutComponentMenu();
-    updateMobileTileView();
-};
-
-function closeLayoutComponentMenu() {
-    layoutComponentMenuUI.closeMenu({
-        menu: layoutComponentMenu,
-        toggleButton: layoutAddComponentToggle,
-    });
-}
-
-function closeLayoutComponentConfig() {
-    const panel = document.querySelector('.layout-config-panel');
-    if (panel) {
-        panel.remove();
-    }
-}
-
-function renderLayoutComponentMenu() {
-    if (!layoutComponentMenu) {
-        return;
-    }
-
-    const items = CORE_PAGE_TYPES.map((type) => {
-        const tile = getExistingLayoutComponentTile(type);
-        const item = tile?.dataset.layoutItemId
-            ? getTileLayoutItem(tile.dataset.layoutItemId)
-            : null;
-        const exists = Boolean(tile);
-        const visible = exists && !tile.classList.contains('is-layout-hidden');
-
-        return {
-            disabled: Boolean(exists && visible && item?.visible !== false),
-            label: getPagePanelLabel(type),
-            statusText: visible ? '已显示' : exists ? '重新显示' : '添加',
-            type,
-        };
-    });
-
-    layoutComponentMenuUI.renderMenu({
-        items,
-        menu: layoutComponentMenu,
-        onSelect: (type) => {
-            addLayoutComponent(type);
-            closeLayoutComponentMenu();
-        },
-    });
-}
-
-const toggleLayoutComponentMenu = () => {
-    if (!layoutComponentMenu || !layoutEditMode) {
-        return;
-    }
-
-    renderLayoutComponentMenu();
-    layoutComponentMenuUI.toggleMenu({
-        menu: layoutComponentMenu,
-        toggleButton: layoutAddComponentToggle,
-    });
-};
+const renderLayoutComponentMenu = () =>
+    pageLayoutEditorRuntime?.renderComponentMenu();
 
 const getLayoutItemForTile = (tile) =>
     getTileLayoutItem(tile?.dataset.layoutItemId || tile?.dataset.layoutId);
@@ -2495,30 +2178,16 @@ const shouldIgnoreLayoutDragTarget = (target) =>
     );
 
 const findLayoutComponentToolbar = (tile) =>
-    layoutComponentActionsUI.findToolbar(tile);
+    pageLayoutEditorRuntime?.findComponentToolbar(tile);
 
-const positionLayoutComponentToolbar = (tile) => {
-    layoutComponentActionsUI.positionToolbar({
-        tile,
-        board: pageLayoutBoard || tile?.parentElement,
-    });
-};
+const positionLayoutComponentToolbar = (tile) =>
+    pageLayoutEditorRuntime?.positionComponentToolbar(tile);
 
-const setActiveLayoutToolbarTile = (tile) => {
-    activeLayoutToolbarTile = tile;
-    layoutComponentActionsUI.setActiveTile({
-        tile,
-        enabled: layoutEditMode,
-        onPosition: positionLayoutComponentToolbar,
-    });
-};
+const setActiveLayoutToolbarTile = (tile) =>
+    pageLayoutEditorRuntime?.setActiveToolbarTile(tile);
 
-const syncLayoutComponentToolbarState = (tile) => {
-    layoutComponentActionsUI.syncToolbarState({
-        tile,
-        freeMoveEnabled: isTileFreeMoveEnabled(tile),
-    });
-};
+const syncLayoutComponentToolbarState = (tile) =>
+    pageLayoutEditorRuntime?.syncComponentToolbarState(tile);
 
 const toggleTileFreeMove = (tile) => {
     const item = getLayoutItemForTile(tile);
@@ -2536,28 +2205,8 @@ const toggleTileFreeMove = (tile) => {
     positionLayoutComponentToolbar(tile);
 };
 
-const ensureLayoutComponentToolbar = (tile) => {
-    return layoutComponentActionsUI.ensureToolbar({
-        board: pageLayoutBoard,
-        tile,
-        freeMoveEnabled: isTileFreeMoveEnabled(tile),
-        onHide: hideLayoutComponent,
-        onToggleFreeMove: toggleTileFreeMove,
-        onActivate: setActiveLayoutToolbarTile,
-    });
-};
-
-const ensureLayoutComponentActions = () => {
-    getVideoTiles().forEach((tile) => {
-        const { actions } = ensureTileStructure(tile);
-        actions
-            .querySelectorAll(
-                '.layout-component-remove, .layout-component-settings'
-            )
-            .forEach((button) => button.remove());
-        ensureLayoutComponentToolbar(tile);
-    });
-};
+const ensureLayoutComponentActions = () =>
+    pageLayoutEditorRuntime?.ensureComponentActions();
 
 const createTileAvatarText = (displayName) =>
     videoTileStructureUI.createTileAvatarText(displayName);
@@ -2875,6 +2524,72 @@ const bindTileLayoutControls = (tile, header) => {
     });
 };
 
+pageLayoutComponentRuntime = layoutComponentRuntime.createComponentRuntime({
+    document,
+    logger: console,
+    localPeerType: LAYOUT_ITEM_TYPES.LOCAL_PEER,
+    getSingletonTypes: () => PAGE_SINGLETON_TYPES,
+    getCorePageTypes: () => CORE_PAGE_TYPES,
+    getDefaultLayoutItems,
+    getLayoutComponentId,
+    getTileLayoutId,
+    getSavedLayoutItemPreference,
+    getSavedLayoutItems: () => Array.from(savedLayoutItemsById.values()),
+    isLayoutStorageHydrating: () => layoutStorageHydrating,
+    setLayoutStorageHydrating: (hydrating) => {
+        layoutStorageHydrating = Boolean(hydrating);
+    },
+    getVideoTiles,
+    applyTileLayout,
+    convertGridLayoutToPixels,
+    getNextTileLayoutZIndex,
+    setTileLayoutItemVisibility,
+    bringTileLayoutToFront,
+    clearSavedLayout,
+    saveLayoutToStorage,
+    upsertTileLayoutItem,
+    applyTileLayoutItemToElement,
+    findLayoutComponentToolbar,
+    closePeerVolumePopover: () => closePeerVolumePopover(),
+    renderLayoutComponentMenu,
+    updateMobileTileView,
+});
+
+pageLayoutEditorRuntime = layoutEditorRuntime.createEditorRuntime({
+    document,
+    refs: {
+        mainLayout,
+    },
+    layoutToolbarUI,
+    layoutComponentMenuUI,
+    layoutComponentActionsUI,
+    initialEditMode: layoutEditMode,
+    getPageLayoutBoard: () => pageLayoutBoard,
+    getVideoTiles,
+    getCorePageTypes: () => CORE_PAGE_TYPES,
+    getExistingLayoutComponentTile,
+    getTileLayoutItem,
+    getPagePanelLabel,
+    onAddComponent: addLayoutComponent,
+    onHideComponent: hideLayoutComponent,
+    onToggleFreeMove: toggleTileFreeMove,
+    isTileFreeMoveEnabled,
+    ensureTileStructure,
+    syncLayoutGridMetadata,
+    onEditModeChange: (enabled) => {
+        layoutEditMode = enabled;
+    },
+    onEnterEditMode: () => {
+        closePeerVolumePopover();
+    },
+    onExitEditMode: () => {
+        hideSnapPreview();
+        resetLayoutResizeCursor();
+    },
+    onFinalizeLayoutEditing: finalizeLayoutEditing,
+    onApplyDefaultLayout: applyDefaultLayout,
+});
+
 pageLayoutRuntime = window.PageLayoutRuntime.createRuntime({
     document,
     logger: console,
@@ -2903,9 +2618,7 @@ pageLayoutRuntime = window.PageLayoutRuntime.createRuntime({
     syncLayoutEditModeUI,
     getVideoTiles,
     serializeLayoutItems,
-    setLayoutEditMode: (nextLayoutEditMode) => {
-        layoutEditMode = nextLayoutEditMode;
-    },
+    setLayoutEditMode,
     onBoardChange: (board) => {
         pageLayoutBoard = board;
     },
@@ -2919,15 +2632,7 @@ pageLayoutRuntime.bootstrapRecoveryToolbar();
 try {
     pageLayoutRuntime.bootstrap();
     pageLayoutBoard = pageLayoutRuntime.getBoard();
-    ensureLayoutEditModeToggle()?.addEventListener(
-        'click',
-        toggleLayoutEditMode
-    );
-    layoutAddComponentToggle?.addEventListener(
-        'click',
-        toggleLayoutComponentMenu
-    );
-    layoutResetDefaultButton?.addEventListener('click', resetDefaultLayout);
+    pageLayoutEditorRuntime.bindToolbarEvents();
     syncLayoutEditModeUI();
 } catch (err) {
     console.error('[page-layout] critical init failure', err);
@@ -3946,9 +3651,7 @@ window.addEventListener('resize', () => {
     updateMobileRoomState();
     updateMobileTileView();
     clampPositionedTileLayouts();
-    if (activeLayoutToolbarTile) {
-        positionLayoutComponentToolbar(activeLayoutToolbarTile);
-    }
+    pageLayoutEditorRuntime?.positionActiveToolbarTile();
 });
 
 updateChannelIndicators();
