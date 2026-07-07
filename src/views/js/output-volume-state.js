@@ -29,22 +29,18 @@
         writeJsonStorage(PEER_VOLUME_STORAGE_KEY, volumes);
     };
 
+    const getEffectiveOutputVolume = (outputVolume = 1, peerVolume = 1) =>
+        Math.min(1, clampVolume(outputVolume, 1) * clampVolume(peerVolume, 1));
+
     const getEffectiveVolume = ({
         muted = false,
         outputVolume = 1,
         peerVolume = 1,
-    } = {}) => {
-        if (muted) {
-            return 0;
-        }
-
-        return Math.min(
-            1,
-            clampVolume(outputVolume, 1) * clampVolume(peerVolume, 1)
-        );
-    };
+    } = {}) => (muted ? 0 : getEffectiveOutputVolume(outputVolume, peerVolume));
 
     global.VoiceOutputVolumeState = {
+        PEER_VOLUME_STORAGE_KEY,
+        getEffectiveOutputVolume,
         getEffectiveVolume,
         getPeerVolume,
         getPeerVolumes,

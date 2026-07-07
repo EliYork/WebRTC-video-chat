@@ -66,9 +66,9 @@ output-device settings or touch media tracks directly.
 `copy-link-ui.js` owns invite/copy button feedback, clipboard writes, icon/text
 state, and timers. It must not own room routing or socket state.
 
-`output-volume-state.js` owns remote peer volume storage, volume clamping, and
-effective output volume calculation. It must not write media element volume or
-muted state directly.
+`output-volume-state.js` owns the remote peer volume storage key, peer volume
+storage reads/writes, volume clamping, and effective output volume calculation.
+It must not write media element volume or muted state directly.
 
 `output-volume-ui.js` owns output volume control UI, selected output state
 display, and output menu rendering. It must not apply output settings to remote

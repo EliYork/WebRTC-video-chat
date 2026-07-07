@@ -111,22 +111,33 @@ const MODULE_SCRIPTS = [
         mustLoadBeforeMain: true,
         dependsOnViewUtils: true,
         forbiddenKeywords: [
+            'document',
+            'querySelector',
+            'mediaElement',
             'new Peer',
             'Peer(',
             'RTCPeerConnection',
+            'socket',
             'socket.emit',
             'socket.on',
+            'io(',
             'navigator.mediaDevices',
             'getUserMedia',
             'getDisplayMedia',
+            'AudioContext',
             'MediaStream',
             'mediaElement.volume',
             'mediaElement.muted',
             'applyOutputSettings',
             'applyOutputSettingsToRemoteMedia',
+            'saveLayoutToStorage',
             'addEventListener',
         ],
         requiredExports: [
+            [
+                /PEER_VOLUME_STORAGE_KEY/,
+                'output volume state must expose the peer volume storage key',
+            ],
             [
                 /getPeerVolumes/,
                 'output volume state must expose volume map read',
@@ -134,12 +145,24 @@ const MODULE_SCRIPTS = [
             [/getPeerVolume/, 'output volume state must expose per-peer read'],
             [/setPeerVolume/, 'output volume state must expose per-peer write'],
             [
+                /getEffectiveOutputVolume/,
+                'output volume state must expose output volume calculation',
+            ],
+            [
                 /getEffectiveVolume/,
                 'output volume state must expose effective volume calculation',
             ],
             [
                 /voice-room-peer-volumes-v1/,
                 'output volume state must preserve peer volume storage key',
+            ],
+            [
+                /Math\.min\(\s*1,\s*Math\.max\(0,\s*numericVolume\)\s*\)/,
+                'output volume state must preserve 0-1 volume clamping',
+            ],
+            [
+                /clampVolume\(outputVolume,\s*1\)\s*\*\s*clampVolume\(peerVolume,\s*1\)/,
+                'output volume state must preserve outputVolume * peerVolume effective volume',
             ],
         ],
     },

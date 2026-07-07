@@ -1013,21 +1013,18 @@ const applyOutputSettings = (mediaElement, isRemote) => {
     }
 
     if (isRemote && outputMuted) {
-        mediaElement.volume = outputVolumeState.getEffectiveVolume({
-            muted: true,
-            outputVolume,
-            peerVolume: getPeerVolume(
-                mediaElement.closest('.video-tile')?.dataset.peerId
-            ),
-        });
+        mediaElement.volume = outputVolumeState.getEffectiveOutputVolume(
+            0,
+            getPeerVolume(mediaElement.closest('.video-tile')?.dataset.peerId)
+        );
         mediaElement.muted = true;
     } else {
         const peerId = mediaElement.closest('.video-tile')?.dataset.peerId;
         const peerVolume = isRemote ? getPeerVolume(peerId) : 1;
-        mediaElement.volume = outputVolumeState.getEffectiveVolume({
+        mediaElement.volume = outputVolumeState.getEffectiveOutputVolume(
             outputVolume,
-            peerVolume,
-        });
+            peerVolume
+        );
         mediaElement.muted = !isRemote;
     }
 };
