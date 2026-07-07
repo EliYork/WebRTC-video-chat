@@ -495,6 +495,77 @@ const MODULE_SCRIPTS = [
         ],
     },
     {
+        path: '/js/page-layout-components.js',
+        sourcePath: '../src/views/js/page-layout-components.js',
+        namespace: 'PageLayoutComponents',
+        mustLoadBeforeMain: true,
+        dependsOnViewUtils: false,
+        forbiddenKeywords: [
+            'new Peer',
+            'Peer(',
+            'navigator.mediaDevices',
+            'getUserMedia',
+            'getDisplayMedia',
+            'AudioContext',
+            'socket',
+            'io(',
+            'localStorage',
+            'sessionStorage',
+            'saveLayoutToStorage',
+            'layoutItemsById',
+            'savedLayoutItemsById',
+            'addLayoutComponent',
+            'hideLayoutComponent',
+            'resetDefaultLayout',
+            'initializeLayoutFromStorage',
+            'applyPageLayoutItemToPanel',
+            'applyStoredLayoutToExistingTile',
+            'startTileResize',
+            'detectTileResizeDirection',
+            'setPointerCapture',
+            'releasePointerCapture',
+            'CHAT_INPUT',
+            'chatForm',
+            'chatInput',
+        ],
+        requiredExports: [
+            [
+                /getDefaultLayoutItems/,
+                'layout components must expose default layout items',
+            ],
+            [
+                /getLayoutComponentId/,
+                'layout components must expose component id mapping',
+            ],
+            [
+                /getLayoutComponentDisplayState/,
+                'layout components must expose component display state',
+            ],
+            [
+                /renderLayoutComponentTile/,
+                'layout components must expose component tile rendering',
+            ],
+            [
+                /SIDEBAR_PANEL[\s\S]*?grid:\s*\{\s*x:\s*0,\s*y:\s*0,\s*w:\s*5,\s*h:\s*18\s*\}/,
+                'default sidebarPanel layout must stay unchanged',
+            ],
+            [
+                /CHAT_PANEL[\s\S]*?grid:\s*\{\s*x:\s*26,\s*y:\s*0,\s*w:\s*6,\s*h:\s*18\s*\}/,
+                'default chatPanel layout must stay unchanged',
+            ],
+            [
+                /LOCAL_PEER[\s\S]*?grid:\s*\{\s*x:\s*13,\s*y:\s*7,\s*w:\s*5,\s*h:\s*4\s*\}/,
+                'default localPeer layout must stay unchanged',
+            ],
+            [/房间信息/, 'room component title must stay unchanged'],
+            [
+                /聊天组件已添加/,
+                'chat component fallback text must stay unchanged',
+            ],
+            [/我的语音/, 'local peer component title must stay unchanged'],
+        ],
+    },
+    {
         path: '/js/page-layout-toolbar-ui.js',
         sourcePath: '../src/views/js/page-layout-toolbar-ui.js',
         namespace: 'PageLayoutToolbarUI',
@@ -1071,6 +1142,7 @@ const script = readText('../src/views/script.js');
 const roomIndex = readText('../src/views/room/index.ejs');
 const pageLayoutStorage = getModuleSource('/js/page-layout-storage.js');
 const pageLayoutConfig = getModuleSource('/js/page-layout-config.js');
+const pageLayoutComponents = getModuleSource('/js/page-layout-components.js');
 const pageLayoutToolbarUi = getModuleSource('/js/page-layout-toolbar-ui.js');
 const pageLayoutRecoveryUi = getModuleSource('/js/page-layout-recovery-ui.js');
 const videoTileStructureUi = getModuleSource('/js/video-tile-structure-ui.js');
@@ -1222,6 +1294,10 @@ assertSourceContains(script, 'page layout base contract', [
         /const layoutConfig = window\.PageLayoutConfig/,
         'script must consume page layout config through PageLayoutConfig',
     ],
+    [
+        /const layoutComponents = window\.PageLayoutComponents/,
+        'script must consume page layout components through PageLayoutComponents',
+    ],
 ]);
 assertSourceContains(pageLayoutConfig, 'page layout config contract', [
     [
@@ -1249,12 +1325,12 @@ assertSourceDoesNotContain(pageLayoutConfig, 'page layout config contract', [
     [/STAGE_PANEL:\s*'stagePanel'/, 'stagePanel must not be a page component'],
 ]);
 
-const defaultsMatch = script.match(
+const defaultsMatch = pageLayoutComponents.match(
     /const getDefaultLayoutItems = \(\) => \[(?<body>[\s\S]*?)\];/
 );
 assert.ok(
     defaultsMatch,
-    'getDefaultLayoutItems should return a literal default layout'
+    'PageLayoutComponents.getDefaultLayoutItems should return a literal default layout'
 );
 const defaultBody = defaultsMatch.groups.body;
 

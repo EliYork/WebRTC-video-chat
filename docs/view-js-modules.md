@@ -25,20 +25,21 @@ module boundary changes.
 14. `/js/page-layout-component-actions-ui.js`
 15. `/js/page-layout-storage.js`
 16. `/js/page-layout-config.js`
-17. `/js/page-layout-toolbar-ui.js`
-18. `/js/page-layout-component-menu-ui.js`
-19. `/js/page-layout-recovery-ui.js`
-20. `/js/room-ui-state.js`
-21. `/js/mobile-room-state.js`
-22. `/js/presence-view-model.js`
-23. `/js/participants-list-ui.js`
-24. `/js/tile-status-ui.js`
-25. `/js/video-tile-structure-ui.js`
-26. `/js/chat-message-ui.js`
-27. `/js/chat-form-ui.js`
-28. `/js/channel-sidebar-ui.js`
-29. `/js/cursor-share-ui.js`
-30. `/script.js`
+17. `/js/page-layout-components.js`
+18. `/js/page-layout-toolbar-ui.js`
+19. `/js/page-layout-component-menu-ui.js`
+20. `/js/page-layout-recovery-ui.js`
+21. `/js/room-ui-state.js`
+22. `/js/mobile-room-state.js`
+23. `/js/presence-view-model.js`
+24. `/js/participants-list-ui.js`
+25. `/js/tile-status-ui.js`
+26. `/js/video-tile-structure-ui.js`
+27. `/js/chat-message-ui.js`
+28. `/js/chat-form-ui.js`
+29. `/js/channel-sidebar-ui.js`
+30. `/js/cursor-share-ui.js`
+31. `/script.js`
 
 Modules that use `window.VoiceViewUtils` must load after `view-utils.js` and
 before `/script.js`.
@@ -105,6 +106,12 @@ the contract.
 `page-layout-config.js` owns pure page-layout constants, default component
 configuration, default layout preferences, and normalization helpers. It must
 not read or write DOM, storage, socket, PeerJS, or media state.
+
+`page-layout-components.js` owns page-layout component default items, component
+id mapping, display-state mapping, and display-only DOM rendering for
+component tiles. It receives live state and callbacks from `script.js` and must
+not own storage hydration, add/hide/reset actions, drag/resize lifecycles,
+socket, PeerJS, or media flows.
 
 `page-layout-toolbar-ui.js` owns the layout edit toolbar DOM, edit/add/reset
 button visual state, save status text, and reset confirmation text. It must not
