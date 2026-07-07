@@ -80,7 +80,6 @@ const {
     PAGE_COMPONENT_TYPES,
     LAYOUT_ITEM_TYPES,
     LEGACY_LAYOUT_ITEM_TYPES,
-    REMOTE_PEER_LAYOUT_ID_PREFIX,
     AUTO_LAYOUT_GRID_SIZES,
     LAYOUT_PREFERENCE_DEFAULTS,
     getDefaultComponentConfig,
@@ -89,6 +88,7 @@ const {
     normalizeLayoutPreferences,
     getLayoutPreferenceValue,
 } = layoutConfig;
+const layoutIds = window.PageLayoutIds;
 const {
     getDefaultLayoutItems,
     getLayoutComponentId,
@@ -1807,107 +1807,31 @@ const getTileType = (tile, hasVideo, member) => {
     return hasVideo ? 'remote-video' : 'remote-audio';
 };
 
-const sanitizeLayoutIdPart = (value) =>
-    String(value || 'unknown').replace(/[^a-zA-Z0-9_-]/g, '-');
+const sanitizeLayoutIdPart = layoutIds.sanitizeLayoutIdPart;
 
 const getRemoteMemberForPeerId = (peerId) =>
     peerId ? presenceMembersByPeerId.get(peerId) || null : null;
 
-const getRemoteLayoutKey = (
-    peerId,
-    member = getRemoteMemberForPeerId(peerId)
-) => {
-    const roomKey = member?.roomId || joinedVoiceRoomId || 'room';
-    const displayName = member?.displayName || member?.senderName;
-    const candidates = [
-        ['member', member?.memberId],
-        ['user', member?.userId],
-        ['client', member?.clientId],
-        ['socket', member?.socketId],
-        ['name', displayName ? `${roomKey}:${displayName}` : null],
-        ['peer', peerId || member?.peerId],
-    ];
-    const candidate = candidates.find(([, value]) => {
-        if (value === undefined || value === null) {
-            return false;
-        }
-
-        return String(value).trim() !== '';
-    });
-
-    return sanitizeLayoutIdPart(
-        candidate ? `${candidate[0]}-${candidate[1]}` : 'unknown'
-    );
-};
-
 const getRemoteLayoutItemId = (
     peerId,
     member = getRemoteMemberForPeerId(peerId)
-) => `${REMOTE_PEER_LAYOUT_ID_PREFIX}${getRemoteLayoutKey(peerId, member)}`;
+) =>
+    layoutIds.getRemoteLayoutItemId(peerId, member, {
+        roomId: joinedVoiceRoomId,
+    });
 
-const getLegacyRemoteLayoutPeerId = (id) => {
-    const value = String(id || '');
-
-    if (value.startsWith(REMOTE_PEER_LAYOUT_ID_PREFIX)) {
-        return value.slice(REMOTE_PEER_LAYOUT_ID_PREFIX.length);
-    }
-
-    if (value.startsWith('remote-peer:')) {
-        return value.slice('remote-peer:'.length);
-    }
-
-    if (value.startsWith('peer:')) {
-        return value.slice('peer:'.length);
-    }
-
-    if (value.startsWith('peer-')) {
-        return value.slice('peer-'.length);
-    }
-
-    return null;
-};
+const getLegacyRemoteLayoutPeerId = layoutIds.getLegacyRemoteLayoutPeerId;
 
 const normalizeRemotePeerLayoutId = (id, peerId, member) => {
-    const resolvedPeerId =
-        peerId || member?.peerId || getLegacyRemoteLayoutPeerId(id);
-
-    if (
-        !resolvedPeerId &&
-        String(id || '').startsWith(REMOTE_PEER_LAYOUT_ID_PREFIX)
-    ) {
-        return `${REMOTE_PEER_LAYOUT_ID_PREFIX}${sanitizeLayoutIdPart(
-            String(id).slice(REMOTE_PEER_LAYOUT_ID_PREFIX.length)
-        )}`;
-    }
-
-    return resolvedPeerId ? getRemoteLayoutItemId(resolvedPeerId, member) : id;
+    return layoutIds.normalizeRemotePeerLayoutId(id, peerId, member, {
+        roomId: joinedVoiceRoomId,
+    });
 };
 
 const getRemoteLayoutAliasIds = (peerId, member, preferredId) => {
-    const aliases = new Set();
-    const resolvedPeerId = peerId || member?.peerId;
-    const sanitizedPeerId = resolvedPeerId
-        ? sanitizeLayoutIdPart(resolvedPeerId)
-        : null;
-
-    if (preferredId) {
-        aliases.add(preferredId);
-    }
-
-    if (resolvedPeerId || member) {
-        aliases.add(getRemoteLayoutItemId(resolvedPeerId, member));
-    }
-
-    if (sanitizedPeerId) {
-        aliases.add(`${REMOTE_PEER_LAYOUT_ID_PREFIX}peer-${sanitizedPeerId}`);
-        aliases.add(`${REMOTE_PEER_LAYOUT_ID_PREFIX}${sanitizedPeerId}`);
-        aliases.add(`remote-peer:${sanitizedPeerId}`);
-        aliases.add(`remote-peer:peer-${sanitizedPeerId}`);
-        aliases.add(`peer:${sanitizedPeerId}`);
-        aliases.add(`peer-${sanitizedPeerId}`);
-    }
-
-    return Array.from(aliases).filter(Boolean);
+    return layoutIds.getRemoteLayoutAliasIds(peerId, member, preferredId, {
+        roomId: joinedVoiceRoomId,
+    });
 };
 
 const getTileLayoutId = (tile, member) => {

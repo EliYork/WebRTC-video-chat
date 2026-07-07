@@ -495,6 +495,90 @@ const MODULE_SCRIPTS = [
         ],
     },
     {
+        path: '/js/page-layout-ids.js',
+        sourcePath: '../src/views/js/page-layout-ids.js',
+        namespace: 'PageLayoutIds',
+        mustLoadBeforeMain: true,
+        dependsOnViewUtils: false,
+        forbiddenKeywords: [
+            'document',
+            'window.localStorage',
+            'localStorage',
+            'sessionStorage',
+            'saveLayoutToStorage',
+            'new Peer',
+            'Peer(',
+            'socket',
+            'socket.emit',
+            'socket.on',
+            'io(',
+            'navigator.mediaDevices',
+            'getUserMedia',
+            'getDisplayMedia',
+            'AudioContext',
+            'layoutItemsById',
+            'savedLayoutItemsById',
+            'getRemoteMemberForPeerId',
+            'presenceMembersByPeerId',
+            'joinedVoiceRoomId',
+            'localPeerId',
+            'getTileLayoutId',
+            'getTileLayoutItemId',
+            'getLayoutItemTypeForTile',
+            'addLayoutComponent',
+            'hideLayoutComponent',
+            'resetDefaultLayout',
+            'initializeLayoutFromStorage',
+            'applyPageLayoutItemToPanel',
+            'renderLayoutComponentTile',
+            'startTileResize',
+            'detectTileResizeDirection',
+        ],
+        requiredExports: [
+            [
+                /sanitizeLayoutIdPart/,
+                'layout ids must expose id-part sanitizing',
+            ],
+            [/getRemoteLayoutKey/, 'layout ids must expose remote key helper'],
+            [
+                /getRemoteLayoutItemId/,
+                'layout ids must expose remote item id helper',
+            ],
+            [
+                /getLegacyRemoteLayoutPeerId/,
+                'layout ids must expose legacy remote id parsing',
+            ],
+            [
+                /normalizeRemotePeerLayoutId/,
+                'layout ids must expose remote id normalization',
+            ],
+            [
+                /getRemoteLayoutAliasIds/,
+                'layout ids must expose remote alias expansion',
+            ],
+            [
+                /replace\(\s*\/\[\^a-zA-Z0-9_-\]\//,
+                'layout ids must preserve sanitize replacement rules',
+            ],
+            [
+                /REMOTE_PEER_LAYOUT_ID_PREFIX/,
+                'layout ids must preserve remotePeer prefix semantics',
+            ],
+            [
+                /'remote-peer:'[\s\S]*'peer:'[\s\S]*'peer-'/,
+                'layout ids must preserve legacy remote alias prefixes',
+            ],
+            [
+                /REMOTE_PEER_LAYOUT_ID_PREFIX[\s\S]*peer-\$\{sanitizedPeerId\}/,
+                'layout ids must preserve remotePeer peer alias matching',
+            ],
+            [
+                /preferredId[\s\S]*aliases\.add\(preferredId\)/,
+                'layout ids must keep preferred saved remote id first',
+            ],
+        ],
+    },
+    {
         path: '/js/page-layout-components.js',
         sourcePath: '../src/views/js/page-layout-components.js',
         namespace: 'PageLayoutComponents',
@@ -1142,6 +1226,7 @@ const script = readText('../src/views/script.js');
 const roomIndex = readText('../src/views/room/index.ejs');
 const pageLayoutStorage = getModuleSource('/js/page-layout-storage.js');
 const pageLayoutConfig = getModuleSource('/js/page-layout-config.js');
+const pageLayoutIds = getModuleSource('/js/page-layout-ids.js');
 const pageLayoutComponents = getModuleSource('/js/page-layout-components.js');
 const pageLayoutToolbarUi = getModuleSource('/js/page-layout-toolbar-ui.js');
 const pageLayoutRecoveryUi = getModuleSource('/js/page-layout-recovery-ui.js');
@@ -1295,6 +1380,10 @@ assertSourceContains(script, 'page layout base contract', [
         'script must consume page layout config through PageLayoutConfig',
     ],
     [
+        /const layoutIds = window\.PageLayoutIds/,
+        'script must consume page layout ids through PageLayoutIds',
+    ],
+    [
         /const layoutComponents = window\.PageLayoutComponents/,
         'script must consume page layout components through PageLayoutComponents',
     ],
@@ -1323,6 +1412,16 @@ assertSourceDoesNotContain(script, 'page layout base contract', [
 ]);
 assertSourceDoesNotContain(pageLayoutConfig, 'page layout config contract', [
     [/STAGE_PANEL:\s*'stagePanel'/, 'stagePanel must not be a page component'],
+]);
+assertSourceContains(pageLayoutIds, 'page-layout-ids.js', [
+    [
+        /REMOTE_PEER_LAYOUT_ID_PREFIX/,
+        'page layout ids must consume the configured remote peer prefix',
+    ],
+    [
+        /'remote-peer:'[\s\S]*'peer:'[\s\S]*'peer-'/,
+        'page layout ids must preserve legacy remote alias parsing',
+    ],
 ]);
 
 const defaultsMatch = pageLayoutComponents.match(
