@@ -1981,6 +1981,16 @@ const shouldIgnoreLayoutDragTarget = (target) =>
         )
     );
 
+const isLayoutDragHandleTarget = (event, tile) => {
+    const handle = event.target?.closest?.('[data-drag-handle="true"]');
+
+    if (!handle || !tile?.contains?.(handle)) {
+        return false;
+    }
+
+    return handle.closest?.('.video-tile') === tile;
+};
+
 const findLayoutComponentToolbar = (tile) =>
     pageLayoutEditorRuntime?.findComponentToolbar(tile);
 
@@ -2139,6 +2149,7 @@ const isTilePointerDisabled = (event) =>
 const startTileDrag = (event, tile) => {
     if (
         isTilePointerDisabled(event) ||
+        !isLayoutDragHandleTarget(event, tile) ||
         !canDragLayoutItem(getLayoutItemForTile(tile))
     ) {
         return;
@@ -2272,11 +2283,12 @@ const bindTileLayoutControls = (tile, header) => {
         tile.addEventListener(
             'pointerdown',
             (event) => {
-                if (shouldIgnoreLayoutDragTarget(event.target)) {
-                    return;
-                }
-
-                const resizeDirection = detectTileResizeDirection(event, tile);
+                const shouldIgnoreTarget = shouldIgnoreLayoutDragTarget(
+                    event.target
+                );
+                const resizeDirection = shouldIgnoreTarget
+                    ? null
+                    : detectTileResizeDirection(event, tile);
 
                 if (resizeDirection) {
                     setActiveLayoutToolbarTile(tile);
@@ -2284,8 +2296,14 @@ const bindTileLayoutControls = (tile, header) => {
                     return;
                 }
 
-                if (canDragLayoutItem(getLayoutItemForTile(tile))) {
-                    setActiveLayoutToolbarTile(tile);
+                bringTileLayoutToFront(tile);
+                setActiveLayoutToolbarTile(tile);
+
+                if (
+                    !shouldIgnoreTarget &&
+                    isLayoutDragHandleTarget(event, tile) &&
+                    canDragLayoutItem(getLayoutItemForTile(tile))
+                ) {
                     startTileDrag(event, tile);
                 }
             },
@@ -2304,6 +2322,7 @@ const bindTileLayoutControls = (tile, header) => {
             'pointerdown',
             (event) =>
                 !shouldIgnoreLayoutDragTarget(event.target) &&
+                isLayoutDragHandleTarget(event, tile) &&
                 canDragLayoutItem(getLayoutItemForTile(tile)) &&
                 startTileDrag(event, tile)
         );
