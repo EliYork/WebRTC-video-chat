@@ -274,7 +274,10 @@ const MODULE_SCRIPTS = [
         forbiddenKeywords: [
             'Peer',
             'socket.emit',
+            'navigator.mediaDevices',
             'getUserMedia',
+            'getDisplayMedia',
+            'AudioContext',
             'replaceTrack',
             'requestAudioStream',
             'createAudioPipeline',
@@ -284,6 +287,52 @@ const MODULE_SCRIPTS = [
             'normalizeLoadedLayoutItems',
             'detectTileResizeDirection',
             'startTileResize',
+        ],
+        requiredExports: [
+            [
+                /getFullscreenElement/,
+                'fullscreen controls must expose fullscreen element lookup',
+            ],
+            [
+                /updateButtonStates/,
+                'fullscreen controls must expose button state sync',
+            ],
+            [
+                /attachTileButton/,
+                'fullscreen controls must expose tile button attachment',
+            ],
+            [
+                /bindFullscreenChange/,
+                'fullscreen controls must expose fullscreen change binding',
+            ],
+            [
+                /requestFullscreen/,
+                'fullscreen controls must preserve requestFullscreen support',
+            ],
+            [
+                /exitFullscreen/,
+                'fullscreen controls must preserve exitFullscreen support',
+            ],
+            [
+                /fullscreenchange/,
+                'fullscreen controls must listen for fullscreenchange',
+            ],
+            [
+                /fullscreenElement/,
+                'fullscreen controls must preserve fullscreenElement lookup',
+            ],
+            [
+                /button\.className = 'fullscreen-btn'/,
+                'fullscreen controls must preserve fullscreen button class',
+            ],
+            [
+                /const video = tile\?\.querySelector\('video'\)/,
+                'fullscreen controls must keep video lookup scoped to the tile',
+            ],
+            [
+                /tile\.ondblclick = toggle/,
+                'fullscreen controls must keep tile double-click as a thin toggle wrapper',
+            ],
         ],
     },
     {
@@ -295,7 +344,10 @@ const MODULE_SCRIPTS = [
         forbiddenKeywords: [
             'Peer',
             'socket.emit',
+            'navigator.mediaDevices',
             'getUserMedia',
+            'getDisplayMedia',
+            'AudioContext',
             'replaceTrack',
             'requestAudioStream',
             'createAudioPipeline',
@@ -303,6 +355,42 @@ const MODULE_SCRIPTS = [
             'setupCallStreamHandler',
             'setViewingRoom',
             'setVoiceTargetRoom',
+        ],
+        requiredExports: [
+            [/show/, 'voice join overlay UI must expose show'],
+            [/hide/, 'voice join overlay UI must expose hide'],
+            [
+                /voiceJoinOverlay/,
+                'voice join overlay UI must preserve overlay identity',
+            ],
+            [
+                /voice-join-overlay hidden/,
+                'voice join overlay UI must preserve hidden initial state',
+            ],
+            [
+                /voiceJoinConfirm/,
+                'voice join overlay UI must preserve confirm control',
+            ],
+            [
+                /voiceJoinCancel/,
+                'voice join overlay UI must preserve cancel control',
+            ],
+            [
+                /currentOptions\.onConfirm/,
+                'voice join overlay UI must invoke confirm callback',
+            ],
+            [
+                /currentOptions\.onCancel/,
+                'voice join overlay UI must invoke cancel callback',
+            ],
+            [
+                /setHidden\(getOverlay\(\), false\)/,
+                'voice join overlay UI must show the overlay through hidden state',
+            ],
+            [
+                /setHidden\(overlay\)/,
+                'voice join overlay UI must hide the overlay through hidden state',
+            ],
         ],
     },
     {
