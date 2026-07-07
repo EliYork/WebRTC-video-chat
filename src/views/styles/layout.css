@@ -244,9 +244,16 @@
 .page-tile-media-controls-panel #buttons {
     box-sizing: border-box;
     width: 100%;
-    min-height: 100%;
-    padding: 10px;
+    min-height: 0;
+    padding: 8px 10px;
     align-content: center;
+    align-items: center;
+    justify-content: center;
+}
+
+.page-tile-media-controls-panel #buttons.hidden {
+    display: grid !important;
+    opacity: 0.72;
 }
 
 .page-tile-chat-panel .chat-messages {

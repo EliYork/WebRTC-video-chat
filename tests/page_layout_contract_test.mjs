@@ -1781,8 +1781,8 @@ assert.match(
 
 assertSourceContains(script, 'page layout base contract', [
     [
-        /PAGE_LAYOUT_STORAGE_KEY_PREFIX\s*=\s*'voicePageLayout:v3'/,
-        'page layout must use the v3 storage key',
+        /PAGE_LAYOUT_STORAGE_KEY_PREFIX\s*=\s*'voicePageLayout:v4'/,
+        'page layout must use the v4 storage key',
     ],
     [
         /const layoutConfig = window\.PageLayoutConfig/,
@@ -1827,8 +1827,8 @@ assertSourceContains(pageLayoutConfig, 'page layout config contract', [
         'membersPanel must be presented as the room panel',
     ],
     [
-        /SIDEBAR_PANEL[\s\S]*?defaultVisible:\s*false[\s\S]*?MEDIA_CONTROLS_PANEL[\s\S]*?defaultVisible:\s*false/,
-        'sidebarPanel and mediaControlsPanel must start hidden by default',
+        /SIDEBAR_PANEL[\s\S]*?defaultVisible:\s*false[\s\S]*?MEDIA_CONTROLS_PANEL[\s\S]*?defaultLayout:\s*\{\s*x:\s*10,\s*y:\s*15,\s*w:\s*12,\s*h:\s*3\s*\}/,
+        'sidebarPanel must stay hidden while mediaControlsPanel defaults to a bottom toolbar layout',
     ],
     [
         /PANEL_REGISTRY[\s\S]*?canHide[\s\S]*?canCollapse[\s\S]*?canPin/,
@@ -1870,6 +1870,17 @@ assertSourceDoesNotContain(pageLayoutConfig, 'page layout config contract', [
         'PANEL_REGISTRY must not expose standalone roomInfoPanel',
     ],
 ]);
+const mediaControlsPanelConfigBody = getSourceBetween(
+    pageLayoutConfig,
+    /id:\s*PAGE_COMPONENT_TYPES\.MEDIA_CONTROLS_PANEL,/,
+    /\n\s*\},\n\s*\{\n\s*id:\s*PAGE_COMPONENT_TYPES\.CHAT_PANEL,/,
+    'mediaControlsPanel registry entry'
+);
+assert.doesNotMatch(
+    mediaControlsPanelConfigBody,
+    /defaultVisible:\s*false/,
+    'mediaControlsPanel must be visible in the default layout'
+);
 assertSourceContains(pageLayoutIds, 'page-layout-ids.js', [
     [
         /REMOTE_PEER_LAYOUT_ID_PREFIX/,
@@ -2022,6 +2033,10 @@ const v3StorageKey = storageApi.getLayoutStorageKey({
     prefix: 'voicePageLayout:v3',
     roomId: 'contract-room',
 });
+const v4StorageKey = storageApi.getLayoutStorageKey({
+    prefix: 'voicePageLayout:v4',
+    roomId: 'contract-room',
+});
 storageState.set(
     v2StorageKey,
     JSON.stringify({
@@ -2039,13 +2054,39 @@ storageState.set(
         ],
     })
 );
+storageState.set(
+    v3StorageKey,
+    JSON.stringify({
+        version: 1,
+        items: [
+            {
+                id: 'page-stagePanel',
+                type: 'stagePanel',
+                visible: true,
+                x: 0,
+                y: 0,
+                w: 12,
+                h: 8,
+            },
+            {
+                id: 'page-mediaControlsPanel',
+                type: 'mediaControlsPanel',
+                visible: false,
+                x: 0,
+                y: 14,
+                w: 6,
+                h: 4,
+            },
+        ],
+    })
+);
 assert.equal(
     storageApi.loadLayoutFromStorage({
-        storageKey: v3StorageKey,
+        storageKey: v4StorageKey,
         normalize: (payload) => payload.items,
     }).length,
     0,
-    'v3 layout loading must ignore old v2 payloads that contain stagePanel'
+    'v4 layout loading must ignore old v2/v3 payloads that contain retired or hidden panel state'
 );
 const normalizedLegacyPanelItems = storageApi.normalizeLoadedLayoutItems(
     {
@@ -2297,8 +2338,8 @@ assert.match(
 );
 assert.match(
     finalizeLayoutEditingBody,
-    /layoutSnapUtils\.snapAllLayoutItemsToGrid\([\s\S]*?hideSnapPreview\(\)[\s\S]*?saveLayoutToStorage\([\s\S]*?setLayoutEditMode\(false\)/,
-    'finalizing layout edit mode must snap all items, hide preview, save, and then leave edit mode'
+    /setLayoutEditMode\(false\)[\s\S]*?hideSnapPreview\(\)[\s\S]*?resetLayoutResizeCursor\(\)[\s\S]*?layoutSnapUtils\.snapAllLayoutItemsToGrid\([\s\S]*?saveLayoutToStorage\(/,
+    'finalizing layout edit mode must leave edit mode before snap/save cleanup so the UI responds immediately'
 );
 assert.match(
     script,
@@ -2544,13 +2585,28 @@ assert.match(
 );
 assert.match(
     pageLayoutToolbarUi,
+    /addComponentToggle\.hidden = true[\s\S]*?lockLayoutToggle\.hidden = true[\s\S]*?resetDefaultButton\.hidden = true[\s\S]*?saveStatus\.hidden = true/,
+    'toolbar must create secondary edit controls hidden in normal mode'
+);
+assert.match(
+    pageLayoutToolbarUi,
     /setButtonLabel\(editModeToggle,\s*editMode \? '完成' : '编辑'\)/,
     'edit toggle must switch between Edit and Done without keeping Edit Layout visible'
 );
 assert.match(
     pageLayoutToolbarUi,
+    /toolbar\.dataset\.editing = String\(editMode\)[\s\S]*?toolbar\.classList\.toggle\('is-layout-editing', editMode\)/,
+    'toolbar render must synchronize data-editing and editing class state'
+);
+assert.match(
+    pageLayoutToolbarUi,
     /addComponentToggle\.hidden = !editMode[\s\S]*?lockLayoutToggle\.hidden = !editMode[\s\S]*?resetDefaultButton\.hidden = !editMode/,
     'components, lock, and reset controls must only appear while editing'
+);
+assert.match(
+    pageLayoutEditorRuntime,
+    /toolbar:\s*toolbarRefs\.toolbar/,
+    'editor runtime must pass the toolbar node into state rendering'
 );
 assert.match(
     pageLayoutEditorRuntime,
@@ -2613,6 +2669,11 @@ assert.match(
     style,
     /\.page-layout-tile\.is-panel-collapsed[\s\S]*?\.tile-body[\s\S]*?display:\s*none/,
     'collapsed panels must hide content while preserving the shell header'
+);
+assert.match(
+    style,
+    /\.page-tile-media-controls-panel #buttons\.hidden[\s\S]*?display:\s*grid !important/,
+    'mediaControlsPanel must keep the real #buttons visible instead of rendering an empty shell'
 );
 assert.doesNotMatch(
     style,

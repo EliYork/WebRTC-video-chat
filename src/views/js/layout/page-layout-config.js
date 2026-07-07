@@ -38,10 +38,9 @@
         {
             id: PAGE_COMPONENT_TYPES.MEDIA_CONTROLS_PANEL,
             title: '媒体控制 Media',
-            defaultLayout: { x: 0, y: 14, w: 6, h: 4 },
-            defaultVisible: false,
-            minWidth: 280,
-            minHeight: 96,
+            defaultLayout: { x: 10, y: 15, w: 12, h: 3 },
+            minWidth: 360,
+            minHeight: 84,
             canDrag: true,
             canResize: true,
             canHide: true,

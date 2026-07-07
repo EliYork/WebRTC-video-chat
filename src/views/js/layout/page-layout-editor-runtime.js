@@ -159,6 +159,7 @@
                 pageLayoutBoard: options.getPageLayoutBoard(),
                 resetDefaultButton: toolbarRefs.resetDefaultButton,
                 saveStatus: toolbarRefs.saveStatus,
+                toolbar: toolbarRefs.toolbar,
             });
 
             options.getVideoTiles().forEach((tile) => {

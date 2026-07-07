@@ -127,7 +127,7 @@ const LAYOUT_MIN_GRID_H = 2;
 const PAGE_GRID_COLUMNS = 32;
 const PAGE_GRID_ROWS = 18;
 const PAGE_STORAGE_VERSION = 1;
-const PAGE_LAYOUT_STORAGE_KEY_PREFIX = 'voicePageLayout:v3';
+const PAGE_LAYOUT_STORAGE_KEY_PREFIX = 'voicePageLayout:v4';
 const PINNED_TILE_Z_INDEX_BASE = 10000;
 const PAGE_SINGLETON_TYPES = new Set(
     getPanelRegistry().map((panel) => panel.id)
@@ -1507,13 +1507,19 @@ const showSnapPreview = (tile, layout) => {
 const hideSnapPreview = () => layoutEditUI.hideSnapPreview();
 
 const finalizeLayoutEditing = () => {
-    layoutSnapUtils.snapAllLayoutItemsToGrid(
-        getTileLayoutItemsRegistry(),
-        getLayoutSnapContext()
-    );
-    hideSnapPreview();
-    saveLayoutToStorage('布局已吸附');
     setLayoutEditMode(false);
+    hideSnapPreview();
+    resetLayoutResizeCursor();
+
+    try {
+        layoutSnapUtils.snapAllLayoutItemsToGrid(
+            getTileLayoutItemsRegistry(),
+            getLayoutSnapContext()
+        );
+        saveLayoutToStorage('布局已吸附');
+    } catch (error) {
+        console.warn('[page-layout] finalize layout failed after exit', error);
+    }
 };
 
 const getLayoutStorageKey = () =>

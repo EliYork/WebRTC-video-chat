@@ -72,12 +72,16 @@
         secondaryActions.className = 'layout-edit-secondary-actions';
         editModeToggle.setAttribute('aria-pressed', 'false');
         addComponentToggle.setAttribute('aria-expanded', 'false');
+        addComponentToggle.hidden = true;
+        lockLayoutToggle.hidden = true;
+        resetDefaultButton.hidden = true;
         componentMenu.className = 'layout-component-menu';
         componentMenu.hidden = true;
         componentMenu.setAttribute('role', 'menu');
         componentMenu.setAttribute('aria-label', '添加布局组件');
         saveStatus.className = 'layout-save-status';
         saveStatus.textContent = '已保存';
+        saveStatus.hidden = true;
 
         primaryAction.append(editModeToggle);
         secondaryActions.append(
@@ -104,6 +108,7 @@
     const renderToolbarState = ({
         mainLayout,
         pageLayoutBoard,
+        toolbar,
         editMode = false,
         editModeToggle,
         addComponentToggle,
@@ -116,6 +121,11 @@
         mainLayout?.classList.toggle('is-layout-locked', layoutLocked);
         pageLayoutBoard?.classList.toggle('is-layout-editing', editMode);
         pageLayoutBoard?.classList.toggle('is-layout-locked', layoutLocked);
+
+        if (toolbar) {
+            toolbar.dataset.editing = String(editMode);
+            toolbar.classList.toggle('is-layout-editing', editMode);
+        }
 
         if (editModeToggle) {
             editModeToggle.setAttribute('aria-pressed', String(editMode));
