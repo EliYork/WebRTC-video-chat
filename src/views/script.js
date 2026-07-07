@@ -10,7 +10,6 @@ const {
     readJsonStorage,
     safeStorageGet,
     safeStorageSet,
-    setHidden,
     writeJsonStorage,
 } = window.VoiceViewUtils;
 
@@ -49,6 +48,7 @@ const controlPopoversUI = window.VoiceControlPopoversUI;
 const remoteVolumeUI = window.VoiceRemoteVolumeUI;
 const copyLinkUI = window.VoiceCopyLinkUI;
 const outputVolumeUI = window.VoiceOutputVolumeUI;
+const mediaControlsUI = window.VoiceMediaControlsUI;
 const fullscreenControls = window.VoiceFullscreenControls;
 const voiceJoinOverlayUI = window.VoiceJoinOverlayUI;
 const layoutEditUI = window.PageLayoutEditUI;
@@ -59,6 +59,7 @@ const presenceViewModel = window.VoicePresenceViewModel;
 const participantsListUI = window.VoiceParticipantsListUI;
 const tileStatusUI = window.VoiceTileStatusUI;
 const chatMessageUI = window.VoiceChatMessageUI;
+const chatFormUI = window.VoiceChatFormUI;
 const channelSidebarUI = window.VoiceChannelSidebarUI;
 const cursorShareUI = window.VoiceCursorShareUI;
 const {
@@ -309,13 +310,20 @@ viewingRoomId = ROOM_ID;
 selectedVoiceRoomId = ROOM_ID;
 
 const showCallControls = () => {
-    setHidden(callControls, false);
-    setHidden(destroyPeerBtn, false);
+    mediaControlsUI.renderCallControls({
+        refs: { controls: callControls, leaveButton: destroyPeerBtn },
+        visible: true,
+    });
+    mediaControlsUI.renderLeaveButtonState({
+        refs: { leaveButton: destroyPeerBtn },
+    });
 };
 
 const hideCallControls = () => {
-    setHidden(callControls);
-    setHidden(destroyPeerBtn);
+    mediaControlsUI.renderCallControls({
+        refs: { controls: callControls, leaveButton: destroyPeerBtn },
+        visible: false,
+    });
 };
 
 const isMobileLayout = () => window.innerWidth <= MOBILE_BREAKPOINT;
@@ -1571,6 +1579,30 @@ const joinChatRoom = (roomId = viewingRoomId) => {
     });
 };
 
+const getChatFormRefs = () => ({
+    form: chatForm,
+    input: chatInput,
+});
+
+const getPendingChatContent = () =>
+    chatFormUI.getMessageContent({
+        refs: getChatFormRefs(),
+        maxLength: CHAT_MESSAGE_MAX_LENGTH,
+    });
+
+const syncChatFormUI = () => {
+    const hasContent = Boolean(getPendingChatContent());
+
+    chatFormUI.renderInputState({
+        refs: getChatFormRefs(),
+        maxLength: CHAT_MESSAGE_MAX_LENGTH,
+    });
+    chatFormUI.renderSubmitState({
+        refs: getChatFormRefs(),
+        disabled: !hasContent,
+    });
+};
+
 const updatePresenceName = () => {
     emitLocalPresenceUpdate();
     updateLocalUserCard();
@@ -1616,9 +1648,10 @@ const setVoiceTargetRoom = (roomId) => {
 };
 
 const sendChatMessage = () => {
-    const content = chatInput?.value.trim().slice(0, CHAT_MESSAGE_MAX_LENGTH);
+    const content = getPendingChatContent();
 
     if (!content) {
+        syncChatFormUI();
         return;
     }
 
@@ -1630,7 +1663,8 @@ const sendChatMessage = () => {
         content,
     });
 
-    chatInput.value = '';
+    chatFormUI.resetForm({ refs: getChatFormRefs(), focus: true });
+    syncChatFormUI();
 };
 
 const clampCursorPosition = (position) =>
@@ -4633,15 +4667,11 @@ const setActiveVideoTrack = (peer, track) => {
 };
 
 const setCameraButtonState = (enabled) => {
-    const btn = document.getElementById('toggleVideo');
-    const icon = btn?.querySelector('i');
-    if (!icon) {
+    const rendered = mediaControlsUI.renderCameraButtonState({ enabled });
+
+    if (!rendered) {
         console.warn('toggleVideo button not found in DOM.');
-        return;
     }
-    icon.className = 'fas fa-video';
-    btn.classList.toggle('is-off', !enabled);
-    btn.setAttribute('aria-pressed', String(!enabled));
 };
 
 const toggleCamera = async (peer) => {
@@ -4769,28 +4799,18 @@ async function toggleScreenShare(peer, myVideoStream) {
 
 //muting my audio
 const setAudioButtonState = (enabled) => {
-    const btn = document.getElementById('toggleAudio');
-    const icon = btn?.querySelector('i');
-    if (!icon) {
+    const rendered = mediaControlsUI.renderMicButtonState({ enabled });
+
+    if (!rendered) {
         console.warn('toggleAudio button not found in DOM.');
-        return;
     }
-    icon.className = 'fas fa-microphone';
-    btn.classList.toggle('is-off', !enabled);
-    btn.setAttribute('aria-pressed', String(!enabled));
 };
 
 const setAudioButtonNoMic = () => {
-    const btn = document.getElementById('toggleAudio');
-    const icon = btn?.querySelector('i');
-
-    if (!icon) {
-        return;
-    }
-
-    icon.className = 'fas fa-microphone';
-    btn.classList.add('is-off');
-    btn.setAttribute('aria-pressed', 'true');
+    mediaControlsUI.renderMicButtonState({
+        enabled: false,
+        unavailable: true,
+    });
 };
 
 const toggleAudio = (myVideoStream) => {
@@ -5081,6 +5101,8 @@ chatInput?.addEventListener('keydown', (event) => {
     sendChatMessage();
 });
 
+chatInput?.addEventListener('input', syncChatFormUI);
+
 outputVolumeUI.init({
     getState: () => ({ muted: outputMuted, volume: outputVolume }),
     onToggleMuted: () => {
@@ -5169,6 +5191,7 @@ window.addEventListener('resize', () => {
 updateChannelIndicators();
 updateOutputButtonState();
 updateScreenShareButtonState();
+syncChatFormUI();
 syncNoiseSettingsUI();
 joinChatRoom(viewingRoomId);
 enablePageCursorSharing();
