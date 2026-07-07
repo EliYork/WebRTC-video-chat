@@ -7,10 +7,8 @@ const {
     createGuestName,
     formatTime,
     queryAll,
-    readJsonStorage,
     safeStorageGet,
     safeStorageSet,
-    writeJsonStorage,
 } = window.VoiceViewUtils;
 
 const videoGrid = byId('video-grid');
@@ -47,6 +45,7 @@ const noiseSettingsUI = window.VoiceNoiseSettingsUI;
 const controlPopoversUI = window.VoiceControlPopoversUI;
 const remoteVolumeUI = window.VoiceRemoteVolumeUI;
 const copyLinkUI = window.VoiceCopyLinkUI;
+const outputVolumeState = window.VoiceOutputVolumeState;
 const outputVolumeUI = window.VoiceOutputVolumeUI;
 const mediaControlsUI = window.VoiceMediaControlsUI;
 const fullscreenControls = window.VoiceFullscreenControls;
@@ -56,11 +55,13 @@ const layoutToolbarUI = window.PageLayoutToolbarUI;
 const layoutComponentMenuUI = window.PageLayoutComponentMenuUI;
 const layoutRecoveryUI = window.PageLayoutRecoveryUI;
 const layoutSnapUtils = window.PageLayoutSnapUtils;
+const layoutResizeUtils = window.PageLayoutResizeUtils;
 const layoutStorage = window.PageLayoutStorage;
 const roomUIState = window.VoiceRoomUIState;
 const presenceViewModel = window.VoicePresenceViewModel;
 const participantsListUI = window.VoiceParticipantsListUI;
 const tileStatusUI = window.VoiceTileStatusUI;
+const videoTileStructureUI = window.VoiceVideoTileStructureUI;
 const chatMessageUI = window.VoiceChatMessageUI;
 const chatFormUI = window.VoiceChatFormUI;
 const channelSidebarUI = window.VoiceChannelSidebarUI;
@@ -75,7 +76,6 @@ const remoteStreams = {};
 const getAudioConstraints = () => noiseSettingsUI.getAudioConstraints();
 
 const CHAT_NAME_STORAGE_KEY = 'webrtc-video-chat-name';
-const PEER_VOLUME_STORAGE_KEY = 'voice-room-peer-volumes-v1';
 const CHAT_MESSAGE_MAX_LENGTH = 500;
 const CURSOR_THROTTLE_MS = 40;
 const CURSOR_IDLE_MS = 700;
@@ -1107,23 +1107,10 @@ const updateLocalUserCard = () => {
     updateAllVideoTileStatus();
 };
 
-const getPeerVolumes = () => readJsonStorage(PEER_VOLUME_STORAGE_KEY, {}) || {};
+const getPeerVolume = (peerId) => outputVolumeState.getPeerVolume(peerId);
 
-const getPeerVolume = (peerId) => {
-    const value = Number(getPeerVolumes()[peerId]);
-
-    return Number.isFinite(value) && value >= 0 && value <= 1 ? value : 1;
-};
-
-const setPeerVolume = (peerId, volume) => {
-    if (!peerId) {
-        return;
-    }
-
-    const volumes = getPeerVolumes();
-    volumes[peerId] = Math.min(1, Math.max(0, Number(volume)));
-    writeJsonStorage(PEER_VOLUME_STORAGE_KEY, volumes);
-};
+const setPeerVolume = (peerId, volume) =>
+    outputVolumeState.setPeerVolume(peerId, volume);
 
 const applyOutputSettings = (mediaElement, isRemote) => {
     if (!mediaElement) {
@@ -1131,12 +1118,21 @@ const applyOutputSettings = (mediaElement, isRemote) => {
     }
 
     if (isRemote && outputMuted) {
-        mediaElement.volume = 0;
+        mediaElement.volume = outputVolumeState.getEffectiveVolume({
+            muted: true,
+            outputVolume,
+            peerVolume: getPeerVolume(
+                mediaElement.closest('.video-tile')?.dataset.peerId
+            ),
+        });
         mediaElement.muted = true;
     } else {
         const peerId = mediaElement.closest('.video-tile')?.dataset.peerId;
         const peerVolume = isRemote ? getPeerVolume(peerId) : 1;
-        mediaElement.volume = Math.min(1, outputVolume * peerVolume);
+        mediaElement.volume = outputVolumeState.getEffectiveVolume({
+            outputVolume,
+            peerVolume,
+        });
         mediaElement.muted = !isRemote;
     }
 };
@@ -3591,78 +3587,17 @@ const ensureLayoutComponentActions = () => {
 };
 
 const createTileAvatarText = (displayName) =>
-    String(displayName || 'Guest')
-        .trim()
-        .slice(0, 1)
-        .toUpperCase() || 'G';
+    videoTileStructureUI.createTileAvatarText(displayName);
 
 const ensureTileStructure = (tile) => {
-    let header = tile.querySelector('.tile-header');
-    let body = tile.querySelector('.tile-body');
-    let overlay = tile.querySelector('.tile-overlay');
-    let actions = tile.querySelector('.tile-actions');
-    let footer = tile.querySelector('.tile-footer');
-
-    if (!header) {
-        header = document.createElement('div');
-        header.className = 'tile-header';
-        header.setAttribute('data-drag-handle', 'true');
-
-        const avatar = document.createElement('div');
-        avatar.className = 'tile-avatar';
-
-        const title = document.createElement('div');
-        title.className = 'tile-title';
-
-        const badges = document.createElement('div');
-        badges.className = 'tile-badges';
-
-        header.append(avatar, title, badges);
-        tile.prepend(header);
-    }
-
-    if (!body) {
-        body = document.createElement('div');
-        body.className = 'tile-body';
-        tile.append(body);
-    }
-
-    if (!overlay) {
-        overlay = document.createElement('div');
-        overlay.className = 'tile-overlay';
-        tile.append(overlay);
-    }
-
-    if (!footer) {
-        footer = document.createElement('div');
-        footer.className = 'tile-footer';
-        tile.append(footer);
-    }
-
-    if (!actions) {
-        actions = document.createElement('div');
-        actions.className = 'tile-actions';
-        tile.append(actions);
-    }
-
-    TILE_RESIZE_DIRECTIONS.forEach((direction) => {
-        let resizeHandle = tile.querySelector(
-            `.tile-resize-handle[data-resize-direction="${direction}"]`
-        );
-
-        if (!resizeHandle) {
-            resizeHandle = document.createElement('div');
-            resizeHandle.className = `tile-resize-handle tile-resize-handle--${direction}`;
-            resizeHandle.dataset.resizeDirection = direction;
-            resizeHandle.setAttribute('aria-hidden', 'true');
-            tile.append(resizeHandle);
-        }
+    const structure = videoTileStructureUI.ensureTileStructure(tile, {
+        resizeDirections: TILE_RESIZE_DIRECTIONS,
     });
 
-    bindTileLayoutControls(tile, header);
+    bindTileLayoutControls(tile, structure.header);
     bindLayoutResizeBoardControls();
 
-    return { header, body, overlay, actions, footer };
+    return structure;
 };
 
 const detectTileResizeDirection = (event, tile) => {
@@ -3680,73 +3615,19 @@ const detectTileResizeDirection = (event, tile) => {
         return null;
     }
 
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
-    const withinHorizontalBand =
-        x >= -TILE_RESIZE_EDGE_OUTSET_PX &&
-        x <= rect.width + TILE_RESIZE_EDGE_OUTSET_PX;
-    const withinVerticalBand =
-        y >= -TILE_RESIZE_EDGE_OUTSET_PX &&
-        y <= rect.height + TILE_RESIZE_EDGE_OUTSET_PX;
-
-    if (!withinHorizontalBand || !withinVerticalBand) {
-        return null;
-    }
-
-    const nearLeftCorner =
-        x >= -TILE_RESIZE_EDGE_OUTSET_PX && x <= TILE_RESIZE_CORNER_SIZE_PX;
-    const nearRightCorner =
-        x >= rect.width - TILE_RESIZE_CORNER_SIZE_PX &&
-        x <= rect.width + TILE_RESIZE_EDGE_OUTSET_PX;
-    const nearTopCorner =
-        y >= -TILE_RESIZE_EDGE_OUTSET_PX && y <= TILE_RESIZE_CORNER_SIZE_PX;
-    const nearBottomCorner =
-        y >= rect.height - TILE_RESIZE_CORNER_SIZE_PX &&
-        y <= rect.height + TILE_RESIZE_EDGE_OUTSET_PX;
-    const nearLeftEdge =
-        x >= -TILE_RESIZE_EDGE_OUTSET_PX && x <= TILE_RESIZE_EDGE_INSET_PX;
-    const nearRightEdge =
-        x >= rect.width - TILE_RESIZE_EDGE_INSET_PX &&
-        x <= rect.width + TILE_RESIZE_EDGE_OUTSET_PX;
-    const nearTopEdge =
-        y >= -TILE_RESIZE_EDGE_OUTSET_PX && y <= TILE_RESIZE_EDGE_INSET_PX;
-    const nearBottomEdge =
-        y >= rect.height - TILE_RESIZE_EDGE_INSET_PX &&
-        y <= rect.height + TILE_RESIZE_EDGE_OUTSET_PX;
-
-    if (nearTopCorner && nearLeftCorner) {
-        return 'nw';
-    }
-
-    if (nearTopCorner && nearRightCorner) {
-        return 'ne';
-    }
-
-    if (nearBottomCorner && nearLeftCorner) {
-        return 'sw';
-    }
-
-    if (nearBottomCorner && nearRightCorner) {
-        return 'se';
-    }
-
-    if (nearTopEdge) {
-        return 'n';
-    }
-
-    if (nearRightEdge) {
-        return 'e';
-    }
-
-    if (nearBottomEdge) {
-        return 's';
-    }
-
-    if (nearLeftEdge) {
-        return 'w';
-    }
-
-    return null;
+    return layoutResizeUtils.detectTileResizeDirection({
+        cornerSizePx: TILE_RESIZE_CORNER_SIZE_PX,
+        edgeInsetPx: TILE_RESIZE_EDGE_INSET_PX,
+        edgeOutsetPx: TILE_RESIZE_EDGE_OUTSET_PX,
+        point: {
+            x: event.clientX - rect.left,
+            y: event.clientY - rect.top,
+        },
+        size: {
+            height: rect.height,
+            width: rect.width,
+        },
+    });
 };
 
 const resetLayoutResizeCursor = (board = pageLayoutBoard || videoGrid) =>
@@ -3884,38 +3765,17 @@ const startTileDrag = (event, tile) => {
 };
 
 const resolveTileResizeLayout = (startLayout, direction, deltaX, deltaY) => {
-    const bounds = getTileBounds();
-    const minW = PAGE_TILE_MIN_WIDTH;
-    const minH = PAGE_TILE_MIN_HEIGHT;
-    const next = { ...startLayout };
+    const nextLayout = layoutResizeUtils.resolveTileResizeLayout({
+        bounds: getTileBounds(),
+        deltaX,
+        deltaY,
+        direction,
+        minHeight: PAGE_TILE_MIN_HEIGHT,
+        minWidth: PAGE_TILE_MIN_WIDTH,
+        startLayout,
+    });
 
-    if (direction.includes('e')) {
-        next.width = Math.min(
-            Math.max(minW, startLayout.width + deltaX),
-            bounds.width - startLayout.x
-        );
-    }
-
-    if (direction.includes('s')) {
-        next.height = Math.min(
-            Math.max(minH, startLayout.height + deltaY),
-            bounds.height - startLayout.y
-        );
-    }
-
-    if (direction.includes('w')) {
-        const right = startLayout.x + startLayout.width;
-        next.x = Math.min(Math.max(0, startLayout.x + deltaX), right - minW);
-        next.width = right - next.x;
-    }
-
-    if (direction.includes('n')) {
-        const bottom = startLayout.y + startLayout.height;
-        next.y = Math.min(Math.max(0, startLayout.y + deltaY), bottom - minH);
-        next.height = bottom - next.y;
-    }
-
-    return clampTileLayout(next);
+    return clampTileLayout(nextLayout);
 };
 
 const startTileResize = (event, tile, direction = 'se') => {

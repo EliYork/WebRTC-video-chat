@@ -14,25 +14,28 @@ module boundary changes.
 3. `/js/control-popovers-ui.js`
 4. `/js/peer-volume-ui.js`
 5. `/js/copy-link-ui.js`
-6. `/js/output-volume-ui.js`
-7. `/js/media-controls-ui.js`
-8. `/js/fullscreen-controls.js`
-9. `/js/voice-join-overlay-ui.js`
-10. `/js/page-layout-snap-utils.js`
-11. `/js/page-layout-edit-ui.js`
-12. `/js/page-layout-storage.js`
-13. `/js/page-layout-toolbar-ui.js`
-14. `/js/page-layout-component-menu-ui.js`
-15. `/js/page-layout-recovery-ui.js`
-16. `/js/room-ui-state.js`
-17. `/js/presence-view-model.js`
-18. `/js/participants-list-ui.js`
-19. `/js/tile-status-ui.js`
-20. `/js/chat-message-ui.js`
-21. `/js/chat-form-ui.js`
-22. `/js/channel-sidebar-ui.js`
-23. `/js/cursor-share-ui.js`
-24. `/script.js`
+6. `/js/output-volume-state.js`
+7. `/js/output-volume-ui.js`
+8. `/js/media-controls-ui.js`
+9. `/js/fullscreen-controls.js`
+10. `/js/voice-join-overlay-ui.js`
+11. `/js/page-layout-snap-utils.js`
+12. `/js/page-layout-resize-utils.js`
+13. `/js/page-layout-edit-ui.js`
+14. `/js/page-layout-storage.js`
+15. `/js/page-layout-toolbar-ui.js`
+16. `/js/page-layout-component-menu-ui.js`
+17. `/js/page-layout-recovery-ui.js`
+18. `/js/room-ui-state.js`
+19. `/js/presence-view-model.js`
+20. `/js/participants-list-ui.js`
+21. `/js/tile-status-ui.js`
+22. `/js/video-tile-structure-ui.js`
+23. `/js/chat-message-ui.js`
+24. `/js/chat-form-ui.js`
+25. `/js/channel-sidebar-ui.js`
+26. `/js/cursor-share-ui.js`
+27. `/script.js`
 
 Modules that use `window.VoiceViewUtils` must load after `view-utils.js` and
 before `/script.js`.
@@ -57,6 +60,10 @@ output-device settings or touch media tracks directly.
 `copy-link-ui.js` owns invite/copy button feedback, clipboard writes, icon/text
 state, and timers. It must not own room routing or socket state.
 
+`output-volume-state.js` owns remote peer volume storage, volume clamping, and
+effective output volume calculation. It must not write media element volume or
+muted state directly.
+
 `output-volume-ui.js` owns output volume control UI, selected output state
 display, and output menu rendering. It must not apply output settings to remote
 media elements.
@@ -72,6 +79,10 @@ voice decisions.
 `page-layout-snap-utils.js` owns pure page-layout geometry helpers: snap,
 clamp, bounds, resize direction, and grid math. It must not bind pointer events
 or read/write storage.
+
+`page-layout-resize-utils.js` owns pure resize hit testing and resize layout
+math. It must not read DOM bounds, bind pointer events, write storage, or apply
+snap previews.
 
 `page-layout-edit-ui.js` owns visual editing helpers: snap preview, resize
 cursor state, hover classes, and floating toolbar DOM. It must not toggle edit
@@ -109,6 +120,10 @@ state.
 
 `tile-status-ui.js` owns tile status text, badges, placeholders, and CSS class
 sync. It must not attach streams or add/remove media tracks.
+
+`video-tile-structure-ui.js` owns video tile DOM structure creation: header,
+body, overlay, actions, footer, avatar text, and resize handle elements. It must
+not bind pointer events or read/write layout storage.
 
 `chat-message-ui.js` owns chat message DOM creation, history rendering, append
 behavior, and scroll-to-bottom UI sync. It must not own `chat:send`,

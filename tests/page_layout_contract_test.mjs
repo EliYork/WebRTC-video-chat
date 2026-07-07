@@ -27,6 +27,19 @@ const loadCssWithImports = (fileUrl, seen = new Set()) => {
 
 const readText = (path) => readFileSync(new URL(path, import.meta.url), 'utf8');
 
+const MEDIA_ORCHESTRATION_FORBIDDEN_KEYWORDS = [
+    'new Peer',
+    'Peer(',
+    'navigator.mediaDevices',
+    'getUserMedia',
+    'getDisplayMedia',
+    'AudioContext',
+    'AudioWorkletNode',
+    'socket.emit',
+    'joinRoom',
+    'presence:joinVoice',
+];
+
 const MODULE_SCRIPTS = [
     {
         path: '/js/view-utils.js',
@@ -89,6 +102,45 @@ const MODULE_SCRIPTS = [
             'createAudioPipeline',
             'joinVoiceChannel',
             'setupCallStreamHandler',
+        ],
+    },
+    {
+        path: '/js/output-volume-state.js',
+        sourcePath: '../src/views/js/output-volume-state.js',
+        namespace: 'VoiceOutputVolumeState',
+        mustLoadBeforeMain: true,
+        dependsOnViewUtils: true,
+        forbiddenKeywords: [
+            'new Peer',
+            'Peer(',
+            'RTCPeerConnection',
+            'socket.emit',
+            'socket.on',
+            'navigator.mediaDevices',
+            'getUserMedia',
+            'getDisplayMedia',
+            'MediaStream',
+            'mediaElement.volume',
+            'mediaElement.muted',
+            'applyOutputSettings',
+            'applyOutputSettingsToRemoteMedia',
+            'addEventListener',
+        ],
+        requiredExports: [
+            [
+                /getPeerVolumes/,
+                'output volume state must expose volume map read',
+            ],
+            [/getPeerVolume/, 'output volume state must expose per-peer read'],
+            [/setPeerVolume/, 'output volume state must expose per-peer write'],
+            [
+                /getEffectiveVolume/,
+                'output volume state must expose effective volume calculation',
+            ],
+            [
+                /voice-room-peer-volumes-v1/,
+                'output volume state must preserve peer volume storage key',
+            ],
         ],
     },
     {
@@ -208,6 +260,42 @@ const MODULE_SCRIPTS = [
             'localStorage',
             'addEventListener("pointer',
             "addEventListener('pointer",
+        ],
+    },
+    {
+        path: '/js/page-layout-resize-utils.js',
+        sourcePath: '../src/views/js/page-layout-resize-utils.js',
+        namespace: 'PageLayoutResizeUtils',
+        mustLoadBeforeMain: true,
+        dependsOnViewUtils: false,
+        forbiddenKeywords: [
+            'Peer',
+            'socket.emit',
+            'socket.on',
+            'navigator.mediaDevices',
+            'getUserMedia',
+            'getDisplayMedia',
+            'MediaStream',
+            'localStorage',
+            'saveLayoutToStorage',
+            'document',
+            'window.',
+            'addEventListener',
+            'setPointerCapture',
+            'releasePointerCapture',
+            'getBoundingClientRect',
+            'showSnapPreview',
+            'hideSnapPreview',
+        ],
+        requiredExports: [
+            [
+                /detectTileResizeDirection/,
+                'layout resize utils must expose resize hit testing',
+            ],
+            [
+                /resolveTileResizeLayout/,
+                'layout resize utils must expose resize layout calculation',
+            ],
         ],
     },
     {
@@ -550,6 +638,56 @@ const MODULE_SCRIPTS = [
         ],
     },
     {
+        path: '/js/video-tile-structure-ui.js',
+        sourcePath: '../src/views/js/video-tile-structure-ui.js',
+        namespace: 'VoiceVideoTileStructureUI',
+        mustLoadBeforeMain: true,
+        dependsOnViewUtils: false,
+        forbiddenKeywords: [
+            'Peer',
+            'socket.emit',
+            'socket.on',
+            'navigator.mediaDevices',
+            'getUserMedia',
+            'getDisplayMedia',
+            'MediaStream',
+            'localStorage',
+            'saveLayoutToStorage',
+            'loadLayoutFromStorage',
+            'startTileDrag',
+            'startTileResize',
+            'detectTileResizeDirection',
+            'bindTileLayoutControls',
+            'bindLayoutResizeBoardControls',
+            'addEventListener',
+            'pointerdown',
+            'pointermove',
+            'pointerup',
+        ],
+        requiredExports: [
+            [
+                /createTileAvatarText/,
+                'video tile structure UI must expose avatar text creation',
+            ],
+            [
+                /ensureTileStructure/,
+                'video tile structure UI must expose tile structure creation',
+            ],
+            [
+                /data-drag-handle/,
+                'video tile structure UI must preserve tile header drag handle',
+            ],
+            [
+                /tile-resize-handle/,
+                'video tile structure UI must preserve resize handle classes',
+            ],
+            [
+                /dataset\.resizeDirection/,
+                'video tile structure UI must preserve resize direction data',
+            ],
+        ],
+    },
+    {
         path: '/js/chat-message-ui.js',
         sourcePath: '../src/views/js/chat-message-ui.js',
         namespace: 'VoiceChatMessageUI',
@@ -737,6 +875,7 @@ const roomIndex = readText('../src/views/room/index.ejs');
 const pageLayoutStorage = getModuleSource('/js/page-layout-storage.js');
 const pageLayoutToolbarUi = getModuleSource('/js/page-layout-toolbar-ui.js');
 const pageLayoutRecoveryUi = getModuleSource('/js/page-layout-recovery-ui.js');
+const videoTileStructureUi = getModuleSource('/js/video-tile-structure-ui.js');
 const style = loadCssWithImports(
     new URL('../src/views/style.css', import.meta.url)
 );
@@ -857,6 +996,11 @@ const assertModuleScriptContracts = (moduleScripts) => {
                 ]);
             }
 
+            assertNoForbiddenKeywords(
+                source,
+                filename,
+                MEDIA_ORCHESTRATION_FORBIDDEN_KEYWORDS
+            );
             assertNoForbiddenKeywords(source, filename, forbiddenKeywords);
             assertSourceContains(source, filename, requiredExports);
         }
@@ -949,6 +1093,22 @@ assertSourceContains(script, 'script.js', [
         message: 'setupCallStreamHandler must stay in script.js',
     },
     {
+        pattern: /const bindPeerCallHandler = /,
+        message: 'bindPeerCallHandler must stay in script.js',
+    },
+    {
+        pattern: /const initiateAudio = async/,
+        message: 'initiateAudio must stay in script.js',
+    },
+    {
+        pattern: /const toggleCamera = async/,
+        message: 'toggleCamera must stay in script.js',
+    },
+    {
+        pattern: /async function toggleScreenShare/,
+        message: 'toggleScreenShare must stay in script.js',
+    },
+    {
         pattern: /const applyOutputSettings = /,
         message: 'applyOutputSettings must stay in script.js',
     },
@@ -1010,6 +1170,13 @@ assertSourceContains(script, 'page layout behavior contract', [
 ]);
 assertSourceContains(pageLayoutRecoveryUi, 'page-layout-recovery-ui.js', [
     [/bar\.hidden = true/, 'recovery toolbar must be hidden by default'],
+]);
+assertSourceContains(videoTileStructureUi, 'video-tile-structure-ui.js', [
+    [/header\.className = 'tile-header'/, 'tile headers must keep class name'],
+    [/body'.*?'tile-body'/, 'tile bodies must keep class name'],
+    [/overlay'.*?'tile-overlay'/, 'tile overlays must keep class name'],
+    [/footer'.*?'tile-footer'/, 'tile footers must keep class name'],
+    [/actions'.*?'tile-actions'/, 'tile actions must keep class name'],
 ]);
 assertSourceDoesNotContain(script, 'page layout behavior contract', [
     [
@@ -1194,8 +1361,13 @@ assert.match(
 );
 assert.match(
     script,
-    /detectTileResizeDirection/,
-    'resize must use tile-edge hit testing, not only tiny handle targets'
+    /const detectTileResizeDirection = [\s\S]*?layoutResizeUtils\.detectTileResizeDirection/,
+    'resize must use delegated tile-edge hit testing, not only tiny handle targets'
+);
+assert.match(
+    script,
+    /const resolveTileResizeLayout = [\s\S]*?layoutResizeUtils\.resolveTileResizeLayout[\s\S]*?clampTileLayout/,
+    'resize layout calculation must delegate pure math while preserving script clamp semantics'
 );
 assert.match(
     script,
