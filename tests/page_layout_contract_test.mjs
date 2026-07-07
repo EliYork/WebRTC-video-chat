@@ -579,6 +579,88 @@ const MODULE_SCRIPTS = [
         ],
     },
     {
+        path: '/js/page-layout-placement-utils.js',
+        sourcePath: '../src/views/js/page-layout-placement-utils.js',
+        namespace: 'PageLayoutPlacementUtils',
+        mustLoadBeforeMain: true,
+        dependsOnViewUtils: false,
+        forbiddenKeywords: [
+            'document',
+            'window.localStorage',
+            'localStorage',
+            'sessionStorage',
+            'saveLayoutToStorage',
+            'new Peer',
+            'Peer(',
+            'socket',
+            'socket.emit',
+            'socket.on',
+            'io(',
+            'navigator.mediaDevices',
+            'getUserMedia',
+            'getDisplayMedia',
+            'AudioContext',
+            'layoutItemsById',
+            'getOccupiedLayoutRects',
+            'getDefaultLayoutItems',
+            'getPreferredTileLayoutItem',
+            'getInitialTileLayoutForSync',
+            'applySavedTileLayout',
+            'addLayoutComponent',
+            'hideLayoutComponent',
+            'resetDefaultLayout',
+            'initializeLayoutFromStorage',
+            'applyPageLayoutItemToPanel',
+            'renderLayoutComponentTile',
+            'startTileResize',
+            'detectTileResizeDirection',
+        ],
+        requiredExports: [
+            [
+                /isAutoPlacedLayoutType/,
+                'placement utils must expose auto type checks',
+            ],
+            [
+                /getAutoLayoutGridSize/,
+                'placement utils must expose auto grid sizes',
+            ],
+            [
+                /isAbnormallyLargeAutoGrid/,
+                'placement utils must expose abnormal grid checks',
+            ],
+            [
+                /normalizeAutoLayoutGrid/,
+                'placement utils must expose auto grid normalization',
+            ],
+            [
+                /getFallbackTileLayoutForType/,
+                'placement utils must expose fallback layout selection',
+            ],
+            [
+                /isRectWithinGrid/,
+                'placement utils must expose grid bounds checking',
+            ],
+            [/rectOverlapArea/, 'placement utils must expose overlap scoring'],
+            [/scoreLayoutSlot/, 'placement utils must expose slot scoring'],
+            [
+                /findAvailableLayoutSlot/,
+                'placement utils must expose slot search',
+            ],
+            [
+                /Number\(grid\?\.w\)\s*>=\s*options\.columns\s*-\s*1[\s\S]*Number\(grid\?\.h\)\s*>=\s*options\.rows\s*-\s*1/,
+                'placement utils must preserve abnormal auto grid thresholds',
+            ],
+            [
+                /overlapArea\s*\*\s*1000\s*\+\s*distanceFromCenter\s*\*\s*10\s*\+\s*edgePenalty/,
+                'placement utils must preserve slot score weights',
+            ],
+            [
+                /for \(let y = 0; y <= options\.rows - size\.h; y \+= 1\)[\s\S]*for \(let x = 0; x <= options\.columns - size\.w; x \+= 1\)/,
+                'placement utils must preserve y-then-x slot search order',
+            ],
+        ],
+    },
+    {
         path: '/js/page-layout-components.js',
         sourcePath: '../src/views/js/page-layout-components.js',
         namespace: 'PageLayoutComponents',
@@ -1227,6 +1309,9 @@ const roomIndex = readText('../src/views/room/index.ejs');
 const pageLayoutStorage = getModuleSource('/js/page-layout-storage.js');
 const pageLayoutConfig = getModuleSource('/js/page-layout-config.js');
 const pageLayoutIds = getModuleSource('/js/page-layout-ids.js');
+const pageLayoutPlacementUtils = getModuleSource(
+    '/js/page-layout-placement-utils.js'
+);
 const pageLayoutComponents = getModuleSource('/js/page-layout-components.js');
 const pageLayoutToolbarUi = getModuleSource('/js/page-layout-toolbar-ui.js');
 const pageLayoutRecoveryUi = getModuleSource('/js/page-layout-recovery-ui.js');
@@ -1384,6 +1469,10 @@ assertSourceContains(script, 'page layout base contract', [
         'script must consume page layout ids through PageLayoutIds',
     ],
     [
+        /const layoutPlacementUtils = window\.PageLayoutPlacementUtils/,
+        'script must consume placement helpers through PageLayoutPlacementUtils',
+    ],
+    [
         /const layoutComponents = window\.PageLayoutComponents/,
         'script must consume page layout components through PageLayoutComponents',
     ],
@@ -1423,6 +1512,24 @@ assertSourceContains(pageLayoutIds, 'page-layout-ids.js', [
         'page layout ids must preserve legacy remote alias parsing',
     ],
 ]);
+assertSourceContains(
+    pageLayoutPlacementUtils,
+    'page-layout-placement-utils.js',
+    [
+        [
+            /const isAutoPlacedLayoutType = \(type, options = \{\}\) =>[\s\S]*Boolean\(getAutoLayoutGridSizes\(options\)\[type\]\)/,
+            'placement utils must keep auto placement driven by configured type sizes',
+        ],
+        [
+            /const getFallbackTileLayoutForType = \(type, layout = \{\}, options = \{\}\) => \{[\s\S]*layout\?\.grid[\s\S]*normalizeAutoLayoutGrid[\s\S]*Number\.isFinite\(Number\(layout\?\.width\)\)[\s\S]*getAutoLayoutGridSize/,
+            'placement utils must preserve fallback layout behavior',
+        ],
+        [
+            /const findAvailableLayoutSlot = [\s\S]*const occupiedRects = options\.occupiedRects \|\| \[\]/,
+            'placement utils must receive occupied rects from script.js',
+        ],
+    ]
+);
 
 const defaultsMatch = pageLayoutComponents.match(
     /const getDefaultLayoutItems = \(\) => \[(?<body>[\s\S]*?)\];/
@@ -1767,24 +1874,24 @@ assert.match(
     'auto placement must collect occupied layout rects'
 );
 assert.match(
-    script,
+    pageLayoutPlacementUtils,
     /const rectOverlapArea = /,
-    'auto placement must score overlap area'
+    'auto placement must score overlap area in placement utils'
 );
 assert.match(
     script,
-    /const isRectWithinGrid = /,
-    'auto placement must reject out-of-grid candidates'
+    /const isRectWithinGrid = [\s\S]*?layoutPlacementUtils\.isRectWithinGrid/,
+    'auto placement must delegate out-of-grid rejection'
 );
 assert.match(
-    script,
+    pageLayoutPlacementUtils,
     /const scoreLayoutSlot = /,
-    'auto placement must score candidate slots'
+    'auto placement must score candidate slots in placement utils'
 );
 assert.match(
     script,
-    /const findAvailableLayoutSlot = /,
-    'auto placement must have a shared findAvailableLayoutSlot helper'
+    /const findAvailableLayoutSlot = [\s\S]*?layoutPlacementUtils\.findAvailableLayoutSlot[\s\S]*?occupiedRects:\s*getOccupiedLayoutRects\(options\.excludeId\)/,
+    'auto placement must delegate slot search while script supplies occupied rects'
 );
 assert.match(
     script,

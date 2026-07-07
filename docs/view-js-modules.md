@@ -26,21 +26,22 @@ module boundary changes.
 15. `/js/page-layout-storage.js`
 16. `/js/page-layout-config.js`
 17. `/js/page-layout-ids.js`
-18. `/js/page-layout-components.js`
-19. `/js/page-layout-toolbar-ui.js`
-20. `/js/page-layout-component-menu-ui.js`
-21. `/js/page-layout-recovery-ui.js`
-22. `/js/room-ui-state.js`
-23. `/js/mobile-room-state.js`
-24. `/js/presence-view-model.js`
-25. `/js/participants-list-ui.js`
-26. `/js/tile-status-ui.js`
-27. `/js/video-tile-structure-ui.js`
-28. `/js/chat-message-ui.js`
-29. `/js/chat-form-ui.js`
-30. `/js/channel-sidebar-ui.js`
-31. `/js/cursor-share-ui.js`
-32. `/script.js`
+18. `/js/page-layout-placement-utils.js`
+19. `/js/page-layout-components.js`
+20. `/js/page-layout-toolbar-ui.js`
+21. `/js/page-layout-component-menu-ui.js`
+22. `/js/page-layout-recovery-ui.js`
+23. `/js/room-ui-state.js`
+24. `/js/mobile-room-state.js`
+25. `/js/presence-view-model.js`
+26. `/js/participants-list-ui.js`
+27. `/js/tile-status-ui.js`
+28. `/js/video-tile-structure-ui.js`
+29. `/js/chat-message-ui.js`
+30. `/js/chat-form-ui.js`
+31. `/js/channel-sidebar-ui.js`
+32. `/js/cursor-share-ui.js`
+33. `/script.js`
 
 Modules that use `window.VoiceViewUtils` must load after `view-utils.js` and
 before `/script.js`.
@@ -113,6 +114,13 @@ remote layout keys, remote item ids, legacy remote aliases, remote id
 normalization, and alias list expansion. It receives room, member, and peer
 state from `script.js` and must not read DOM, storage, sockets, PeerJS, or media
 state.
+
+`page-layout-placement-utils.js` owns pure page-layout auto-placement
+calculation: auto-placed type checks, default grid sizes, abnormal auto-grid
+normalization, fallback layouts, grid bounds, overlap scoring, slot scoring,
+and first-best available slot search. It receives grid constants, clamp/convert
+helpers, and occupied rects from `script.js`; it must not inspect DOM, storage,
+sockets, PeerJS, or media state.
 
 `page-layout-components.js` owns page-layout component default items, component
 id mapping, display-state mapping, and display-only DOM rendering for

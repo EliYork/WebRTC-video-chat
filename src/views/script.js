@@ -60,6 +60,7 @@ const layoutResizeUtils = window.PageLayoutResizeUtils;
 const layoutStorage = window.PageLayoutStorage;
 const layoutConfig = window.PageLayoutConfig;
 const layoutComponents = window.PageLayoutComponents;
+const layoutPlacementUtils = window.PageLayoutPlacementUtils;
 const roomUIState = window.VoiceRoomUIState;
 const mobileRoomState = window.VoiceMobileRoomState;
 const presenceViewModel = window.VoicePresenceViewModel;
@@ -1960,118 +1961,47 @@ const convertTileLayoutToGrid = (layout) =>
 const convertGridLayoutToPixels = (layout) =>
     layoutSnapUtils.convertGridLayoutToPixels(layout, getLayoutSnapContext());
 
-const isAutoPlacedLayoutType = (type) => Boolean(AUTO_LAYOUT_GRID_SIZES[type]);
+const getLayoutPlacementContext = () => ({
+    autoLayoutGridSizes: AUTO_LAYOUT_GRID_SIZES,
+    columns: PAGE_GRID_COLUMNS,
+    rows: PAGE_GRID_ROWS,
+    minGridW: LAYOUT_MIN_GRID_W,
+    minGridH: LAYOUT_MIN_GRID_H,
+    clampGridLayout,
+    convertTileLayoutToGrid,
+});
+
+const isAutoPlacedLayoutType = (type) =>
+    layoutPlacementUtils.isAutoPlacedLayoutType(
+        type,
+        getLayoutPlacementContext()
+    );
 
 const normalizeLayoutItemType = (type) =>
     LEGACY_LAYOUT_ITEM_TYPES[type] || type;
 
 const getAutoLayoutGridSize = (type) =>
-    clampGridLayout({
-        x: 0,
-        y: 0,
-        ...(AUTO_LAYOUT_GRID_SIZES[type] || {
-            w: LAYOUT_MIN_GRID_W,
-            h: LAYOUT_MIN_GRID_H,
-        }),
-    });
+    layoutPlacementUtils.getAutoLayoutGridSize(
+        type,
+        getLayoutPlacementContext()
+    );
 
-const isAbnormallyLargeAutoGrid = (type, grid) =>
-    isAutoPlacedLayoutType(type) &&
-    (Number(grid?.w) >= PAGE_GRID_COLUMNS - 1 ||
-        Number(grid?.h) >= PAGE_GRID_ROWS - 1);
+const normalizeAutoLayoutGrid = (type, grid = {}) =>
+    layoutPlacementUtils.normalizeAutoLayoutGrid(
+        type,
+        grid,
+        getLayoutPlacementContext()
+    );
 
-const normalizeAutoLayoutGrid = (type, grid = {}) => {
-    if (!isAutoPlacedLayoutType(type)) {
-        return clampGridLayout(grid);
-    }
-
-    const defaultSize = getAutoLayoutGridSize(type);
-    const width = Number(grid.w);
-    const height = Number(grid.h);
-    const hasUsableSize =
-        Number.isFinite(width) &&
-        Number.isFinite(height) &&
-        width > 0 &&
-        height > 0 &&
-        !isAbnormallyLargeAutoGrid(type, { w: width, h: height });
-
-    return clampGridLayout({
-        x: grid.x,
-        y: grid.y,
-        w: hasUsableSize ? width : defaultSize.w,
-        h: hasUsableSize ? height : defaultSize.h,
-    });
-};
-
-const getFallbackTileLayoutForType = (type, layout = {}) => {
-    if (layout?.grid && isAutoPlacedLayoutType(type)) {
-        return {
-            grid: normalizeAutoLayoutGrid(type, layout.grid),
-            zIndex: layout.zIndex,
-        };
-    }
-
-    if (
-        isAutoPlacedLayoutType(type) &&
-        Number.isFinite(Number(layout?.width)) &&
-        Number.isFinite(Number(layout?.height))
-    ) {
-        const grid = convertTileLayoutToGrid(layout);
-        if (isAbnormallyLargeAutoGrid(type, grid)) {
-            return {
-                grid: {
-                    ...grid,
-                    w: getAutoLayoutGridSize(type).w,
-                    h: getAutoLayoutGridSize(type).h,
-                },
-                zIndex: layout.zIndex,
-            };
-        }
-    }
-
-    if (
-        layout?.grid ||
-        Number.isFinite(Number(layout?.width)) ||
-        Number.isFinite(Number(layout?.height))
-    ) {
-        return layout;
-    }
-
-    if (!isAutoPlacedLayoutType(type)) {
-        return layout;
-    }
-
-    return {
-        grid: getAutoLayoutGridSize(type),
-        zIndex: layout?.zIndex,
-    };
-};
+const getFallbackTileLayoutForType = (type, layout = {}) =>
+    layoutPlacementUtils.getFallbackTileLayoutForType(
+        type,
+        layout,
+        getLayoutPlacementContext()
+    );
 
 const isRectWithinGrid = (rect) =>
-    rect &&
-    rect.x >= 0 &&
-    rect.y >= 0 &&
-    rect.w > 0 &&
-    rect.h > 0 &&
-    rect.x + rect.w <= PAGE_GRID_COLUMNS &&
-    rect.y + rect.h <= PAGE_GRID_ROWS;
-
-const rectOverlapArea = (a, b) => {
-    if (!a || !b) {
-        return 0;
-    }
-
-    const overlapW = Math.max(
-        0,
-        Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)
-    );
-    const overlapH = Math.max(
-        0,
-        Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y)
-    );
-
-    return overlapW * overlapH;
-};
+    layoutPlacementUtils.isRectWithinGrid(rect, getLayoutPlacementContext());
 
 const getOccupiedLayoutRects = (excludeId) => {
     const rects = [];
@@ -2094,55 +2024,12 @@ const getOccupiedLayoutRects = (excludeId) => {
     return rects;
 };
 
-const scoreLayoutSlot = (rect, occupiedRects, options = {}) => {
-    const centerX = options.centerX ?? PAGE_GRID_COLUMNS / 2;
-    const centerY = options.centerY ?? PAGE_GRID_ROWS / 2;
-    const rectCenterX = rect.x + rect.w / 2;
-    const rectCenterY = rect.y + rect.h / 2;
-    const overlapArea = occupiedRects.reduce(
-        (total, occupied) => total + rectOverlapArea(rect, occupied),
-        0
-    );
-    const distanceFromCenter =
-        Math.abs(rectCenterX - centerX) + Math.abs(rectCenterY - centerY);
-    const edgePenalty =
-        (rect.x === 0 ? 2 : 0) +
-        (rect.y === 0 ? 1 : 0) +
-        (rect.x + rect.w === PAGE_GRID_COLUMNS ? 2 : 0) +
-        (rect.y + rect.h === PAGE_GRID_ROWS ? 1 : 0);
-
-    return overlapArea * 1000 + distanceFromCenter * 10 + edgePenalty;
-};
-
-const findAvailableLayoutSlot = (type, preferredSize, options = {}) => {
-    const size = clampGridLayout({
-        x: 0,
-        y: 0,
-        ...(preferredSize || getAutoLayoutGridSize(type)),
+const findAvailableLayoutSlot = (type, preferredSize, options = {}) =>
+    layoutPlacementUtils.findAvailableLayoutSlot(type, preferredSize, {
+        ...getLayoutPlacementContext(),
+        ...options,
+        occupiedRects: getOccupiedLayoutRects(options.excludeId),
     });
-    const occupiedRects = getOccupiedLayoutRects(options.excludeId);
-    let bestSlot = null;
-    let bestScore = Number.POSITIVE_INFINITY;
-
-    for (let y = 0; y <= PAGE_GRID_ROWS - size.h; y += 1) {
-        for (let x = 0; x <= PAGE_GRID_COLUMNS - size.w; x += 1) {
-            const candidate = { x, y, w: size.w, h: size.h };
-
-            if (!isRectWithinGrid(candidate)) {
-                continue;
-            }
-
-            const score = scoreLayoutSlot(candidate, occupiedRects, options);
-
-            if (score < bestScore) {
-                bestScore = score;
-                bestSlot = candidate;
-            }
-        }
-    }
-
-    return bestSlot || clampGridLayout({ x: 0, y: 0, w: size.w, h: size.h });
-};
 
 const findTileForLayoutItem = (item) =>
     item?.elementId
