@@ -25,82 +25,614 @@ const loadCssWithImports = (fileUrl, seen = new Set()) => {
     });
 };
 
-const script = readFileSync(
-    new URL('../src/views/script.js', import.meta.url),
-    'utf8'
+const readText = (path) => readFileSync(new URL(path, import.meta.url), 'utf8');
+
+const MODULE_SCRIPTS = [
+    {
+        path: '/js/view-utils.js',
+        sourcePath: '../src/views/js/view-utils.js',
+        namespace: 'VoiceViewUtils',
+        mustLoadBeforeMain: true,
+        dependsOnViewUtils: false,
+    },
+    {
+        path: '/js/noise-settings-ui.js',
+        sourcePath: '../src/views/js/noise-settings-ui.js',
+        namespace: 'VoiceNoiseSettingsUI',
+        mustLoadBeforeMain: true,
+        dependsOnViewUtils: true,
+    },
+    {
+        path: '/js/control-popovers-ui.js',
+        sourcePath: '../src/views/js/control-popovers-ui.js',
+        namespace: 'VoiceControlPopoversUI',
+        mustLoadBeforeMain: true,
+        dependsOnViewUtils: true,
+        forbiddenKeywords: [
+            'getUserMedia',
+            'Peer',
+            'socket.emit',
+            'replaceTrack',
+            'requestAudioStream',
+            'createAudioPipeline',
+        ],
+    },
+    {
+        path: '/js/peer-volume-ui.js',
+        sourcePath: '../src/views/js/peer-volume-ui.js',
+        namespace: 'VoiceRemoteVolumeUI',
+        mustLoadBeforeMain: true,
+        dependsOnViewUtils: true,
+        forbiddenKeywords: [
+            'getUserMedia',
+            'Peer',
+            'socket.emit',
+            'replaceTrack',
+            'requestAudioStream',
+            'createAudioPipeline',
+            'joinVoiceChannel',
+            'setupCallStreamHandler',
+        ],
+    },
+    {
+        path: '/js/copy-link-ui.js',
+        sourcePath: '../src/views/js/copy-link-ui.js',
+        namespace: 'VoiceCopyLinkUI',
+        mustLoadBeforeMain: true,
+        dependsOnViewUtils: true,
+        forbiddenKeywords: [
+            'Peer',
+            'socket.emit',
+            'getUserMedia',
+            'replaceTrack',
+            'requestAudioStream',
+            'createAudioPipeline',
+            'joinVoiceChannel',
+            'setupCallStreamHandler',
+        ],
+    },
+    {
+        path: '/js/output-volume-ui.js',
+        sourcePath: '../src/views/js/output-volume-ui.js',
+        namespace: 'VoiceOutputVolumeUI',
+        mustLoadBeforeMain: true,
+        dependsOnViewUtils: true,
+        forbiddenKeywords: [
+            'Peer',
+            'socket.emit',
+            'getUserMedia',
+            'replaceTrack',
+            'requestAudioStream',
+            'createAudioPipeline',
+            'joinVoiceChannel',
+            'setupCallStreamHandler',
+            'applyOutputSettingsToRemoteMedia',
+        ],
+    },
+    {
+        path: '/js/media-controls-ui.js',
+        sourcePath: '../src/views/js/media-controls-ui.js',
+        namespace: 'VoiceMediaControlsUI',
+        mustLoadBeforeMain: true,
+        dependsOnViewUtils: true,
+        forbiddenKeywords: [
+            'Peer',
+            'socket.emit',
+            'socket.on',
+            'getUserMedia',
+            'replaceTrack',
+            'requestAudioStream',
+            'createAudioPipeline',
+            'joinVoiceChannel',
+            'setupCallStreamHandler',
+            'enumerateDevices',
+            'applyOutputSettingsToRemoteMedia',
+            'addTrack',
+            'removeTrack',
+        ],
+        requiredExports: [
+            [
+                /renderCallControls/,
+                'media controls UI must expose control visibility rendering',
+            ],
+            [
+                /renderMicButtonState/,
+                'media controls UI must expose mic button rendering',
+            ],
+            [
+                /renderCameraButtonState/,
+                'media controls UI must expose camera button rendering',
+            ],
+            [
+                /renderLeaveButtonState/,
+                'media controls UI must expose leave button rendering',
+            ],
+        ],
+    },
+    {
+        path: '/js/fullscreen-controls.js',
+        sourcePath: '../src/views/js/fullscreen-controls.js',
+        namespace: 'VoiceFullscreenControls',
+        mustLoadBeforeMain: true,
+        dependsOnViewUtils: true,
+        forbiddenKeywords: [
+            'Peer',
+            'socket.emit',
+            'getUserMedia',
+            'replaceTrack',
+            'requestAudioStream',
+            'createAudioPipeline',
+            'joinVoiceChannel',
+            'setupCallStreamHandler',
+            'saveLayoutToStorage',
+            'normalizeLoadedLayoutItems',
+            'detectTileResizeDirection',
+            'startTileResize',
+        ],
+    },
+    {
+        path: '/js/voice-join-overlay-ui.js',
+        sourcePath: '../src/views/js/voice-join-overlay-ui.js',
+        namespace: 'VoiceJoinOverlayUI',
+        mustLoadBeforeMain: true,
+        dependsOnViewUtils: true,
+        forbiddenKeywords: [
+            'Peer',
+            'socket.emit',
+            'getUserMedia',
+            'replaceTrack',
+            'requestAudioStream',
+            'createAudioPipeline',
+            'joinVoiceChannel',
+            'setupCallStreamHandler',
+            'setViewingRoom',
+            'setVoiceTargetRoom',
+        ],
+    },
+    {
+        path: '/js/page-layout-snap-utils.js',
+        sourcePath: '../src/views/js/page-layout-snap-utils.js',
+        namespace: 'PageLayoutSnapUtils',
+        mustLoadBeforeMain: true,
+        dependsOnViewUtils: false,
+        forbiddenKeywords: [
+            'function toggleLayoutEditMode',
+            'function setLayoutEditMode',
+            'function syncLayoutEditModeUI',
+            'function finalizeLayoutEditing',
+            'function finishTileLayoutInteraction',
+            'function finalizeLayoutItemDrag',
+            'saveLayout',
+            'loadLayout',
+            'persist',
+            'localStorage',
+            'addEventListener("pointer',
+            "addEventListener('pointer",
+        ],
+    },
+    {
+        path: '/js/page-layout-edit-ui.js',
+        sourcePath: '../src/views/js/page-layout-edit-ui.js',
+        namespace: 'PageLayoutEditUI',
+        mustLoadBeforeMain: true,
+        dependsOnViewUtils: false,
+        forbiddenKeywords: [
+            'function toggleLayoutEditMode',
+            'function setLayoutEditMode',
+            'function syncLayoutEditModeUI',
+            'function finalizeLayoutEditing',
+            'function finishTileLayoutInteraction',
+            'function finalizeLayoutItemDrag',
+            'function snapTileLayoutToGridForTile',
+            'function snapAllLayoutItemsToGrid',
+            'function snapTileLayoutToGrid',
+            'saveLayout',
+            'persist',
+            'localStorage',
+        ],
+    },
+    {
+        path: '/js/page-layout-storage.js',
+        sourcePath: '../src/views/js/page-layout-storage.js',
+        namespace: 'PageLayoutStorage',
+        mustLoadBeforeMain: true,
+        dependsOnViewUtils: false,
+        forbiddenKeywords: [
+            'function toggleLayoutEditMode',
+            'function setLayoutEditMode',
+            'function syncLayoutEditModeUI',
+            'function finalizeLayoutEditing',
+            'function finishTileLayoutInteraction',
+            'function finalizeLayoutItemDrag',
+            'addEventListener("pointer',
+            "addEventListener('pointer",
+            'getUserMedia',
+            'RTCPeerConnection',
+            'socket.on',
+        ],
+        requiredExports: [
+            [
+                /item\.type === 'stagePanel'[\s\S]*?return null;/,
+                'normalizeLoadedLayoutItems must ignore saved stagePanel entries',
+            ],
+        ],
+    },
+    {
+        path: '/js/room-ui-state.js',
+        sourcePath: '../src/views/js/room-ui-state.js',
+        namespace: 'VoiceRoomUIState',
+        mustLoadBeforeMain: true,
+        dependsOnViewUtils: true,
+        forbiddenKeywords: [
+            'Peer',
+            'socket.emit',
+            'socket.on',
+            'getUserMedia',
+            'replaceTrack',
+            'requestAudioStream',
+            'createAudioPipeline',
+            'joinVoiceChannel',
+            'setupCallStreamHandler',
+            'setViewingRoom',
+            'setVoiceTargetRoom',
+            'saveLayoutToStorage',
+            'loadLayoutFromStorage',
+            'startTileResize',
+            'detectTileResizeDirection',
+        ],
+        requiredExports: [
+            [/renderCallTimer/, 'room UI state must render call timer UI'],
+            [
+                /renderLocalUserCard/,
+                'room UI state must render local user card UI',
+            ],
+            [
+                /renderMobileTileNav/,
+                'room UI state must render mobile tile nav UI',
+            ],
+            [/renderRoomHeader/, 'room UI state must render room header UI'],
+        ],
+    },
+    {
+        path: '/js/presence-view-model.js',
+        sourcePath: '../src/views/js/presence-view-model.js',
+        namespace: 'VoicePresenceViewModel',
+        mustLoadBeforeMain: true,
+        dependsOnViewUtils: false,
+        forbiddenKeywords: [
+            'Peer',
+            'socket.emit',
+            'socket.on',
+            'document',
+            'querySelector',
+            'localStorage',
+            'getUserMedia',
+            'replaceTrack',
+            'requestAudioStream',
+            'createAudioPipeline',
+            'joinVoiceChannel',
+            'setupCallStreamHandler',
+            'setViewingRoom',
+            'setVoiceTargetRoom',
+            'saveLayoutToStorage',
+            'loadLayoutFromStorage',
+            'startTileResize',
+            'detectTileResizeDirection',
+            'connectToNewUser',
+            'getOrderedTiles',
+            'syncPresenceTiles',
+            'applyOutputSettingsToRemoteMedia',
+        ],
+        requiredExports: [
+            [
+                /getMemberMicStatus/,
+                'presence view model must expose mic status mapping',
+            ],
+            [
+                /getMemberTileText/,
+                'presence view model must expose tile status text mapping',
+            ],
+            [
+                /getMemberStatusIcons/,
+                'presence view model must expose status icon mapping',
+            ],
+            [
+                /buildParticipantViewModel/,
+                'presence view model must expose participant view model mapping',
+            ],
+        ],
+    },
+    {
+        path: '/js/participants-list-ui.js',
+        sourcePath: '../src/views/js/participants-list-ui.js',
+        namespace: 'VoiceParticipantsListUI',
+        mustLoadBeforeMain: true,
+        dependsOnViewUtils: true,
+        forbiddenKeywords: [
+            'Peer',
+            'socket.emit',
+            'socket.on',
+            'getUserMedia',
+            'replaceTrack',
+            'requestAudioStream',
+            'createAudioPipeline',
+            'joinVoiceChannel',
+            'setupCallStreamHandler',
+            'setViewingRoom',
+            'setVoiceTargetRoom',
+            'saveLayoutToStorage',
+            'loadLayoutFromStorage',
+            'startTileResize',
+            'detectTileResizeDirection',
+            'connectToNewUser',
+            'getOrderedTiles',
+            'syncPresenceTiles',
+            'applyOutputSettingsToRemoteMedia',
+        ],
+        requiredExports: [
+            [
+                /renderParticipantsList/,
+                'participants list UI must expose list rendering',
+            ],
+            [
+                /renderParticipantItem/,
+                'participants list UI must expose item rendering',
+            ],
+            [
+                /renderEmptyParticipants/,
+                'participants list UI must expose empty state',
+            ],
+            [
+                /updateParticipantItemClasses/,
+                'participants list UI must expose participant class sync',
+            ],
+        ],
+    },
+    {
+        path: '/js/tile-status-ui.js',
+        sourcePath: '../src/views/js/tile-status-ui.js',
+        namespace: 'VoiceTileStatusUI',
+        mustLoadBeforeMain: true,
+        dependsOnViewUtils: true,
+        forbiddenKeywords: [
+            'Peer',
+            'socket.emit',
+            'socket.on',
+            'getUserMedia',
+            'replaceTrack',
+            'requestAudioStream',
+            'createAudioPipeline',
+            'joinVoiceChannel',
+            'setupCallStreamHandler',
+            'setViewingRoom',
+            'setVoiceTargetRoom',
+            'saveLayoutToStorage',
+            'loadLayoutFromStorage',
+            'startTileResize',
+            'detectTileResizeDirection',
+            'connectToNewUser',
+            'getOrderedTiles',
+            'syncPresenceTiles',
+            'applyOutputSettingsToRemoteMedia',
+            'attachStream',
+            'addTrack',
+            'removeTrack',
+        ],
+        requiredExports: [
+            [/renderTileStatus/, 'tile status UI must expose status rendering'],
+            [
+                /updateTileStatusClasses/,
+                'tile status UI must expose class syncing',
+            ],
+            [/renderTileBadges/, 'tile status UI must expose badge rendering'],
+            [
+                /renderTilePlaceholder/,
+                'tile status UI must expose placeholder rendering',
+            ],
+        ],
+    },
+    {
+        path: '/js/chat-message-ui.js',
+        sourcePath: '../src/views/js/chat-message-ui.js',
+        namespace: 'VoiceChatMessageUI',
+        mustLoadBeforeMain: true,
+        dependsOnViewUtils: true,
+        forbiddenKeywords: [
+            'Peer',
+            'socket.emit',
+            'socket.on',
+            'getUserMedia',
+            'replaceTrack',
+            'requestAudioStream',
+            'createAudioPipeline',
+            'joinVoiceChannel',
+            'setupCallStreamHandler',
+            'setViewingRoom',
+            'setVoiceTargetRoom',
+            'saveLayoutToStorage',
+            'loadLayoutFromStorage',
+            'startTileResize',
+            'detectTileResizeDirection',
+            'connectToNewUser',
+            'getOrderedTiles',
+            'syncPresenceTiles',
+            'applyOutputSettingsToRemoteMedia',
+            'chat:send',
+            'chat:join',
+            'chatForm',
+            'chatInput',
+        ],
+        requiredExports: [
+            [
+                /renderChatMessageItem/,
+                'chat message UI must expose item rendering',
+            ],
+            [
+                /appendChatMessage/,
+                'chat message UI must expose append rendering',
+            ],
+            [
+                /renderChatHistory/,
+                'chat message UI must expose history rendering',
+            ],
+            [
+                /scrollToBottom/,
+                'chat message UI may own scroll-to-bottom UI sync',
+            ],
+        ],
+    },
+    {
+        path: '/js/chat-form-ui.js',
+        sourcePath: '../src/views/js/chat-form-ui.js',
+        namespace: 'VoiceChatFormUI',
+        mustLoadBeforeMain: true,
+        dependsOnViewUtils: true,
+        forbiddenKeywords: [
+            'socket.emit',
+            'socket.on',
+            'chat:send',
+            'chat:message',
+            'chat:history',
+            'Peer',
+            'getUserMedia',
+            'requestAudioStream',
+            'joinVoiceChannel',
+            'setViewingRoom',
+            'saveLayoutToStorage',
+        ],
+        requiredExports: [
+            [
+                /getMessageContent/,
+                'chat form UI must expose content normalization',
+            ],
+            [
+                /renderSubmitState/,
+                'chat form UI must expose submit state rendering',
+            ],
+            [
+                /renderInputState/,
+                'chat form UI must expose input state rendering',
+            ],
+            [/resetForm/, 'chat form UI must expose form reset helper'],
+            [/focusInput/, 'chat form UI must expose focus helper'],
+        ],
+    },
+    {
+        path: '/js/channel-sidebar-ui.js',
+        sourcePath: '../src/views/js/channel-sidebar-ui.js',
+        namespace: 'VoiceChannelSidebarUI',
+        mustLoadBeforeMain: true,
+        dependsOnViewUtils: true,
+        forbiddenKeywords: [
+            'Peer',
+            'socket.emit',
+            'socket.on',
+            'getUserMedia',
+            'replaceTrack',
+            'requestAudioStream',
+            'createAudioPipeline',
+            'joinVoiceChannel',
+            'setupCallStreamHandler',
+            'setViewingRoom',
+            'setVoiceTargetRoom',
+            'saveLayoutToStorage',
+            'loadLayoutFromStorage',
+            'startTileResize',
+            'detectTileResizeDirection',
+            'connectToNewUser',
+            'getOrderedTiles',
+            'syncPresenceTiles',
+            'applyOutputSettingsToRemoteMedia',
+            'voiceJoinOverlay',
+        ],
+        requiredExports: [
+            [
+                /renderChannelItemState/,
+                'channel sidebar UI must expose item state rendering',
+            ],
+            [
+                /renderChannelListState/,
+                'channel sidebar UI must expose list state rendering',
+            ],
+            [
+                /aria-current/,
+                'channel sidebar UI may own current-channel aria sync',
+            ],
+        ],
+    },
+    {
+        path: '/js/cursor-share-ui.js',
+        sourcePath: '../src/views/js/cursor-share-ui.js',
+        namespace: 'VoiceCursorShareUI',
+        mustLoadBeforeMain: true,
+        dependsOnViewUtils: true,
+        forbiddenKeywords: [
+            'Peer',
+            'socket.emit',
+            'socket.on',
+            'getUserMedia',
+            'replaceTrack',
+            'requestAudioStream',
+            'createAudioPipeline',
+            'joinVoiceChannel',
+            'setupCallStreamHandler',
+            'setViewingRoom',
+            'setVoiceTargetRoom',
+            'saveLayoutToStorage',
+            'loadLayoutFromStorage',
+            'startTileResize',
+            'detectTileResizeDirection',
+            'connectToNewUser',
+            'getOrderedTiles',
+            'syncPresenceTiles',
+            'applyOutputSettingsToRemoteMedia',
+            'cursor:move',
+            'cursor:leave',
+            'cursor:remove',
+            'addEventListener',
+        ],
+        requiredExports: [
+            [
+                /getCursorOverlay/,
+                'cursor share UI must expose overlay creation',
+            ],
+            [
+                /renderRemoteCursor/,
+                'cursor share UI must expose cursor rendering',
+            ],
+            [/setCursorIdle/, 'cursor share UI must expose idle class syncing'],
+            [
+                /removeRemoteCursor/,
+                'cursor share UI must expose cursor removal',
+            ],
+        ],
+    },
+];
+
+const moduleSources = new Map(
+    MODULE_SCRIPTS.map(({ path, sourcePath }) => [path, readText(sourcePath)])
 );
-const roomIndex = readFileSync(
-    new URL('../src/views/room/index.ejs', import.meta.url),
-    'utf8'
-);
-const noiseSettingsUi = readFileSync(
-    new URL('../src/views/js/noise-settings-ui.js', import.meta.url),
-    'utf8'
-);
-const controlPopoversUi = readFileSync(
-    new URL('../src/views/js/control-popovers-ui.js', import.meta.url),
-    'utf8'
-);
-const peerVolumeUi = readFileSync(
-    new URL('../src/views/js/peer-volume-ui.js', import.meta.url),
-    'utf8'
-);
-const copyLinkUi = readFileSync(
-    new URL('../src/views/js/copy-link-ui.js', import.meta.url),
-    'utf8'
-);
-const outputVolumeUi = readFileSync(
-    new URL('../src/views/js/output-volume-ui.js', import.meta.url),
-    'utf8'
-);
-const fullscreenControls = readFileSync(
-    new URL('../src/views/js/fullscreen-controls.js', import.meta.url),
-    'utf8'
-);
-const voiceJoinOverlayUi = readFileSync(
-    new URL('../src/views/js/voice-join-overlay-ui.js', import.meta.url),
-    'utf8'
-);
-const pageLayoutEditUi = readFileSync(
-    new URL('../src/views/js/page-layout-edit-ui.js', import.meta.url),
-    'utf8'
-);
-const pageLayoutSnapUtils = readFileSync(
-    new URL('../src/views/js/page-layout-snap-utils.js', import.meta.url),
-    'utf8'
-);
-const pageLayoutStorage = readFileSync(
-    new URL('../src/views/js/page-layout-storage.js', import.meta.url),
-    'utf8'
-);
-const roomUiState = readFileSync(
-    new URL('../src/views/js/room-ui-state.js', import.meta.url),
-    'utf8'
-);
-const presenceViewModel = readFileSync(
-    new URL('../src/views/js/presence-view-model.js', import.meta.url),
-    'utf8'
-);
-const participantsListUi = readFileSync(
-    new URL('../src/views/js/participants-list-ui.js', import.meta.url),
-    'utf8'
-);
-const tileStatusUi = readFileSync(
-    new URL('../src/views/js/tile-status-ui.js', import.meta.url),
-    'utf8'
-);
-const chatMessageUi = readFileSync(
-    new URL('../src/views/js/chat-message-ui.js', import.meta.url),
-    'utf8'
-);
-const channelSidebarUi = readFileSync(
-    new URL('../src/views/js/channel-sidebar-ui.js', import.meta.url),
-    'utf8'
-);
-const cursorShareUi = readFileSync(
-    new URL('../src/views/js/cursor-share-ui.js', import.meta.url),
-    'utf8'
-);
+const getModuleSource = (path) => moduleSources.get(path);
+
+const script = readText('../src/views/script.js');
+const roomIndex = readText('../src/views/room/index.ejs');
+const noiseSettingsUi = getModuleSource('/js/noise-settings-ui.js');
+const controlPopoversUi = getModuleSource('/js/control-popovers-ui.js');
+const peerVolumeUi = getModuleSource('/js/peer-volume-ui.js');
+const copyLinkUi = getModuleSource('/js/copy-link-ui.js');
+const outputVolumeUi = getModuleSource('/js/output-volume-ui.js');
+const fullscreenControls = getModuleSource('/js/fullscreen-controls.js');
+const voiceJoinOverlayUi = getModuleSource('/js/voice-join-overlay-ui.js');
+const pageLayoutEditUi = getModuleSource('/js/page-layout-edit-ui.js');
+const pageLayoutSnapUtils = getModuleSource('/js/page-layout-snap-utils.js');
+const pageLayoutStorage = getModuleSource('/js/page-layout-storage.js');
+const roomUiState = getModuleSource('/js/room-ui-state.js');
+const presenceViewModel = getModuleSource('/js/presence-view-model.js');
+const participantsListUi = getModuleSource('/js/participants-list-ui.js');
+const tileStatusUi = getModuleSource('/js/tile-status-ui.js');
+const chatMessageUi = getModuleSource('/js/chat-message-ui.js');
+const channelSidebarUi = getModuleSource('/js/channel-sidebar-ui.js');
+const cursorShareUi = getModuleSource('/js/cursor-share-ui.js');
 const style = loadCssWithImports(
     new URL('../src/views/style.css', import.meta.url)
 );
@@ -181,6 +713,49 @@ const getSourceBetween = (source, startPattern, endPattern, label) => {
     return source.slice(
         startIndex,
         startIndex + startMatch[0].length + endMatch.index
+    );
+};
+
+const assertModuleScriptContracts = (moduleScripts) => {
+    assertScriptBeforeMain('/js/view-utils.js');
+
+    moduleScripts.forEach(
+        ({
+            path,
+            namespace,
+            mustLoadBeforeMain = true,
+            dependsOnViewUtils = false,
+            forbiddenKeywords = [],
+            requiredExports = [],
+        }) => {
+            const source = getModuleSource(path);
+            const filename = path.replace('/js/', '');
+
+            assert.ok(source, `${filename} source must be loaded`);
+
+            if (mustLoadBeforeMain) {
+                assertScriptBeforeMain(path);
+            }
+
+            if (
+                path !== '/js/view-utils.js' &&
+                (dependsOnViewUtils || source.includes('VoiceViewUtils'))
+            ) {
+                assertScriptBefore('/js/view-utils.js', path);
+            }
+
+            if (namespace) {
+                assertSourceContains(source, filename, [
+                    [
+                        new RegExp(`global\\.${namespace}\\s*=\\s*\\{`),
+                        `${filename} must expose ${namespace}`,
+                    ],
+                ]);
+            }
+
+            assertNoForbiddenKeywords(source, filename, forbiddenKeywords);
+            assertSourceContains(source, filename, requiredExports);
+        }
     );
 };
 
@@ -536,6 +1111,7 @@ const uiModuleContracts = [
     },
 ];
 
+assertModuleScriptContracts(MODULE_SCRIPTS);
 assertScriptBeforeMain('/js/view-utils.js');
 uiModuleContracts.forEach(({ path, source, forbidden = [] }) => {
     assertScriptBeforeMain(path);
