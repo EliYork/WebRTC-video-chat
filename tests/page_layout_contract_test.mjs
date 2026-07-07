@@ -320,6 +320,85 @@ const MODULE_SCRIPTS = [
         ],
     },
     {
+        path: '/js/page-layout-component-actions-ui.js',
+        sourcePath: '../src/views/js/page-layout-component-actions-ui.js',
+        namespace: 'PageLayoutComponentActionsUI',
+        mustLoadBeforeMain: true,
+        dependsOnViewUtils: false,
+        forbiddenKeywords: [
+            'new Peer',
+            'Peer(',
+            'socket.emit',
+            'socket.on',
+            'navigator.mediaDevices',
+            'getUserMedia',
+            'getDisplayMedia',
+            'MediaStream',
+            'localStorage',
+            'sessionStorage',
+            'saveLayoutToStorage',
+            'clearSavedLayout',
+            'updateLayoutItemConfig',
+            'hideLayoutComponent(',
+            'toggleTileFreeMove(',
+            'startTileResize',
+            'detectTileResizeDirection',
+            'setPointerCapture',
+            'releasePointerCapture',
+        ],
+        requiredExports: [
+            [/findToolbar/, 'component action UI must expose toolbar lookup'],
+            [
+                /positionToolbar/,
+                'component action UI must expose toolbar positioning',
+            ],
+            [
+                /setActiveTile/,
+                'component action UI must expose selected tile rendering',
+            ],
+            [
+                /syncToolbarState/,
+                'component action UI must expose toolbar state sync',
+            ],
+            [
+                /ensureToolbar/,
+                'component action UI must expose toolbar creation',
+            ],
+            [
+                /layout-toolbar-button layout-toolbar-hide/,
+                'component action UI must preserve hide button classes',
+            ],
+            [
+                /setAttribute\('aria-label', '隐藏组件'\)/,
+                'component action UI must preserve hide aria label',
+            ],
+            [
+                /setAttribute\('aria-label', '自由移动'\)/,
+                'component action UI must preserve free move aria label',
+            ],
+            [
+                /textContent = '移'/,
+                'component action UI must preserve free move button text',
+            ],
+            [
+                /textContent = '\?'/,
+                'component action UI must preserve help button text',
+            ],
+            [
+                /is-layout-selected/,
+                'component action UI must preserve selected class sync',
+            ],
+            [
+                /is-visible/,
+                'component action UI must preserve toolbar visibility',
+            ],
+            [
+                /is-free-move-enabled/,
+                'component action UI must preserve free move class sync',
+            ],
+        ],
+    },
+    {
         path: '/js/page-layout-storage.js',
         sourcePath: '../src/views/js/page-layout-storage.js',
         namespace: 'PageLayoutStorage',
@@ -342,6 +421,76 @@ const MODULE_SCRIPTS = [
             [
                 /item\.type === 'stagePanel'[\s\S]*?return null;/,
                 'normalizeLoadedLayoutItems must ignore saved stagePanel entries',
+            ],
+        ],
+    },
+    {
+        path: '/js/page-layout-config.js',
+        sourcePath: '../src/views/js/page-layout-config.js',
+        namespace: 'PageLayoutConfig',
+        mustLoadBeforeMain: true,
+        dependsOnViewUtils: false,
+        forbiddenKeywords: [
+            'document',
+            'querySelector',
+            'localStorage',
+            'sessionStorage',
+            'new Peer',
+            'Peer(',
+            'socket',
+            'navigator.mediaDevices',
+            'getUserMedia',
+            'getDisplayMedia',
+            'AudioContext',
+        ],
+        requiredExports: [
+            [
+                /PAGE_COMPONENT_TYPES/,
+                'layout config must expose page component types',
+            ],
+            [
+                /LAYOUT_ITEM_TYPES/,
+                'layout config must expose layout item types',
+            ],
+            [
+                /LEGACY_LAYOUT_ITEM_TYPES/,
+                'layout config must expose legacy item type aliases',
+            ],
+            [
+                /REMOTE_PEER_LAYOUT_ID_PREFIX/,
+                'layout config must expose remote peer layout id prefix',
+            ],
+            [
+                /AUTO_LAYOUT_GRID_SIZES/,
+                'layout config must expose auto placement grid sizes',
+            ],
+            [
+                /COMPONENT_CONFIG_DEFAULTS/,
+                'layout config must expose component config defaults',
+            ],
+            [
+                /LAYOUT_PREFERENCE_DEFAULTS/,
+                'layout config must expose layout preference defaults',
+            ],
+            [
+                /getDefaultComponentConfig/,
+                'layout config must expose default config cloning',
+            ],
+            [
+                /normalizeComponentConfig/,
+                'layout config must expose component config normalization',
+            ],
+            [
+                /getDefaultLayoutPreferences/,
+                'layout config must expose layout preference defaults cloning',
+            ],
+            [
+                /normalizeLayoutPreferences/,
+                'layout config must expose layout preference normalization',
+            ],
+            [
+                /getLayoutPreferenceValue/,
+                'layout config must expose preference value lookup',
             ],
         ],
     },
@@ -497,6 +646,54 @@ const MODULE_SCRIPTS = [
                 'room UI state must render mobile tile nav UI',
             ],
             [/renderRoomHeader/, 'room UI state must render room header UI'],
+        ],
+    },
+    {
+        path: '/js/mobile-room-state.js',
+        sourcePath: '../src/views/js/mobile-room-state.js',
+        namespace: 'VoiceMobileRoomState',
+        mustLoadBeforeMain: true,
+        dependsOnViewUtils: false,
+        forbiddenKeywords: [
+            'new Peer',
+            'Peer(',
+            'socket.emit',
+            'socket.on',
+            'navigator.mediaDevices',
+            'getUserMedia',
+            'getDisplayMedia',
+            'joinVoiceChannel',
+            'setupCallStreamHandler',
+            'setViewingRoom',
+            'setVoiceTargetRoom',
+            'saveLayoutToStorage',
+            'loadLayoutFromStorage',
+            'startTileResize',
+            'detectTileResizeDirection',
+        ],
+        requiredExports: [
+            [
+                /createMobileRoomState/,
+                'mobile room state must expose controller factory',
+            ],
+            [
+                /if \(aSharing && !bSharing\) return -1;/,
+                'mobile room state must sort screen-share tiles first',
+            ],
+            [
+                /remotePeerOrder\.indexOf\(a\.id\)\s*-\s*remotePeerOrder\.indexOf\(b\.id\)/,
+                'mobile room state must preserve remote peer ordering',
+            ],
+            [
+                /remoteTiles\.push\(localTile\)/,
+                'mobile room state must keep local tile last',
+            ],
+            [
+                /toggleRoomClass\?\.\(refs\.mainLayout, 'mobile-in-room', isInRoom\)/,
+                'mobile room state must own mobile room class sync',
+            ],
+            [/goPrevious/, 'mobile room state must expose previous navigation'],
+            [/goNext/, 'mobile room state must expose next navigation'],
         ],
     },
     {
@@ -873,6 +1070,7 @@ const getModuleSource = (path) => moduleSources.get(path);
 const script = readText('../src/views/script.js');
 const roomIndex = readText('../src/views/room/index.ejs');
 const pageLayoutStorage = getModuleSource('/js/page-layout-storage.js');
+const pageLayoutConfig = getModuleSource('/js/page-layout-config.js');
 const pageLayoutToolbarUi = getModuleSource('/js/page-layout-toolbar-ui.js');
 const pageLayoutRecoveryUi = getModuleSource('/js/page-layout-recovery-ui.js');
 const videoTileStructureUi = getModuleSource('/js/video-tile-structure-ui.js');
@@ -1021,6 +1219,12 @@ assertSourceContains(script, 'page layout base contract', [
         'page layout must use the v2 storage key',
     ],
     [
+        /const layoutConfig = window\.PageLayoutConfig/,
+        'script must consume page layout config through PageLayoutConfig',
+    ],
+]);
+assertSourceContains(pageLayoutConfig, 'page layout config contract', [
+    [
         /SIDEBAR_PANEL:\s*'sidebarPanel'/,
         'sidebarPanel must be a first-class page component',
     ],
@@ -1029,7 +1233,7 @@ assertSourceContains(script, 'page layout base contract', [
         'chatPanel must be a first-class page component',
     ],
 ]);
-const pageComponentTypesMatch = script.match(
+const pageComponentTypesMatch = pageLayoutConfig.match(
     /const PAGE_COMPONENT_TYPES = \{(?<body>[\s\S]*?)\};/
 );
 assert.ok(pageComponentTypesMatch, 'PAGE_COMPONENT_TYPES must be inspectable');
@@ -1039,6 +1243,9 @@ assertSourceDoesNotContain(
     [[/CHAT_INPUT/, 'PAGE_COMPONENT_TYPES must not restore CHAT_INPUT']]
 );
 assertSourceDoesNotContain(script, 'page layout base contract', [
+    [/STAGE_PANEL:\s*'stagePanel'/, 'stagePanel must not be a page component'],
+]);
+assertSourceDoesNotContain(pageLayoutConfig, 'page layout config contract', [
     [/STAGE_PANEL:\s*'stagePanel'/, 'stagePanel must not be a page component'],
 ]);
 
@@ -1210,7 +1417,7 @@ const setLayoutEditModeBody = getSourceBetween(
 const toggleLayoutEditModeBody = getSourceBetween(
     script,
     /const toggleLayoutEditMode = \(\) => \{/,
-    /\nconst getOrderedTiles = /,
+    /\nconst updateMobileTileView = /,
     'layout edit mode toggle'
 );
 const finalizeLayoutEditingBody = getSourceBetween(
@@ -1375,7 +1582,7 @@ assert.match(
     'drag and resize finish must use the shared finalize path'
 );
 assert.match(
-    script,
+    pageLayoutConfig,
     /const AUTO_LAYOUT_GRID_SIZES = [\s\S]*?\[LAYOUT_ITEM_TYPES\.LOCAL_PEER\]:\s*\{\s*w:\s*5,\s*h:\s*4\s*\}[\s\S]*?\[LAYOUT_ITEM_TYPES\.REMOTE_PEER\]:\s*\{\s*w:\s*5,\s*h:\s*4\s*\}[\s\S]*?\[LAYOUT_ITEM_TYPES\.SCREEN_SHARE\]:\s*\{\s*w:\s*14,\s*h:\s*9\s*\}/,
     'auto-placed voice and screen-share tiles must use the requested default grid sizes'
 );

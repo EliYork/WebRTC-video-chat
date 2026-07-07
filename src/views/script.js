@@ -51,13 +51,16 @@ const mediaControlsUI = window.VoiceMediaControlsUI;
 const fullscreenControls = window.VoiceFullscreenControls;
 const voiceJoinOverlayUI = window.VoiceJoinOverlayUI;
 const layoutEditUI = window.PageLayoutEditUI;
+const layoutComponentActionsUI = window.PageLayoutComponentActionsUI;
 const layoutToolbarUI = window.PageLayoutToolbarUI;
 const layoutComponentMenuUI = window.PageLayoutComponentMenuUI;
 const layoutRecoveryUI = window.PageLayoutRecoveryUI;
 const layoutSnapUtils = window.PageLayoutSnapUtils;
 const layoutResizeUtils = window.PageLayoutResizeUtils;
 const layoutStorage = window.PageLayoutStorage;
+const layoutConfig = window.PageLayoutConfig;
 const roomUIState = window.VoiceRoomUIState;
+const mobileRoomState = window.VoiceMobileRoomState;
 const presenceViewModel = window.VoicePresenceViewModel;
 const participantsListUI = window.VoiceParticipantsListUI;
 const tileStatusUI = window.VoiceTileStatusUI;
@@ -72,6 +75,19 @@ const {
     getMemberStatusIcons,
     getMemberTileText,
 } = presenceViewModel;
+const {
+    PAGE_COMPONENT_TYPES,
+    LAYOUT_ITEM_TYPES,
+    LEGACY_LAYOUT_ITEM_TYPES,
+    REMOTE_PEER_LAYOUT_ID_PREFIX,
+    AUTO_LAYOUT_GRID_SIZES,
+    LAYOUT_PREFERENCE_DEFAULTS,
+    getDefaultComponentConfig,
+    normalizeComponentConfig,
+    getDefaultLayoutPreferences,
+    normalizeLayoutPreferences,
+    getLayoutPreferenceValue,
+} = layoutConfig;
 const remoteStreams = {};
 const getAudioConstraints = () => noiseSettingsUI.getAudioConstraints();
 
@@ -107,10 +123,6 @@ const PAGE_GRID_COLUMNS = 32;
 const PAGE_GRID_ROWS = 18;
 const PAGE_STORAGE_VERSION = 1;
 const PAGE_LAYOUT_STORAGE_KEY_PREFIX = 'voicePageLayout:v2';
-const PAGE_COMPONENT_TYPES = {
-    SIDEBAR_PANEL: 'sidebarPanel',
-    CHAT_PANEL: 'chatPanel',
-};
 const PAGE_SINGLETON_TYPES = new Set([
     PAGE_COMPONENT_TYPES.SIDEBAR_PANEL,
     PAGE_COMPONENT_TYPES.CHAT_PANEL,
@@ -123,82 +135,7 @@ const PAGE_COMPONENT_LABELS = {
     [PAGE_COMPONENT_TYPES.CHAT_PANEL]: '聊天消息',
 };
 let pageLayoutBoard;
-const LAYOUT_ITEM_TYPES = {
-    LOCAL: 'local',
-    LOCAL_PEER: 'localPeer',
-    REMOTE_PEER: 'remotePeer',
-    SCREEN_SHARE: 'screen-share',
-    PLACEHOLDER: 'placeholder',
-    ROOM: 'room',
-    CHAT: 'chat',
-};
-const LEGACY_LAYOUT_ITEM_TYPES = {
-    remotePeer: LAYOUT_ITEM_TYPES.REMOTE_PEER,
-    'remote-peer': LAYOUT_ITEM_TYPES.REMOTE_PEER,
-    screenShare: LAYOUT_ITEM_TYPES.SCREEN_SHARE,
-};
-const REMOTE_PEER_LAYOUT_ID_PREFIX = 'remotePeer:';
-const AUTO_LAYOUT_GRID_SIZES = {
-    [LAYOUT_ITEM_TYPES.LOCAL_PEER]: { w: 5, h: 4 },
-    [LAYOUT_ITEM_TYPES.REMOTE_PEER]: { w: 5, h: 4 },
-    [LAYOUT_ITEM_TYPES.SCREEN_SHARE]: { w: 14, h: 9 },
-};
-const COMPONENT_CONFIG_DEFAULTS = {
-    [LAYOUT_ITEM_TYPES.ROOM]: {
-        freeMove: true,
-        showRoomName: true,
-        showCopyLink: true,
-        showMemberCount: true,
-    },
-    [LAYOUT_ITEM_TYPES.CHAT]: {
-        freeMove: true,
-        compactMode: false,
-        showHeader: true,
-    },
-    [LAYOUT_ITEM_TYPES.LOCAL_PEER]: {
-        freeMove: true,
-        userPlaced: false,
-        showSelfPreview: true,
-        showControls: true,
-    },
-    [LAYOUT_ITEM_TYPES.REMOTE_PEER]: {
-        freeMove: true,
-        userPlaced: false,
-        keepHiddenWhenRejoin: true,
-        showPeerName: true,
-    },
-    [LAYOUT_ITEM_TYPES.SCREEN_SHARE]: {
-        freeMove: true,
-        userPlaced: false,
-        autoShowScreenShare: true,
-        showScreenHeader: true,
-    },
-};
-const LAYOUT_PREFERENCE_DEFAULTS = {
-    autoShowLocalPeer: true,
-    autoShowRemotePeers: true,
-    autoShowScreenShare: true,
-    keepHiddenRemotePeers: true,
-};
 let layoutPreferences = { ...LAYOUT_PREFERENCE_DEFAULTS };
-
-const getDefaultComponentConfig = (type) => {
-    const defaults = COMPONENT_CONFIG_DEFAULTS[type];
-    return defaults ? { ...defaults } : { freeMove: true };
-};
-
-const normalizeComponentConfig = (type, config = {}) => {
-    const defaults = getDefaultComponentConfig(type);
-    const result = {};
-    for (const key of Object.keys(defaults)) {
-        if (key in config && typeof config[key] === typeof defaults[key]) {
-            result[key] = config[key];
-        } else {
-            result[key] = defaults[key];
-        }
-    }
-    return result;
-};
 
 const updateLayoutItemConfig = (id, patch) => {
     const item = getTileLayoutItem(id);
@@ -213,18 +150,6 @@ const updateLayoutItemConfig = (id, patch) => {
     saveLayoutToStorage('配置已更新');
 };
 
-const getDefaultLayoutPreferences = () => ({ ...LAYOUT_PREFERENCE_DEFAULTS });
-
-const normalizeLayoutPreferences = (prefs = {}) => {
-    const defaults = getDefaultLayoutPreferences();
-    const result = {};
-    for (const key of Object.keys(defaults)) {
-        result[key] =
-            typeof prefs[key] === 'boolean' ? prefs[key] : defaults[key];
-    }
-    return result;
-};
-
 const readLayoutPreferencesFromStorage = () => {
     return layoutStorage.readLayoutPreferencesFromStorage({
         storageKey: getLayoutStorageKey(),
@@ -234,10 +159,7 @@ const readLayoutPreferencesFromStorage = () => {
 };
 
 const getLayoutPreference = (key) => {
-    const prefs = layoutPreferences || getDefaultLayoutPreferences();
-    return prefs[key] !== undefined
-        ? prefs[key]
-        : LAYOUT_PREFERENCE_DEFAULTS[key];
+    return getLayoutPreferenceValue(layoutPreferences, key);
 };
 const cursorSharingMedia = window.matchMedia(
     `(max-width: ${MOBILE_BREAKPOINT}px), (pointer: coarse)`
@@ -266,7 +188,6 @@ let callStartedAt;
 let callDurationTimer;
 let outputMuted = false;
 let outputVolume = 1;
-let activeMobileTileIndex = 0;
 const remotePeerOrder = [];
 const screenSharers = new Set();
 const peersWithCallHandler = new WeakSet();
@@ -332,6 +253,22 @@ const isMobileLayout = () => window.innerWidth <= MOBILE_BREAKPOINT;
 
 const getVideoTiles = () =>
     Array.from((pageLayoutBoard || videoGrid).querySelectorAll('.video-tile'));
+
+const mobileRoomController = mobileRoomState.createMobileRoomState({
+    refs: {
+        count: mobileTileCount,
+        mainLayout,
+        nextButton: mobileNextTileBtn,
+        previousButton: mobilePrevTileBtn,
+    },
+    getTiles: getVideoTiles,
+    getLocalTileId: () => 'local-video',
+    getRemotePeerOrder: () => remotePeerOrder,
+    isScreenSharingPeer: (peerId) => screenSharers.has(peerId),
+    isMobileLayout,
+    renderMobileTileNav: roomUIState.renderMobileTileNav,
+    toggleRoomClass: roomUIState.toggleClass,
+});
 
 const syncLayoutGridMetadata = () => {
     const board = pageLayoutBoard || videoGrid;
@@ -923,62 +860,13 @@ const toggleLayoutEditMode = () => {
     setLayoutEditMode(true);
 };
 
-const getOrderedTiles = () => {
-    const tiles = getVideoTiles();
-    const localTile = tiles.find((t) => t.id === 'local-video');
-    const remoteTiles = tiles.filter((t) => t.id !== 'local-video');
+const updateMobileTileView = () => mobileRoomController.updateTileView();
 
-    remoteTiles.sort((a, b) => {
-        const aSharing = screenSharers.has(a.id);
-        const bSharing = screenSharers.has(b.id);
-
-        if (aSharing && !bSharing) return -1;
-        if (!aSharing && bSharing) return 1;
-
-        return remotePeerOrder.indexOf(a.id) - remotePeerOrder.indexOf(b.id);
-    });
-
-    if (localTile) {
-        remoteTiles.push(localTile);
-    }
-
-    return remoteTiles;
-};
-
-const updateMobileTileView = () => {
-    const orderedTiles = getOrderedTiles();
-    const totalTiles = orderedTiles.length;
-
-    if (totalTiles === 0) {
-        activeMobileTileIndex = 0;
-    } else {
-        activeMobileTileIndex = Math.min(activeMobileTileIndex, totalTiles - 1);
-    }
-
-    const activeTile = orderedTiles[activeMobileTileIndex];
-
-    roomUIState.renderMobileTileNav({
-        refs: {
-            count: mobileTileCount,
-            mainLayout,
-            nextButton: mobileNextTileBtn,
-            previousButton: mobilePrevTileBtn,
-        },
-        activeIndex: activeMobileTileIndex,
-        activeTile,
-        allTiles: getVideoTiles(),
-        isInRoom: mainLayout?.classList.contains('mobile-in-room'),
-        totalTiles,
-    });
-};
-
-const setMobileRoomView = (isInRoom) => {
-    roomUIState.toggleClass(mainLayout, 'mobile-in-room', isInRoom);
-    updateMobileTileView();
-};
+const setMobileRoomView = (isInRoom) =>
+    mobileRoomController.setRoomView(isInRoom);
 
 const updateMobileRoomState = () => {
-    setMobileRoomView(Boolean(joinedVoiceRoomId) && isMobileLayout());
+    mobileRoomController.updateRoomState(Boolean(joinedVoiceRoomId));
 };
 
 const updateCallDuration = () => {
@@ -3451,10 +3339,10 @@ const shouldIgnoreLayoutDragTarget = (target) =>
     );
 
 const findLayoutComponentToolbar = (tile) =>
-    layoutEditUI.findLayoutComponentToolbar(tile);
+    layoutComponentActionsUI.findToolbar(tile);
 
 const positionLayoutComponentToolbar = (tile) => {
-    layoutEditUI.positionLayoutComponentToolbar({
+    layoutComponentActionsUI.positionToolbar({
         tile,
         board: pageLayoutBoard || tile?.parentElement,
     });
@@ -3462,38 +3350,18 @@ const positionLayoutComponentToolbar = (tile) => {
 
 const setActiveLayoutToolbarTile = (tile) => {
     activeLayoutToolbarTile = tile;
-    document
-        .querySelectorAll('.video-tile.is-layout-selected')
-        .forEach((activeTile) =>
-            activeTile.classList.remove('is-layout-selected')
-        );
-    document
-        .querySelectorAll('.layout-component-toolbar')
-        .forEach((toolbar) => toolbar.classList.remove('is-visible'));
-
-    if (!layoutEditMode || !tile) {
-        return;
-    }
-
-    tile.classList.add('is-layout-selected');
-    const toolbar = findLayoutComponentToolbar(tile);
-    if (toolbar) {
-        toolbar.classList.add('is-visible');
-        positionLayoutComponentToolbar(tile);
-    }
+    layoutComponentActionsUI.setActiveTile({
+        tile,
+        enabled: layoutEditMode,
+        onPosition: positionLayoutComponentToolbar,
+    });
 };
 
 const syncLayoutComponentToolbarState = (tile) => {
-    const toolbar = findLayoutComponentToolbar(tile);
-    const freeMoveButton = toolbar?.querySelector('.layout-toolbar-free-move');
-    const enabled = isTileFreeMoveEnabled(tile);
-
-    tile.classList.toggle('is-free-move-enabled', enabled);
-
-    if (freeMoveButton) {
-        freeMoveButton.setAttribute('aria-pressed', String(enabled));
-        freeMoveButton.title = enabled ? '关闭自由移动' : '开启自由移动';
-    }
+    layoutComponentActionsUI.syncToolbarState({
+        tile,
+        freeMoveEnabled: isTileFreeMoveEnabled(tile),
+    });
 };
 
 const toggleTileFreeMove = (tile) => {
@@ -3513,65 +3381,14 @@ const toggleTileFreeMove = (tile) => {
 };
 
 const ensureLayoutComponentToolbar = (tile) => {
-    if (!pageLayoutBoard || !tile.id) {
-        return null;
-    }
-
-    let toolbar = findLayoutComponentToolbar(tile);
-
-    if (!toolbar) {
-        toolbar = document.createElement('div');
-        toolbar.className = 'layout-component-toolbar';
-        toolbar.dataset.targetTileId = tile.id;
-
-        const hideButton = document.createElement('button');
-        hideButton.type = 'button';
-        hideButton.className = 'layout-toolbar-button layout-toolbar-hide';
-        hideButton.title = '隐藏组件';
-        hideButton.setAttribute('aria-label', '隐藏组件');
-        hideButton.textContent = '\u00D7';
-        hideButton.addEventListener('click', (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            hideLayoutComponent(tile);
-            toolbar.classList.remove('is-visible');
-        });
-
-        const freeMoveButton = document.createElement('button');
-        freeMoveButton.type = 'button';
-        freeMoveButton.className =
-            'layout-toolbar-button layout-toolbar-free-move';
-        freeMoveButton.setAttribute('aria-label', '自由移动');
-        freeMoveButton.textContent = '移';
-        freeMoveButton.addEventListener('click', (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            toggleTileFreeMove(tile);
-        });
-
-        const helpWrap = document.createElement('span');
-        helpWrap.className = 'layout-toolbar-help-wrap';
-        const helpButton = document.createElement('button');
-        helpButton.type = 'button';
-        helpButton.className = 'layout-toolbar-button layout-toolbar-help';
-        helpButton.setAttribute('aria-label', '自由移动说明');
-        helpButton.textContent = '?';
-        const tooltip = document.createElement('span');
-        tooltip.className = 'layout-toolbar-tooltip';
-        tooltip.textContent =
-            '开启自由移动后，退出编辑模式也可以拖动这个组件。';
-        helpWrap.append(helpButton, tooltip);
-
-        toolbar.append(hideButton, freeMoveButton, helpWrap);
-        toolbar.addEventListener('mouseenter', () =>
-            setActiveLayoutToolbarTile(tile)
-        );
-        pageLayoutBoard.append(toolbar);
-    }
-
-    syncLayoutComponentToolbarState(tile);
-    positionLayoutComponentToolbar(tile);
-    return toolbar;
+    return layoutComponentActionsUI.ensureToolbar({
+        board: pageLayoutBoard,
+        tile,
+        freeMoveEnabled: isTileFreeMoveEnabled(tile),
+        onHide: hideLayoutComponent,
+        onToggleFreeMove: toggleTileFreeMove,
+        onActivate: setActiveLayoutToolbarTile,
+    });
 };
 
 const ensureLayoutComponentActions = () => {
@@ -4921,26 +4738,11 @@ mobileBackToChannelsBtn?.addEventListener('click', () => {
 });
 
 mobilePrevTileBtn?.addEventListener('click', () => {
-    const totalTiles = getVideoTiles().length;
-
-    if (totalTiles <= 1) {
-        return;
-    }
-
-    activeMobileTileIndex =
-        (activeMobileTileIndex - 1 + totalTiles) % totalTiles;
-    updateMobileTileView();
+    mobileRoomController.goPrevious();
 });
 
 mobileNextTileBtn?.addEventListener('click', () => {
-    const totalTiles = getVideoTiles().length;
-
-    if (totalTiles <= 1) {
-        return;
-    }
-
-    activeMobileTileIndex = (activeMobileTileIndex + 1) % totalTiles;
-    updateMobileTileView();
+    mobileRoomController.goNext();
 });
 
 window.addEventListener('resize', () => {

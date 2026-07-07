@@ -22,20 +22,23 @@ module boundary changes.
 11. `/js/page-layout-snap-utils.js`
 12. `/js/page-layout-resize-utils.js`
 13. `/js/page-layout-edit-ui.js`
-14. `/js/page-layout-storage.js`
-15. `/js/page-layout-toolbar-ui.js`
-16. `/js/page-layout-component-menu-ui.js`
-17. `/js/page-layout-recovery-ui.js`
-18. `/js/room-ui-state.js`
-19. `/js/presence-view-model.js`
-20. `/js/participants-list-ui.js`
-21. `/js/tile-status-ui.js`
-22. `/js/video-tile-structure-ui.js`
-23. `/js/chat-message-ui.js`
-24. `/js/chat-form-ui.js`
-25. `/js/channel-sidebar-ui.js`
-26. `/js/cursor-share-ui.js`
-27. `/script.js`
+14. `/js/page-layout-component-actions-ui.js`
+15. `/js/page-layout-storage.js`
+16. `/js/page-layout-config.js`
+17. `/js/page-layout-toolbar-ui.js`
+18. `/js/page-layout-component-menu-ui.js`
+19. `/js/page-layout-recovery-ui.js`
+20. `/js/room-ui-state.js`
+21. `/js/mobile-room-state.js`
+22. `/js/presence-view-model.js`
+23. `/js/participants-list-ui.js`
+24. `/js/tile-status-ui.js`
+25. `/js/video-tile-structure-ui.js`
+26. `/js/chat-message-ui.js`
+27. `/js/chat-form-ui.js`
+28. `/js/channel-sidebar-ui.js`
+29. `/js/cursor-share-ui.js`
+30. `/script.js`
 
 Modules that use `window.VoiceViewUtils` must load after `view-utils.js` and
 before `/script.js`.
@@ -85,13 +88,23 @@ math. It must not read DOM bounds, bind pointer events, write storage, or apply
 snap previews.
 
 `page-layout-edit-ui.js` owns visual editing helpers: snap preview, resize
-cursor state, hover classes, and floating toolbar DOM. It must not toggle edit
-mode, finalize layout interactions, or persist layout data.
+cursor state, hover classes, and shared toolbar positioning helpers. It must not
+toggle edit mode, finalize layout interactions, or persist layout data.
+
+`page-layout-component-actions-ui.js` owns layout component floating action
+toolbar DOM, selected tile class rendering, toolbar visibility, free-move button
+state, and related aria/title text. It receives callbacks from `script.js` for
+hide/free-move behavior and must not own storage, sockets, PeerJS, media, or
+drag/resize pointer lifecycles.
 
 `page-layout-storage.js` owns page-layout storage key construction, payload
 normalization, load/save/clear, and malformed-storage fallback. Its storage key,
 payload shape, item fields, and normalize/load/save/clear semantics are part of
 the contract.
+
+`page-layout-config.js` owns pure page-layout constants, default component
+configuration, default layout preferences, and normalization helpers. It must
+not read or write DOM, storage, socket, PeerJS, or media state.
 
 `page-layout-toolbar-ui.js` owns the layout edit toolbar DOM, edit/add/reset
 button visual state, save status text, and reset confirmation text. It must not
@@ -109,6 +122,11 @@ page, restore the static layout, or initialize/validate the layout board.
 `room-ui-state.js` owns room header, local user card, call timer, and mobile
 tile nav rendering. It should receive state snapshots from `script.js` rather
 than reading live socket or media state.
+
+`mobile-room-state.js` owns mobile tile ordering, active tile index, mobile room
+class sync, and previous/next tile navigation. It receives live room/media
+ordering state from `script.js` and must not own voice join/leave, socket,
+PeerJS, or media-device flows.
 
 `presence-view-model.js` is a pure mapper from member/presence state to view
 models: mic status, tile text, status icons, and participant list data. It must
