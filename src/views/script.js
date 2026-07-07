@@ -130,11 +130,8 @@ const PAGE_SINGLETON_TYPES = new Set([
 const REAL_DOM_PAGE_TYPES = PAGE_SINGLETON_TYPES;
 const PAGE_TILE_MIN_WIDTH = 160;
 const PAGE_TILE_MIN_HEIGHT = 80;
-const PAGE_COMPONENT_LABELS = {
-    [PAGE_COMPONENT_TYPES.SIDEBAR_PANEL]: '左侧频道栏',
-    [PAGE_COMPONENT_TYPES.CHAT_PANEL]: '聊天消息',
-};
 let pageLayoutBoard;
+let pageLayoutRuntime;
 let layoutPreferences = { ...LAYOUT_PREFERENCE_DEFAULTS };
 
 const updateLayoutItemConfig = (id, patch) => {
@@ -270,31 +267,6 @@ const mobileRoomController = mobileRoomState.createMobileRoomState({
     toggleRoomClass: roomUIState.toggleClass,
 });
 
-const syncLayoutGridMetadata = () => {
-    const board = pageLayoutBoard || videoGrid;
-    if (!board) {
-        return;
-    }
-
-    board.dataset.layoutGridColumns = String(PAGE_GRID_COLUMNS);
-    board.dataset.layoutGridRows = String(PAGE_GRID_ROWS);
-    board.style.setProperty('--layout-grid-columns', String(PAGE_GRID_COLUMNS));
-    board.style.setProperty('--layout-grid-rows', String(PAGE_GRID_ROWS));
-};
-
-const createPageLayoutTile = (type) => {
-    const tile = document.createElement('div');
-    tile.id = `page-tile-${type}`;
-    tile.className = 'video-tile page-layout-tile';
-    tile.dataset.pageLayoutType = type;
-    tile.dataset.layoutComponentType = type;
-    tile.style.overflow = 'hidden';
-    return tile;
-};
-
-const getPageComponentId = (type) => `page-tile-${type}`;
-
-const PL_LOG = (...args) => console.log('[page-layout]', ...args);
 const PL_WARN = (...args) => console.warn('[page-layout]', ...args);
 
 const CORE_PAGE_TYPES = [
@@ -302,498 +274,15 @@ const CORE_PAGE_TYPES = [
     PAGE_COMPONENT_TYPES.CHAT_PANEL,
 ];
 
-const validatePageLayout = () => {
-    const missing = [];
-    const hidden = [];
+const getPagePanelLabel = (type) =>
+    pageLayoutRuntime?.getPagePanelLabel(type) || type;
 
-    CORE_PAGE_TYPES.forEach((type) => {
-        const tile = document.getElementById(getPageComponentId(type));
-        if (!tile) {
-            missing.push(type);
-        } else if (tile.classList.contains('is-layout-hidden')) {
-            hidden.push(type);
-        }
-    });
-
-    if (missing.length > 0) {
-        PL_WARN('Missing core page tiles:', missing);
-    }
-
-    if (hidden.length === CORE_PAGE_TYPES.length) {
-        PL_WARN('All core page tiles are hidden');
-    }
-
-    return { missing, hidden };
+const syncLayoutGridMetadata = () => {
+    pageLayoutRuntime?.syncLayoutGridMetadata();
 };
-
-const ensureDefaultPageLayout = () => {
-    PL_LOG('Ensuring default page layout exists');
-
-    if (!pageLayoutBoard) {
-        PL_WARN('No page layout board, cannot ensure defaults');
-        return;
-    }
-
-    CORE_PAGE_TYPES.forEach((type) => {
-        const tile = document.getElementById(getPageComponentId(type));
-        const defaultItem = getDefaultLayoutItems().find(
-            (item) => item.type === type
-        );
-        if (!tile || !defaultItem) {
-            PL_WARN('Missing default page panel:', type);
-            return;
-        }
-
-        applyTileLayout(
-            tile,
-            convertGridLayoutToPixels({
-                ...defaultItem.grid,
-                zIndex: getNextTileLayoutZIndex(),
-            })
-        );
-        setTileLayoutItemVisibility(tile.dataset.layoutItemId, true);
-        tile.classList.remove('is-layout-hidden');
-    });
-
-    syncLayoutGridMetadata();
-    saveLayoutToStorage('布局已初始化');
-};
-
-const getPagePanelLabel = (type) => PAGE_COMPONENT_LABELS[type] || type;
-
-const createPageTileFromNode = (type, node) => {
-    const tile = createPageLayoutTile(type);
-    const className = `page-tile-${type.replace(
-        /[A-Z]/g,
-        (letter) => `-${letter.toLowerCase()}`
-    )}`;
-    tile.classList.add(className);
-    const { header, body, footer } = ensureTileStructure(tile);
-    const avatar = header.querySelector('.tile-avatar');
-    const title = header.querySelector('.tile-title');
-    const badges = header.querySelector('.tile-badges');
-    const label = getPagePanelLabel(type);
-
-    if (avatar) {
-        avatar.textContent = createTileAvatarText(label);
-    }
-
-    if (title) {
-        title.textContent = label;
-    }
-
-    if (badges) {
-        badges.replaceChildren();
-    }
-
-    body.append(node);
-    footer.textContent = '';
-    footer.hidden = true;
-
-    const itemId = `page-${sanitizeLayoutIdPart(type)}`;
-    tile.dataset.layoutItemId = itemId;
-    tile.dataset.layoutId = itemId;
-    syncTileLayoutItemFromElement(tile, {
-        id: itemId,
-        type,
-        visible: true,
-        positioned: true,
-    });
-
-    return tile;
-};
-
-const getPageTileDiagnostics = (board, type) => {
-    const tile = board.querySelector(`#${getPageComponentId(type)}`);
-    return {
-        tile,
-        text: tile?.textContent.trim() || '',
-        childCount: tile?.querySelector('.tile-body')?.children.length || 0,
-    };
-};
-
-const validateDetachedPageLayoutBoard = (board) => {
-    const tileCount = board.querySelectorAll('.page-layout-tile').length;
-    const sidebar = getPageTileDiagnostics(
-        board,
-        PAGE_COMPONENT_TYPES.SIDEBAR_PANEL
-    );
-    const chat = getPageTileDiagnostics(board, PAGE_COMPONENT_TYPES.CHAT_PANEL);
-    const chatInputHasTextControl = Boolean(
-        chat.tile?.querySelector('textarea, input')
-    );
-    const chatInputHasSendButton = Boolean(
-        chat.tile &&
-            Array.from(chat.tile.querySelectorAll('button')).some(
-                (button) =>
-                    button.type === 'submit' ||
-                    button.textContent.includes('发送')
-            )
-    );
-    const chatHasMessageArea = Boolean(
-        chat.tile?.querySelector('#chatMessages, .chat-messages') ||
-            chat.tile?.querySelector('.chat-panel')?.children.length
-    );
-    const failures = [];
-
-    if (tileCount < CORE_PAGE_TYPES.length) {
-        failures.push(`expected ${CORE_PAGE_TYPES.length} page tiles`);
-    }
-
-    if (
-        !sidebar.tile ||
-        !sidebar.text.includes('朋友语音房间') ||
-        !/大厅|游戏开黑/.test(sidebar.text) ||
-        !sidebar.tile.querySelector('[data-channel-room], .tree-channel')
-    ) {
-        failures.push('sidebarPanel is missing channel content');
-    }
-
-    if (!board.querySelector('#video-grid')) {
-        failures.push('runtime video grid is missing');
-    }
-
-    if (
-        !chat.tile ||
-        !chatHasMessageArea ||
-        !chatInputHasTextControl ||
-        !chatInputHasSendButton
-    ) {
-        failures.push('chatPanel is missing chat content');
-    }
-
-    return {
-        ok: failures.length === 0,
-        failures,
-    };
-};
-
-const restoreMovedPagePanelNodes = (entries) => {
-    entries.forEach(({ node, placeholder }) => {
-        if (placeholder.isConnected) {
-            placeholder.replaceWith(node);
-        }
-    });
-};
-
-const initPageLayoutBoard = () => {
-    if (pageLayoutBoard) {
-        return pageLayoutBoard;
-    }
-
-    if (!mainLayout) {
-        PL_WARN('No #main element found');
-        return undefined;
-    }
-
-    const sidebarEl = mainLayout.querySelector('.room-sidebar');
-    const stageEl = mainLayout.querySelector('.room-stage');
-    const chatPanelEl = mainLayout.querySelector('.chat-panel');
-    const chatMessagesEl = chatPanelEl?.querySelector(
-        '#chatMessages, .chat-messages'
-    );
-    const chatFormEl = chatPanelEl?.querySelector('#chatForm, .chat-form');
-    const runtimeVideoGrid = mainLayout.querySelector('#video-grid');
-    const chatFormHasControls = Boolean(
-        chatFormEl?.querySelector('textarea, input') &&
-            chatFormEl.querySelector('button')
-    );
-
-    if (chatPanelEl && !chatMessagesEl) {
-        PL_WARN(
-            'Chat messages container was not found; keeping remaining chat panel content after input extraction.'
-        );
-    }
-
-    PL_LOG('source nodes', {
-        sidebar: Boolean(sidebarEl),
-        sidebarChildren: sidebarEl?.children.length || 0,
-        sidebarHasBrand: Boolean(sidebarEl?.querySelector('.sidebar-brand')),
-        sidebarHasTree: Boolean(
-            sidebarEl?.querySelector('.sidebar-channel-tree')
-        ),
-        sidebarHasUserCard: Boolean(
-            sidebarEl?.querySelector('.local-user-card')
-        ),
-        stage: Boolean(stageEl),
-        stageHasCanvas: Boolean(stageEl?.querySelector('#canvas')),
-        stageHasVideoGrid: Boolean(runtimeVideoGrid),
-        chatPanel: Boolean(chatPanelEl),
-        chatPanelHasMessages: Boolean(chatMessagesEl),
-        chatPanelHasForm: Boolean(chatFormEl),
-        chatFormHasControls,
-    });
-
-    const missingSelectors = [
-        ['.room-sidebar', sidebarEl],
-        ['#video-grid', runtimeVideoGrid],
-        ['.chat-panel', chatPanelEl],
-        ['#chatForm or .chat-form', chatFormEl],
-        ['chat input controls', chatFormHasControls ? chatFormEl : null],
-    ]
-        .filter(([, node]) => !node)
-        .map(([selector]) => selector);
-
-    if (missingSelectors.length > 0) {
-        console.error('[page-layout] missing source nodes:', missingSelectors);
-        _bootstrapRecoveryToolbar({ visible: true });
-        return undefined;
-    }
-
-    const entries = [
-        {
-            type: PAGE_COMPONENT_TYPES.SIDEBAR_PANEL,
-            node: sidebarEl,
-        },
-        {
-            type: PAGE_COMPONENT_TYPES.CHAT_PANEL,
-            node: chatPanelEl,
-        },
-    ].map((entry) => {
-        const placeholder = document.createComment(
-            `page-layout-placeholder:${entry.type}`
-        );
-        entry.node.before(placeholder);
-        return { ...entry, placeholder };
-    });
-
-    const board = document.createElement('div');
-    board.id = 'page-layout-board';
-    board.className = 'page-layout-board';
-
-    PL_LOG('Board created, moving full DOM panels');
-    board.append(runtimeVideoGrid);
-    entries.forEach(({ type, node }) => {
-        board.append(createPageTileFromNode(type, node));
-    });
-
-    const detachedValidation = validateDetachedPageLayoutBoard(board);
-    if (!detachedValidation.ok) {
-        console.error(
-            '[page-layout] detached board validation failed:',
-            detachedValidation.failures
-        );
-        restoreMovedPagePanelNodes(entries);
-        _bootstrapRecoveryToolbar({ visible: true });
-        return undefined;
-    }
-
-    mainLayout.classList.remove('room-layout');
-    mainLayout.replaceChildren(board);
-    pageLayoutBoard = board;
-
-    syncLayoutGridMetadata();
-
-    const savedItems = loadLayoutFromStorage();
-    PL_LOG('Loaded layout from storage:', savedItems.length, 'items');
-    const savedHasCore =
-        savedItems.length > 0 &&
-        CORE_PAGE_TYPES.every((type) =>
-            savedItems.some((item) => item.type === type)
-        );
-
-    if (savedItems.length === 0 || !savedHasCore) {
-        PL_LOG('No valid saved layout, using defaults');
-        ensureDefaultPageLayout();
-    } else {
-        const { missing } = validatePageLayout();
-        if (missing.length > 0 || missing.length === CORE_PAGE_TYPES.length) {
-            PL_WARN('Saved layout missing core components, using defaults');
-            ensureDefaultPageLayout();
-        } else {
-            initializeLayoutFromStorage();
-        }
-    }
-
-    ensureLayoutEditModeToggle();
-    syncLayoutEditModeUI();
-
-    PL_LOG('Board initialized with', getVideoTiles().length, 'tiles');
-    return board;
-};
-
-const _originalMainSnapshot = mainLayout ? mainLayout.cloneNode(true) : null;
-
-const _bootstrapRecoveryToolbar = ({ visible = false } = {}) =>
-    layoutRecoveryUI.ensureRecoveryToolbar({
-        onReset: () => {
-            clearSavedLayout();
-            window.location.reload();
-        },
-        onRestore: () => {
-            restoreOriginalStaticLayout();
-        },
-        visible,
-    });
 
 const restoreOriginalStaticLayout = () => {
-    if (!mainLayout) return;
-    const board = document.getElementById('page-layout-board');
-    if (board) board.remove();
-    mainLayout.classList.add('room-layout');
-    if (_originalMainSnapshot && _originalMainSnapshot.children.length > 0) {
-        mainLayout.replaceChildren();
-        while (_originalMainSnapshot.firstChild) {
-            mainLayout.append(_originalMainSnapshot.firstChild);
-        }
-        console.info('[page-layout] restored original static layout');
-    } else {
-        mainLayout.replaceChildren();
-        mainLayout.innerHTML = `
-            <aside class="room-sidebar"><div class="sidebar-brand"><a href="/">朋友语音房间</a></div></aside>
-            <main class="room-stage"><section id="canvas"><div id="video-grid"></div></section></main>
-            <aside class="chat-panel"><ol id="chatMessages" class="chat-messages" style="height:60vh"></ol>
-            <form id="chatForm" class="chat-form"><textarea id="chatInput"></textarea><button>发送</button></form></aside>`;
-        console.info('[page-layout] created safe fallback DOM');
-    }
-    pageLayoutBoard = undefined;
-    layoutEditMode = false;
-    syncLayoutEditModeUI();
-};
-
-window.__voiceLayoutDebug = {
-    bootTime: new Date().toISOString(),
-    resetLayout() {
-        clearSavedLayout();
-        document.getElementById('page-layout-board')?.remove();
-        if (typeof initPageLayoutBoard === 'function') {
-            pageLayoutBoard = undefined;
-            try {
-                initPageLayoutBoard();
-            } catch (err) {
-                console.error('[page-layout] reset failed', err);
-                restoreOriginalStaticLayout();
-            }
-        } else {
-            window.location.reload();
-        }
-    },
-    showRecoveryToolbar() {
-        _bootstrapRecoveryToolbar({ visible: true });
-    },
-    hideRecoveryToolbar() {
-        _bootstrapRecoveryToolbar({ visible: false });
-    },
-    dumpDom() {
-        const result = {
-            main: Boolean(document.getElementById('main')),
-            board: Boolean(document.getElementById('page-layout-board')),
-            pageTiles: document.querySelectorAll(
-                '#page-layout-board > .page-layout-tile'
-            ).length,
-            toolbar: Boolean(
-                document.querySelector(
-                    '.layout-recovery-toolbar, .stage-layout-toolbar'
-                )
-            ),
-            unexpectedStagePanel: Boolean(
-                document.getElementById('page-tile-stagePanel')
-            ),
-            remotePeerCount: document.querySelectorAll(
-                '.video-tile[data-layout-item-type="remotePeer"]'
-            ).length,
-            localPeer: {
-                exists: Boolean(document.getElementById('local-video')),
-                hidden: Boolean(
-                    document
-                        .getElementById('local-video')
-                        ?.classList.contains('is-layout-hidden')
-                ),
-            },
-            hasFooterLabels: Array.from(
-                document.querySelectorAll(
-                    '.page-layout-tile > .tile-footer:not([hidden])'
-                )
-            ).some((footer) => footer.textContent.trim().length > 0),
-        };
-        const types = CORE_PAGE_TYPES;
-        types.forEach((t) => {
-            const tile = document.getElementById(`page-tile-${t}`);
-            result[t] = tile
-                ? {
-                      exists: true,
-                      id: tile.id,
-                      hidden: tile.classList.contains('is-layout-hidden'),
-                      childCount: tile.children.length,
-                      bodyChildren:
-                          tile.querySelector('.tile-body')?.children.length ||
-                          0,
-                      textPreview: tile.textContent.trim().slice(0, 80),
-                      hasInput: Boolean(tile.querySelector('textarea, input')),
-                      hasChannelLinks: Boolean(
-                          tile.querySelector(
-                              '.tree-channel, [data-channel-room]'
-                          )
-                      ),
-                  }
-                : { exists: false };
-        });
-        result.totalTiles = document.querySelectorAll('.video-tile').length;
-        layoutRecoveryUI.printDebugTable(result);
-        return result;
-    },
-    dumpLayout() {
-        if (typeof serializeLayoutItems === 'function') {
-            const items = serializeLayoutItems();
-            layoutRecoveryUI.printDebugTable(
-                items.map((item) => ({
-                    id: item.id,
-                    type: item.type,
-                    x: item.x,
-                    y: item.y,
-                    w: item.w,
-                    h: item.h,
-                    visible: item.visible,
-                }))
-            );
-            return items;
-        }
-        console.warn('[page-layout] serializeLayoutItems not available yet');
-        return [];
-    },
-    validateLayout() {
-        if (typeof validatePageLayout === 'function') {
-            return validatePageLayout();
-        }
-        return { missing: [], hidden: [] };
-    },
-};
-
-const _detectBrokenBoard = () => {
-    const board = document.getElementById('page-layout-board');
-    if (!board) return false;
-    const tileCount = board.querySelectorAll('.page-layout-tile').length;
-    if (tileCount === 0) {
-        console.warn(
-            '[page-layout] detected empty board with 0 tiles, recovering'
-        );
-        return true;
-    }
-    const validation = validateDetachedPageLayoutBoard(board);
-    if (!validation.ok) {
-        console.warn(
-            '[page-layout] detected broken page board, recovering',
-            validation.failures
-        );
-        return true;
-    }
-    return false;
-};
-
-const _runPageLayoutInit = () => {
-    if (_detectBrokenBoard()) {
-        restoreOriginalStaticLayout();
-        _bootstrapRecoveryToolbar({ visible: true });
-        return;
-    }
-
-    try {
-        initPageLayoutBoard();
-    } catch (err) {
-        console.error('[page-layout] init failed', err);
-        restoreOriginalStaticLayout();
-        _bootstrapRecoveryToolbar({ visible: true });
-    }
+    pageLayoutRuntime?.restoreOriginalStaticLayout();
 };
 
 const ensureLayoutEditModeToggle = () => {
@@ -2939,7 +2428,7 @@ function renderLayoutComponentMenu() {
 
         return {
             disabled: Boolean(exists && visible && item?.visible !== false),
-            label: PAGE_COMPONENT_LABELS[type] || type,
+            label: getPagePanelLabel(type),
             statusText: visible ? '已显示' : exists ? '重新显示' : '添加',
             type,
         };
@@ -3386,10 +2875,50 @@ const bindTileLayoutControls = (tile, header) => {
     });
 };
 
-_bootstrapRecoveryToolbar();
+pageLayoutRuntime = window.PageLayoutRuntime.createRuntime({
+    document,
+    logger: console,
+    refs: {
+        mainLayout,
+        videoGrid,
+    },
+    layoutRecoveryUI,
+    pageComponentTypes: PAGE_COMPONENT_TYPES,
+    pageGridColumns: PAGE_GRID_COLUMNS,
+    pageGridRows: PAGE_GRID_ROWS,
+    getDefaultLayoutItems,
+    ensureTileStructure,
+    createTileAvatarText,
+    sanitizeLayoutIdPart,
+    syncTileLayoutItemFromElement,
+    applyTileLayout,
+    convertGridLayoutToPixels,
+    getNextTileLayoutZIndex,
+    setTileLayoutItemVisibility,
+    saveLayoutToStorage,
+    loadLayoutFromStorage,
+    clearSavedLayout,
+    initializeLayoutFromStorage,
+    ensureLayoutEditModeToggle,
+    syncLayoutEditModeUI,
+    getVideoTiles,
+    serializeLayoutItems,
+    setLayoutEditMode: (nextLayoutEditMode) => {
+        layoutEditMode = nextLayoutEditMode;
+    },
+    onBoardChange: (board) => {
+        pageLayoutBoard = board;
+    },
+    reload: () => {
+        window.location.reload();
+    },
+});
+
+pageLayoutRuntime.bootstrapRecoveryToolbar();
 
 try {
-    _runPageLayoutInit();
+    pageLayoutRuntime.bootstrap();
+    pageLayoutBoard = pageLayoutRuntime.getBoard();
     ensureLayoutEditModeToggle()?.addEventListener(
         'click',
         toggleLayoutEditMode
@@ -3403,7 +2932,7 @@ try {
 } catch (err) {
     console.error('[page-layout] critical init failure', err);
     restoreOriginalStaticLayout();
-    _bootstrapRecoveryToolbar({ visible: true });
+    pageLayoutRuntime.bootstrapRecoveryToolbar({ visible: true });
 }
 
 const closePeerVolumePopover = () => {

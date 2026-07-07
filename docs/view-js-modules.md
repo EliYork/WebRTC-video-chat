@@ -44,17 +44,18 @@ window namespaces, module exports, or the ownership boundaries below.
 21. `/js/layout/page-layout-toolbar-ui.js`
 22. `/js/layout/page-layout-component-menu-ui.js`
 23. `/js/layout/page-layout-recovery-ui.js`
-24. `/js/room/room-ui-state.js`
-25. `/js/room/mobile-room-state.js`
-26. `/js/room/presence-view-model.js`
-27. `/js/room/participants-list-ui.js`
-28. `/js/room/tile-status-ui.js`
-29. `/js/room/video-tile-structure-ui.js`
-30. `/js/chat/chat-message-ui.js`
-31. `/js/chat/chat-form-ui.js`
-32. `/js/room/channel-sidebar-ui.js`
-33. `/js/room/cursor-share-ui.js`
-34. `/script.js`
+24. `/js/layout/page-layout-runtime.js`
+25. `/js/room/room-ui-state.js`
+26. `/js/room/mobile-room-state.js`
+27. `/js/room/presence-view-model.js`
+28. `/js/room/participants-list-ui.js`
+29. `/js/room/tile-status-ui.js`
+30. `/js/room/video-tile-structure-ui.js`
+31. `/js/chat/chat-message-ui.js`
+32. `/js/chat/chat-form-ui.js`
+33. `/js/room/channel-sidebar-ui.js`
+34. `/js/room/cursor-share-ui.js`
+35. `/script.js`
 
 Modules that use `window.VoiceViewUtils` must load after
 `/js/shared/view-utils.js` and before `/script.js`. All view modules must load
@@ -136,6 +137,15 @@ components directly.
 toolbar visibility, and debug table printing. It must not clear storage,
 reload the page, restore the static layout, or initialize/validate the layout
 board.
+
+`layout/page-layout-runtime.js` owns the page-layout runtime boot path:
+page-layout board creation, real DOM panel migration into the board, detached
+board validation, default page-layout ensure, broken-board detection, recovery
+toolbar wiring, fallback static restore, and `window.__voiceLayoutDebug`.
+It receives DOM refs, storage/layout callbacks, toolbar hooks, and layout
+helpers from `script.js`; it must not own WebRTC, media, socket, PeerJS, chat
+socket flow, tile drag/resize lifecycles, or output-volume/media-element
+application. This move is a large runtime migration, not a test closeout.
 
 ## Chat
 
@@ -223,8 +233,8 @@ explicitly opens a new boundary and adds tests first:
 - WebRTC, PeerJS, socket, and stream lifecycles.
 - `requestAudioStream()`, `createAudioPipeline()`,
   `setupCallStreamHandler()`, and `joinVoiceChannel()`.
-- Page layout rendering, resize/drag orchestration, restore/migration, and
-  storage migration.
+- Main page orchestration and page-layout dependency wiring.
+- Page layout resize/drag orchestration and storage migration.
 - Chat socket flow, including message payload decisions and history handling.
 - Screen-share and cursor-share network flow.
 - Output-device application to remote media.
@@ -242,5 +252,7 @@ New modules should follow these rules:
   `script.js`.
 - Modules that use `VoiceViewUtils` must load after
   `/js/shared/view-utils.js`.
-- Each new module must update `tests/page_layout_contract_test.mjs` with load
-  order, namespace, required exports, and forbidden keyword contracts.
+- New modules normally update `tests/page_layout_contract_test.mjs` with load
+  order, namespace, required exports, and forbidden keyword contracts. The
+  `page-layout-runtime.js` migration intentionally deferred that contract
+  sync because it was a large runtime move, not a test closeout.
