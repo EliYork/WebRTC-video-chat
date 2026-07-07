@@ -2,14 +2,7 @@
 console.info('[page-layout] script boot v2 ' + new Date().toISOString());
 let socket;
 
-const {
-    byId,
-    createGuestName,
-    formatTime,
-    queryAll,
-    safeStorageGet,
-    safeStorageSet,
-} = window.VoiceViewUtils;
+const { byId, formatTime, queryAll } = window.VoiceViewUtils;
 
 const videoGrid = byId('video-grid');
 const mainLayout = byId('main');
@@ -69,6 +62,7 @@ const tileStatusUI = window.VoiceTileStatusUI;
 const videoTileStructureUI = window.VoiceVideoTileStructureUI;
 const chatMessageUI = window.VoiceChatMessageUI;
 const chatFormUI = window.VoiceChatFormUI;
+const chatNameState = window.VoiceChatNameState;
 const channelSidebarUI = window.VoiceChannelSidebarUI;
 const cursorShareUI = window.VoiceCursorShareUI;
 const {
@@ -98,7 +92,6 @@ const {
 const remoteStreams = {};
 const getAudioConstraints = () => noiseSettingsUI.getAudioConstraints();
 
-const CHAT_NAME_STORAGE_KEY = 'webrtc-video-chat-name';
 const CHAT_MESSAGE_MAX_LENGTH = 500;
 const CURSOR_THROTTLE_MS = 40;
 const CURSOR_IDLE_MS = 700;
@@ -1174,31 +1167,17 @@ const bindVoiceSocketHandlers = (activeSocket) => {
     activeSocket.on('removeUserVideo', handleSocketRemoveUserVideo);
 };
 
-const getStoredChatName = () => {
-    const storedName = safeStorageGet(CHAT_NAME_STORAGE_KEY);
+const getStoredChatName = () => chatNameState.getStoredChatName();
 
-    if (storedName) {
-        return storedName;
-    }
-
-    const guestName = createGuestName();
-    safeStorageSet(CHAT_NAME_STORAGE_KEY, guestName);
-    return guestName;
-};
-
-const getChatName = () => {
-    const name = chatNameInput?.value.trim().slice(0, 32);
-    return name || getStoredChatName();
-};
+const getChatName = () => chatNameState.getChatName(chatNameInput?.value);
 
 const saveChatName = () => {
     if (!chatNameInput) {
         return;
     }
 
-    const name = chatNameInput.value.trim().slice(0, 32) || createGuestName();
+    const name = chatNameState.saveChatName(chatNameInput.value);
     chatNameInput.value = name;
-    safeStorageSet(CHAT_NAME_STORAGE_KEY, name);
 };
 
 const getChatMessageViewModel = (message) => ({

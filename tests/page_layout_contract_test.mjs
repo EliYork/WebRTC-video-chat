@@ -1,4 +1,4 @@
-import assert from 'node:assert/strict';
+﻿import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const loadCssWithImports = (fileUrl, seen = new Set()) => {
@@ -42,22 +42,95 @@ const MEDIA_ORCHESTRATION_FORBIDDEN_KEYWORDS = [
 
 const MODULE_SCRIPTS = [
     {
-        path: '/js/view-utils.js',
-        sourcePath: '../src/views/js/view-utils.js',
+        path: '/js/shared/view-utils.js',
+        sourcePath: '../src/views/js/shared/view-utils.js',
         namespace: 'VoiceViewUtils',
         mustLoadBeforeMain: true,
         dependsOnViewUtils: false,
     },
     {
-        path: '/js/noise-settings-ui.js',
-        sourcePath: '../src/views/js/noise-settings-ui.js',
+        path: '/js/chat/chat-name-state.js',
+        sourcePath: '../src/views/js/chat/chat-name-state.js',
+        namespace: 'VoiceChatNameState',
+        mustLoadBeforeMain: true,
+        dependsOnViewUtils: true,
+        forbiddenKeywords: [
+            'document',
+            'querySelector',
+            'socket',
+            'io(',
+            'Peer',
+            'navigator.mediaDevices',
+            'getUserMedia',
+            'getDisplayMedia',
+            'AudioContext',
+            'saveLayoutToStorage',
+            'joinChatRoom',
+            'sendChatMessage',
+            'appendChatMessage',
+            'renderChatHistory',
+            'updatePresenceName',
+            'emitLocalPresenceUpdate',
+            'updateLocalUserCard',
+        ],
+        requiredExports: [
+            [
+                /CHAT_NAME_STORAGE_KEY/,
+                'chat name state must expose the storage key',
+            ],
+            [
+                /normalizeChatName/,
+                'chat name state must expose name normalization',
+            ],
+            [
+                /getStoredChatName/,
+                'chat name state must expose stored name lookup',
+            ],
+            [
+                /getChatName/,
+                'chat name state must expose effective name lookup',
+            ],
+            [/saveChatName/, 'chat name state must expose name persistence'],
+            [
+                /webrtc-video-chat-name/,
+                'chat name state must preserve the storage key',
+            ],
+            [
+                /\.trim\(\)\s*\.slice\(0, CHAT_NAME_MAX_LENGTH\)/,
+                'chat name state must preserve trim and max length normalization',
+            ],
+            [
+                /const CHAT_NAME_MAX_LENGTH = 32/,
+                'chat name state must preserve the 32 character limit',
+            ],
+            [
+                /normalizeChatName\(inputValue\) \|\| getStoredChatName\(\)/,
+                'chat name state must fall back to stored or guest name for empty input',
+            ],
+            [
+                /normalizeChatName\(inputValue\) \|\| createGuestName\(\)/,
+                'chat name state must fall back to guest name before saving empty input',
+            ],
+            [
+                /safeStorageGet\(CHAT_NAME_STORAGE_KEY\)/,
+                'chat name state must read the existing storage key',
+            ],
+            [
+                /safeStorageSet\(CHAT_NAME_STORAGE_KEY, name\)/,
+                'chat name state must save the normalized name to the existing storage key',
+            ],
+        ],
+    },
+    {
+        path: '/js/media/noise-settings-ui.js',
+        sourcePath: '../src/views/js/media/noise-settings-ui.js',
         namespace: 'VoiceNoiseSettingsUI',
         mustLoadBeforeMain: true,
         dependsOnViewUtils: true,
     },
     {
-        path: '/js/control-popovers-ui.js',
-        sourcePath: '../src/views/js/control-popovers-ui.js',
+        path: '/js/shared/control-popovers-ui.js',
+        sourcePath: '../src/views/js/shared/control-popovers-ui.js',
         namespace: 'VoiceControlPopoversUI',
         mustLoadBeforeMain: true,
         dependsOnViewUtils: true,
@@ -89,8 +162,8 @@ const MODULE_SCRIPTS = [
         ],
     },
     {
-        path: '/js/peer-volume-ui.js',
-        sourcePath: '../src/views/js/peer-volume-ui.js',
+        path: '/js/media/peer-volume-ui.js',
+        sourcePath: '../src/views/js/media/peer-volume-ui.js',
         namespace: 'VoiceRemoteVolumeUI',
         mustLoadBeforeMain: true,
         dependsOnViewUtils: true,
@@ -106,8 +179,8 @@ const MODULE_SCRIPTS = [
         ],
     },
     {
-        path: '/js/copy-link-ui.js',
-        sourcePath: '../src/views/js/copy-link-ui.js',
+        path: '/js/shared/copy-link-ui.js',
+        sourcePath: '../src/views/js/shared/copy-link-ui.js',
         namespace: 'VoiceCopyLinkUI',
         mustLoadBeforeMain: true,
         dependsOnViewUtils: true,
@@ -146,8 +219,8 @@ const MODULE_SCRIPTS = [
         ],
     },
     {
-        path: '/js/output-volume-state.js',
-        sourcePath: '../src/views/js/output-volume-state.js',
+        path: '/js/media/output-volume-state.js',
+        sourcePath: '../src/views/js/media/output-volume-state.js',
         namespace: 'VoiceOutputVolumeState',
         mustLoadBeforeMain: true,
         dependsOnViewUtils: true,
@@ -208,8 +281,8 @@ const MODULE_SCRIPTS = [
         ],
     },
     {
-        path: '/js/output-volume-ui.js',
-        sourcePath: '../src/views/js/output-volume-ui.js',
+        path: '/js/media/output-volume-ui.js',
+        sourcePath: '../src/views/js/media/output-volume-ui.js',
         namespace: 'VoiceOutputVolumeUI',
         mustLoadBeforeMain: true,
         dependsOnViewUtils: true,
@@ -226,8 +299,8 @@ const MODULE_SCRIPTS = [
         ],
     },
     {
-        path: '/js/media-controls-ui.js',
-        sourcePath: '../src/views/js/media-controls-ui.js',
+        path: '/js/media/media-controls-ui.js',
+        sourcePath: '../src/views/js/media/media-controls-ui.js',
         namespace: 'VoiceMediaControlsUI',
         mustLoadBeforeMain: true,
         dependsOnViewUtils: true,
@@ -266,8 +339,8 @@ const MODULE_SCRIPTS = [
         ],
     },
     {
-        path: '/js/fullscreen-controls.js',
-        sourcePath: '../src/views/js/fullscreen-controls.js',
+        path: '/js/media/fullscreen-controls.js',
+        sourcePath: '../src/views/js/media/fullscreen-controls.js',
         namespace: 'VoiceFullscreenControls',
         mustLoadBeforeMain: true,
         dependsOnViewUtils: true,
@@ -336,8 +409,8 @@ const MODULE_SCRIPTS = [
         ],
     },
     {
-        path: '/js/voice-join-overlay-ui.js',
-        sourcePath: '../src/views/js/voice-join-overlay-ui.js',
+        path: '/js/media/voice-join-overlay-ui.js',
+        sourcePath: '../src/views/js/media/voice-join-overlay-ui.js',
         namespace: 'VoiceJoinOverlayUI',
         mustLoadBeforeMain: true,
         dependsOnViewUtils: true,
@@ -394,8 +467,8 @@ const MODULE_SCRIPTS = [
         ],
     },
     {
-        path: '/js/page-layout-snap-utils.js',
-        sourcePath: '../src/views/js/page-layout-snap-utils.js',
+        path: '/js/layout/page-layout-snap-utils.js',
+        sourcePath: '../src/views/js/layout/page-layout-snap-utils.js',
         namespace: 'PageLayoutSnapUtils',
         mustLoadBeforeMain: true,
         dependsOnViewUtils: false,
@@ -415,8 +488,8 @@ const MODULE_SCRIPTS = [
         ],
     },
     {
-        path: '/js/page-layout-resize-utils.js',
-        sourcePath: '../src/views/js/page-layout-resize-utils.js',
+        path: '/js/layout/page-layout-resize-utils.js',
+        sourcePath: '../src/views/js/layout/page-layout-resize-utils.js',
         namespace: 'PageLayoutResizeUtils',
         mustLoadBeforeMain: true,
         dependsOnViewUtils: false,
@@ -451,8 +524,8 @@ const MODULE_SCRIPTS = [
         ],
     },
     {
-        path: '/js/page-layout-edit-ui.js',
-        sourcePath: '../src/views/js/page-layout-edit-ui.js',
+        path: '/js/layout/page-layout-edit-ui.js',
+        sourcePath: '../src/views/js/layout/page-layout-edit-ui.js',
         namespace: 'PageLayoutEditUI',
         mustLoadBeforeMain: true,
         dependsOnViewUtils: false,
@@ -472,8 +545,9 @@ const MODULE_SCRIPTS = [
         ],
     },
     {
-        path: '/js/page-layout-component-actions-ui.js',
-        sourcePath: '../src/views/js/page-layout-component-actions-ui.js',
+        path: '/js/layout/page-layout-component-actions-ui.js',
+        sourcePath:
+            '../src/views/js/layout/page-layout-component-actions-ui.js',
         namespace: 'PageLayoutComponentActionsUI',
         mustLoadBeforeMain: true,
         dependsOnViewUtils: false,
@@ -551,8 +625,8 @@ const MODULE_SCRIPTS = [
         ],
     },
     {
-        path: '/js/page-layout-storage.js',
-        sourcePath: '../src/views/js/page-layout-storage.js',
+        path: '/js/layout/page-layout-storage.js',
+        sourcePath: '../src/views/js/layout/page-layout-storage.js',
         namespace: 'PageLayoutStorage',
         mustLoadBeforeMain: true,
         dependsOnViewUtils: false,
@@ -577,8 +651,8 @@ const MODULE_SCRIPTS = [
         ],
     },
     {
-        path: '/js/page-layout-config.js',
-        sourcePath: '../src/views/js/page-layout-config.js',
+        path: '/js/layout/page-layout-config.js',
+        sourcePath: '../src/views/js/layout/page-layout-config.js',
         namespace: 'PageLayoutConfig',
         mustLoadBeforeMain: true,
         dependsOnViewUtils: false,
@@ -647,8 +721,8 @@ const MODULE_SCRIPTS = [
         ],
     },
     {
-        path: '/js/page-layout-ids.js',
-        sourcePath: '../src/views/js/page-layout-ids.js',
+        path: '/js/layout/page-layout-ids.js',
+        sourcePath: '../src/views/js/layout/page-layout-ids.js',
         namespace: 'PageLayoutIds',
         mustLoadBeforeMain: true,
         dependsOnViewUtils: false,
@@ -731,8 +805,8 @@ const MODULE_SCRIPTS = [
         ],
     },
     {
-        path: '/js/page-layout-placement-utils.js',
-        sourcePath: '../src/views/js/page-layout-placement-utils.js',
+        path: '/js/layout/page-layout-placement-utils.js',
+        sourcePath: '../src/views/js/layout/page-layout-placement-utils.js',
         namespace: 'PageLayoutPlacementUtils',
         mustLoadBeforeMain: true,
         dependsOnViewUtils: false,
@@ -813,8 +887,8 @@ const MODULE_SCRIPTS = [
         ],
     },
     {
-        path: '/js/page-layout-components.js',
-        sourcePath: '../src/views/js/page-layout-components.js',
+        path: '/js/layout/page-layout-components.js',
+        sourcePath: '../src/views/js/layout/page-layout-components.js',
         namespace: 'PageLayoutComponents',
         mustLoadBeforeMain: true,
         dependsOnViewUtils: false,
@@ -884,8 +958,8 @@ const MODULE_SCRIPTS = [
         ],
     },
     {
-        path: '/js/page-layout-toolbar-ui.js',
-        sourcePath: '../src/views/js/page-layout-toolbar-ui.js',
+        path: '/js/layout/page-layout-toolbar-ui.js',
+        sourcePath: '../src/views/js/layout/page-layout-toolbar-ui.js',
         namespace: 'PageLayoutToolbarUI',
         mustLoadBeforeMain: true,
         dependsOnViewUtils: false,
@@ -923,8 +997,8 @@ const MODULE_SCRIPTS = [
         ],
     },
     {
-        path: '/js/page-layout-component-menu-ui.js',
-        sourcePath: '../src/views/js/page-layout-component-menu-ui.js',
+        path: '/js/layout/page-layout-component-menu-ui.js',
+        sourcePath: '../src/views/js/layout/page-layout-component-menu-ui.js',
         namespace: 'PageLayoutComponentMenuUI',
         mustLoadBeforeMain: true,
         dependsOnViewUtils: false,
@@ -966,8 +1040,8 @@ const MODULE_SCRIPTS = [
         ],
     },
     {
-        path: '/js/page-layout-recovery-ui.js',
-        sourcePath: '../src/views/js/page-layout-recovery-ui.js',
+        path: '/js/layout/page-layout-recovery-ui.js',
+        sourcePath: '../src/views/js/layout/page-layout-recovery-ui.js',
         namespace: 'PageLayoutRecoveryUI',
         mustLoadBeforeMain: true,
         dependsOnViewUtils: false,
@@ -1002,8 +1076,8 @@ const MODULE_SCRIPTS = [
         ],
     },
     {
-        path: '/js/room-ui-state.js',
-        sourcePath: '../src/views/js/room-ui-state.js',
+        path: '/js/room/room-ui-state.js',
+        sourcePath: '../src/views/js/room/room-ui-state.js',
         namespace: 'VoiceRoomUIState',
         mustLoadBeforeMain: true,
         dependsOnViewUtils: true,
@@ -1038,8 +1112,8 @@ const MODULE_SCRIPTS = [
         ],
     },
     {
-        path: '/js/mobile-room-state.js',
-        sourcePath: '../src/views/js/mobile-room-state.js',
+        path: '/js/room/mobile-room-state.js',
+        sourcePath: '../src/views/js/room/mobile-room-state.js',
         namespace: 'VoiceMobileRoomState',
         mustLoadBeforeMain: true,
         dependsOnViewUtils: false,
@@ -1086,8 +1160,8 @@ const MODULE_SCRIPTS = [
         ],
     },
     {
-        path: '/js/presence-view-model.js',
-        sourcePath: '../src/views/js/presence-view-model.js',
+        path: '/js/room/presence-view-model.js',
+        sourcePath: '../src/views/js/room/presence-view-model.js',
         namespace: 'VoicePresenceViewModel',
         mustLoadBeforeMain: true,
         dependsOnViewUtils: false,
@@ -1135,8 +1209,8 @@ const MODULE_SCRIPTS = [
         ],
     },
     {
-        path: '/js/participants-list-ui.js',
-        sourcePath: '../src/views/js/participants-list-ui.js',
+        path: '/js/room/participants-list-ui.js',
+        sourcePath: '../src/views/js/room/participants-list-ui.js',
         namespace: 'VoiceParticipantsListUI',
         mustLoadBeforeMain: true,
         dependsOnViewUtils: true,
@@ -1181,8 +1255,8 @@ const MODULE_SCRIPTS = [
         ],
     },
     {
-        path: '/js/tile-status-ui.js',
-        sourcePath: '../src/views/js/tile-status-ui.js',
+        path: '/js/room/tile-status-ui.js',
+        sourcePath: '../src/views/js/room/tile-status-ui.js',
         namespace: 'VoiceTileStatusUI',
         mustLoadBeforeMain: true,
         dependsOnViewUtils: true,
@@ -1224,8 +1298,8 @@ const MODULE_SCRIPTS = [
         ],
     },
     {
-        path: '/js/video-tile-structure-ui.js',
-        sourcePath: '../src/views/js/video-tile-structure-ui.js',
+        path: '/js/room/video-tile-structure-ui.js',
+        sourcePath: '../src/views/js/room/video-tile-structure-ui.js',
         namespace: 'VoiceVideoTileStructureUI',
         mustLoadBeforeMain: true,
         dependsOnViewUtils: false,
@@ -1274,8 +1348,8 @@ const MODULE_SCRIPTS = [
         ],
     },
     {
-        path: '/js/chat-message-ui.js',
-        sourcePath: '../src/views/js/chat-message-ui.js',
+        path: '/js/chat/chat-message-ui.js',
+        sourcePath: '../src/views/js/chat/chat-message-ui.js',
         namespace: 'VoiceChatMessageUI',
         mustLoadBeforeMain: true,
         dependsOnViewUtils: true,
@@ -1324,8 +1398,8 @@ const MODULE_SCRIPTS = [
         ],
     },
     {
-        path: '/js/chat-form-ui.js',
-        sourcePath: '../src/views/js/chat-form-ui.js',
+        path: '/js/chat/chat-form-ui.js',
+        sourcePath: '../src/views/js/chat/chat-form-ui.js',
         namespace: 'VoiceChatFormUI',
         mustLoadBeforeMain: true,
         dependsOnViewUtils: true,
@@ -1360,8 +1434,8 @@ const MODULE_SCRIPTS = [
         ],
     },
     {
-        path: '/js/channel-sidebar-ui.js',
-        sourcePath: '../src/views/js/channel-sidebar-ui.js',
+        path: '/js/room/channel-sidebar-ui.js',
+        sourcePath: '../src/views/js/room/channel-sidebar-ui.js',
         namespace: 'VoiceChannelSidebarUI',
         mustLoadBeforeMain: true,
         dependsOnViewUtils: true,
@@ -1403,8 +1477,8 @@ const MODULE_SCRIPTS = [
         ],
     },
     {
-        path: '/js/cursor-share-ui.js',
-        sourcePath: '../src/views/js/cursor-share-ui.js',
+        path: '/js/room/cursor-share-ui.js',
+        sourcePath: '../src/views/js/room/cursor-share-ui.js',
         namespace: 'VoiceCursorShareUI',
         mustLoadBeforeMain: true,
         dependsOnViewUtils: true,
@@ -1458,16 +1532,24 @@ const getModuleSource = (path) => moduleSources.get(path);
 
 const script = readText('../src/views/script.js');
 const roomIndex = readText('../src/views/room/index.ejs');
-const pageLayoutStorage = getModuleSource('/js/page-layout-storage.js');
-const pageLayoutConfig = getModuleSource('/js/page-layout-config.js');
-const pageLayoutIds = getModuleSource('/js/page-layout-ids.js');
+const pageLayoutStorage = getModuleSource('/js/layout/page-layout-storage.js');
+const pageLayoutConfig = getModuleSource('/js/layout/page-layout-config.js');
+const pageLayoutIds = getModuleSource('/js/layout/page-layout-ids.js');
 const pageLayoutPlacementUtils = getModuleSource(
-    '/js/page-layout-placement-utils.js'
+    '/js/layout/page-layout-placement-utils.js'
 );
-const pageLayoutComponents = getModuleSource('/js/page-layout-components.js');
-const pageLayoutToolbarUi = getModuleSource('/js/page-layout-toolbar-ui.js');
-const pageLayoutRecoveryUi = getModuleSource('/js/page-layout-recovery-ui.js');
-const videoTileStructureUi = getModuleSource('/js/video-tile-structure-ui.js');
+const pageLayoutComponents = getModuleSource(
+    '/js/layout/page-layout-components.js'
+);
+const pageLayoutToolbarUi = getModuleSource(
+    '/js/layout/page-layout-toolbar-ui.js'
+);
+const pageLayoutRecoveryUi = getModuleSource(
+    '/js/layout/page-layout-recovery-ui.js'
+);
+const videoTileStructureUi = getModuleSource(
+    '/js/room/video-tile-structure-ui.js'
+);
 const style = loadCssWithImports(
     new URL('../src/views/style.css', import.meta.url)
 );
@@ -1552,7 +1634,7 @@ const getSourceBetween = (source, startPattern, endPattern, label) => {
 };
 
 const assertModuleScriptContracts = (moduleScripts) => {
-    assertScriptBeforeMain('/js/view-utils.js');
+    assertScriptBeforeMain('/js/shared/view-utils.js');
 
     moduleScripts.forEach(
         ({
@@ -1573,10 +1655,10 @@ const assertModuleScriptContracts = (moduleScripts) => {
             }
 
             if (
-                path !== '/js/view-utils.js' &&
+                path !== '/js/shared/view-utils.js' &&
                 (dependsOnViewUtils || source.includes('VoiceViewUtils'))
             ) {
-                assertScriptBefore('/js/view-utils.js', path);
+                assertScriptBefore('/js/shared/view-utils.js', path);
             }
 
             if (namespace) {
@@ -1600,6 +1682,35 @@ const assertModuleScriptContracts = (moduleScripts) => {
 };
 
 assertModuleScriptContracts(MODULE_SCRIPTS);
+
+assertSourceContains(script, 'chat name state delegation', [
+    [
+        /const chatNameState = window\.VoiceChatNameState/,
+        'script.js must load the chat name state module',
+    ],
+    [
+        /const getStoredChatName = \(\) => chatNameState\.getStoredChatName\(\);/,
+        'script.js must keep getStoredChatName as a thin state-module wrapper',
+    ],
+    [
+        /const getChatName = \(\) => chatNameState\.getChatName\(chatNameInput\?\.value\);/,
+        'script.js must keep chatNameInput DOM reads outside the state module',
+    ],
+    [
+        /const saveChatName = \(\) => \{[\s\S]*?if \(!chatNameInput\) \{[\s\S]*?return;[\s\S]*?\}[\s\S]*?const name = chatNameState\.saveChatName\(chatNameInput\.value\);[\s\S]*?chatNameInput\.value = name;[\s\S]*?\};/,
+        'script.js must keep saveChatName as a DOM-input wrapper around chat name state',
+    ],
+    [
+        /chatNameInput\.addEventListener\('change', \(\) => \{[\s\S]*?saveChatName\(\);[\s\S]*?updatePresenceName\(\);[\s\S]*?\}\);/,
+        'chat name input change must still save before updating presence',
+    ],
+]);
+assertSourceDoesNotContain(script, 'chat name state delegation', [
+    [
+        /const CHAT_NAME_STORAGE_KEY = 'webrtc-video-chat-name'/,
+        'script.js must not retain the chat name storage key after extraction',
+    ],
+]);
 
 assert.match(
     roomIndex,
