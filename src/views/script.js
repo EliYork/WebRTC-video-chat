@@ -56,6 +56,7 @@ const layoutComponents = window.PageLayoutComponents;
 const layoutPlacementUtils = window.PageLayoutPlacementUtils;
 const layoutEditorRuntime = window.PageLayoutEditorRuntime;
 const layoutComponentRuntime = window.PageLayoutComponentRuntime;
+const layoutStoreRuntime = window.PageLayoutStoreRuntime;
 const roomUIState = window.VoiceRoomUIState;
 const mobileRoomState = window.VoiceMobileRoomState;
 const presenceViewModel = window.VoicePresenceViewModel;
@@ -134,7 +135,7 @@ const PAGE_TILE_MIN_WIDTH = 160;
 const PAGE_TILE_MIN_HEIGHT = 80;
 let pageLayoutBoard;
 let pageLayoutRuntime;
-let layoutPreferences = { ...LAYOUT_PREFERENCE_DEFAULTS };
+let pageLayoutStoreRuntime;
 
 const updateLayoutItemConfig = (id, patch) => {
     const item = getTileLayoutItem(id);
@@ -145,21 +146,12 @@ const updateLayoutItemConfig = (id, patch) => {
         ...item.config,
         ...patch,
     });
-    layoutItemsById.set(id, item);
+    setTileLayoutItem(item);
     saveLayoutToStorage('配置已更新');
 };
 
-const readLayoutPreferencesFromStorage = () => {
-    return layoutStorage.readLayoutPreferencesFromStorage({
-        storageKey: getLayoutStorageKey(),
-        normalizeLayoutPreferences,
-        getDefaultLayoutPreferences,
-    });
-};
-
-const getLayoutPreference = (key) => {
-    return getLayoutPreferenceValue(layoutPreferences, key);
-};
+const getLayoutPreference = (key) =>
+    pageLayoutStoreRuntime?.getLayoutPreference(key);
 const cursorSharingMedia = window.matchMedia(
     `(max-width: ${MOBILE_BREAKPOINT}px), (pointer: coarse)`
 );
@@ -191,10 +183,8 @@ const remotePeerOrder = [];
 const screenSharers = new Set();
 const peersWithCallHandler = new WeakSet();
 const presenceMembersByPeerId = new Map();
-const layoutItemsById = new Map();
 let tileLayoutZIndex = TILE_BASE_Z_INDEX;
 let layoutEditMode = false;
-let layoutStorageHydrating = false;
 let pageLayoutEditorRuntime;
 let pageLayoutComponentRuntime;
 const layoutResizeBoundBoards = new WeakSet();
@@ -1283,19 +1273,7 @@ const normalizeTileLayoutZIndex = (value) => {
 };
 
 const saveTileLayout = (layoutId, layout) => {
-    if (!layoutId) {
-        return;
-    }
-
-    const item = getTileLayoutItem(layoutId);
-
-    if (item) {
-        item.layout = normalizeTileLayout(layout);
-        item.grid = convertTileLayoutToGrid(item.layout);
-        layoutItemsById.set(layoutId, item);
-    }
-
-    saveLayoutToStorage('布局已更新');
+    pageLayoutStoreRuntime?.saveTileLayout(layoutId, layout);
 };
 
 const getTileLayoutZIndex = (tile) =>
@@ -1351,7 +1329,7 @@ const getLayoutSnapContext = () => ({
     getCurrentTileLayout,
     applyTileLayout,
     applyTileLayoutItemToElement,
-    setLayoutItem: (item) => layoutItemsById.set(item.id, item),
+    setLayoutItem: setTileLayoutItem,
 });
 
 const getTileBounds = () =>
@@ -1411,7 +1389,7 @@ const isRectWithinGrid = (rect) =>
 const getOccupiedLayoutRects = (excludeId) => {
     const rects = [];
 
-    layoutItemsById.forEach((item) => {
+    forEachTileLayoutItem((item) => {
         if (!item?.id || item.id === excludeId || item.visible === false) {
             return;
         }
@@ -1466,7 +1444,7 @@ const hideSnapPreview = () => layoutEditUI.hideSnapPreview();
 
 const finalizeLayoutEditing = () => {
     layoutSnapUtils.snapAllLayoutItemsToGrid(
-        layoutItemsById,
+        getTileLayoutItemsRegistry(),
         getLayoutSnapContext()
     );
     hideSnapPreview();
@@ -1480,101 +1458,27 @@ const getLayoutStorageKey = () =>
         roomId: viewingRoomId || selectedVoiceRoomId || 'default',
     });
 
-const getKnownLayoutItemTypes = () =>
-    new Set([
-        ...Object.values(LAYOUT_ITEM_TYPES),
-        ...Object.values(PAGE_COMPONENT_TYPES),
-    ]);
-
-const serializeLayoutItems = () =>
-    layoutStorage.serializeLayoutItems(layoutItemsById, {
-        clampGridLayout,
-        normalizeZIndex: normalizeTileLayoutZIndex,
-        normalizeComponentConfig,
-    });
-
-const normalizeLoadedLayoutItems = (payload) =>
-    layoutStorage.normalizeLoadedLayoutItems(payload, {
-        version: PAGE_STORAGE_VERSION,
-        columns: PAGE_GRID_COLUMNS,
-        rows: PAGE_GRID_ROWS,
-        getKnownLayoutItemTypes,
-        normalizeLayoutItemType,
-        getLegacyRemoteLayoutPeerId,
-        normalizeRemotePeerLayoutId,
-        remotePeerType: LAYOUT_ITEM_TYPES.REMOTE_PEER,
-        singletonTypes: PAGE_SINGLETON_TYPES,
-        normalizeAutoLayoutGrid,
-        normalizeZIndex: normalizeTileLayoutZIndex,
-        normalizeComponentConfig,
-    });
+const serializeLayoutItems = () => pageLayoutStoreRuntime?.serialize() || [];
 
 const loadLayoutFromStorage = () =>
-    layoutStorage.loadLayoutFromStorage({
-        storageKey: getLayoutStorageKey(),
-        normalize: normalizeLoadedLayoutItems,
-        onInvalid: (error) => {
-            console.warn(
-                '[layout] saved layout is invalid; using defaults.',
-                error
-            );
-        },
-    });
-
-const savedLayoutItemsById = new Map();
-
-const refreshSavedLayoutItems = () => {
-    savedLayoutItemsById.clear();
-    loadLayoutFromStorage().forEach((item) => {
-        savedLayoutItemsById.set(item.id, item);
-    });
-    layoutPreferences = readLayoutPreferencesFromStorage();
-};
+    pageLayoutStoreRuntime?.loadLayoutFromStorage() || [];
 
 const getSavedLayoutItemPreference = (itemId) =>
-    savedLayoutItemsById.get(itemId);
+    pageLayoutStoreRuntime?.getSavedItem(itemId);
 
 const getSavedRemoteLayoutItemPreference = (peerId, member, preferredId) =>
-    getRemoteLayoutAliasIds(peerId, member, preferredId)
-        .map((aliasId) => savedLayoutItemsById.get(aliasId))
-        .find(Boolean);
+    pageLayoutStoreRuntime?.getSavedRemoteItem(peerId, member, preferredId);
 
 const showLayoutSaveStatus = (message) =>
     pageLayoutEditorRuntime?.showSaveStatus(message);
 
-const buildLayoutStoragePayload = () =>
-    layoutStorage.buildLayoutStoragePayload({
-        version: PAGE_STORAGE_VERSION,
-        columns: PAGE_GRID_COLUMNS,
-        rows: PAGE_GRID_ROWS,
-        items: serializeLayoutItems(),
-        preferences: layoutPreferences
-            ? { ...layoutPreferences }
-            : getDefaultLayoutPreferences(),
-    });
-
 const saveLayoutToStorage = (message = '已保存') => {
-    if (layoutStorageHydrating) {
-        return;
-    }
-
-    const payload = buildLayoutStoragePayload();
-    layoutStorage.saveLayoutToStorage({
-        storageKey: getLayoutStorageKey(),
-        payload,
-    });
-    refreshSavedLayoutItems();
-    showLayoutSaveStatus(message);
+    pageLayoutStoreRuntime?.saveLayoutToStorage(message);
 };
 
 const clearSavedLayout = () => {
-    layoutStorage.clearSavedLayout({
-        storageKey: getLayoutStorageKey(),
-    });
-    refreshSavedLayoutItems();
+    pageLayoutStoreRuntime?.clearSavedLayout();
 };
-
-refreshSavedLayoutItems();
 
 const clampTileLayout = (layout) =>
     layoutSnapUtils.clampTileLayout(layout, getLayoutSnapContext());
@@ -1630,65 +1534,19 @@ const getLayoutItemTypeForTile = (tile, tileType) => {
     return LAYOUT_ITEM_TYPES.REMOTE_PEER;
 };
 
-const createTileLayoutItem = ({
-    id,
-    type,
-    peerId,
-    elementId,
-    layout,
-    visible = true,
-    positioned = false,
-    config,
-}) => {
-    const nextLayout = normalizeTileLayout(
-        getFallbackTileLayoutForType(type, layout)
-    );
+const getTileLayoutItem = (itemId) => pageLayoutStoreRuntime?.getItem(itemId);
 
-    return {
-        id,
-        type,
-        peerId,
-        elementId,
-        visible: Boolean(visible),
-        positioned: Boolean(positioned),
-        layout: nextLayout,
-        grid: convertTileLayoutToGrid(nextLayout),
-        config: normalizeComponentConfig(type, config),
-    };
+const setTileLayoutItem = (item) => pageLayoutStoreRuntime?.setItem(item);
+
+const forEachTileLayoutItem = (callback) => {
+    pageLayoutStoreRuntime?.forEachItem(callback);
 };
 
-const getTileLayoutItem = (itemId) => layoutItemsById.get(itemId);
+const getTileLayoutItemsRegistry = () =>
+    pageLayoutStoreRuntime?.getRegistry();
 
-const upsertTileLayoutItem = (tile, updates = {}) => {
-    const id = updates.id || getTileLayoutItemId(tile);
-    const previous = getTileLayoutItem(id);
-    const layout =
-        updates.layout || previous?.layout || getCurrentTileLayout(tile);
-    const tileConfig = tile.classList.contains('is-free-move-enabled')
-        ? { freeMove: true }
-        : {};
-    const mergedConfig = {
-        ...(previous?.config || {}),
-        ...tileConfig,
-        ...(updates.config || {}),
-    };
-    const item = createTileLayoutItem({
-        id,
-        type: updates.type || previous?.type || LAYOUT_ITEM_TYPES.PLACEHOLDER,
-        peerId: updates.peerId ?? previous?.peerId ?? tile.dataset.peerId,
-        elementId: updates.elementId || previous?.elementId || tile.id,
-        layout,
-        visible: updates.visible ?? previous?.visible ?? true,
-        positioned:
-            updates.positioned ??
-            previous?.positioned ??
-            tile.classList.contains('is-positioned'),
-        config: mergedConfig,
-    });
-
-    layoutItemsById.set(id, item);
-    return item;
-};
+const upsertTileLayoutItem = (tile, updates = {}) =>
+    pageLayoutStoreRuntime?.upsertTileLayoutItem(tile, updates);
 
 const applyTileLayoutItemToElement = (
     tile,
@@ -1715,58 +1573,20 @@ const applyTileLayoutItemToElement = (
     }
 };
 
-const syncTileLayoutItemFromElement = (tile, updates = {}) => {
-    const item = upsertTileLayoutItem(tile, {
-        ...updates,
-        id: updates.id || getTileLayoutItemId(tile),
-        peerId: updates.peerId ?? tile.dataset.peerId,
-        elementId: tile.id,
-    });
+const syncTileLayoutItemFromElement = (tile, updates = {}) =>
+    pageLayoutStoreRuntime?.syncTileLayoutItemFromElement(tile, updates);
 
-    applyTileLayoutItemToElement(tile, item, {
-        applyPosition: false,
-    });
-    return item;
-};
-
-const persistTileLayoutItem = (tile) => {
-    const item = syncTileLayoutItemFromElement(tile, {
-        layout: getCurrentTileLayout(tile),
-        positioned: tile.classList.contains('is-positioned'),
-        visible: true,
-    });
-
-    saveTileLayout(item.id, {
-        ...item.layout,
-        grid: convertTileLayoutToGrid(item.layout),
-    });
-};
+const persistTileLayoutItem = (tile) =>
+    pageLayoutStoreRuntime?.persistTileLayoutItem(tile);
 
 const setTileLayoutItemVisibility = (
     itemId,
     visible,
     { syncElement = true } = {}
 ) => {
-    const item = getTileLayoutItem(itemId);
-
-    if (!item) {
-        return;
-    }
-
-    item.visible = Boolean(visible);
-    layoutItemsById.set(itemId, item);
-
-    if (!syncElement) {
-        return;
-    }
-
-    const tile = document.getElementById(item.elementId);
-
-    if (tile) {
-        applyTileLayoutItemToElement(tile, item, {
-            applyPosition: false,
-        });
-    }
+    pageLayoutStoreRuntime?.setItemVisibility(itemId, visible, {
+        syncElement,
+    });
 };
 
 const isRemoteLayoutAliasForTile = (tile, itemId, nextItemId) => {
@@ -1786,23 +1606,7 @@ const isRemoteLayoutAliasForTile = (tile, itemId, nextItemId) => {
 };
 
 const retirePreviousTileLayoutItem = (tile, nextItemId) => {
-    const previousItemIds = new Set([
-        tile.dataset.layoutItemId,
-        tile.dataset.layoutId,
-    ]);
-
-    previousItemIds.forEach((previousItemId) => {
-        if (previousItemId && previousItemId !== nextItemId) {
-            if (isRemoteLayoutAliasForTile(tile, previousItemId, nextItemId)) {
-                layoutItemsById.delete(previousItemId);
-                return;
-            }
-
-            setTileLayoutItemVisibility(previousItemId, false, {
-                syncElement: false,
-            });
-        }
-    });
+    pageLayoutStoreRuntime?.retirePreviousTileLayoutItem(tile, nextItemId);
 };
 
 const applyTileLayout = (tile, layout, { syncItem = true } = {}) => {
@@ -1861,7 +1665,7 @@ const markTileLayoutUserPlaced = (tile) => {
         ...item.config,
         userPlaced: true,
     });
-    layoutItemsById.set(item.id, item);
+    setTileLayoutItem(item);
     applyTileLayoutItemToElement(tile, item, {
         applyPosition: false,
     });
@@ -2524,6 +2328,38 @@ const bindTileLayoutControls = (tile, header) => {
     });
 };
 
+pageLayoutStoreRuntime = layoutStoreRuntime.createRuntime({
+    document,
+    logger: console,
+    layoutStorage,
+    version: PAGE_STORAGE_VERSION,
+    columns: PAGE_GRID_COLUMNS,
+    rows: PAGE_GRID_ROWS,
+    layoutItemTypes: LAYOUT_ITEM_TYPES,
+    pageComponentTypes: PAGE_COMPONENT_TYPES,
+    getSingletonTypes: () => PAGE_SINGLETON_TYPES,
+    getLayoutStorageKey,
+    getDefaultLayoutPreferences,
+    normalizeLayoutPreferences,
+    getLayoutPreferenceValue,
+    clampGridLayout,
+    normalizeZIndex: normalizeTileLayoutZIndex,
+    normalizeComponentConfig,
+    normalizeLayoutItemType,
+    getLegacyRemoteLayoutPeerId,
+    normalizeRemotePeerLayoutId,
+    normalizeAutoLayoutGrid,
+    getRemoteLayoutAliasIds,
+    getFallbackTileLayoutForType,
+    normalizeTileLayout,
+    convertTileLayoutToGrid,
+    getTileLayoutItemId,
+    getCurrentTileLayout,
+    applyTileLayoutItemToElement,
+    isRemoteLayoutAliasForTile,
+    showLayoutSaveStatus,
+});
+
 pageLayoutComponentRuntime = layoutComponentRuntime.createComponentRuntime({
     document,
     logger: console,
@@ -2534,11 +2370,11 @@ pageLayoutComponentRuntime = layoutComponentRuntime.createComponentRuntime({
     getLayoutComponentId,
     getTileLayoutId,
     getSavedLayoutItemPreference,
-    getSavedLayoutItems: () => Array.from(savedLayoutItemsById.values()),
-    isLayoutStorageHydrating: () => layoutStorageHydrating,
-    setLayoutStorageHydrating: (hydrating) => {
-        layoutStorageHydrating = Boolean(hydrating);
-    },
+    getSavedLayoutItems: () => pageLayoutStoreRuntime?.getSavedItems() || [],
+    isLayoutStorageHydrating: () =>
+        pageLayoutStoreRuntime?.isHydrating() || false,
+    setLayoutStorageHydrating: (hydrating) =>
+        pageLayoutStoreRuntime?.setHydrating(hydrating),
     getVideoTiles,
     applyTileLayout,
     convertGridLayoutToPixels,
@@ -3500,7 +3336,7 @@ const joinVoiceChannel = (roomId) => {
         resetLocalVoiceState();
 
         //removing all videos for client who is leaving.
-        layoutItemsById.forEach((item) => {
+        forEachTileLayoutItem((item) => {
             if (!PAGE_SINGLETON_TYPES.has(item.type)) {
                 setTileLayoutItemVisibility(item.id, false);
             }

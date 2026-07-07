@@ -47,17 +47,18 @@ window namespaces, module exports, or the ownership boundaries below.
 24. `/js/layout/page-layout-runtime.js`
 25. `/js/layout/page-layout-editor-runtime.js`
 26. `/js/layout/page-layout-component-runtime.js`
-27. `/js/room/room-ui-state.js`
-28. `/js/room/mobile-room-state.js`
-29. `/js/room/presence-view-model.js`
-30. `/js/room/participants-list-ui.js`
-31. `/js/room/tile-status-ui.js`
-32. `/js/room/video-tile-structure-ui.js`
-33. `/js/chat/chat-message-ui.js`
-34. `/js/chat/chat-form-ui.js`
-35. `/js/room/channel-sidebar-ui.js`
-36. `/js/room/cursor-share-ui.js`
-37. `/script.js`
+27. `/js/layout/page-layout-store-runtime.js`
+28. `/js/room/room-ui-state.js`
+29. `/js/room/mobile-room-state.js`
+30. `/js/room/presence-view-model.js`
+31. `/js/room/participants-list-ui.js`
+32. `/js/room/tile-status-ui.js`
+33. `/js/room/video-tile-structure-ui.js`
+34. `/js/chat/chat-message-ui.js`
+35. `/js/chat/chat-form-ui.js`
+36. `/js/room/channel-sidebar-ui.js`
+37. `/js/room/cursor-share-ui.js`
+38. `/script.js`
 
 Modules that use `window.VoiceViewUtils` must load after
 `/js/shared/view-utils.js` and before `/script.js`. All view modules must load
@@ -170,6 +171,17 @@ lookup helpers, and UI refresh callbacks from `script.js`; it must not own
 socket, PeerJS, or chat socket flow. This move is a large component lifecycle
 migration, not a test closeout.
 
+`layout/page-layout-store-runtime.js` owns the page-layout state store:
+layout item registry operations, saved layout item cache, layout preferences,
+storage hydration state, serialize/normalize adapters, payload build,
+load/save/clear orchestration, saved item preference lookup, remote alias
+saved-item lookup, and tile item get/upsert/persist/visibility/retire
+operations. It receives storage helpers, layout config helpers, geometry
+normalizers, storage key access, remote alias resolution, DOM apply callbacks,
+and save-status callbacks from `script.js`; it must not own DOM positioning,
+drag/resize lifecycles, WebRTC, media, socket, PeerJS, or chat socket flow.
+This move is a layout store/runtime migration, not a test closeout.
+
 ## Chat
 
 `chat/chat-name-state.js` owns the chat display-name storage key, stored-name
@@ -257,8 +269,7 @@ explicitly opens a new boundary and adds tests first:
 - `requestAudioStream()`, `createAudioPipeline()`,
   `setupCallStreamHandler()`, and `joinVoiceChannel()`.
 - Main page orchestration and page-layout dependency wiring.
-- Page layout low-level apply/save/storage, resize/drag orchestration, and
-  storage migration.
+- Page layout DOM apply, resize/drag orchestration, and storage migration.
 - Chat socket flow, including message payload decisions and history handling.
 - Screen-share and cursor-share network flow.
 - Output-device application to remote media.
@@ -279,5 +290,6 @@ New modules should follow these rules:
 - New modules normally update `tests/page_layout_contract_test.mjs` with load
   order, namespace, required exports, and forbidden keyword contracts. The
   `page-layout-runtime.js`, `page-layout-editor-runtime.js`, and
-  `page-layout-component-runtime.js` migrations intentionally deferred that
-  contract sync because they were large runtime moves, not test closeouts.
+  `page-layout-component-runtime.js`, and `page-layout-store-runtime.js`
+  migrations intentionally deferred that contract sync because they were large
+  runtime moves, not test closeouts.
