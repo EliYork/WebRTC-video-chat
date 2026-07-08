@@ -346,6 +346,14 @@ const MODULE_SCRIPTS = [
                 /renderLeaveButtonState/,
                 'media controls UI must expose leave button rendering',
             ],
+            [
+                /bindMediaDevicePopovers/,
+                'media controls UI must expose dock device popover behavior',
+            ],
+            [
+                /renderDeviceList/,
+                'media controls UI must expose media device list rendering',
+            ],
         ],
     },
     {
@@ -1827,8 +1835,8 @@ assertSourceContains(pageLayoutConfig, 'page layout config contract', [
         'membersPanel must be presented as the room panel',
     ],
     [
-        /SIDEBAR_PANEL[\s\S]*?defaultVisible:\s*false[\s\S]*?MEDIA_CONTROLS_PANEL[\s\S]*?defaultLayout:\s*\{\s*x:\s*10,\s*y:\s*15,\s*w:\s*12,\s*h:\s*3\s*\}/,
-        'sidebarPanel must stay hidden while mediaControlsPanel defaults to a bottom toolbar layout',
+        /SIDEBAR_PANEL[\s\S]*?defaultVisible:\s*false[\s\S]*?MEDIA_CONTROLS_PANEL[\s\S]*?title:\s*'语音 Dock'[\s\S]*?defaultLayout:\s*\{\s*x:\s*0,\s*y:\s*15,\s*w:\s*12,\s*h:\s*3\s*\}/,
+        'sidebarPanel must stay hidden while mediaControlsPanel defaults to a left-bottom dock layout',
     ],
     [
         /PANEL_REGISTRY[\s\S]*?canHide[\s\S]*?canCollapse[\s\S]*?canPin/,
@@ -2672,8 +2680,13 @@ assert.match(
 );
 assert.match(
     style,
-    /\.page-tile-media-controls-panel #buttons\.hidden[\s\S]*?display:\s*grid !important/,
-    'mediaControlsPanel must keep the real #buttons visible instead of rendering an empty shell'
+    /#buttons\.media-dock[\s\S]*?position:\s*fixed[\s\S]*?left:\s*max\(16px, env\(safe-area-inset-left\)\)[\s\S]*?bottom:\s*max\(16px, env\(safe-area-inset-bottom\)\)/,
+    'media dock must be a fixed left-bottom control surface'
+);
+assert.match(
+    style,
+    /\.page-layout-board:not\(\.is-layout-editing\)[\s\S]*?\.page-tile-media-controls-panel[\s\S]*?background:\s*transparent[\s\S]*?\.tile-header[\s\S]*?display:\s*none/,
+    'old mediaControlsPanel shell must be hidden outside layout editing'
 );
 assert.doesNotMatch(
     style,

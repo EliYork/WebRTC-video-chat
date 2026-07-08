@@ -58,15 +58,9 @@
                         <strong id="localUserName">Guest</strong>
                         <p id="callStatusText">未加入语音</p>
                     </div>
-                    <button id="destroyPeer" class="hidden" type="button">离开</button>
                 </div>
                 <div class="local-meta-panel">
                     <div class="local-status-chips">
-                        <span class="status-chip status-chip-wide">
-                            <strong id="localVoiceChannelName">大厅</strong>
-                            <span aria-hidden="true">·</span>
-                            <strong id="callDuration">00:00</strong>
-                        </span>
                         <span id="screenStatusText" class="status-chip screen-status-chip hidden">共享中</span>
                         <span id="noiseToggle" class="noise-toggle status-chip" role="button" tabindex="0" aria-pressed="true">降噪 <strong id="noiseStatusText">开</strong></span>
                         <span id="aiNoiseToggle" class="noise-toggle status-chip" role="button" tabindex="0" aria-pressed="false" data-not-supported-label="N/A">AI <strong id="aiNoiseStatusText">关</strong></span>
@@ -75,38 +69,63 @@
                         </button>
                     </div>
                 </div>
-                <div id="buttons" class="hidden local-controls" aria-label="通话控制">
-                    <div class="control-button-wrap">
-                        <button id="toggleAudio" type="button" title="麦克风" aria-label="麦克风" aria-pressed="false">
-                            <i class="fas fa-microphone"></i>
+                <div id="buttons" class="hidden media-dock" aria-label="通话控制">
+                    <div class="media-dock-info">
+                        <strong id="localVoiceChannelName">大厅</strong>
+                        <span id="callDuration">00:00</span>
+                    </div>
+                    <div class="media-dock-actions">
+                        <div class="media-dock-control-group control-button-wrap" data-device-control="mic">
+                            <button id="toggleAudio" type="button" title="麦克风" aria-label="麦克风" aria-pressed="false">
+                                <i class="fas fa-microphone"></i>
+                            </button>
+                            <button class="control-menu-toggle" type="button" aria-label="麦克风设置" aria-expanded="false" data-control-menu="mic">
+                                <i class="fas fa-chevron-up"></i>
+                            </button>
+                        </div>
+                        <div class="media-dock-control-group control-button-wrap" data-device-control="output">
+                            <button id="toggleOutput" type="button" title="听筒" aria-label="听筒" aria-pressed="false">
+                                <i class="fas fa-volume-up"></i>
+                            </button>
+                            <button class="control-menu-toggle" type="button" aria-label="播放设置" aria-expanded="false" data-control-menu="output">
+                                <i class="fas fa-chevron-up"></i>
+                            </button>
+                        </div>
+                        <button id="shareScreen" type="button" title="屏幕共享" aria-label="屏幕共享" aria-pressed="false">
+                            <i class="far fa-newspaper"></i>
                         </button>
-                        <button class="control-menu-toggle" type="button" aria-label="麦克风设置" aria-expanded="false" data-control-menu="mic">
-                            <i class="fas fa-chevron-up"></i>
+                        <button id="toggleVideo" type="button" title="摄像头" aria-label="摄像头" aria-pressed="false">
+                            <i class="fas fa-video"></i>
+                        </button>
+                        <button id="destroyPeer" class="hidden" type="button" title="离开当前语音频道" aria-label="离开当前语音频道">
+                            <i class="fas fa-phone-slash" aria-hidden="true"></i>
                         </button>
                     </div>
-                    <div class="control-button-wrap">
-                        <button id="toggleOutput" type="button" title="听筒" aria-label="听筒">
-                            <i class="fas fa-volume-up"></i>
-                        </button>
-                        <button class="control-menu-toggle" type="button" aria-label="播放设置" aria-expanded="false" data-control-menu="output">
-                            <i class="fas fa-chevron-up"></i>
-                        </button>
-                    </div>
-                    <button id="toggleVideo" type="button" title="摄像头" aria-label="摄像头" aria-pressed="false">
-                        <i class="fas fa-video"></i>
-                    </button>
-                    <button id="shareScreen" type="button" title="屏幕共享" aria-label="屏幕共享">
-                        <i class="far fa-newspaper"></i>
-                    </button>
-                    <label class="control-popover mic-volume-popover" data-control-panel="mic">
-                        <span>麦克风音量</span>
-                        <input id="micGainSlider" type="range" min="0" max="150" step="5" value="100">
-                        <span id="micGainValue">100%</span>
-                    </label>
-                    <label class="control-popover" data-control-panel="output">
-                        <span>播放音量</span>
-                        <input id="outputVolume" type="range" min="0" max="1" step="0.05" value="1">
-                    </label>
+                    <section class="media-device-popover mic-volume-popover" data-control-panel="mic" data-device-popover="mic" role="dialog" aria-label="麦克风设备">
+                        <div class="media-device-popover-header">
+                            <strong>麦克风</strong>
+                            <span id="micDeviceStatus">默认设备</span>
+                        </div>
+                        <div class="media-device-list" data-device-list="mic"></div>
+                        <label class="media-volume-row">
+                            <span>输入音量</span>
+                            <input id="micGainSlider" type="range" min="0" max="150" step="5" value="100">
+                            <strong id="micGainValue">100%</strong>
+                        </label>
+                    </section>
+                    <section class="media-device-popover" data-control-panel="output" data-device-popover="output" role="dialog" aria-label="输出设备">
+                        <div class="media-device-popover-header">
+                            <strong>耳机</strong>
+                            <span id="outputDeviceStatus">默认设备</span>
+                        </div>
+                        <p class="media-device-warning hidden" data-output-unsupported>当前浏览器不支持选择输出设备</p>
+                        <div class="media-device-list" data-device-list="output"></div>
+                        <label class="media-volume-row">
+                            <span>输出音量</span>
+                            <input id="outputVolume" type="range" min="0" max="1" step="0.05" value="1">
+                            <strong id="outputVolumeValue">100%</strong>
+                        </label>
+                    </section>
                 </div>
             </section>
         </aside>

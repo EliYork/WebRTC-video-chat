@@ -143,37 +143,50 @@
         display: none;
     }
 
-    .room-layout.mobile-in-room .local-controls,
-    #main.mobile-in-room .page-tile-sidebar-panel .local-controls {
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-        justify-content: normal;
+    #main.mobile-in-room #buttons.media-dock {
+        left: 10px;
+        right: 10px;
+        bottom: calc(10px + env(safe-area-inset-bottom));
+        width: auto;
+        min-height: 52px;
+        justify-content: center;
+        gap: 8px;
+        padding: 8px;
     }
 
-    .room-layout.mobile-in-room #shareScreen,
-    #main.mobile-in-room .page-tile-sidebar-panel #shareScreen {
+    #main.mobile-in-room .media-dock-info {
+        min-width: 68px;
+        max-width: 92px;
+    }
+
+    #main.mobile-in-room .media-dock-actions {
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+
+    #main.mobile-in-room #shareScreen {
         display: none;
     }
 
-    .room-layout.mobile-in-room .control-popover,
-    #main.mobile-in-room .page-tile-sidebar-panel .control-popover {
-        display: none;
+    #main.mobile-in-room .media-device-popover {
+        left: 8px;
+        right: 8px;
+        width: auto;
+        max-height: min(54vh, 360px);
     }
 
-    .room-layout.mobile-in-room .control-menu-toggle,
-    #main.mobile-in-room .page-tile-sidebar-panel .control-menu-toggle {
-        display: none !important;
+    #main.mobile-in-room .media-device-popover[data-device-popover='output'] {
+        left: 8px;
     }
 
-    .room-layout.mobile-in-room .control-button-wrap,
-    #main.mobile-in-room .page-tile-sidebar-panel .control-button-wrap {
-        display: block;
+    #main.mobile-in-room .control-button-wrap {
+        grid-template-columns: 34px 18px;
     }
 
-    .room-layout.mobile-in-room #buttons button,
-    #main.mobile-in-room .page-tile-sidebar-panel #buttons button {
-        width: 100%;
+    #main.mobile-in-room #buttons button {
+        width: 34px;
+        height: 34px;
         min-height: 34px;
-        padding: 7px 5px;
     }
 
     .mobile-back-button,

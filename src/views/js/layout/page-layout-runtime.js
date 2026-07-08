@@ -4,7 +4,7 @@
     const PAGE_COMPONENT_LABELS = {
         sidebarPanel: '侧边栏 Sidebar',
         membersPanel: '房间 Room',
-        mediaControlsPanel: '媒体控制 Media',
+        mediaControlsPanel: '语音 Dock',
         chatPanel: '聊天 Chat',
     };
 

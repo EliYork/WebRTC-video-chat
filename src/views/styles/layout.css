@@ -241,7 +241,8 @@
     overflow: auto;
 }
 
-.page-tile-media-controls-panel #buttons {
+.page-layout-board.is-layout-editing .page-tile-media-controls-panel #buttons {
+    position: static;
     box-sizing: border-box;
     width: 100%;
     min-height: 0;
@@ -251,8 +252,10 @@
     justify-content: center;
 }
 
-.page-tile-media-controls-panel #buttons.hidden {
-    display: grid !important;
+.page-layout-board.is-layout-editing
+    .page-tile-media-controls-panel
+    #buttons.hidden {
+    display: inline-flex !important;
     opacity: 0.72;
 }
 

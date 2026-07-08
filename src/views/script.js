@@ -27,15 +27,11 @@ const localVoiceChannelName = byId('localVoiceChannelName');
 const callStatusText = byId('callStatusText');
 const callDuration = byId('callDuration');
 const screenStatusText = byId('screenStatusText');
-const shareScreenBtn = byId('shareScreen');
-const controlMenuToggles = queryAll('[data-control-menu]');
-const controlPanels = queryAll('[data-control-panel]');
 const mobileBackToChannelsBtn = byId('mobileBackToChannels');
 const mobilePrevTileBtn = byId('mobilePrevTile');
 const mobileNextTileBtn = byId('mobileNextTile');
 const mobileTileCount = byId('mobileTileCount');
 const noiseSettingsUI = window.VoiceNoiseSettingsUI;
-const controlPopoversUI = window.VoiceControlPopoversUI;
 const remoteVolumeUI = window.VoiceRemoteVolumeUI;
 const copyLinkUI = window.VoiceCopyLinkUI;
 const outputVolumeState = window.VoiceOutputVolumeState;
@@ -95,7 +91,18 @@ const {
     renderLayoutComponentTile: renderLayoutComponentTileContent,
 } = layoutComponents;
 const remoteStreams = {};
-const getAudioConstraints = () => noiseSettingsUI.getAudioConstraints();
+const getAudioConstraints = () => {
+    const constraints = noiseSettingsUI.getAudioConstraints();
+
+    if (selectedInputDeviceId && selectedInputDeviceId !== 'default') {
+        return {
+            ...constraints,
+            deviceId: { exact: selectedInputDeviceId },
+        };
+    }
+
+    return constraints;
+};
 
 const CHAT_MESSAGE_MAX_LENGTH = 500;
 const CURSOR_THROTTLE_MS = 40;
@@ -181,6 +188,12 @@ let callStartedAt;
 let callDurationTimer;
 let outputMuted = false;
 let outputVolume = 1;
+let selectedInputDeviceId = 'default';
+let selectedOutputDeviceId = 'default';
+let mediaDevicesCache = {
+    mic: [],
+    output: [],
+};
 const remotePeerOrder = [];
 const screenSharers = new Set();
 const peersWithCallHandler = new WeakSet();
@@ -430,6 +443,31 @@ const getPeerVolume = (peerId) => outputVolumeState.getPeerVolume(peerId);
 const setPeerVolume = (peerId, volume) =>
     outputVolumeState.setPeerVolume(peerId, volume);
 
+const canSelectAudioOutput = () =>
+    typeof HTMLMediaElement !== 'undefined' &&
+    typeof HTMLMediaElement.prototype.setSinkId === 'function';
+
+const applyOutputDevice = (mediaElement, isRemote) => {
+    if (!isRemote || !mediaElement || !canSelectAudioOutput()) {
+        return;
+    }
+
+    const sinkId = selectedOutputDeviceId || 'default';
+
+    if (mediaElement.dataset.outputSinkId === sinkId) {
+        return;
+    }
+
+    mediaElement
+        .setSinkId(sinkId)
+        .then(() => {
+            mediaElement.dataset.outputSinkId = sinkId;
+        })
+        .catch((error) => {
+            console.warn('Could not switch output device.', error);
+        });
+};
+
 const applyOutputSettings = (mediaElement, isRemote) => {
     if (!mediaElement) {
         return;
@@ -450,6 +488,8 @@ const applyOutputSettings = (mediaElement, isRemote) => {
         );
         mediaElement.muted = !isRemote;
     }
+
+    applyOutputDevice(mediaElement, isRemote);
 };
 
 const applyOutputSettingsToRemoteMedia = () => {
@@ -464,18 +504,64 @@ const updateOutputButtonState = () => {
 };
 
 const updateScreenShareButtonState = () => {
-    const icon = shareScreenBtn?.querySelector('i');
-    const label = shareScreenBtn?.querySelector('span');
+    mediaControlsUI.renderScreenShareButtonState({
+        sharing: Boolean(sharingNow),
+    });
+};
 
-    if (icon) {
-        icon.className = 'far fa-newspaper';
-        shareScreenBtn.classList.toggle('is-off', !sharingNow);
-        shareScreenBtn.setAttribute('aria-pressed', String(sharingNow));
+const renderMediaDeviceList = (type) => {
+    mediaControlsUI.renderDeviceList({
+        type,
+        devices: mediaDevicesCache[type],
+        selectedDeviceId:
+            type === 'mic' ? selectedInputDeviceId : selectedOutputDeviceId,
+        unsupported: type === 'output' && !canSelectAudioOutput(),
+        onSelect: type === 'mic' ? selectInputDevice : selectOutputDevice,
+    });
+};
+
+const refreshMediaDeviceLists = async () => {
+    if (!navigator.mediaDevices?.enumerateDevices) {
+        mediaDevicesCache = {
+            mic: [],
+            output: [],
+        };
+        renderMediaDeviceList('mic');
+        renderMediaDeviceList('output');
+        return;
     }
 
-    if (label) {
-        label.textContent = sharingNow ? '共享中' : '共享';
+    try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        mediaDevicesCache = {
+            mic: devices.filter((device) => device.kind === 'audioinput'),
+            output: devices.filter((device) => device.kind === 'audiooutput'),
+        };
+    } catch (error) {
+        console.warn('Could not enumerate media devices.', error);
+        mediaDevicesCache = {
+            mic: [],
+            output: [],
+        };
     }
+
+    renderMediaDeviceList('mic');
+    renderMediaDeviceList('output');
+};
+
+const selectInputDevice = async (deviceId = 'default') => {
+    selectedInputDeviceId = deviceId;
+    renderMediaDeviceList('mic');
+
+    if (myVideoStream && currentPeer && !currentPeer.destroyed) {
+        await restartLocalMicrophone(currentPeer);
+    }
+};
+
+const selectOutputDevice = (deviceId = 'default') => {
+    selectedOutputDeviceId = deviceId;
+    renderMediaDeviceList('output');
+    applyOutputSettingsToRemoteMedia();
 };
 
 const resetLocalVoiceState = () => {
@@ -3188,6 +3274,44 @@ const sendVideoTrackToPeers = (peer, track) => {
     });
 };
 
+const sendAudioTrackToPeers = (peer, track) => {
+    const myPeers = getKnownRemotePeerIds(peer);
+
+    myPeers.forEach((peerId) => {
+        const calls = peer.connections[peerId] || [];
+        let replacedTrack = false;
+
+        calls.forEach((call) => {
+            const sender = call?.peerConnection
+                ?.getSenders()
+                .find(
+                    (currentSender) =>
+                        currentSender.track?.kind === 'audio' ||
+                        currentSender.track === null
+                );
+
+            if (!sender) {
+                return;
+            }
+
+            sender.replaceTrack(track || null).catch((error) => {
+                console.warn(
+                    `Could not replace audio track for peer ${peerId}.`,
+                    error
+                );
+            });
+            replacedTrack = true;
+        });
+
+        if (!replacedTrack && track) {
+            console.warn(
+                `No audio sender found for peer ${peerId}; starting an audio call.`
+            );
+            connectToNewUser(peer, peerId, new MediaStream([track]));
+        }
+    });
+};
+
 const sendAudioOnlyStateToPeers = (peer) => {
     const audioOnlyStream = new MediaStream(
         myVideoStream?.getAudioTracks() || []
@@ -3389,6 +3513,38 @@ const toggleAudio = (myVideoStream) => {
     }
 };
 
+const restartLocalMicrophone = async (peer) => {
+    const previousAudioTrack = myVideoStream?.getAudioTracks()[0];
+    const wasMuted = Boolean(previousAudioTrack && !previousAudioTrack.enabled);
+
+    destroyProcessedAudioStream();
+    myVideoStream?.getTracks().forEach((track) => track.stop());
+    myVideoStream = undefined;
+
+    try {
+        const stream = await requestAudioStream();
+        const nextAudioTrack = stream.getAudioTracks()[0];
+
+        if (nextAudioTrack) {
+            nextAudioTrack.enabled = !wasMuted;
+        }
+
+        myVideoStream = stream;
+        micPermissionDenied = false;
+        setAudioButtonState(Boolean(nextAudioTrack?.enabled));
+        setLocalVideoStream(getActiveStream());
+        sendAudioTrackToPeers(peer, nextAudioTrack);
+        emitLocalPresenceUpdate();
+        updateLocalUserCard();
+    } catch (error) {
+        micPermissionDenied = true;
+        setAudioButtonNoMic();
+        emitLocalPresenceUpdate();
+        updateLocalUserCard();
+        console.warn('Could not switch microphone device.', error);
+    }
+};
+
 const resetAutoTileLayoutHeights = () => {
     getVideoTiles().forEach((tile) => {
         if (!tile.classList.contains('is-positioned')) {
@@ -3404,6 +3560,7 @@ const initiateAudio = async (peer) => {
         myVideoStream = stream;
         micPermissionDenied = false;
         setAudioButtonState(stream.getAudioTracks()[0].enabled);
+        refreshMediaDeviceLists();
         setLocalVideoStream(getActiveStream());
         if (!callStartedAt) {
             startCallTimer();
@@ -3669,10 +3826,15 @@ outputVolumeUI.init({
     },
 });
 
-controlPopoversUI.createController({
-    toggles: controlMenuToggles,
-    panels: controlPanels,
+mediaControlsUI.bindMediaDevicePopovers({
+    isMobile: isMobileLayout,
+    onOpen: refreshMediaDeviceLists,
 });
+refreshMediaDeviceLists();
+navigator.mediaDevices?.addEventListener?.(
+    'devicechange',
+    refreshMediaDeviceLists
+);
 
 remoteVolumeUI.init();
 
