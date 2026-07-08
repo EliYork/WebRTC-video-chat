@@ -324,6 +324,8 @@
 
             control.addEventListener('pointerenter', () => open(type));
             control.addEventListener('pointerleave', () => scheduleClose(type));
+            control.addEventListener('mouseenter', () => open(type));
+            control.addEventListener('mouseleave', () => scheduleClose(type));
             control.addEventListener('focusin', () => open(type));
             control.addEventListener('focusout', () => scheduleClose(type));
             mainButton?.addEventListener('click', () => {
@@ -342,6 +344,8 @@
 
             popover.addEventListener('pointerenter', () => open(type));
             popover.addEventListener('pointerleave', () => scheduleClose(type));
+            popover.addEventListener('mouseenter', () => open(type));
+            popover.addEventListener('mouseleave', () => scheduleClose(type));
             popover.addEventListener('focusin', () => open(type));
             popover.addEventListener('focusout', () => scheduleClose(type));
         });

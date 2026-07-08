@@ -38,9 +38,9 @@
         {
             id: PAGE_COMPONENT_TYPES.MEDIA_CONTROLS_PANEL,
             title: '语音 Dock',
-            defaultLayout: { x: 0, y: 15, w: 12, h: 3 },
-            minWidth: 360,
-            minHeight: 84,
+            defaultLayout: { x: 0, y: 12, w: 4, h: 6 },
+            minWidth: 220,
+            minHeight: 140,
             canDrag: true,
             canResize: true,
             canHide: true,

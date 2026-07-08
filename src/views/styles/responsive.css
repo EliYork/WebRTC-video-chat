@@ -144,24 +144,24 @@
     }
 
     #main.mobile-in-room #buttons.media-dock {
-        left: 10px;
-        right: 10px;
-        bottom: calc(10px + env(safe-area-inset-bottom));
-        width: auto;
+        width: 100%;
         min-height: 52px;
-        justify-content: center;
         gap: 8px;
         padding: 8px;
     }
 
-    #main.mobile-in-room .media-dock-info {
-        min-width: 68px;
-        max-width: 92px;
+    #main.mobile-in-room .media-dock-header {
+        align-items: center;
     }
 
+    #main.mobile-in-room .media-dock-activity-row,
     #main.mobile-in-room .media-dock-actions {
-        flex-wrap: wrap;
-        justify-content: center;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    #main.mobile-in-room #buttons .copy-room-link.media-dock-pill,
+    #main.mobile-in-room #buttons #destroyPeer {
+        width: 100%;
     }
 
     #main.mobile-in-room #shareScreen {
@@ -180,11 +180,10 @@
     }
 
     #main.mobile-in-room .control-button-wrap {
-        grid-template-columns: 34px 18px;
+        grid-template-columns: minmax(0, 1fr) 18px;
     }
 
     #main.mobile-in-room #buttons button {
-        width: 34px;
         height: 34px;
         min-height: 34px;
     }

@@ -351,6 +351,10 @@ const MODULE_SCRIPTS = [
                 'media controls UI must expose dock device popover behavior',
             ],
             [
+                /pointerenter[\s\S]*?pointerleave[\s\S]*?mouseenter[\s\S]*?mouseleave/,
+                'media controls UI must keep device popovers responsive to pointer and mouse hover events',
+            ],
+            [
                 /renderDeviceList/,
                 'media controls UI must expose media device list rendering',
             ],
@@ -1786,11 +1790,29 @@ assert.match(
     /<aside\b[^>]*id="chat-panel"[^>]*class="chat-panel"[\s\S]*?<form\b[^>]*id="chatForm"[\s\S]*?<textarea\b[^>]*id="chatInput"/,
     '.chat-panel must remain intact and contain #chatForm / #chatInput'
 );
+assert.match(
+    roomIndex,
+    /<div\b[^>]*id="buttons"[^>]*class="[^"]*\bmedia-dock\b[^"]*"[\s\S]*?<div\b[^>]*class="local-user-header media-dock-user"[\s\S]*?id="localUserName"[\s\S]*?<div\b[^>]*class="media-dock-info"[\s\S]*?id="localVoiceChannelName"[\s\S]*?<div\b[^>]*class="media-dock-activity-row"[\s\S]*?id="noiseToggle"[\s\S]*?id="aiNoiseToggle"[\s\S]*?id="destroyPeer"[\s\S]*?<div\b[^>]*class="media-dock-actions"[\s\S]*?id="copyRoomLink"[\s\S]*?id="toggleAudio"[\s\S]*?id="toggleOutput"/,
+    'media dock must own local identity, voice details, noise, AI, hangup, copy link, mic, and output controls in one DOM source'
+);
+assert.doesNotMatch(
+    roomIndex,
+    /<section\b[^>]*class="local-user-card"[\s\S]*?<div\b[^>]*class="local-user-header(?! media-dock-user)"/,
+    'local room card must not keep a second standalone identity strip outside the media dock'
+);
 
 assertSourceContains(script, 'page layout base contract', [
     [
+        /PAGE_STORAGE_VERSION\s*=\s*2/,
+        'page layout schema version must bump for the media dock layout migration',
+    ],
+    [
         /PAGE_LAYOUT_STORAGE_KEY_PREFIX\s*=\s*'voicePageLayout:v4'/,
         'page layout must use the v4 storage key',
+    ],
+    [
+        /const migrateLoadedLayoutItem = \(/,
+        'script must define a saved layout item migration hook',
     ],
     [
         /const layoutConfig = window\.PageLayoutConfig/,
@@ -1835,8 +1857,8 @@ assertSourceContains(pageLayoutConfig, 'page layout config contract', [
         'membersPanel must be presented as the room panel',
     ],
     [
-        /SIDEBAR_PANEL[\s\S]*?defaultVisible:\s*false[\s\S]*?MEDIA_CONTROLS_PANEL[\s\S]*?title:\s*'语音 Dock'[\s\S]*?defaultLayout:\s*\{\s*x:\s*0,\s*y:\s*15,\s*w:\s*12,\s*h:\s*3\s*\}/,
-        'sidebarPanel must stay hidden while mediaControlsPanel defaults to a left-bottom dock layout',
+        /SIDEBAR_PANEL[\s\S]*?defaultVisible:\s*false[\s\S]*?MEDIA_CONTROLS_PANEL[\s\S]*?title:\s*'语音 Dock'[\s\S]*?defaultLayout:\s*\{\s*x:\s*0,\s*y:\s*12,\s*w:\s*4,\s*h:\s*6\s*\}[\s\S]*?canDrag:\s*true[\s\S]*?canResize:\s*true/,
+        'sidebarPanel must stay hidden while mediaControlsPanel defaults to a draggable left-bottom 4x6 dock layout',
     ],
     [
         /PANEL_REGISTRY[\s\S]*?canHide[\s\S]*?canCollapse[\s\S]*?canPin/,
@@ -1844,7 +1866,7 @@ assertSourceContains(pageLayoutConfig, 'page layout config contract', [
     ],
     [
         /PANEL_COLLAPSED_HEIGHT\s*=\s*42/,
-        'panel collapse must use one shared collapsed height',
+        'panel collapse must keep a shared fallback collapsed height',
     ],
     [
         /PANEL_COMPONENT_CONFIG_DEFAULTS[\s\S]*?collapsed:\s*false[\s\S]*?pinned:\s*false[\s\S]*?expandedHeight:\s*0/,
@@ -1888,6 +1910,11 @@ assert.doesNotMatch(
     mediaControlsPanelConfigBody,
     /defaultVisible:\s*false/,
     'mediaControlsPanel must be visible in the default layout'
+);
+assert.match(
+    mediaControlsPanelConfigBody,
+    /minWidth:\s*220[\s\S]*?minHeight:\s*140/,
+    'mediaControlsPanel minimum size must allow the 4x6 dock default'
 );
 assertSourceContains(pageLayoutIds, 'page-layout-ids.js', [
     [
@@ -1953,6 +1980,12 @@ assertSourceContains(pageLayoutRuntime, 'page-layout-runtime.js', [
         message:
             'page layout must validate detached board content before replacing #main',
     },
+    {
+        pattern:
+            /tile\.dataset\.layoutItemId = itemId;[\s\S]*?tile\.dataset\.layoutId = itemId;[\s\S]*?options\.syncTileLayoutItemFromElement\(tile,/,
+        message:
+            'page panels must keep layout item data needed for drag/save persistence',
+    },
 ]);
 assert.match(
     pageLayoutRuntime,
@@ -2015,11 +2048,23 @@ assertSourceContains(pageLayoutStorage, 'page-layout-storage.js', [
         /knownTypes\.has\(type\)/,
         'normalizeLoadedLayoutItems must filter unknown or retired panel types',
     ],
+    [
+        /supportedVersions[\s\S]*?payloadVersion/,
+        'normalizeLoadedLayoutItems must allow explicitly supported legacy schema versions',
+    ],
+    [
+        /migrateLoadedLayoutItem/,
+        'normalizeLoadedLayoutItems must support per-item migration',
+    ],
 ]);
 assertSourceContains(pageLayoutStoreRuntime, 'page-layout-store-runtime.js', [
     [
         /\.\.\.options\.getSingletonTypes\(\)/,
         'known page panel types must come from the current panel registry',
+    ],
+    [
+        /supportedVersions:\s*options\.supportedStorageVersions[\s\S]*?migrateLoadedLayoutItem:\s*options\.migrateLoadedLayoutItem/,
+        'store runtime must pass storage migration hooks to layout storage',
     ],
 ]);
 
@@ -2154,6 +2199,92 @@ assert.deepEqual(
     ['membersPanel'],
     'saved stagePanel and standalone roomInfoPanel entries must be filtered before rendering'
 );
+const migratedLegacyMediaDockItems = storageApi.normalizeLoadedLayoutItems(
+    {
+        version: 1,
+        items: [
+            {
+                id: 'page-mediaControlsPanel',
+                type: 'mediaControlsPanel',
+                visible: false,
+                x: 10,
+                y: 15,
+                w: 12,
+                h: 3,
+            },
+            {
+                id: 'page-chatPanel',
+                type: 'chatPanel',
+                visible: true,
+                x: 26,
+                y: 0,
+                w: 6,
+                h: 18,
+            },
+        ],
+    },
+    {
+        version: 2,
+        supportedVersions: [1],
+        columns: 32,
+        rows: 18,
+        getKnownLayoutItemTypes: () =>
+            new Set(['membersPanel', 'mediaControlsPanel', 'chatPanel']),
+        normalizeLayoutItemType: (type) => type,
+        getLegacyRemoteLayoutPeerId: () => null,
+        normalizeRemotePeerLayoutId: (id) => id,
+        remotePeerType: 'remotePeer',
+        singletonTypes: new Set([
+            'membersPanel',
+            'mediaControlsPanel',
+            'chatPanel',
+        ]),
+        normalizeAutoLayoutGrid: (type, grid) => grid,
+        normalizeZIndex: (z) => Number(z) || 0,
+        normalizeComponentConfig: () => ({}),
+        migrateLoadedLayoutItem: ({ item, itemId, payloadVersion, type }) => {
+            if (
+                payloadVersion < 2 &&
+                itemId === 'page-mediaControlsPanel' &&
+                type === 'mediaControlsPanel' &&
+                (Number(item.w) >= 8 || Number(item.h) <= 3)
+            ) {
+                return {
+                    ...item,
+                    x: 0,
+                    y: 12,
+                    w: 4,
+                    h: 6,
+                    visible: true,
+                };
+            }
+
+            return item;
+        },
+    }
+);
+const migratedMediaDockItem = migratedLegacyMediaDockItems.find(
+    (item) => item.id === 'page-mediaControlsPanel'
+);
+assert.ok(
+    migratedMediaDockItem,
+    'legacy mediaControlsPanel item must survive migration'
+);
+assert.equal(
+    migratedMediaDockItem.type,
+    'mediaControlsPanel',
+    'legacy mediaControlsPanel item must keep its current type'
+);
+assert.deepEqual(
+    { ...migratedMediaDockItem.grid },
+    { x: 0, y: 12, w: 4, h: 6 },
+    'legacy wide mediaControlsPanel grid must migrate to the left-bottom 4x6 dock default'
+);
+assert.equal(
+    migratedMediaDockItem.visible,
+    true,
+    'legacy hidden mediaControlsPanel must become visible after dock migration'
+);
 assert.match(
     pageLayoutRuntime,
     /installDebugRuntime\(\);\s*return\s*\{\s*bootstrap,/,
@@ -2184,20 +2315,20 @@ assertSourceContains(
             'page-level panel headers must remove the leading avatar/icon marker',
         ],
         [
-            /const ensurePanelShellActions = \(tile, type\) => \{[\s\S]*?panelConfig\.canPin[\s\S]*?panelConfig\.canCollapse/,
-            'panel shell actions must be generated from registry pin/collapse capabilities',
+            /const ensurePanelShellActions = \(tile, type\) => \{[\s\S]*?panelConfig\.canCollapse[\s\S]*?panelConfig\.canPin/,
+            'panel shell actions must place collapse before pin while using registry capabilities',
         ],
         [
-            /action:\s*'pin'[\s\S]*?onTogglePanelPin[\s\S]*?action:\s*'collapse'[\s\S]*?onTogglePanelCollapse/,
-            'panel shell actions must include unified pin and collapse controls',
+            /action:\s*'collapse'[\s\S]*?onTogglePanelCollapse[\s\S]*?action:\s*'pin'[\s\S]*?onTogglePanelPin/,
+            'panel shell actions must place the collapse button to the left of the top-right pin button',
         ],
         [
             /pointerdown[\s\S]*?stopPanelActionEvent[\s\S]*?click[\s\S]*?stopPanelActionEvent/,
             'panel action buttons must block pointerdown and click from starting panel drag',
         ],
         [
-            /roomPanelContent\.append\(membersEl,\s*roomInfoEl\)/,
-            'membersPanel must merge channel/member content with local room status content',
+            /roomPanelContent\.append\(membersEl\)/,
+            'membersPanel must keep channel/member content while local identity lives in the media dock',
         ],
         [
             /node:\s*mediaControlsEl/,
@@ -2243,8 +2374,8 @@ assertSourceContains(script, 'page layout behavior contract', [
         'component toolbar position must be recalculated from tile bounds',
     ],
     [
-        /const togglePanelCollapse = \(tile\) => \{[\s\S]*?expandedHeight[\s\S]*?PANEL_COLLAPSED_HEIGHT[\s\S]*?savePanelItemState/,
-        'collapse must preserve expanded height and save panel state through the shared path',
+        /const getPanelCollapsedHeight = \(\) => \{[\s\S]*?PAGE_GRID_ROWS[\s\S]*?\};[\s\S]*?const togglePanelCollapse = \(tile\) => \{[\s\S]*?expandedHeight[\s\S]*?getPanelCollapsedHeight\(\)[\s\S]*?savePanelItemState/,
+        'collapse must use the one-grid titlebar height while preserving expanded height and saving panel state through the shared path',
     ],
     [
         /const togglePanelPin = \(tile\) => \{[\s\S]*?const currentLayout = item\.layout \|\| getCurrentTileLayout\(tile\)[\s\S]*?getNextTileLayoutZIndexForBand\(nextPinned\)[\s\S]*?savePanelItemState/,
@@ -2660,6 +2791,11 @@ assert.match(
 );
 assert.match(
     style,
+    /\.panel-shell-actions[\s\S]*?position:\s*absolute[\s\S]*?top:\s*6px[\s\S]*?right:\s*10px/,
+    'panel shell actions must sit in the titlebar top-right corner'
+);
+assert.match(
+    style,
     /\.panel-shell-actions[\s\S]*?opacity:\s*0[\s\S]*?pointer-events:\s*none/,
     'panel shell actions must stay hidden until hover/focus/editing'
 );
@@ -2680,13 +2816,44 @@ assert.match(
 );
 assert.match(
     style,
-    /#buttons\.media-dock[\s\S]*?position:\s*fixed[\s\S]*?left:\s*max\(16px, env\(safe-area-inset-left\)\)[\s\S]*?bottom:\s*max\(16px, env\(safe-area-inset-bottom\)\)/,
-    'media dock must be a fixed left-bottom control surface'
+    /#buttons\.media-dock[\s\S]*?position:\s*relative[\s\S]*?width:\s*100%[\s\S]*?height:\s*auto[\s\S]*?min-height:\s*58px/,
+    'media dock must stay compact inside mediaControlsPanel instead of using viewport-fixed positioning or filling the full panel height'
+);
+const mediaDockStyleMatch = style.match(
+    /#buttons\.media-dock\s*\{(?<body>[\s\S]*?)\}/
+);
+assert.ok(mediaDockStyleMatch, 'media dock base style must exist');
+assert.doesNotMatch(
+    mediaDockStyleMatch.groups.body,
+    /position:\s*fixed|left:\s*max\(16px, env\(safe-area-inset-left\)\)|bottom:\s*max\(16px, env\(safe-area-inset-bottom\)\)/,
+    'normal mode media dock must not escape the page layout system with fixed left-bottom positioning'
 );
 assert.match(
     style,
     /\.page-layout-board:not\(\.is-layout-editing\)[\s\S]*?\.page-tile-media-controls-panel[\s\S]*?background:\s*transparent[\s\S]*?\.tile-header[\s\S]*?display:\s*none/,
     'old mediaControlsPanel shell must be hidden outside layout editing'
+);
+assert.match(
+    style,
+    /\.page-layout-board:not\(\.is-layout-editing\) \.page-tile-media-controls-panel[\s\S]*?display:\s*block/,
+    'normal mode must not display-none the mediaControlsPanel that contains the dock'
+);
+const normalMediaPanelStyleMatch = style.match(
+    /\.page-layout-board:not\(\.is-layout-editing\) \.page-tile-media-controls-panel\s*\{(?<body>[\s\S]*?)\}/
+);
+assert.ok(
+    normalMediaPanelStyleMatch,
+    'normal mode mediaControlsPanel style must exist'
+);
+assert.doesNotMatch(
+    normalMediaPanelStyleMatch.groups.body,
+    /position:\s*static/,
+    'normal mode mediaControlsPanel must keep layout runtime positioning'
+);
+assert.match(
+    style,
+    /#buttons\.media-dock\.hidden[\s\S]*?display:\s*grid !important/,
+    'normal mode hidden state must not hide the real media dock body'
 );
 assert.doesNotMatch(
     style,
@@ -2758,6 +2925,11 @@ assert.match(
     boardMatch.groups.body,
     /--layout-grid-size-y:\s*calc\(100%\s*\/\s*var\(--layout-grid-rows,\s*18\)\)/,
     'board grid height should reuse the page layout grid rows'
+);
+assert.match(
+    boardMatch.groups.body,
+    /--layout-tile-header-height:\s*calc\(\s*100vh\s*\/\s*var\(--layout-grid-rows,\s*18\)\s*\)/,
+    'page tile titlebars should use one page-layout grid row'
 );
 assert.match(
     boardMatch.groups.body,
@@ -2846,8 +3018,8 @@ assert.doesNotMatch(
 );
 assert.match(
     pageTileHeaderMatch.groups.body,
-    /min-height:\s*(?:3[0-9]|4[0-4])px/,
-    'normal-mode page tile headers should stay compact'
+    /height:\s*var\(--layout-tile-header-height\)[\s\S]*?min-height:\s*var\(--layout-tile-header-height\)/,
+    'normal-mode page tile headers should stay exactly one layout grid row tall'
 );
 assert.match(
     pageTileFooterMatch.groups.body,

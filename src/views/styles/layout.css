@@ -17,6 +17,7 @@
     );
     --layout-grid-size-x: calc(100% / var(--layout-grid-columns, 32));
     --layout-grid-size-y: calc(100% / var(--layout-grid-rows, 18));
+    --layout-tile-header-height: calc(100vh / var(--layout-grid-rows, 18));
     position: relative;
     width: 100%;
     height: 100vh;
@@ -74,10 +75,12 @@
 }
 
 .page-layout-tile .tile-header {
+    position: relative;
     display: grid;
     flex: 0 0 auto;
     grid-template-columns: minmax(0, 1fr) auto;
-    min-height: 34px;
+    height: var(--layout-tile-header-height);
+    min-height: var(--layout-tile-header-height);
     padding: 6px 10px;
     border-bottom-color: rgba(216, 111, 154, 0.14);
     background-color: rgba(255, 252, 254, 0.86);
@@ -89,6 +92,9 @@
 }
 
 .panel-shell-actions {
+    position: absolute;
+    top: 6px;
+    right: 10px;
     display: inline-flex;
     align-items: center;
     gap: 4px;
@@ -128,7 +134,7 @@
 }
 
 .page-layout-tile.is-panel-collapsed {
-    min-height: 42px !important;
+    min-height: var(--layout-tile-header-height) !important;
 }
 
 .page-layout-tile.is-panel-collapsed .tile-body,
@@ -247,15 +253,13 @@
     width: 100%;
     min-height: 0;
     padding: 8px 10px;
-    align-content: center;
-    align-items: center;
-    justify-content: center;
+    align-content: end;
 }
 
 .page-layout-board.is-layout-editing
     .page-tile-media-controls-panel
     #buttons.hidden {
-    display: inline-flex !important;
+    display: grid !important;
     opacity: 0.72;
 }
 

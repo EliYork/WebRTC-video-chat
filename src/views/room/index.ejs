@@ -52,29 +52,54 @@
             </nav>
 
             <section class="local-user-card" aria-label="本地用户控制">
-                <div class="local-user-header">
-                    <div class="local-avatar" aria-hidden="true">♡</div>
-                    <div class="local-user-identity">
-                        <strong id="localUserName">Guest</strong>
-                        <p id="callStatusText">未加入语音</p>
+                <div id="buttons" class="hidden media-dock" aria-label="通话控制">
+                    <div class="media-dock-header">
+                        <div class="local-user-header media-dock-user">
+                            <div class="local-avatar" aria-hidden="true">♡</div>
+                            <div class="local-user-identity">
+                                <strong id="localUserName">Guest</strong>
+                                <p id="callStatusText">未加入语音</p>
+                            </div>
+                        </div>
+                        <div class="media-dock-info">
+                            <span class="media-dock-kicker">语音详情</span>
+                            <strong id="localVoiceChannelName">大厅</strong>
+                            <span class="media-dock-timer">
+                                <i class="fas fa-signal" aria-hidden="true"></i>
+                                <span id="callDuration">00:00</span>
+                            </span>
+                        </div>
                     </div>
-                </div>
-                <div class="local-meta-panel">
-                    <div class="local-status-chips">
-                        <span id="screenStatusText" class="status-chip screen-status-chip hidden">共享中</span>
-                        <span id="noiseToggle" class="noise-toggle status-chip" role="button" tabindex="0" aria-pressed="true">降噪 <strong id="noiseStatusText">开</strong></span>
-                        <span id="aiNoiseToggle" class="noise-toggle status-chip" role="button" tabindex="0" aria-pressed="false" data-not-supported-label="N/A">AI <strong id="aiNoiseStatusText">关</strong></span>
-                        <button id="copyRoomLink" class="status-chip copy-room-link" type="button" title="复制频道链接" aria-label="复制频道链接">
-                            <i class="fas fa-link"></i>
+                    <div class="media-dock-activity-row">
+                        <span id="screenStatusText" class="media-dock-pill screen-status-chip hidden">
+                            <i class="fas fa-desktop" aria-hidden="true"></i>
+                            共享中
+                        </span>
+                        <span id="noiseToggle" class="media-dock-pill noise-toggle" role="button" tabindex="0" aria-pressed="true">
+                            <i class="fas fa-wind" aria-hidden="true"></i>
+                            降噪 <strong id="noiseStatusText">开</strong>
+                        </span>
+                        <span id="aiNoiseToggle" class="media-dock-pill noise-toggle" role="button" tabindex="0" aria-pressed="false" data-not-supported-label="N/A">
+                            <i class="fas fa-magic" aria-hidden="true"></i>
+                            AI <strong id="aiNoiseStatusText">关</strong>
+                        </span>
+                        <button id="destroyPeer" class="hidden media-dock-hangup" type="button" title="离开当前语音频道" aria-label="离开当前语音频道">
+                            <i class="fas fa-phone-slash" aria-hidden="true"></i>
                         </button>
                     </div>
-                </div>
-                <div id="buttons" class="hidden media-dock" aria-label="通话控制">
-                    <div class="media-dock-info">
-                        <strong id="localVoiceChannelName">大厅</strong>
-                        <span id="callDuration">00:00</span>
-                    </div>
-                    <div class="media-dock-actions">
+                    <div class="media-dock-actions" aria-label="语音控制按钮">
+                        <button id="copyRoomLink" class="media-dock-action-button copy-room-link" type="button" title="复制频道链接" aria-label="复制频道链接">
+                            <i class="fas fa-link" aria-hidden="true"></i>
+                            <span>链接</span>
+                        </button>
+                        <button id="shareScreen" class="media-dock-action-button" type="button" title="屏幕共享" aria-label="屏幕共享" aria-pressed="false">
+                            <i class="far fa-newspaper"></i>
+                            <span>共享</span>
+                        </button>
+                        <button id="toggleVideo" class="media-dock-action-button" type="button" title="摄像头" aria-label="摄像头" aria-pressed="false">
+                            <i class="fas fa-video"></i>
+                            <span>视频</span>
+                        </button>
                         <div class="media-dock-control-group control-button-wrap" data-device-control="mic">
                             <button id="toggleAudio" type="button" title="麦克风" aria-label="麦克风" aria-pressed="false">
                                 <i class="fas fa-microphone"></i>
@@ -91,15 +116,6 @@
                                 <i class="fas fa-chevron-up"></i>
                             </button>
                         </div>
-                        <button id="shareScreen" type="button" title="屏幕共享" aria-label="屏幕共享" aria-pressed="false">
-                            <i class="far fa-newspaper"></i>
-                        </button>
-                        <button id="toggleVideo" type="button" title="摄像头" aria-label="摄像头" aria-pressed="false">
-                            <i class="fas fa-video"></i>
-                        </button>
-                        <button id="destroyPeer" class="hidden" type="button" title="离开当前语音频道" aria-label="离开当前语音频道">
-                            <i class="fas fa-phone-slash" aria-hidden="true"></i>
-                        </button>
                     </div>
                     <section class="media-device-popover mic-volume-popover" data-control-panel="mic" data-device-popover="mic" role="dialog" aria-label="麦克风设备">
                         <div class="media-device-popover-header">

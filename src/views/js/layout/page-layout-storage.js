@@ -37,7 +37,18 @@
     };
 
     const normalizeLoadedLayoutItems = (payload, context = {}) => {
-        if (!payload || payload.version !== context.version) {
+        const payloadVersion = Number(payload?.version);
+        const supportedVersions = new Set(
+            [context.version, ...(context.supportedVersions || [])]
+                .map(Number)
+                .filter(Number.isFinite)
+        );
+
+        if (
+            !payload ||
+            !Number.isFinite(payloadVersion) ||
+            !supportedVersions.has(payloadVersion)
+        ) {
             return [];
         }
 
@@ -85,21 +96,31 @@
                 if (context.singletonTypes.has(type)) {
                     seenSingletonTypes.add(type);
                 }
+                const migratedItem =
+                    context.migrateLoadedLayoutItem?.({
+                        item,
+                        itemId,
+                        payloadVersion,
+                        type,
+                    }) || item;
                 const grid = context.normalizeAutoLayoutGrid(type, {
-                    x: item.x,
-                    y: item.y,
-                    w: item.w,
-                    h: item.h,
+                    x: migratedItem.x,
+                    y: migratedItem.y,
+                    w: migratedItem.w,
+                    h: migratedItem.h,
                 });
 
                 return {
                     id: itemId,
                     type,
                     grid,
-                    z: context.normalizeZIndex(item.z),
-                    visible: item.visible !== false,
+                    z: context.normalizeZIndex(migratedItem.z),
+                    visible: migratedItem.visible !== false,
                     config: {
-                        ...context.normalizeComponentConfig(type, item.config),
+                        ...context.normalizeComponentConfig(
+                            type,
+                            migratedItem.config
+                        ),
                         peerId: peerId || null,
                     },
                 };

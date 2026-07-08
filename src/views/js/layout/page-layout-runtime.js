@@ -138,21 +138,6 @@
 
             actions.replaceChildren();
 
-            if (panelConfig.canPin !== false) {
-                const pinButton = createPanelActionButton({
-                    action: 'pin',
-                    iconClassName: 'fas fa-thumbtack',
-                    label: '固定置顶',
-                });
-                pinButton.addEventListener('pointerdown', stopPanelActionEvent);
-                pinButton.addEventListener('click', (event) => {
-                    stopPanelActionEvent(event);
-                    options.onTogglePanelPin?.(tile);
-                    syncPanelActions(tile);
-                });
-                actions.append(pinButton);
-            }
-
             if (panelConfig.canCollapse !== false) {
                 const collapseButton = createPanelActionButton({
                     action: 'collapse',
@@ -169,6 +154,21 @@
                     syncPanelActions(tile);
                 });
                 actions.append(collapseButton);
+            }
+
+            if (panelConfig.canPin !== false) {
+                const pinButton = createPanelActionButton({
+                    action: 'pin',
+                    iconClassName: 'fas fa-thumbtack',
+                    label: '固定置顶',
+                });
+                pinButton.addEventListener('pointerdown', stopPanelActionEvent);
+                pinButton.addEventListener('click', (event) => {
+                    stopPanelActionEvent(event);
+                    options.onTogglePanelPin?.(tile);
+                    syncPanelActions(tile);
+                });
+                actions.append(pinButton);
             }
 
             syncPanelActions(tile);
@@ -365,16 +365,15 @@
                 !/大厅|游戏开黑/.test(members.text) ||
                 !members.tile.querySelector(
                     '[data-channel-room], .tree-channel'
-                ) ||
-                !members.tile.querySelector('.local-user-card') ||
-                !members.tile.querySelector('#localUserName')
+                )
             ) {
                 failures.push('membersPanel is missing room content');
             }
 
             if (
                 !mediaControls.tile ||
-                !mediaControls.tile.querySelector('#buttons')
+                !mediaControls.tile.querySelector('#buttons') ||
+                !mediaControls.tile.querySelector('#localUserName')
             ) {
                 failures.push('mediaControlsPanel is missing media controls');
             }
@@ -488,7 +487,7 @@
             roomPanelContent.className = 'room-panel-content';
             roomPanelContent.setAttribute('aria-label', '房间 Room');
             membersEl.before(roomPanelContent);
-            roomPanelContent.append(membersEl, roomInfoEl);
+            roomPanelContent.append(membersEl);
 
             const entries = [
                 {

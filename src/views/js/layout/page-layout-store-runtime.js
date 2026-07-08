@@ -50,6 +50,8 @@
                 normalizeAutoLayoutGrid: options.normalizeAutoLayoutGrid,
                 normalizeZIndex: options.normalizeZIndex,
                 normalizeComponentConfig: options.normalizeComponentConfig,
+                supportedVersions: options.supportedStorageVersions,
+                migrateLoadedLayoutItem: options.migrateLoadedLayoutItem,
             });
 
         const loadLayoutFromStorage = () =>

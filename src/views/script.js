@@ -133,8 +133,11 @@ const LAYOUT_MIN_GRID_W = 3;
 const LAYOUT_MIN_GRID_H = 2;
 const PAGE_GRID_COLUMNS = 32;
 const PAGE_GRID_ROWS = 18;
-const PAGE_STORAGE_VERSION = 1;
+const PAGE_STORAGE_VERSION = 2;
+const LEGACY_PAGE_STORAGE_VERSIONS = [1];
 const PAGE_LAYOUT_STORAGE_KEY_PREFIX = 'voicePageLayout:v4';
+const MEDIA_DOCK_LAYOUT_ITEM_ID = 'page-mediaControlsPanel';
+const MEDIA_DOCK_DEFAULT_GRID = Object.freeze({ x: 0, y: 12, w: 4, h: 6 });
 const PINNED_TILE_Z_INDEX_BASE = 10000;
 const PAGE_SINGLETON_TYPES = new Set(
     getPanelRegistry().map((panel) => panel.id)
@@ -415,7 +418,7 @@ const updateLocalUserCard = () => {
 
     roomUIState.renderLocalUserCard({
         refs: {
-            card: localUserCard,
+            card: callControls || localUserCard,
             channelName: localVoiceChannelName,
             name: localUserName,
             screenStatus: screenStatusText,
@@ -1427,6 +1430,15 @@ const getLayoutBoardForTile = (tile) => {
     return pageLayoutBoard || videoGrid;
 };
 
+const getPanelCollapsedHeight = () => {
+    const boardHeight =
+        getLayoutBoardForTile()?.getBoundingClientRect?.().height ||
+        window.innerHeight ||
+        PANEL_COLLAPSED_HEIGHT;
+
+    return Math.max(32, Math.round(boardHeight / PAGE_GRID_ROWS));
+};
+
 const getTileMinimumSize = (tile) => {
     const panelConfig = getPanelConfig(tile?.dataset?.pageLayoutType);
     const collapsed =
@@ -1436,7 +1448,7 @@ const getTileMinimumSize = (tile) => {
     return {
         width: panelConfig?.minWidth || PAGE_TILE_MIN_WIDTH,
         height: collapsed
-            ? PANEL_COLLAPSED_HEIGHT
+            ? getPanelCollapsedHeight()
             : panelConfig?.minHeight || PAGE_TILE_MIN_HEIGHT,
     };
 };
@@ -1525,6 +1537,39 @@ const normalizeAutoLayoutGrid = (type, grid = {}) =>
         grid,
         getLayoutPlacementContext()
     );
+
+const isLegacyMediaDockGrid = (item = {}) => {
+    const width = Number(item.w);
+    const height = Number(item.h);
+
+    return (
+        Number.isFinite(width) &&
+        Number.isFinite(height) &&
+        (width >= 8 || height <= 3)
+    );
+};
+
+const migrateLoadedLayoutItem = ({
+    item,
+    itemId,
+    payloadVersion,
+    type,
+} = {}) => {
+    if (
+        Number(payloadVersion) >= PAGE_STORAGE_VERSION ||
+        type !== PAGE_COMPONENT_TYPES.MEDIA_CONTROLS_PANEL ||
+        itemId !== MEDIA_DOCK_LAYOUT_ITEM_ID ||
+        !isLegacyMediaDockGrid(item)
+    ) {
+        return item;
+    }
+
+    return {
+        ...item,
+        ...MEDIA_DOCK_DEFAULT_GRID,
+        visible: true,
+    };
+};
 
 const getFallbackTileLayoutForType = (type, layout = {}) =>
     layoutPlacementUtils.getFallbackTileLayoutForType(
@@ -1735,7 +1780,7 @@ const applyTileLayoutItemToElement = (
         applyTileLayout(
             tile,
             item.config?.collapsed === true
-                ? { ...item.layout, height: PANEL_COLLAPSED_HEIGHT }
+                ? { ...item.layout, height: getPanelCollapsedHeight() }
                 : item.layout,
             { syncItem: false }
         );
@@ -2168,7 +2213,7 @@ const togglePanelCollapse = (tile) => {
     );
     const nextLayout = collapsed
         ? { ...currentLayout, height: expandedHeight }
-        : { ...currentLayout, height: PANEL_COLLAPSED_HEIGHT };
+        : { ...currentLayout, height: getPanelCollapsedHeight() };
 
     tile.dataset.panelCollapsing = String(!collapsed);
     applyTileLayout(tile, nextLayout, { syncItem: false });
@@ -2647,6 +2692,7 @@ pageLayoutStoreRuntime = layoutStoreRuntime.createRuntime({
     rows: PAGE_GRID_ROWS,
     layoutItemTypes: LAYOUT_ITEM_TYPES,
     pageComponentTypes: PAGE_COMPONENT_TYPES,
+    supportedStorageVersions: LEGACY_PAGE_STORAGE_VERSIONS,
     getSingletonTypes: () => PAGE_SINGLETON_TYPES,
     getLayoutStorageKey,
     getDefaultLayoutPreferences,
@@ -2661,6 +2707,7 @@ pageLayoutStoreRuntime = layoutStoreRuntime.createRuntime({
     normalizeAutoLayoutGrid,
     getRemoteLayoutAliasIds,
     getFallbackTileLayoutForType,
+    migrateLoadedLayoutItem,
     normalizeTileLayout,
     convertTileLayoutToGrid,
     getTileLayoutItemId,
@@ -3846,7 +3893,9 @@ noiseSettingsControls = noiseSettingsUI.init({
         aiNoiseStatusText: byId('aiNoiseStatusText'),
         micGainSlider: byId('micGainSlider'),
         micGainValue: byId('micGainValue'),
-        restartNoticePanel: document.querySelector('.local-meta-panel'),
+        restartNoticePanel: callControls?.querySelector(
+            '.media-dock-activity-row'
+        ),
     },
     isAiExperimentSupported,
     getNoiseMode: () => noiseMode,
