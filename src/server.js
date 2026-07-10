@@ -21,6 +21,7 @@ import {
     resolveOwnedViewChatRoom,
     switchViewChatRoom,
 } from './utils/ViewChatRoomLifecycle.js';
+import { createVoiceCallSignaling } from './utils/VoiceCallSignaling.js';
 // import { getMemoryUsageMessage, getCpuUsageMessage } from "./utils/LogMemoryUsage.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -93,6 +94,11 @@ const CHANNELS = [
 ];
 
 const getChannel = (slug) => CHANNELS.find((channel) => channel.slug === slug);
+const voiceCallSignaling = createVoiceCallSignaling({
+    io,
+    logger: Log,
+    resolveRoomId: (roomId) => getChannel(roomId)?.slug,
+});
 const CHAT_HISTORY_LIMIT = 50;
 const CHAT_MESSAGE_MAX_LENGTH = 500;
 const chatHistoryByRoom = new Map();
@@ -207,41 +213,31 @@ app.get('/room/:channel', (req, res) => {
 app.use((_, res) => res.status(404).send('404 Not Found'));
 
 /**
- * handleJoinRoom
+ * handleVoiceJoin
  *
  * Handles a user's request to join a voice room.
  *
- * @param {string} roomId - The ID of the room the user wants to join.
- * @param {string} peerId - The ID of the user joining the room.
+ * @param {object} payload - The owned voice room and local PeerJS id.
  * @param {Socket} socket - The socket instance representing the user's connection.
  *
  * Behavior:
- * - Stores voiceRoomId and voicePeerId on socket.data.
- * - Adds the user's socket to the specified room.
- * - Notifies other users in the room that a new user has connected.
+ * - Validates and stores voiceRoomId / voicePeerId on socket.data.
+ * - Adds the user's socket to the fixed voice room.
+ * - Tells only the new member which existing peers it must call.
  *
  * NOTE: disconnect handler is registered once in io.on('connection'),
  * not here, to avoid duplicate registrations.
  */
-const handleJoinRoom = async (roomId, peerId, socket) => {
-    Log.info(
-        `[joinVoice] socket=${socket.id} peerId=${peerId} roomId=${roomId}`
-    );
-    const existingVoicePeers = (await io.in(roomId).fetchSockets())
-        .filter(
-            (currentSocket) =>
-                currentSocket.id !== socket.id && currentSocket.data.voicePeerId
-        )
-        .map((currentSocket) => currentSocket.data.voicePeerId);
+const handleVoiceJoin = async (payload, socket) => {
+    const result = await voiceCallSignaling.join(payload, socket);
 
-    socket.data.voiceRoomId = roomId;
-    socket.data.voicePeerId = peerId;
-    await socket.join(roomId);
+    if (result.ok) {
+        Log.info(
+            `[joinVoice] socket=${socket.id} peerId=${socket.data.voicePeerId} roomId=${socket.data.voiceRoomId}`
+        );
+    }
 
-    existingVoicePeers.forEach((existingPeerId) => {
-        socket.emit('userConnected', { roomId, peerId: existingPeerId });
-    });
-    socket.to(roomId).emit('userConnected', { roomId, peerId });
+    return result;
 };
 
 /**
@@ -287,14 +283,13 @@ const handleVoicePeerLeft = async ({ roomId, peerId } = {}, socket) => {
     if (socket.data.voiceRoomId === channel.slug) {
         delete socket.data.voiceRoomId;
         delete socket.data.voicePeerId;
+        delete socket.data.voiceCallRevision;
     }
 };
 
 const handlePresenceJoinVoice = (
     {
-        roomId,
         senderName,
-        peerId,
         hasMic,
         micPermissionDenied,
         muted,
@@ -303,9 +298,11 @@ const handlePresenceJoinVoice = (
     } = {},
     socket
 ) => {
+    const roomId = socket.data.voiceRoomId;
+    const peerId = socket.data.voicePeerId;
     const channel = getChannel(roomId);
 
-    if (!channel) {
+    if (!channel || !peerId) {
         return;
     }
 
@@ -338,9 +335,7 @@ const handlePresenceJoinVoice = (
 
 const handlePresenceUpdate = (
     {
-        roomId,
         senderName,
-        peerId,
         hasMic,
         micPermissionDenied,
         muted,
@@ -349,9 +344,10 @@ const handlePresenceUpdate = (
     } = {},
     socket
 ) => {
-    const channel = getChannel(roomId || socket.data.presenceRoomId);
+    const channel = getChannel(socket.data.voiceRoomId);
+    const peerId = socket.data.voicePeerId;
 
-    if (!channel) {
+    if (!channel || !peerId) {
         return;
     }
 
@@ -367,7 +363,7 @@ const handlePresenceUpdate = (
             senderName !== undefined
                 ? normalizeSenderName(senderName)
                 : member.senderName || 'Guest',
-        peerId: peerId || member.peerId,
+        peerId,
         hasMic: hasMic !== undefined ? Boolean(hasMic) : Boolean(member.hasMic),
         micPermissionDenied:
             micPermissionDenied !== undefined
@@ -486,7 +482,7 @@ const handlePresenceRemove = (socket) => {
  *
  * Sets up socket event listeners for each new client connection.
  * - Logs when a user connects.
- * - Handles 'joinRoom' event to join a room.
+ * - Handles the owned voice signaling join event.
  */
 io.on('connection', (socket) => {
     Log.info(`User with socket.id ${socket.id} has connected.`);
@@ -500,8 +496,12 @@ io.on('connection', (socket) => {
         handleDisconnect(socket);
     });
 
-    socket.on('joinRoom', (roomId, userId) =>
-        handleJoinRoom(roomId, userId, socket)
+    socket.on('voice:join', async (payload, acknowledge) => {
+        const result = await handleVoiceJoin(payload, socket);
+        acknowledge?.(result);
+    });
+    socket.on('voice:call-refresh', () =>
+        voiceCallSignaling.requestRefresh(socket)
     );
     socket.on('chat:join', (payload) => handleChatJoin(payload, socket));
     socket.on('chat:send', (payload) => handleChatSend(payload, socket));

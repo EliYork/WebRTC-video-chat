@@ -265,6 +265,12 @@ room, or overlay behavior.
 rendering, idle state, and removal. It must not emit or listen for cursor
 socket events.
 
+`voice/voice-call-protocol.js` owns only the per-peer pending/active call gate:
+one caller direction, duplicate-event suppression, shared stream binding,
+close/error release, guarded call refresh, and lookup of the single sender used
+for track replacement. It does not own presence, remote streams, tiles, media
+capture, socket events, or complete reconnect cleanup.
+
 ## Main Flow Still Owned By `script.js`
 
 These high-risk flows remain in `src/views/script.js` unless a later phase
@@ -272,7 +278,8 @@ explicitly opens a new boundary and adds tests first:
 
 - WebRTC, PeerJS, socket, and stream lifecycles.
 - `requestAudioStream()`, `createAudioPipeline()`,
-  `setupCallStreamHandler()`, and `joinVoiceChannel()`.
+  `setupCallStreamHandler()`, call-refresh orchestration, and
+  `joinVoiceChannel()`.
 - Main page orchestration and page-layout dependency wiring.
 - Page layout DOM apply, resize/drag orchestration, and storage migration.
 - Chat socket flow, including message payload decisions and history handling.

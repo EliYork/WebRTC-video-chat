@@ -3,11 +3,11 @@
 | 项目                                             | 状态     | 备注                                                                |
 | ------------------------------------------------ | -------- | ------------------------------------------------------------------- |
 | Socket.IO 浏览/聊天 room 生命周期                | 已完成   | view/chat 底层 room 已与 voice 隔离，切换、清理与事件隔离测试通过。 |
-| 每对参与者的双向重复 PeerJS media call           | 未开始   | 需要唯一呼叫发起方和协议测试。                                      |
+| 每对参与者的双向重复 PeerJS media call           | 已完成   | 新加入者为唯一发起方，最小 call gate 与协议行为测试已通过。         |
 | 布局恢复克隆 DOM 导致缓存引用失效                | 已完成   | 原业务节点 identity 恢复与六项行为测试均已通过。                    |
-| 实时协议信任客户端 roomId / peerId               | 未开始   | 本轮只收紧 view/chat owner，不代表完整协议边界已修复。              |
+| 实时协议信任客户端 roomId / peerId               | 部分完成 | view/chat 与 voice join/presence 已使用服务端 owner；其他事件待修。 |
 | 生产依赖的 high / moderate 漏洞                  | 未开始   | 保留依赖升级与回归验证任务。                                        |
-| 核心实时协议行为测试不足                         | 部分完成 | 本轮仅增加 view/chat room 生命周期测试。                            |
+| 核心实时协议行为测试不足                         | 部分完成 | 已覆盖 view/chat 与唯一 voice call；完整重连和异常生命周期仍缺失。  |
 | 远端 call / stream / tile 缺少统一生命周期 owner | 未开始   | 需要 peer/call registry 或同等窄职责 owner。                        |
 | 不可达的旧 ROOM / CHAT 布局组件体系              | 未开始   | 待确认迁移兼容需求后收敛。                                          |
 | 两套 popover controller 并存                     | 未开始   | 待选择唯一 owner。                                                  |

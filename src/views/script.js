@@ -64,6 +64,7 @@ const chatFormUI = window.VoiceChatFormUI;
 const chatNameState = window.VoiceChatNameState;
 const channelSidebarUI = window.VoiceChannelSidebarUI;
 const cursorShareUI = window.VoiceCursorShareUI;
+const voiceCallProtocol = window.VoiceCallProtocol;
 const {
     buildParticipantViewModel,
     getMemberMicStatus,
@@ -198,9 +199,17 @@ let mediaDevicesCache = {
     output: [],
 };
 const remotePeerOrder = [];
+const outgoingVoiceCallTargets = new Set();
 const screenSharers = new Set();
 const peersWithCallHandler = new WeakSet();
 const presenceMembersByPeerId = new Map();
+let localVoiceCallRevision = 0;
+const voiceCallGate = voiceCallProtocol.createCallGate({
+    onStream: ({ call, peerId, stream }) =>
+        setupCallStreamHandler(call, peerId, stream),
+    onWarning: (message, error) => console.warn(message, error || ''),
+});
+const voiceRefreshRevisionGate = voiceCallProtocol.createRefreshRevisionGate();
 let tileLayoutZIndex = TILE_BASE_Z_INDEX;
 let layoutEditMode = false;
 let layoutLocked = false;
@@ -616,13 +625,37 @@ const updateChannelIndicators = () => {
     updateMobileRoomState();
 };
 
-const connectToNewUser = (peer, peerId, stream, options = {}) => {
+const getVoiceCallMetadata = () => ({
+    videoState: activeVideoTrack ? 'video' : 'audio-only',
+});
+
+const connectToNewUser = (
+    peer,
+    peerId,
+    stream,
+    { refreshKey, ...options } = {}
+) => {
+    if (!outgoingVoiceCallTargets.has(peerId)) {
+        return undefined;
+    }
+
     console.log(
         `User ${peerId} has joined the socket room. Initiating peer call`
     );
 
-    const call = peer.call(peerId, stream, options);
-    setupCallStreamHandler(call, peerId);
+    return voiceCallGate.callPeer({
+        options: {
+            ...options,
+            metadata: {
+                ...getVoiceCallMetadata(),
+                ...options.metadata,
+            },
+        },
+        peer,
+        peerId,
+        refreshKey,
+        stream,
+    });
 };
 
 const addKnownRemotePeer = (peerId) => {
@@ -635,19 +668,10 @@ const addKnownRemotePeer = (peerId) => {
     }
 };
 
-const getKnownRemotePeerIds = (peer) =>
-    Array.from(
-        new Set([
-            ...remotePeerOrder,
-            ...Object.keys(peer?.connections || {}),
-            ...presenceMembersByPeerId.keys(),
-        ])
-    ).filter((peerId) => peerId && peerId !== localPeerId);
+const handleSocketVoiceCallTargets = ({ roomId, peerIds = [] }) => {
+    console.info('[voice] call targets', { roomId, peerIds });
 
-const handleSocketUserConnected = ({ roomId, peerId }) => {
-    console.info('[voice] userConnected', { roomId, peerId });
-
-    if (roomId !== joinedVoiceRoomId || peerId === localPeerId) {
+    if (roomId !== joinedVoiceRoomId) {
         return;
     }
 
@@ -655,14 +679,33 @@ const handleSocketUserConnected = ({ roomId, peerId }) => {
         return;
     }
 
-    addKnownRemotePeer(peerId);
-    ensurePresenceTileForPeer(peerId);
+    Array.from(new Set(peerIds)).forEach((peerId) => {
+        if (!peerId || peerId === localPeerId) {
+            return;
+        }
 
-    const stream = getActiveStream();
+        outgoingVoiceCallTargets.add(peerId);
+        addKnownRemotePeer(peerId);
+        ensurePresenceTileForPeer(peerId);
+        connectToNewUser(currentPeer, peerId, getActiveStream());
+    });
+};
 
-    if (stream.getTracks().length > 0) {
-        connectToNewUser(currentPeer, peerId, stream);
+const handleSocketVoiceRefreshPeer = ({ roomId, peerId, revision }) => {
+    if (
+        roomId !== joinedVoiceRoomId ||
+        !outgoingVoiceCallTargets.has(peerId) ||
+        !currentPeer ||
+        currentPeer.destroyed
+    ) {
+        return;
     }
+
+    voiceRefreshRevisionGate.apply(peerId, revision, () =>
+        connectToNewUser(currentPeer, peerId, getActiveStream(), {
+            refreshKey: `${peerId}:${revision}`,
+        })
+    );
 };
 
 const handleSocketRemoveUserVideo = ({ roomId, peerId }) => {
@@ -676,14 +719,19 @@ const handleSocketRemoveUserVideo = ({ roomId, peerId }) => {
         remotePeerOrder.splice(idx, 1);
     }
 
+    outgoingVoiceCallTargets.delete(peerId);
+    voiceCallGate.closePeer(peerId);
+    voiceRefreshRevisionGate.releasePeer(peerId);
     screenSharers.delete(peerId);
     removeVideoElement(peerId);
 };
 
 const bindVoiceSocketHandlers = (activeSocket) => {
-    activeSocket.off('userConnected', handleSocketUserConnected);
+    activeSocket.off('voice:call-targets', handleSocketVoiceCallTargets);
+    activeSocket.off('voice:refresh-peer', handleSocketVoiceRefreshPeer);
     activeSocket.off('removeUserVideo', handleSocketRemoveUserVideo);
-    activeSocket.on('userConnected', handleSocketUserConnected);
+    activeSocket.on('voice:call-targets', handleSocketVoiceCallTargets);
+    activeSocket.on('voice:refresh-peer', handleSocketVoiceRefreshPeer);
     activeSocket.on('removeUserVideo', handleSocketRemoveUserVideo);
 };
 
@@ -3225,21 +3273,19 @@ const mergeRemoteStream = (
     return remoteStream;
 };
 
-function setupCallStreamHandler(call, peerId) {
-    call.on('stream', (userVideoStream) => {
-        console.info('[voice] remote stream received', {
-            peerId,
-            audioTracks: userVideoStream.getAudioTracks().length,
-            videoTracks: userVideoStream.getVideoTracks().length,
-        });
-        addVideoStream(
-            document.createElement('video'),
-            mergeRemoteStream(peerId, userVideoStream, {
-                clearVideo: call.metadata?.videoState === 'audio-only',
-            }),
-            peerId
-        );
+function setupCallStreamHandler(call, peerId, userVideoStream) {
+    console.info('[voice] remote stream received', {
+        peerId,
+        audioTracks: userVideoStream.getAudioTracks().length,
+        videoTracks: userVideoStream.getVideoTracks().length,
     });
+    addVideoStream(
+        document.createElement('video'),
+        mergeRemoteStream(peerId, userVideoStream, {
+            clearVideo: call.metadata?.videoState === 'audio-only',
+        }),
+        peerId
+    );
 }
 
 const bindPeerCallHandler = (peer) => {
@@ -3256,8 +3302,7 @@ const bindPeerCallHandler = (peer) => {
 
         console.log('Received a call...');
         console.info('[voice] call received', { peerId: call.peer });
-        call.answer(getActiveStream());
-        setupCallStreamHandler(call, call.peer);
+        voiceCallGate.answerCall({ call, stream: getActiveStream() });
     });
 };
 // ----------------------------------------------------------------------------------
@@ -3294,110 +3339,50 @@ const setLocalVideoStream = (stream) => {
     addVideoStream(myVideo, stream);
 };
 
-const callPeersWithStream = (peer, stream, options = {}) => {
-    if (!stream) {
-        console.warn('No stream available for peer call.');
+const refreshVoiceCallsForLocalMedia = (peer) => {
+    if (
+        !peer ||
+        peer !== currentPeer ||
+        peer.destroyed ||
+        !joinedVoiceRoomId ||
+        !localPeerId
+    ) {
         return;
     }
 
-    const myPeers = getKnownRemotePeerIds(peer);
+    localVoiceCallRevision += 1;
+    const refreshKey = `${localPeerId}:${localVoiceCallRevision}`;
+    const stream = getActiveStream();
 
-    myPeers.forEach((peerId) =>
-        connectToNewUser(peer, peerId, stream, options)
+    outgoingVoiceCallTargets.forEach((peerId) =>
+        connectToNewUser(peer, peerId, stream, { refreshKey })
     );
+    ensureSocket().emit('voice:call-refresh');
+};
+
+const replaceVoiceTrackForPeers = async (peer, kind, track) => {
+    if (!peer || peer !== currentPeer || peer.destroyed) {
+        return;
+    }
+
+    const peerIds = voiceCallGate.getPeerIds();
+    await Promise.all(
+        peerIds.map((peerId) => voiceCallGate.replaceTrack(peerId, kind, track))
+    );
+    refreshVoiceCallsForLocalMedia(peer);
 };
 
 const sendVideoTrackToPeers = (peer, track) => {
-    const myPeers = getKnownRemotePeerIds(peer);
-
-    myPeers.forEach((peerId) => {
-        const calls = peer.connections[peerId] || [];
-        let replacedTrack = false;
-
-        calls.forEach((call) => {
-            const sender = call?.peerConnection
-                ?.getSenders()
-                .find(
-                    (currentSender) =>
-                        currentSender.track?.kind === 'video' ||
-                        currentSender.track === null
-                );
-
-            if (!sender) {
-                return;
-            }
-
-            sender.replaceTrack(track || null).catch((error) => {
-                console.warn(
-                    `Could not replace video track for peer ${peerId}.`,
-                    error
-                );
-            });
-            replacedTrack = true;
-        });
-
-        if (!replacedTrack && track) {
-            console.warn(
-                `No video sender found for peer ${peerId}; starting a video call.`
-            );
-            connectToNewUser(peer, peerId, new MediaStream([track]));
-        }
-    });
-};
-
-const sendAudioTrackToPeers = (peer, track) => {
-    const myPeers = getKnownRemotePeerIds(peer);
-
-    myPeers.forEach((peerId) => {
-        const calls = peer.connections[peerId] || [];
-        let replacedTrack = false;
-
-        calls.forEach((call) => {
-            const sender = call?.peerConnection
-                ?.getSenders()
-                .find(
-                    (currentSender) =>
-                        currentSender.track?.kind === 'audio' ||
-                        currentSender.track === null
-                );
-
-            if (!sender) {
-                return;
-            }
-
-            sender.replaceTrack(track || null).catch((error) => {
-                console.warn(
-                    `Could not replace audio track for peer ${peerId}.`,
-                    error
-                );
-            });
-            replacedTrack = true;
-        });
-
-        if (!replacedTrack && track) {
-            console.warn(
-                `No audio sender found for peer ${peerId}; starting an audio call.`
-            );
-            connectToNewUser(peer, peerId, new MediaStream([track]));
-        }
-    });
-};
-
-const sendAudioOnlyStateToPeers = (peer) => {
-    const audioOnlyStream = new MediaStream(
-        myVideoStream?.getAudioTracks() || []
-    );
-
-    if (audioOnlyStream.getTracks().length === 0) {
-        console.warn('No audio track available for audio-only state update.');
+    if (!track) {
+        refreshVoiceCallsForLocalMedia(peer);
         return;
     }
 
-    callPeersWithStream(peer, audioOnlyStream, {
-        metadata: {
-            videoState: 'audio-only',
-        },
-    });
+    void replaceVoiceTrackForPeers(peer, 'video', track);
+};
+
+const sendAudioTrackToPeers = (peer, track) => {
+    void replaceVoiceTrackForPeers(peer, 'audio', track);
 };
 
 const setActiveVideoTrack = (peer, track) => {
@@ -3405,10 +3390,6 @@ const setActiveVideoTrack = (peer, track) => {
     const stream = getActiveStream();
     setLocalVideoStream(stream);
     sendVideoTrackToPeers(peer, track);
-
-    if (!track) {
-        sendAudioOnlyStateToPeers(peer);
-    }
 };
 
 const setCameraButtonState = (enabled) => {
@@ -3518,7 +3499,6 @@ async function toggleScreenShare(peer, myVideoStream) {
             console.info('[screen] sending screen audio track', {
                 count: screenAudioTracks.length,
             });
-            callPeersWithStream(peer, getActiveStream());
         } else {
             console.info('[screen] no screen audio track was provided');
         }
@@ -3641,12 +3621,7 @@ const initiateAudio = async (peer) => {
         emitLocalPresenceUpdate();
 
         bindPeerCallHandler(peer);
-
-        getKnownRemotePeerIds(peer).forEach((peerId) => {
-            if (peerId !== localPeerId) {
-                connectToNewUser(peer, peerId, getActiveStream());
-            }
-        });
+        refreshVoiceCallsForLocalMedia(peer);
     } catch (error) {
         micPermissionDenied = true;
         emitLocalPresenceUpdate();
@@ -3736,14 +3711,33 @@ const joinVoiceChannel = (roomId) => {
         updateChannelIndicators();
         startCallTimer();
 
-        activeSocket.emit('joinRoom', roomToJoin, peerId);
-        activeSocket.emit('presence:joinVoice', {
-            roomId: roomToJoin,
-            senderName: getChatName(),
-            ...getLocalPresenceState(),
-        });
-
         bindVoiceSocketHandlers(activeSocket);
+        activeSocket.emit(
+            'voice:join',
+            { roomId: roomToJoin, peerId },
+            (result) => {
+                if (
+                    !result?.ok ||
+                    peer !== currentPeer ||
+                    peer.destroyed ||
+                    joinedVoiceRoomId !== roomToJoin
+                ) {
+                    if (!result?.ok) {
+                        console.warn(
+                            'Voice signaling join was rejected.',
+                            result
+                        );
+                    }
+                    return;
+                }
+
+                activeSocket.emit('presence:joinVoice', {
+                    roomId: roomToJoin,
+                    senderName: getChatName(),
+                    ...getLocalPresenceState(),
+                });
+            }
+        );
         setLocalVideoStream(getActiveStream());
         updateLocalUserCard();
     });
@@ -3751,6 +3745,10 @@ const joinVoiceChannel = (roomId) => {
     peer.on('error', (error) => {
         console.warn('Peer connection failed.', error);
         isConnectingToPeer = false;
+        outgoingVoiceCallTargets.clear();
+        voiceCallGate.reset();
+        voiceRefreshRevisionGate.reset();
+        localVoiceCallRevision = 0;
         currentPeer = undefined;
         resetLocalVoiceState();
         hideCallControls();
@@ -3769,6 +3767,10 @@ const joinVoiceChannel = (roomId) => {
             roomId: joinedVoiceRoomId,
             peerId: id || localPeerId,
         });
+        outgoingVoiceCallTargets.clear();
+        voiceCallGate.reset();
+        voiceRefreshRevisionGate.reset();
+        localVoiceCallRevision = 0;
         currentPeer = undefined;
         joinedVoiceRoomId = undefined;
         isConnectingToPeer = false;

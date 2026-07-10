@@ -1593,6 +1593,44 @@ const MODULE_SCRIPTS = [
             ],
         ],
     },
+    {
+        path: '/js/voice/voice-call-protocol.js',
+        sourcePath: '../src/views/js/voice/voice-call-protocol.js',
+        namespace: 'VoiceCallProtocol',
+        mustLoadBeforeMain: true,
+        dependsOnViewUtils: false,
+        allowsMediaOrchestration: true,
+        forbiddenKeywords: [
+            'document',
+            'navigator',
+            'MediaStream',
+            'peer.connections',
+            'socket.emit',
+            'socket.on',
+            'addVideoStream',
+            'removeVideoElement',
+            'mergeRemoteStream',
+        ],
+        requiredExports: [
+            [/createCallGate/, 'voice call protocol must expose its call gate'],
+            [
+                /createRefreshRevisionGate/,
+                'voice call protocol must suppress stale refresh events',
+            ],
+            [
+                /releasePeer/,
+                'voice call protocol must release peer state for retry',
+            ],
+            [
+                /closePeer/,
+                'voice call protocol must close the gated call on owned leave',
+            ],
+            [
+                /replaceTrack/,
+                'voice call protocol must expose unique-call track replacement',
+            ],
+        ],
+    },
 ];
 
 const moduleSources = new Map(
@@ -1715,6 +1753,7 @@ const assertModuleScriptContracts = (moduleScripts) => {
             namespace,
             mustLoadBeforeMain = true,
             dependsOnViewUtils = false,
+            allowsMediaOrchestration = false,
             forbiddenKeywords = [],
             requiredExports = [],
         }) => {
@@ -1743,11 +1782,13 @@ const assertModuleScriptContracts = (moduleScripts) => {
                 ]);
             }
 
-            assertNoForbiddenKeywords(
-                source,
-                filename,
-                MEDIA_ORCHESTRATION_FORBIDDEN_KEYWORDS
-            );
+            if (!allowsMediaOrchestration) {
+                assertNoForbiddenKeywords(
+                    source,
+                    filename,
+                    MEDIA_ORCHESTRATION_FORBIDDEN_KEYWORDS
+                );
+            }
             assertNoForbiddenKeywords(source, filename, forbiddenKeywords);
             assertSourceContains(source, filename, requiredExports);
         }
