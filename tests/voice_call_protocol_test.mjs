@@ -11,8 +11,13 @@ const protocolSource = readFileSync(
 );
 const protocolWindow = {};
 vm.runInNewContext(protocolSource, { window: protocolWindow });
-const { createCallGate, createRefreshRevisionGate } =
-    protocolWindow.VoiceCallProtocol;
+const registrySource = readFileSync(
+    new URL('../src/views/js/voice/voice-peer-registry.js', import.meta.url),
+    'utf8'
+);
+vm.runInNewContext(registrySource, { window: protocolWindow });
+const { createRefreshRevisionGate } = protocolWindow.VoiceCallProtocol;
+const { createRegistry } = protocolWindow.VoicePeerRegistry;
 
 class FakeCall {
     constructor(peer, { metadata, peerConnection } = {}) {
@@ -91,6 +96,10 @@ class FakeSocket {
         this.rooms.add(roomId);
     }
 
+    async leave(roomId) {
+        this.rooms.delete(roomId);
+    }
+
     emit(event, payload) {
         this.emitted.push({ event, payload });
     }
@@ -137,8 +146,12 @@ const getEvents = (socket, event) =>
     socket.emitted.filter((entry) => entry.event === event);
 
 const createGate = (streams = []) =>
-    createCallGate({
-        onStream: ({ peerId, stream }) => streams.push({ peerId, stream }),
+    createRegistry({
+        attachRemoteStream: ({ peerId, stream }) => {
+            streams.push({ peerId, stream });
+            return { peerId, stream };
+        },
+        createRemoteStream: ({ incomingStream }) => incomingStream,
     });
 
 test('two sequential joins assign only the new peer as caller', async () => {
@@ -255,7 +268,7 @@ test('duplicate call instructions are idempotent while pending or active', () =>
         {
             direction: 'outgoing',
             refreshKey: undefined,
-            state: 'active',
+            state: 'pending-outgoing',
         }
     );
 });
@@ -270,7 +283,7 @@ test('close, error, leave, and same-peer-id rejoin all release the gate', () => 
     const second = gate.callPeer({ peer, peerId: 'A', stream });
     second.emit('error', new Error('network'));
     const third = gate.callPeer({ peer, peerId: 'A', stream });
-    gate.closePeer('A');
+    gate.cleanupPeer('A', 'voice-peer-left');
     const rejoined = gate.callPeer({ peer, peerId: 'A', stream });
 
     assert.notEqual(first, second);
@@ -340,6 +353,8 @@ test('refresh keeps the original caller direction and replaces calls sequentiall
         metadata: refreshedOutgoing.metadata,
     });
     incomingGate.answerCall({ call: refreshedIncoming, stream });
+    refreshedOutgoing.emit('stream', { id: 'remote-a' });
+    refreshedIncoming.emit('stream', { id: 'remote-b' });
     outgoingGate.callPeer({
         peer,
         peerId: 'A',
@@ -416,6 +431,39 @@ test('server refresh uses socket-owned room and peer state', async () => {
     });
 });
 
+test('server voice leave uses socket owner and broadcasts only once', async () => {
+    const { io, signaling } = createSignalingFixture();
+    const socketA = new FakeSocket(io, 'socket-a');
+    const socketB = new FakeSocket(io, 'socket-b');
+    await signaling.join({ roomId: 'lobby', peerId: 'A' }, socketA);
+    await signaling.join({ roomId: 'lobby', peerId: 'B' }, socketB);
+
+    const first = await signaling.leave(socketB, {
+        peerId: 'A',
+        reason: 'voicePeerLeft',
+        roomId: 'game',
+    });
+    const duplicate = await signaling.leave(socketB, {
+        reason: 'socket-disconnect',
+    });
+
+    assert.deepEqual(first, {
+        ok: true,
+        peerId: 'B',
+        reason: 'voicePeerLeft',
+        roomId: 'lobby',
+    });
+    assert.deepEqual(duplicate, { duplicate: true, ok: true });
+    assert.deepEqual(getEvents(socketA, 'removeUserVideo'), [
+        {
+            event: 'removeUserVideo',
+            payload: { peerId: 'B', roomId: 'lobby' },
+        },
+    ]);
+    assert.equal(socketB.rooms.has('lobby'), false);
+    assert.deepEqual(socketB.data, {});
+});
+
 test('invalid voice join cannot leave room or owner state behind', async () => {
     const { io, signaling } = createSignalingFixture();
     const socket = new FakeSocket(io, 'socket-invalid');
@@ -451,6 +499,8 @@ test('client and server contain only the new voice call signaling events', () =>
     assert.doesNotMatch(scriptSource, /userConnected|'joinRoom'/);
     assert.ok(
         templateSource.indexOf('/js/voice/voice-call-protocol.js') <
-            templateSource.indexOf('/script.js')
+            templateSource.indexOf('/js/voice/voice-peer-registry.js') &&
+            templateSource.indexOf('/js/voice/voice-peer-registry.js') <
+                templateSource.indexOf('/script.js')
     );
 });

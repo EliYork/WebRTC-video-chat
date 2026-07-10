@@ -58,7 +58,9 @@ window namespaces, module exports, or the ownership boundaries below.
 35. `/js/chat/chat-form-ui.js`
 36. `/js/room/channel-sidebar-ui.js`
 37. `/js/room/cursor-share-ui.js`
-38. `/script.js`
+38. `/js/voice/voice-call-protocol.js`
+39. `/js/voice/voice-peer-registry.js`
+40. `/script.js`
 
 Modules that use `window.VoiceViewUtils` must load after
 `/js/shared/view-utils.js` and before `/script.js`. All view modules must load
@@ -265,20 +267,21 @@ room, or overlay behavior.
 rendering, idle state, and removal. It must not emit or listen for cursor
 socket events.
 
-`voice/voice-call-protocol.js` owns only the per-peer pending/active call gate:
-one caller direction, duplicate-event suppression, shared stream binding,
-close/error release, guarded call refresh, and lookup of the single sender used
-for track replacement. It does not own presence, remote streams, tiles, media
-capture, socket events, or complete reconnect cleanup.
+`voice/voice-call-protocol.js` owns only refresh metadata and revision ordering.
+It does not store active calls. `voice/voice-peer-registry.js` is the sole owner
+of current/replacement call identity, direction and state, remote stream and
+track listeners, participant tile identity, idempotent cleanup, and lookup of
+the single sender used for track replacement. Presence and socket event
+orchestration remain in `script.js` and call the registry's narrow APIs.
 
 ## Main Flow Still Owned By `script.js`
 
 These high-risk flows remain in `src/views/script.js` unless a later phase
 explicitly opens a new boundary and adds tests first:
 
-- WebRTC, PeerJS, socket, and stream lifecycles.
+- PeerJS session creation, socket events, and local media capture lifecycles.
 - `requestAudioStream()`, `createAudioPipeline()`,
-  `setupCallStreamHandler()`, call-refresh orchestration, and
+  remote stream composition, call-refresh orchestration, and
   `joinVoiceChannel()`.
 - Main page orchestration and page-layout dependency wiring.
 - Page layout DOM apply, resize/drag orchestration, and storage migration.

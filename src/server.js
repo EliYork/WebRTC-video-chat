@@ -247,44 +247,11 @@ const handleVoiceJoin = async (payload, socket) => {
  * Reads voiceRoomId / voicePeerId from socket.data to avoid stale closured values.
  */
 const handleDisconnect = (socket) => {
-    const voiceRoomId = socket.data.voiceRoomId;
-    const voicePeerId = socket.data.voicePeerId;
-
-    if (!voiceRoomId || !voicePeerId) {
-        return;
-    }
-
-    Log.info(
-        `[leaveVoice] socket=${socket.id} peerId=${voicePeerId} roomId=${voiceRoomId} (disconnect)`
-    );
-    socket.to(voiceRoomId).emit('removeUserVideo', {
-        roomId: voiceRoomId,
-        peerId: voicePeerId,
-    });
+    void voiceCallSignaling.leave(socket, { reason: 'socket-disconnect' });
 };
 
-const handleVoicePeerLeft = async ({ roomId, peerId } = {}, socket) => {
-    const channel = getChannel(roomId);
-
-    if (!channel || !peerId) {
-        return;
-    }
-
-    Log.info(
-        `[leaveVoice] socket=${socket.id} peerId=${peerId} roomId=${channel.slug} (voicePeerLeft)`
-    );
-
-    await socket.leave(channel.slug);
-    socket.to(channel.slug).emit('removeUserVideo', {
-        roomId: channel.slug,
-        peerId,
-    });
-
-    if (socket.data.voiceRoomId === channel.slug) {
-        delete socket.data.voiceRoomId;
-        delete socket.data.voicePeerId;
-        delete socket.data.voiceCallRevision;
-    }
+const handleVoicePeerLeft = (socket) => {
+    void voiceCallSignaling.leave(socket, { reason: 'voicePeerLeft' });
 };
 
 const handlePresenceJoinVoice = (
@@ -488,6 +455,7 @@ io.on('connection', (socket) => {
     Log.info(`User with socket.id ${socket.id} has connected.`);
 
     socket.on('disconnecting', () => {
+        handleDisconnect(socket);
         handleCursorRemove(socket);
         handlePresenceRemove(socket);
     });
@@ -512,9 +480,7 @@ io.on('connection', (socket) => {
     socket.on('presence:update', (payload) =>
         handlePresenceUpdate(payload, socket)
     );
-    socket.on('voicePeerLeft', (payload) =>
-        handleVoicePeerLeft(payload, socket)
-    );
+    socket.on('voicePeerLeft', () => handleVoicePeerLeft(socket));
     socket.on('cursor:move', (payload) => handleCursorMove(payload, socket));
     socket.on('cursor:leave', (payload) => handleCursorLeave(payload, socket));
     socket.on('screen:shareStart', ({ roomId } = {}) => {

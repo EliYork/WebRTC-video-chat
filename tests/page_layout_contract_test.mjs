@@ -1612,7 +1612,6 @@ const MODULE_SCRIPTS = [
             'mergeRemoteStream',
         ],
         requiredExports: [
-            [/createCallGate/, 'voice call protocol must expose its call gate'],
             [
                 /createRefreshRevisionGate/,
                 'voice call protocol must suppress stale refresh events',
@@ -1621,13 +1620,32 @@ const MODULE_SCRIPTS = [
                 /releasePeer/,
                 'voice call protocol must release peer state for retry',
             ],
-            [
-                /closePeer/,
-                'voice call protocol must close the gated call on owned leave',
-            ],
+        ],
+    },
+    {
+        path: '/js/voice/voice-peer-registry.js',
+        sourcePath: '../src/views/js/voice/voice-peer-registry.js',
+        namespace: 'VoicePeerRegistry',
+        mustLoadBeforeMain: true,
+        dependsOnViewUtils: false,
+        allowsMediaOrchestration: true,
+        forbiddenKeywords: [
+            'document',
+            'navigator',
+            'MediaStream',
+            'peer.connections',
+            'socket.emit',
+            'socket.on',
+            'addVideoStream',
+            'removeVideoElement',
+        ],
+        requiredExports: [
+            [/createRegistry/, 'peer registry must expose its factory'],
+            [/cleanupPeer/, 'peer registry must expose idempotent cleanup'],
+            [/teardown/, 'peer registry must expose session teardown'],
             [
                 /replaceTrack/,
-                'voice call protocol must expose unique-call track replacement',
+                'peer registry must own unique-call track replacement',
             ],
         ],
     },
@@ -2086,8 +2104,8 @@ assertSourceContains(script, 'script.js', [
         message: 'setVoiceTargetRoom must stay in script.js',
     },
     {
-        pattern: /function setupCallStreamHandler/,
-        message: 'setupCallStreamHandler must stay in script.js',
+        pattern: /const mergeRemoteStream = /,
+        message: 'remote stream composition must stay in script.js',
     },
     {
         pattern: /const bindPeerCallHandler = /,

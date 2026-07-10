@@ -65,6 +65,7 @@ const chatNameState = window.VoiceChatNameState;
 const channelSidebarUI = window.VoiceChannelSidebarUI;
 const cursorShareUI = window.VoiceCursorShareUI;
 const voiceCallProtocol = window.VoiceCallProtocol;
+const voicePeerRegistryApi = window.VoicePeerRegistry;
 const {
     buildParticipantViewModel,
     getMemberMicStatus,
@@ -91,7 +92,6 @@ const {
     getLayoutComponentId,
     renderLayoutComponentTile: renderLayoutComponentTileContent,
 } = layoutComponents;
-const remoteStreams = {};
 const getAudioConstraints = () => {
     const constraints = noiseSettingsUI.getAudioConstraints();
 
@@ -204,10 +204,38 @@ const screenSharers = new Set();
 const peersWithCallHandler = new WeakSet();
 const presenceMembersByPeerId = new Map();
 let localVoiceCallRevision = 0;
-const voiceCallGate = voiceCallProtocol.createCallGate({
-    onStream: ({ call, peerId, stream }) =>
-        setupCallStreamHandler(call, peerId, stream),
+const voicePeerRegistry = voicePeerRegistryApi.createRegistry({
+    attachRemoteStream: ({ peerId, stream }) =>
+        addVideoStream(document.createElement('video'), stream, peerId),
+    createRemoteStream: ({
+        clearVideo,
+        currentStream,
+        incomingStream,
+        peerId,
+    }) =>
+        mergeRemoteStream(peerId, incomingStream, {
+            clearVideo,
+            currentStream,
+        }),
+    detachRemoteStream: ({ tile }) => {
+        const mediaElement = tile?.querySelector('video, audio');
+        if (mediaElement) {
+            mediaElement.onloadedmetadata = null;
+            mediaElement.srcObject = null;
+        }
+    },
+    onReplacementFailed: ({ peerId }) =>
+        voiceRefreshRevisionGate.releasePeer(peerId),
+    onRemoteMediaState: ({ peerId, reason, stream }) => {
+        console.info('[voice] remote media state', {
+            peerId,
+            reason,
+            audioTracks: stream?.getAudioTracks?.().length || 0,
+            videoTracks: stream?.getVideoTracks?.().length || 0,
+        });
+    },
     onWarning: (message, error) => console.warn(message, error || ''),
+    removeRemoteTile: ({ peerId, tile }) => removeRemoteTile(peerId, tile),
 });
 const voiceRefreshRevisionGate = voiceCallProtocol.createRefreshRevisionGate();
 let tileLayoutZIndex = TILE_BASE_Z_INDEX;
@@ -643,7 +671,7 @@ const connectToNewUser = (
         `User ${peerId} has joined the socket room. Initiating peer call`
     );
 
-    return voiceCallGate.callPeer({
+    return voicePeerRegistry.callPeer({
         options: {
             ...options,
             metadata: {
@@ -720,10 +748,9 @@ const handleSocketRemoveUserVideo = ({ roomId, peerId }) => {
     }
 
     outgoingVoiceCallTargets.delete(peerId);
-    voiceCallGate.closePeer(peerId);
+    voicePeerRegistry.cleanupPeer(peerId, 'voice-peer-left');
     voiceRefreshRevisionGate.releasePeer(peerId);
     screenSharers.delete(peerId);
-    removeVideoElement(peerId);
 };
 
 const bindVoiceSocketHandlers = (activeSocket) => {
@@ -917,6 +944,12 @@ const ensureSocket = () => {
         screenSharers.delete(peerId);
         updateAllVideoTileStatus();
         updateMobileTileView();
+    });
+    socket.on('disconnect', () => {
+        outgoingVoiceCallTargets.clear();
+        screenSharers.clear();
+        voicePeerRegistry.teardown('socket-disconnect');
+        voiceRefreshRevisionGate.reset();
     });
 
     return socket;
@@ -3118,11 +3151,7 @@ const ensurePresenceTileForPeer = (
             }
         }
 
-        addVideoStream(
-            document.createElement('video'),
-            new MediaStream(),
-            peerId
-        );
+        voicePeerRegistry.ensurePeerTile(peerId);
 
         if (!shouldAutoShow) {
             const tile = document.getElementById(peerId);
@@ -3132,6 +3161,7 @@ const ensurePresenceTileForPeer = (
             }
         }
     } else {
+        voicePeerRegistry.ensurePeerTile(peerId);
         updateVideoTileStatus(existingTile);
     }
 };
@@ -3160,7 +3190,7 @@ const syncPresenceTilesForJoinedRoom = (channels = []) => {
         const peerId = tile.dataset.peerId;
 
         if (tile.id !== 'local-video' && peerId && !activePeerIds.has(peerId)) {
-            removeVideoElement(tile.id);
+            voicePeerRegistry.cleanupPeer(peerId, 'presence-member-removed');
         }
     });
 };
@@ -3239,6 +3269,7 @@ const addVideoStream = (video, stream, videoId) => {
     });
     resetAutoTileLayoutHeights();
     updateMobileTileView();
+    return tile;
 };
 
 initializeLayoutFromStorage();
@@ -3246,15 +3277,11 @@ initializeLayoutFromStorage();
 const mergeRemoteStream = (
     peerId,
     incomingStream,
-    { clearVideo = false } = {}
+    { clearVideo = false, currentStream } = {}
 ) => {
-    const remoteStream = remoteStreams[peerId] || new MediaStream();
-    const incomingAudioTracks = incomingStream.getAudioTracks();
-    const incomingVideoTracks = incomingStream.getVideoTracks();
-
-    if (!remoteStreams[peerId]) {
-        remoteStreams[peerId] = remoteStream;
-    }
+    const remoteStream = currentStream || new MediaStream();
+    const incomingAudioTracks = incomingStream?.getAudioTracks?.() || [];
+    const incomingVideoTracks = incomingStream?.getVideoTracks?.() || [];
 
     if (incomingAudioTracks.length > 0) {
         remoteStream.getAudioTracks().forEach((track) => {
@@ -3273,21 +3300,6 @@ const mergeRemoteStream = (
     return remoteStream;
 };
 
-function setupCallStreamHandler(call, peerId, userVideoStream) {
-    console.info('[voice] remote stream received', {
-        peerId,
-        audioTracks: userVideoStream.getAudioTracks().length,
-        videoTracks: userVideoStream.getVideoTracks().length,
-    });
-    addVideoStream(
-        document.createElement('video'),
-        mergeRemoteStream(peerId, userVideoStream, {
-            clearVideo: call.metadata?.videoState === 'audio-only',
-        }),
-        peerId
-    );
-}
-
 const bindPeerCallHandler = (peer) => {
     if (peersWithCallHandler.has(peer)) {
         return;
@@ -3302,7 +3314,7 @@ const bindPeerCallHandler = (peer) => {
 
         console.log('Received a call...');
         console.info('[voice] call received', { peerId: call.peer });
-        voiceCallGate.answerCall({ call, stream: getActiveStream() });
+        voicePeerRegistry.answerCall({ call, stream: getActiveStream() });
     });
 };
 // ----------------------------------------------------------------------------------
@@ -3365,9 +3377,11 @@ const replaceVoiceTrackForPeers = async (peer, kind, track) => {
         return;
     }
 
-    const peerIds = voiceCallGate.getPeerIds();
+    const peerIds = voicePeerRegistry.getPeerIds();
     await Promise.all(
-        peerIds.map((peerId) => voiceCallGate.replaceTrack(peerId, kind, track))
+        peerIds.map((peerId) =>
+            voicePeerRegistry.replaceTrack(peerId, kind, track)
+        )
     );
     refreshVoiceCallsForLocalMedia(peer);
 };
@@ -3684,6 +3698,7 @@ const joinVoiceChannel = (roomId) => {
 
     // first wait to connect to the peer server
     peer.on('open', async (peerId) => {
+        voicePeerRegistry.setSessionDisconnected(false);
         localPeerId = peerId;
         myVideo.parentElement?.setAttribute('data-peer-id', localPeerId);
         const activeSocket = ensureSocket();
@@ -3743,10 +3758,14 @@ const joinVoiceChannel = (roomId) => {
     });
 
     peer.on('error', (error) => {
+        if (peer !== currentPeer) {
+            return;
+        }
+
         console.warn('Peer connection failed.', error);
         isConnectingToPeer = false;
         outgoingVoiceCallTargets.clear();
-        voiceCallGate.reset();
+        voicePeerRegistry.teardown('peer-error');
         voiceRefreshRevisionGate.reset();
         localVoiceCallRevision = 0;
         currentPeer = undefined;
@@ -3759,16 +3778,17 @@ const joinVoiceChannel = (roomId) => {
     });
 
     //once disconnected from peer, we tell the server this. The server will tell disconnect this user from websocket (see -DISCONNECT FUNCTION - )
-    peer.on('close', (id) => {
+    peer.on('close', () => {
+        if (peer !== currentPeer) {
+            return;
+        }
+
         console.log(
             `Peer destroyed : ${peer.destroyed}. Letting Everyone else on in the room know.`
         );
-        socket?.emit('voicePeerLeft', {
-            roomId: joinedVoiceRoomId,
-            peerId: id || localPeerId,
-        });
+        socket?.emit('voicePeerLeft');
         outgoingVoiceCallTargets.clear();
-        voiceCallGate.reset();
+        voicePeerRegistry.teardown('peer-close');
         voiceRefreshRevisionGate.reset();
         localVoiceCallRevision = 0;
         currentPeer = undefined;
@@ -3787,12 +3807,14 @@ const joinVoiceChannel = (roomId) => {
 
     peer.on('disconnected', () => {
         console.log('Peer disconnected');
+        voicePeerRegistry.setSessionDisconnected(true);
     });
 
     //client click to end call and stays in browser
     document.getElementById('destroyPeer').onclick = () => {
         console.log('Destroy peer clicked');
         ensureSocket().emit('presence:leaveVoice');
+        voicePeerRegistry.teardown('local-voice-leave');
         peer.destroy();
         resetLocalVoiceState();
 
@@ -3811,11 +3833,16 @@ const joinVoiceChannel = (roomId) => {
     };
 };
 
-function removeVideoElement(id) {
-    var vidElement = document.getElementById(id);
-    delete remoteStreams[id];
+function removeRemoteTile(peerId, ownedTile) {
+    const vidElement =
+        ownedTile?.id === peerId ? ownedTile : document.getElementById(peerId);
 
     if (vidElement) {
+        const mediaElement = vidElement.querySelector('video, audio');
+        if (mediaElement) {
+            mediaElement.onloadedmetadata = null;
+            mediaElement.srcObject = null;
+        }
         setTileLayoutItemVisibility(vidElement.dataset.layoutItemId, false);
         vidElement.remove();
         resetAutoTileLayoutHeights();
@@ -3956,6 +3983,10 @@ window.addEventListener('resize', () => {
     updateMobileTileView();
     clampPositionedTileLayouts();
     pageLayoutEditorRuntime?.positionActiveToolbarTile();
+});
+
+window.addEventListener('pagehide', () => {
+    voicePeerRegistry.teardown('page-unload');
 });
 
 updateChannelIndicators();

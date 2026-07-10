@@ -108,8 +108,26 @@ export const createVoiceCallSignaling = ({
         return { ok: true, revision };
     };
 
+    const leave = async (socket, { reason = 'voice-leave' } = {}) => {
+        const roomId = resolveRoomId?.(socket?.data.voiceRoomId);
+        const peerId = normalizeVoicePeerId(socket?.data.voicePeerId);
+
+        if (!roomId || !peerId || roomId !== socket.data.voiceRoomId) {
+            return { duplicate: true, ok: true };
+        }
+
+        delete socket.data.voiceRoomId;
+        delete socket.data.voicePeerId;
+        delete socket.data.voiceCallRevision;
+
+        socket.to(roomId).emit('removeUserVideo', { peerId, roomId });
+        await socket.leave?.(roomId);
+        return { ok: true, peerId, reason, roomId };
+    };
+
     return {
         join,
+        leave,
         requestRefresh,
     };
 };
