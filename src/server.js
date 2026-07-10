@@ -22,6 +22,10 @@ import {
     switchViewChatRoom,
 } from './utils/ViewChatRoomLifecycle.js';
 import { createVoiceCallSignaling } from './utils/VoiceCallSignaling.js';
+import {
+    bindSocketDisconnectLifecycle,
+    removeOwnedPresenceMember,
+} from './utils/SocketDisconnectLifecycle.js';
 // import { getMemoryUsageMessage, getCpuUsageMessage } from "./utils/LogMemoryUsage.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -169,20 +173,8 @@ const syncPresenceScreenSharing = ({ peerId, roomId, sharing, socket }) => {
     return true;
 };
 
-const removePresenceMember = (socket) => {
-    const roomId = socket.data.presenceRoomId;
-    const members = onlineMembersByRoom.get(roomId);
-
-    if (!members) {
-        return;
-    }
-
-    members.delete(socket.id);
-
-    if (members.size === 0) {
-        onlineMembersByRoom.delete(roomId);
-    }
-};
+const removePresenceMember = (socket) =>
+    removeOwnedPresenceMember(onlineMembersByRoom, socket);
 
 const getCursorColor = (seed) => {
     let hash = 0;
@@ -264,9 +256,8 @@ const handleVoiceJoin = async (payload, socket) => {
  * Handles the disconnection of a user.
  * Reads voiceRoomId / voicePeerId from socket.data to avoid stale closured values.
  */
-const handleDisconnect = (socket) => {
-    void voiceCallSignaling.leave(socket, { reason: 'socket-disconnect' });
-};
+const handleDisconnectingVoice = (socket) =>
+    voiceCallSignaling.leave(socket, { reason: 'socket-disconnecting' });
 
 const handleVoicePeerLeft = (socket) => {
     void voiceCallSignaling.leave(socket, { reason: 'voicePeerLeft' });
@@ -365,9 +356,11 @@ const handlePresenceUpdate = (
 };
 
 const handlePresenceLeaveVoice = (socket) => {
-    removePresenceMember(socket);
+    const removed = removePresenceMember(socket);
     delete socket.data.presenceRoomId;
-    broadcastPresence();
+    if (removed) {
+        broadcastPresence();
+    }
 };
 
 const handleChatJoin = async ({ roomId } = {}, socket) => {
@@ -452,8 +445,23 @@ const handleCursorLeave = ({ roomId } = {}, socket) => {
 const handleCursorRemove = (socket) => emitViewCursorRemove(socket);
 
 const handlePresenceRemove = (socket) => {
-    removePresenceMember(socket);
-    broadcastPresence();
+    const removed = removePresenceMember(socket);
+    delete socket.data.presenceRoomId;
+    if (removed) {
+        broadcastPresence();
+    }
+};
+
+const clearDisconnectedSocketOwners = (socket) => {
+    [
+        'chatRoomId',
+        'presenceRoomId',
+        'viewRoomId',
+        'voicePeerId',
+        'voiceRoomId',
+        'voiceScreenSharing',
+        'voiceSessionGeneration',
+    ].forEach((key) => delete socket.data[key]);
 };
 
 /**
@@ -466,14 +474,38 @@ const handlePresenceRemove = (socket) => {
 io.on('connection', (socket) => {
     Log.info(`User with socket.id ${socket.id} has connected.`);
 
-    socket.on('disconnecting', () => {
-        handleDisconnect(socket);
-        handleCursorRemove(socket);
-        handlePresenceRemove(socket);
-    });
-
-    socket.on('disconnect', () => {
-        handleDisconnect(socket);
+    bindSocketDisconnectLifecycle(socket, {
+        disconnectingSteps: [
+            {
+                name: 'cursor-remove',
+                run: () => handleCursorRemove(socket),
+            },
+            {
+                name: 'voice-screen-share-leave',
+                run: () => handleDisconnectingVoice(socket),
+            },
+            {
+                name: 'presence-remove',
+                run: () => handlePresenceRemove(socket),
+            },
+        ],
+        disconnectSteps: [
+            {
+                name: 'clear-socket-owners',
+                run: () => clearDisconnectedSocketOwners(socket),
+            },
+            {
+                name: 'disconnect-log',
+                run: ({ reason }) =>
+                    Log.info(
+                        `[socket] disconnected socket=${socket.id} reason=${reason}`
+                    ),
+            },
+        ],
+        onError: ({ error, step }) =>
+            Log.warn(
+                `[socket-cleanup] socket=${socket.id} step=${step} error=${error?.message || error}`
+            ),
     });
 
     socket.on('voice:join', async (payload, acknowledge) => {

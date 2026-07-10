@@ -201,7 +201,7 @@ test('invalid channels do not change data or room membership', async () => {
     assert.equal(socket.data.chatRoomId, 'lobby');
 });
 
-test('server disconnect wiring keeps cursor, presence, and voice cleanup hooks', () => {
+test('server disconnect wiring centralizes cursor voice and presence cleanup', () => {
     const serverSource = readFileSync(
         new URL('../src/server.js', import.meta.url),
         'utf8'
@@ -209,10 +209,10 @@ test('server disconnect wiring keeps cursor, presence, and voice cleanup hooks',
 
     assert.match(
         serverSource,
-        /socket\.on\('disconnecting',[\s\S]*?handleCursorRemove\(socket\);[\s\S]*?handlePresenceRemove\(socket\);/
+        /bindSocketDisconnectLifecycle\(socket,[\s\S]*?name: 'cursor-remove'[\s\S]*?handleCursorRemove\(socket\)[\s\S]*?name: 'voice-screen-share-leave'[\s\S]*?handleDisconnectingVoice\(socket\)[\s\S]*?name: 'presence-remove'[\s\S]*?handlePresenceRemove\(socket\)/
     );
     assert.match(
         serverSource,
-        /socket\.on\('disconnect',[\s\S]*?handleDisconnect\(socket\);/
+        /disconnectSteps:[\s\S]*?name: 'clear-socket-owners'[\s\S]*?clearDisconnectedSocketOwners\(socket\)[\s\S]*?name: 'disconnect-log'/
     );
 });
