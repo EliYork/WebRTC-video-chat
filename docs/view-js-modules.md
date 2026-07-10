@@ -144,7 +144,12 @@ board.
 `layout/page-layout-runtime.js` owns the page-layout runtime boot path:
 page-layout board creation, real DOM panel migration into the board, detached
 board validation, default page-layout ensure, broken-board detection, recovery
-toolbar wiring, fallback static restore, and `window.__voiceLayoutDebug`.
+toolbar wiring, original-node position capture, identity-preserving static
+restore, and `window.__voiceLayoutDebug`. Recovery must move the original
+sidebar, member tree, media dock, chat panel, and video grid back to their
+recorded parents; it must not clone or rebuild those business nodes. Normal
+recovery leaves a stable non-layout page, while explicit debug reset may reuse
+the restored nodes for one guarded layout initialization attempt.
 It receives DOM refs, storage/layout callbacks, toolbar hooks, and layout
 helpers from `script.js`; it must not own WebRTC, media, socket, PeerJS, chat
 socket flow, tile drag/resize lifecycles, or output-volume/media-element

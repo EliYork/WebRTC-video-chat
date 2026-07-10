@@ -8,6 +8,90 @@
         chatPanel: '聊天 Chat',
     };
 
+    const createOriginalDomOwner = ({ root, nodes = [], logger } = {}) => {
+        const originalRootChildren = Array.from(root?.childNodes || []);
+        const originalPositions = nodes
+            .filter((node) => node?.parentNode)
+            .map((node) => ({
+                node,
+                parent: node.parentNode,
+                nextSibling: node.nextSibling,
+            }));
+        const transientNodes = new Set();
+        const warn = (...args) =>
+            logger?.warn?.('[page-layout] original DOM restore:', ...args);
+
+        const trackTransient = (node) => {
+            if (node) {
+                transientNodes.add(node);
+            }
+            return node;
+        };
+
+        const restore = () => {
+            const errors = [];
+            const attempt = (label, callback) => {
+                try {
+                    callback();
+                } catch (error) {
+                    errors.push({ label, error });
+                    warn(label, error);
+                }
+            };
+
+            originalPositions
+                .slice()
+                .reverse()
+                .forEach(({ node, parent, nextSibling }) => {
+                    attempt(
+                        `restore node ${node.id || node.nodeName || ''}`,
+                        () => {
+                            const reference =
+                                nextSibling?.parentNode === parent
+                                    ? nextSibling
+                                    : null;
+                            parent.insertBefore(node, reference);
+                        }
+                    );
+                });
+
+            if (root) {
+                const originalChildren = new Set(originalRootChildren);
+                Array.from(root.childNodes).forEach((child) => {
+                    if (!originalChildren.has(child)) {
+                        attempt(
+                            `remove runtime root child ${child.id || child.nodeName || ''}`,
+                            () => child.remove()
+                        );
+                    }
+                });
+                originalRootChildren.forEach((child) => {
+                    attempt(
+                        `restore root child ${child.id || child.nodeName || ''}`,
+                        () => root.append(child)
+                    );
+                });
+            }
+
+            Array.from(transientNodes)
+                .reverse()
+                .forEach((node) => {
+                    attempt(
+                        `remove transient ${node.id || node.nodeName || ''}`,
+                        () => node.remove()
+                    );
+                });
+            transientNodes.clear();
+
+            return { errors, ok: errors.length === 0 };
+        };
+
+        return {
+            restore,
+            trackTransient,
+        };
+    };
+
     const createRuntime = (options = {}) => {
         const documentRef = options.document || global.document;
         const logger = options.logger || global.console;
@@ -26,9 +110,17 @@
                   pageComponentTypes.CHAT_PANEL,
               ].filter(Boolean);
         let board = options.initialBoard;
-        const originalMainSnapshot = mainLayout
-            ? mainLayout.cloneNode(true)
-            : null;
+        const originalDomOwner = createOriginalDomOwner({
+            root: mainLayout,
+            nodes: [
+                mainLayout?.querySelector('.sidebar-brand'),
+                mainLayout?.querySelector('.sidebar-channel-tree'),
+                mainLayout?.querySelector('#buttons'),
+                mainLayout?.querySelector('.chat-panel'),
+                videoGrid,
+            ],
+            logger,
+        });
 
         const setBoard = (nextBoard) => {
             board = nextBoard;
@@ -393,14 +485,6 @@
             };
         };
 
-        const restoreMovedPagePanelNodes = (entries) => {
-            entries.forEach(({ node, placeholder }) => {
-                if (placeholder.isConnected) {
-                    placeholder.replaceWith(node);
-                }
-            });
-        };
-
         const bootstrapRecoveryToolbar = ({ visible = false } = {}) =>
             options.layoutRecoveryUI.ensureRecoveryToolbar({
                 onReset: () => {
@@ -486,6 +570,7 @@
             const roomPanelContent = documentRef.createElement('section');
             roomPanelContent.className = 'room-panel-content';
             roomPanelContent.setAttribute('aria-label', '房间 Room');
+            originalDomOwner.trackTransient(roomPanelContent);
             membersEl.before(roomPanelContent);
             roomPanelContent.append(membersEl);
 
@@ -510,6 +595,7 @@
                 const placeholder = documentRef.createComment(
                     `page-layout-placeholder:${entry.type}`
                 );
+                originalDomOwner.trackTransient(placeholder);
                 entry.node.before(placeholder);
                 return { ...entry, placeholder };
             });
@@ -517,15 +603,19 @@
             const nextBoard = documentRef.createElement('div');
             nextBoard.id = 'page-layout-board';
             nextBoard.className = 'page-layout-board';
+            originalDomOwner.trackTransient(nextBoard);
 
             log('Board created, moving full DOM panels');
             const videoGridPlaceholder = documentRef.createComment(
                 'page-layout-placeholder:video-grid'
             );
+            originalDomOwner.trackTransient(videoGridPlaceholder);
             runtimeVideoGrid.before(videoGridPlaceholder);
             nextBoard.append(runtimeVideoGrid);
             entries.forEach(({ type, node }) => {
-                nextBoard.append(createPageTileFromNode(type, node));
+                const tile = createPageTileFromNode(type, node);
+                originalDomOwner.trackTransient(tile);
+                nextBoard.append(tile);
             });
 
             const detachedValidation =
@@ -535,13 +625,7 @@
                     'detached board validation failed:',
                     detachedValidation.failures
                 );
-                restoreMovedPagePanelNodes([
-                    {
-                        node: runtimeVideoGrid,
-                        placeholder: videoGridPlaceholder,
-                    },
-                ]);
-                restoreMovedPagePanelNodes(entries);
+                restoreOriginalStaticLayout();
                 bootstrapRecoveryToolbar({ visible: true });
                 return undefined;
             }
@@ -590,32 +674,58 @@
         };
 
         const restoreOriginalStaticLayout = () => {
-            if (!mainLayout) return;
-            const existingBoard =
-                documentRef.getElementById('page-layout-board');
-            if (existingBoard) existingBoard.remove();
-            mainLayout.classList.add('room-layout');
-            if (
-                originalMainSnapshot &&
-                originalMainSnapshot.children.length > 0
-            ) {
-                mainLayout.replaceChildren();
-                while (originalMainSnapshot.firstChild) {
-                    mainLayout.append(originalMainSnapshot.firstChild);
-                }
-                logger.info('[page-layout] restored original static layout');
-            } else {
-                mainLayout.replaceChildren();
-                mainLayout.innerHTML = `
-            <aside class="room-sidebar"><div class="sidebar-brand"><a href="/">朋友语音房间</a></div></aside>
-            <main class="room-stage"><section id="canvas"><div id="video-grid"></div></section></main>
-            <aside class="chat-panel"><ol id="chatMessages" class="chat-messages" style="height:60vh"></ol>
-            <form id="chatForm" class="chat-form"><textarea id="chatInput"></textarea><button>发送</button></form></aside>`;
-                logger.info('[page-layout] created safe fallback DOM');
+            if (!mainLayout) {
+                return { errors: [], ok: false };
             }
-            setBoard(undefined);
-            options.setLayoutEditMode(false);
-            options.syncLayoutEditModeUI();
+
+            const errors = [];
+            const activeElement = documentRef.activeElement;
+            const attempt = (label, callback) => {
+                try {
+                    callback?.();
+                } catch (error) {
+                    errors.push({ label, error });
+                    warn(`recovery step failed: ${label}`, error);
+                }
+            };
+
+            attempt('cancel layout interactions', () =>
+                options.cancelLayoutInteractions?.()
+            );
+            attempt('exit layout edit mode', () =>
+                options.setLayoutEditMode(false)
+            );
+            attempt('unlock layout', () => options.setLayoutLocked?.(false));
+
+            const restored = originalDomOwner.restore();
+            errors.push(...restored.errors);
+            attempt('clear layout board state', () => setBoard(undefined));
+            attempt('restore main layout classes', () => {
+                mainLayout.classList.add('room-layout');
+                mainLayout.classList.remove(
+                    'is-layout-editing',
+                    'is-layout-locked'
+                );
+            });
+            attempt('restore focus', () => {
+                if (
+                    activeElement?.isConnected !== false &&
+                    typeof activeElement?.focus === 'function'
+                ) {
+                    activeElement.focus({ preventScroll: true });
+                }
+            });
+            attempt('sync layout edit UI', () =>
+                options.syncLayoutEditModeUI()
+            );
+
+            if (errors.length > 0) {
+                warn('original DOM recovery completed with errors', errors);
+            } else {
+                log('restored original business DOM nodes');
+            }
+
+            return { errors, ok: errors.length === 0 };
         };
 
         const detectBrokenBoard = () => {
@@ -660,13 +770,18 @@
                 bootTime: new Date().toISOString(),
                 resetLayout() {
                     options.clearSavedLayout();
-                    documentRef.getElementById('page-layout-board')?.remove();
-                    setBoard(undefined);
+                    const restored = restoreOriginalStaticLayout();
+                    if (!restored.ok) {
+                        warn('reset stopped after incomplete DOM recovery');
+                        bootstrapRecoveryToolbar({ visible: true });
+                        return;
+                    }
                     try {
                         initPageLayoutBoard();
                     } catch (err) {
                         error('reset failed', err);
                         restoreOriginalStaticLayout();
+                        bootstrapRecoveryToolbar({ visible: true });
                     }
                 },
                 showRecoveryToolbar() {
@@ -788,6 +903,7 @@
     };
 
     global.PageLayoutRuntime = {
+        createOriginalDomOwner,
         createRuntime,
     };
 })(window);

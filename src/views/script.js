@@ -207,6 +207,7 @@ let layoutLocked = false;
 let pageLayoutEditorRuntime;
 let pageLayoutComponentRuntime;
 const layoutResizeBoundBoards = new WeakSet();
+const activeLayoutInteractionCancels = new Set();
 let noiseAudioContext = null;
 let noiseProcessorNode = null;
 // eslint-disable-next-line no-unused-vars
@@ -2508,7 +2509,7 @@ const startTileDrag = (event, tile) => {
         positionLayoutComponentToolbar(tile);
     };
 
-    const onEnd = () => {
+    const finishInteraction = (persist = true) => {
         if (finished) {
             return;
         }
@@ -2518,15 +2519,24 @@ const startTileDrag = (event, tile) => {
             tile.releasePointerCapture(event.pointerId);
         }
         tile.classList.remove('is-dragging');
-        finishTileLayoutInteraction(tile);
+        if (persist) {
+            finishTileLayoutInteraction(tile);
+        } else {
+            hideSnapPreview();
+            resetLayoutResizeCursor();
+        }
         window.removeEventListener('pointermove', onMove);
         window.removeEventListener('pointerup', onEnd);
         window.removeEventListener('pointercancel', onEnd);
+        activeLayoutInteractionCancels.delete(cancelInteraction);
     };
+    const onEnd = () => finishInteraction(true);
+    const cancelInteraction = () => finishInteraction(false);
 
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onEnd);
     window.addEventListener('pointercancel', onEnd);
+    activeLayoutInteractionCancels.add(cancelInteraction);
 };
 
 const resolveTileResizeLayout = (
@@ -2588,7 +2598,7 @@ const startTileResize = (event, tile, direction = 'se') => {
         positionLayoutComponentToolbar(tile);
     };
 
-    const onEnd = () => {
+    const finishInteraction = (persist = true) => {
         if (finished) {
             return;
         }
@@ -2599,15 +2609,27 @@ const startTileResize = (event, tile, direction = 'se') => {
         }
         tile.classList.remove('is-resizing');
         resetLayoutResizeCursor();
-        finishTileLayoutInteraction(tile);
+        if (persist) {
+            finishTileLayoutInteraction(tile);
+        } else {
+            hideSnapPreview();
+        }
         window.removeEventListener('pointermove', onMove);
         window.removeEventListener('pointerup', onEnd);
         window.removeEventListener('pointercancel', onEnd);
+        activeLayoutInteractionCancels.delete(cancelInteraction);
     };
+    const onEnd = () => finishInteraction(true);
+    const cancelInteraction = () => finishInteraction(false);
 
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onEnd);
     window.addEventListener('pointercancel', onEnd);
+    activeLayoutInteractionCancels.add(cancelInteraction);
+};
+
+const cancelActiveLayoutInteractions = () => {
+    Array.from(activeLayoutInteractionCancels).forEach((cancel) => cancel());
 };
 
 const bindTileLayoutControls = (tile, header) => {
@@ -2819,6 +2841,8 @@ pageLayoutRuntime = window.PageLayoutRuntime.createRuntime({
     getVideoTiles,
     serializeLayoutItems,
     setLayoutEditMode,
+    setLayoutLocked,
+    cancelLayoutInteractions: cancelActiveLayoutInteractions,
     onBoardChange: (board) => {
         pageLayoutBoard = board;
     },

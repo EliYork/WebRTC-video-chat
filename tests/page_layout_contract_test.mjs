@@ -1972,6 +1972,22 @@ assertSourceDoesNotContain(defaultBody, 'default page layout', [
 
 assertSourceContains(pageLayoutRuntime, 'page-layout-runtime.js', [
     {
+        pattern: /const createOriginalDomOwner = /,
+        message: 'page layout recovery must own original DOM references',
+    },
+    {
+        pattern:
+            /attempt\('cancel layout interactions',[\s\S]*?attempt\('exit layout edit mode',[\s\S]*?originalDomOwner\.restore\(\)/,
+        message:
+            'page layout recovery must cancel active interactions before restoring original nodes',
+    },
+    {
+        pattern:
+            /resetLayout\(\) \{[\s\S]*?restoreOriginalStaticLayout\(\)[\s\S]*?initPageLayoutBoard\(\)/,
+        message:
+            'debug reset must restore original nodes before reusing them for layout initialization',
+    },
+    {
         pattern: /const createPageTileFromNode = /,
         message: 'page layout must move existing DOM roots into tiles',
     },
@@ -1987,6 +2003,20 @@ assertSourceContains(pageLayoutRuntime, 'page-layout-runtime.js', [
             'page panels must keep layout item data needed for drag/save persistence',
     },
 ]);
+assertSourceDoesNotContain(
+    pageLayoutRuntime,
+    'page layout recovery ownership',
+    [
+        [
+            /cloneNode\(/,
+            'page layout recovery must not clone business DOM nodes',
+        ],
+        [
+            /innerHTML\s*=/,
+            'page layout recovery must not rebuild business DOM from HTML',
+        ],
+    ]
+);
 assert.match(
     pageLayoutRuntime,
     /const visible = defaultItem\.visible !== false;[\s\S]*?setTileLayoutItemVisibility\([\s\S]*?visible[\s\S]*?classList\.toggle\('is-layout-hidden', !visible\)/,
@@ -2357,6 +2387,14 @@ assertSourceDoesNotContain(
     ]
 );
 assertSourceContains(script, 'page layout behavior contract', [
+    [
+        /const activeLayoutInteractionCancels = new Set\(\)/,
+        'script must track active layout interactions for recovery cancellation',
+    ],
+    [
+        /const cancelInteraction = \(\) => finishInteraction\(false\)/,
+        'recovery cancellation must finish active layout interactions without persisting them',
+    ],
     [
         /REAL_DOM_PAGE_TYPES\.has\(type\)[\s\S]*?return;/,
         'renderLayoutComponentTile must return before replacing real DOM panel bodies',
