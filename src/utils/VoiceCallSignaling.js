@@ -19,8 +19,31 @@ export const createVoiceCallSignaling = ({
     io,
     resolveRoomId,
     logger,
+    onScreenShareChange,
 } = {}) => {
     const roomJoinQueues = new Map();
+
+    const getVoiceOwner = (socket, { requireMembership = true } = {}) => {
+        const roomId = resolveRoomId?.(socket?.data.voiceRoomId);
+        const peerId = normalizeVoicePeerId(socket?.data.voicePeerId);
+        const voiceSessionGeneration = Number(
+            socket?.data.voiceSessionGeneration
+        );
+
+        if (
+            !socket ||
+            !roomId ||
+            !peerId ||
+            roomId !== socket.data.voiceRoomId ||
+            !Number.isInteger(voiceSessionGeneration) ||
+            voiceSessionGeneration <= 0 ||
+            (requireMembership && !socket.rooms?.has(roomId))
+        ) {
+            return undefined;
+        }
+
+        return { peerId, roomId, voiceSessionGeneration };
+    };
 
     const enqueueRoomJoin = (roomId, operation) => {
         const previous = roomJoinQueues.get(roomId) || Promise.resolve();
@@ -45,9 +68,15 @@ export const createVoiceCallSignaling = ({
         return enqueueRoomJoin(ownedRoomId, async () => {
             if (
                 socket.data.voiceRoomId === ownedRoomId &&
-                socket.data.voicePeerId === ownedPeerId
+                socket.data.voicePeerId === ownedPeerId &&
+                socket.rooms?.has(ownedRoomId)
             ) {
-                return { duplicate: true, ok: true, peerIds: [] };
+                return {
+                    duplicate: true,
+                    ok: true,
+                    peerIds: [],
+                    voiceSessionGeneration: socket.data.voiceSessionGeneration,
+                };
             }
 
             if (
@@ -60,9 +89,21 @@ export const createVoiceCallSignaling = ({
                 };
             }
 
+            const roomSockets = await io.in(ownedRoomId).fetchSockets();
+            if (
+                roomSockets.some(
+                    (currentSocket) =>
+                        currentSocket.id !== socket.id &&
+                        currentSocket.data.voiceRoomId === ownedRoomId &&
+                        currentSocket.data.voicePeerId === ownedPeerId
+                )
+            ) {
+                return { ok: false, reason: 'voice-peer-id-in-use' };
+            }
+
             const existingPeerIds = Array.from(
                 new Set(
-                    (await io.in(ownedRoomId).fetchSockets())
+                    roomSockets
                         .filter(
                             (currentSocket) =>
                                 currentSocket.id !== socket.id &&
@@ -74,51 +115,81 @@ export const createVoiceCallSignaling = ({
             );
 
             await socket.join(ownedRoomId);
+            const voiceSessionGeneration =
+                Number(socket.data.voiceSessionGeneration || 0) + 1;
             socket.data.voiceRoomId = ownedRoomId;
             socket.data.voicePeerId = ownedPeerId;
-            socket.data.voiceCallRevision = 0;
+            socket.data.voiceScreenSharing = false;
+            socket.data.voiceSessionGeneration = voiceSessionGeneration;
             socket.emit('voice:call-targets', {
                 roomId: ownedRoomId,
                 peerIds: existingPeerIds,
+                voiceSessionGeneration,
+            });
+            socket.to(ownedRoomId).emit('voice:peer-joined', {
+                peerId: ownedPeerId,
+                roomId: ownedRoomId,
             });
 
-            return { ok: true, peerIds: existingPeerIds };
+            return {
+                ok: true,
+                peerIds: existingPeerIds,
+                voiceSessionGeneration,
+            };
         }).catch((error) => {
             logger?.warn?.('[voice-call] join failed', error);
             return { ok: false, reason: 'voice-join-failed' };
         });
     };
 
-    const requestRefresh = (socket) => {
-        const roomId = resolveRoomId?.(socket?.data.voiceRoomId);
-        const peerId = normalizeVoicePeerId(socket?.data.voicePeerId);
-
-        if (!roomId || !peerId || roomId !== socket.data.voiceRoomId) {
+    const updateScreenShare = (
+        { sharing, voiceSessionGeneration } = {},
+        socket
+    ) => {
+        const owner = getVoiceOwner(socket);
+        if (!owner) {
             return { ok: false, reason: 'voice-owner-missing' };
         }
+        if (
+            typeof sharing !== 'boolean' ||
+            !Number.isInteger(voiceSessionGeneration) ||
+            voiceSessionGeneration !== owner.voiceSessionGeneration
+        ) {
+            return { ok: false, reason: 'invalid-screen-share-state' };
+        }
+        if (socket.data.voiceScreenSharing === sharing) {
+            return { duplicate: true, ok: true, sharing };
+        }
 
-        const revision = Number(socket.data.voiceCallRevision || 0) + 1;
-        socket.data.voiceCallRevision = revision;
-        socket.to(roomId).emit('voice:refresh-peer', {
-            peerId,
-            revision,
-            roomId,
-        });
-
-        return { ok: true, revision };
+        socket.data.voiceScreenSharing = sharing;
+        const event = {
+            peerId: owner.peerId,
+            roomId: owner.roomId,
+            sharing,
+        };
+        onScreenShareChange?.({ ...event, socket });
+        socket.to(owner.roomId).emit('screen:share', event);
+        return { ok: true, sharing };
     };
 
     const leave = async (socket, { reason = 'voice-leave' } = {}) => {
-        const roomId = resolveRoomId?.(socket?.data.voiceRoomId);
-        const peerId = normalizeVoicePeerId(socket?.data.voicePeerId);
+        const owner = getVoiceOwner(socket, { requireMembership: false });
 
-        if (!roomId || !peerId || roomId !== socket.data.voiceRoomId) {
+        if (!owner) {
             return { duplicate: true, ok: true };
+        }
+
+        const { peerId, roomId } = owner;
+        if (socket.data.voiceScreenSharing === true) {
+            socket.data.voiceScreenSharing = false;
+            const event = { peerId, roomId, sharing: false };
+            onScreenShareChange?.({ ...event, socket });
+            socket.to(roomId).emit('screen:share', event);
         }
 
         delete socket.data.voiceRoomId;
         delete socket.data.voicePeerId;
-        delete socket.data.voiceCallRevision;
+        delete socket.data.voiceScreenSharing;
 
         socket.to(roomId).emit('removeUserVideo', { peerId, roomId });
         await socket.leave?.(roomId);
@@ -126,8 +197,9 @@ export const createVoiceCallSignaling = ({
     };
 
     return {
+        getVoiceOwner,
         join,
         leave,
-        requestRefresh,
+        updateScreenShare,
     };
 };

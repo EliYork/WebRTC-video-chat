@@ -1,77 +1,177 @@
-# Voice Call Protocol And Peer Registry
+# Voice Media Call Protocol
 
-Voice media uses one PeerJS `MediaConnection` per participant pair. The server
-assigns the caller direction; DOM tiles, presence entries, and
-`peer.connections` are not connection-ownership signals.
+## Confirmed negotiation constraint
 
-## Initial join
+The Edge `webrtc-internals` dump showed connected PeerConnections whose offer
+and answer contained only `m=application`. They had no `m=audio`, no `m=video`,
+and no RTP stats. The sharing answerer later added a video track while handling
+a replacement call, but an answer cannot add a media section that the remote
+offer did not contain.
 
-1. After PeerJS `open`, the client binds voice socket handlers and emits
-   `voice:join` with its room and PeerJS id.
-2. The server validates the fixed channel, records `voiceRoomId` and
-   `voicePeerId` on `socket.data`, and serializes joins in that voice room.
-3. Only the joining socket receives `voice:call-targets`, containing peers that
-   were already in the room.
-4. The joining client calls each target once. Existing clients never dial the
-   new peer; they only answer the incoming call.
+PeerJS 1.5.4 adds every caller-stream track to its new RTCPeerConnection before
+`createOffer()`. `MediaConnection.answer(stream)` adds answer-side tracks before
+applying the offer, but those tracks are still limited by the offered media
+sections. `offerToReceiveAudio` and `offerToReceiveVideo` are not used as a
+substitute for explicit Unified Plan transceivers, and PeerJS does not expose a
+high-level renegotiation operation for an existing MediaConnection.
 
-For sequential joins, B calls A, and C calls A plus B. This produces three
-calls for A/B/C rather than six.
+The former assumption that one permanently directed, bidirectional
+MediaConnection could later gain arbitrary answerer media through a replacement
+answer is therefore invalid.
 
-## Protocol and registry boundary
+## Directional media model
 
-`voice-call-protocol.js` owns the refresh metadata constants and the
-per-peer revision gate. It does not store active calls.
+Each participant pair has zero, one, or two intentional MediaConnections:
 
-`voice-peer-registry.js` is the sole owner of remote real-time resources. Each
-peer entry contains the current call identity and direction, lifecycle state,
-refresh key/generation, replacement call state, composed remote stream,
-participant tile, call listeners, stream/track listeners, and cleanup
-generation. Presence remains a separate statement that a member belongs to a
-voice room; it can ask the registry to ensure a tile or fully clean up a peer,
-but it never owns a `MediaConnection`.
+```text
+A -> B: carries only A's current media snapshot
+B -> A: carries only B's current media snapshot
+```
 
-The registry states are `idle`, `pending-outgoing`, `pending-incoming`,
-`replacing`, `active`, `closing`, and `closed`. Sender lookup and track
-replacement use only the current registry call and never traverse PeerJS
-internal connection collections.
+Each sender direction has at most one owned call. Replacement transfers the
+direction owner to the new generation and immediately closes the retired call;
+it does not keep a same-direction call alive while waiting for connection.
+These are not duplicate bidirectional calls: the two directions have distinct
+ownership and never send the answerer's tracks back on the same call.
 
-## Media refresh and replacement
+An incoming send call is always accepted with `call.answer()` and no stream,
+which is PeerJS's one-way-call path. The caller's stream therefore defines all
+offered RTP media sections. The registry never uses PeerJS's private connection
+lists as an owner.
 
-When local track composition changes, the original caller remains the caller.
-The new call becomes the registry's current identity while the previous call,
-stream, and tile are retained. Events from the previous call cannot overwrite
-or clean the current entry. When the new stream arrives, the registry updates
-the existing composed stream and tile, then unbinds and closes the previous
-call. If creation throws, returns no call, or the replacement errors before a
-stream arrives, the previous call remains current and the refresh revision is
-released for retry.
+An empty local snapshot does not create a MediaConnection. This avoids the
+data-channel-only offer seen in the dump. When that participant later enables a
+media type, it creates its own send call and the offer contains the required
+media section.
 
-## Cleanup
+## Join and media publication
 
-`cleanupPeer(peerId, reason)` is idempotent. It unbinds call and media
-listeners, detaches the tile's `srcObject`, closes owned current/replacement
-calls at most once, removes the tile, clears stream references, and deletes the
-entry. `teardown(reason)` applies the same operation to every peer for local
-leave, PeerJS close/error, Socket.IO disconnect, and page teardown.
+1. After PeerJS `open`, the client binds the incoming-call handler and emits
+   `voice:join` with the requested fixed room and its PeerJS id.
+2. The server validates and records the socket-owned voice room/id, assigns a
+   monotonic voice-session generation, and serializes joins in that room.
+3. The joining socket receives `voice:call-targets` with all existing peers.
+4. Existing sockets receive `voice:peer-joined` for the new peer.
+5. Every side adds the other to its media-target set and publishes its own
+   current snapshot if that snapshot contains live tracks.
 
-A single ended audio or video track is removed from the composed stream while
-other live tracks and the tile remain. All tracks ending, or the stream becoming
-inactive, performs full peer cleanup. PeerJS `disconnected` only marks the
-signaling session unavailable and blocks new calls; it does not claim that
-remote presence ended or immediately destroy established media.
+Local media changes do not ask a remote, historically chosen caller to rebuild
+the pair. The changing participant increments its local media generation and
+publishes a replacement only in its own outgoing direction to every current
+target.
+
+Outgoing metadata contains:
+
+- `voiceMediaDirection: "send"`;
+- positive `voiceMediaGeneration`;
+- ordered `voiceMediaKinds` (for example `['audio', 'audio', 'video']`);
+- concise sharing/video-source diagnostics.
+
+Incoming calls with missing direction metadata, invalid generations, duplicate
+generations, or stale generations are closed. A replacement becomes the sole
+owner for that direction and the old call is retired immediately. Its real
+remote stream then replaces the previous composed media snapshot. Late stream,
+close, or error events from retired generations cannot overwrite current state.
+
+## Media policy and SDP behavior
+
+The media snapshot contains live tracks only:
+
+- microphone audio: normally one audio track;
+- screen audio: retained in addition to microphone audio;
+- video: one `activeVideoTrack`.
+
+Microphone and screen audio are not silently collapsed. If both exist, PeerJS
+adds two audio tracks and Chromium creates two audio senders/media sections.
+There is currently no Web Audio mixing step.
+
+Camera and screen video are intentionally mutually exclusive in the outgoing
+snapshot. Starting screen share makes the screen track the one active video
+source; stopping it restores the live camera track if present, otherwise the
+next snapshot is audio-only. Camera-to-screen replacement rebuilds only the
+local send direction.
+
+| A media                           | B media      | Directional result                                 |
+| --------------------------------- | ------------ | -------------------------------------------------- |
+| none                              | none         | no media call until a live track exists            |
+| mic                               | mic          | one audio call in each direction                   |
+| mic                               | mic + camera | reverse audio calls plus B's video m-line          |
+| mic + screen video                | mic          | A offers audio/video; B independently offers audio |
+| mic + screen video + screen audio | mic          | A offers two audio m-lines and one video m-line    |
+| camera then screen                | mic          | A replaces only A -> B with the new video source   |
+| any side enables media later      | any          | that side originates or replaces its own send call |
+
+Socket.IO sharing state remains UI/presence state only. It never substitutes for
+an RTP track, an SDP media section, or inbound/outbound RTP stats. Tile
+`srcObject` assignment only renders registry-owned remote tracks.
+
+Remote tile presentation is derived from live tracks, not from the presence of
+a `<video>` node or an ended track that remains in a MediaStream. When the
+registry has no live remote video, the old video decoder is paused, detached,
+and reset before the existing tile renders its audio element and participant
+placeholder. When camera replaces screen inside the same composed stream, the
+video element is explicitly rebound to the new live track. Neither transition
+changes participant tile identity or interrupts surviving audio.
+
+## Registry and cleanup
+
+`voice-peer-registry.js` owns incoming and outgoing call identity separately for
+each remote peer, their generations/listeners, the composed remote stream, and
+the stable participant tile. A direction close affects only that direction.
+The participant tile remains while presence still owns the peer.
+
+`cleanupPeer(peerId, reason)` closes both directions once, unbinds call and media
+listeners, detaches the remote stream, and removes the tile. Leave, refresh
+replacement, page teardown, and late close/error paths are idempotent.
+
+For a non-BFCache `pagehide`, the page stops screen/camera/microphone tracks at
+most once, notifies voice leave, tears down the registry, destroys PeerJS, and
+disconnects Socket.IO. BFCache pagehide is preserved.
+
+## Opt-in diagnostics
+
+Diagnostics are disabled by default. Enable them for one page with
+`?voiceMediaDebug=1`, or persistently with:
+
+```js
+localStorage.setItem('voiceMediaDebug', '1');
+```
+
+The bounded log retains at most 200 entries and records peer id, direction,
+generation, track kinds/enabled state, sender/transceiver kinds, SDP media-kind
+summaries, connection state, sharing state, remote stream kinds, and cleanup
+reason. It does not record full SDP, candidates, IPs, device labels, track ids,
+or unbounded history. Export a copy in the console with:
+
+```js
+exportVoiceMediaDebug();
+```
 
 ## Server owner boundary
 
-Voice join, refresh, active leave (`voicePeerLeft`), and disconnect cleanup use
-`socket.data.voiceRoomId` and `socket.data.voicePeerId`. Leave clears that owner
-state before broadcasting, so active leave plus disconnect is idempotent and a
-client payload cannot select another peer. Screen-share events still accept a
-client room id and remain in the trust-boundary backlog.
+Voice join, peer-joined targeting, active leave (`voicePeerLeft`), and disconnect
+cleanup use `socket.data.voiceRoomId` and `socket.data.voicePeerId`. Screen share
+accepts only a strict `sharing` boolean plus the server-issued voice-session
+generation. Presence derives peer, room, and sharing state from the server
+owner.
 
-## Deliberate boundary
+| Event                                    | Client business payload               | Server identity/room owner               | Broadcast target                |
+| ---------------------------------------- | ------------------------------------- | ---------------------------------------- | ------------------------------- |
+| `voice:join`                             | fixed room and PeerJS id claim        | validated room/id and session generation | joiner plus existing room peers |
+| `voice:call-targets`                     | none                                  | current room membership                  | joining socket                  |
+| `voice:peer-joined`                      | none                                  | newly joined socket owner                | existing sockets in owned room  |
+| `presence:joinVoice` / `presence:update` | bounded display/media booleans        | current voice owner                      | presence snapshot               |
+| `voicePeerLeft` / disconnect             | none                                  | current voice owner                      | owned voice room                |
+| `screen:share`                           | strict boolean and session generation | current voice owner                      | owned voice room                |
 
-This layer does not implement automatic PeerJS or Socket.IO reconnect, retry,
-or backoff. Real-browser WebRTC timing, temporary PeerServer disconnect
-behavior, and permission failures still require manual validation and later
-repair work.
+## Test model and remaining browser gate
+
+`tests/voice_media_negotiation_test.mjs` uses a strict fake SDP/transceiver
+model. It derives offer media sections only from caller tracks and rejects an
+answer that tries to add more audio/video sections than the offer. It covers
+late mic/video, both microphones, screen media, two audio tracks, video-source
+replacement, audio-only fallback, stale events, leave/rejoin, and three peers.
+
+The remaining acceptance gate is a real Edge retest. The successful dump must
+show required `m=audio`/`m=video`, sender-side `outbound-rtp`, receiver-side
+`inbound-rtp`, registry-owned remote tracks, and visible screen video.

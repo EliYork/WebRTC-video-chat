@@ -1,18 +1,29 @@
 (function exposeVoicePeerRegistry(global) {
     'use strict';
 
-    const REFRESH_METADATA_FLAG = 'voiceCallRefresh';
-    const REFRESH_METADATA_KEY = 'voiceCallRefreshKey';
+    const protocol = global.VoiceCallProtocol || {};
+    const {
+        MEDIA_DIRECTION_METADATA = 'voiceMediaDirection',
+        MEDIA_GENERATION_METADATA = 'voiceMediaGeneration',
+        MEDIA_KINDS_METADATA = 'voiceMediaKinds',
+        SEND_DIRECTION = 'send',
+    } = protocol;
 
     const isCall = (value) => Boolean(value && typeof value.on === 'function');
+    const isGeneration = (value) =>
+        Number.isInteger(Number(value)) && Number(value) > 0;
+    const getLiveTracks = (stream) =>
+        (stream?.getTracks?.() || []).filter(
+            (track) => track?.readyState !== 'ended'
+        );
 
     const createRegistry = ({
         attachRemoteStream,
         createRemoteStream,
         detachRemoteStream,
+        onDebug,
         onPeerCleanup,
         onRemoteMediaState,
-        onReplacementFailed,
         onWarning,
         removeRemoteTile,
     } = {}) => {
@@ -21,29 +32,24 @@
         let sessionDisconnected = false;
 
         const warn = (message, error) => onWarning?.(message, error);
+        const debug = (event) => onDebug?.(event);
 
-        const notifyState = (entry, reason) =>
-            onRemoteMediaState?.({
-                peerId: entry.peerId,
-                reason,
-                state: entry.state,
-                stream: entry.remoteStream,
-                tile: entry.tile,
-            });
+        const createDirectionState = () => ({
+            current: null,
+            pending: null,
+        });
 
         const createEntry = (peerId) => ({
-            call: null,
             callListeners: new Map(),
             cleanupGeneration: 0,
-            direction: undefined,
-            generation: 0,
+            incoming: createDirectionState(),
+            lastIncomingGeneration: 0,
             lastIncomingStream: null,
+            lastOutgoingGeneration: 0,
+            outgoing: createDirectionState(),
+            outgoingCreatingGeneration: 0,
             peerId,
-            pendingToken: null,
-            refreshKey: undefined,
             remoteStream: null,
-            replacement: null,
-            state: 'idle',
             streamListeners: [],
             tile: null,
         });
@@ -69,16 +75,20 @@
             }
         };
 
-        const unbindCall = (entry, call) => {
-            const listeners = entry?.callListeners.get(call);
+        const unbindCall = (entry, record) => {
+            const listeners = entry?.callListeners.get(record?.call);
             if (!listeners) {
                 return;
             }
 
-            listeners.forEach(({ event, listener }) =>
-                removeEmitterListener(call, event, listener)
-            );
-            entry.callListeners.delete(call);
+            listeners.forEach(({ event, listener, target, type }) => {
+                if (type === 'event-target') {
+                    target?.removeEventListener?.(event, listener);
+                } else {
+                    removeEmitterListener(target, event, listener);
+                }
+            });
+            entry.callListeners.delete(record.call);
         };
 
         const closeCallOnce = (call) => {
@@ -95,22 +105,20 @@
             return true;
         };
 
-        const retireCall = (entry, call, { close = true } = {}) => {
-            if (!isCall(call)) {
+        const retireRecord = (entry, record, { close = true } = {}) => {
+            if (!record) {
                 return;
             }
-
-            unbindCall(entry, call);
+            unbindCall(entry, record);
             if (close) {
-                closeCallOnce(call);
+                closeCallOnce(record.call);
             }
         };
 
-        const removeTargetListener = ({ event, listener, target }) =>
-            target?.removeEventListener?.(event, listener);
-
         const detachStreamListeners = (entry) => {
-            entry.streamListeners.forEach(removeTargetListener);
+            entry.streamListeners.forEach(({ event, listener, target }) =>
+                target?.removeEventListener?.(event, listener)
+            );
             entry.streamListeners = [];
         };
 
@@ -118,168 +126,62 @@
             if (typeof target?.addEventListener !== 'function') {
                 return;
             }
-
             target.addEventListener(event, listener);
             entry.streamListeners.push({ event, listener, target });
         };
 
-        const cleanupPeer = (
-            peerId,
-            reason = 'cleanup',
-            { closeCall = true, expectedCall } = {}
-        ) => {
-            const entry = entries.get(peerId);
-            if (!entry || (expectedCall && entry.call !== expectedCall)) {
-                return false;
-            }
-
-            entry.state = 'closing';
-            entry.cleanupGeneration += 1;
-            const currentCall = entry.call;
-            const previousCall = entry.replacement?.call;
-            const stream = entry.remoteStream;
-            const tile = entry.tile;
-
-            Array.from(entry.callListeners.keys()).forEach((call) =>
-                unbindCall(entry, call)
-            );
-            detachStreamListeners(entry);
-
-            try {
-                detachRemoteStream?.({ peerId, reason, stream, tile });
-            } catch (error) {
-                warn(`Could not detach remote stream for ${peerId}.`, error);
-            }
-
-            if (closeCall) {
-                closeCallOnce(currentCall);
-            }
-            closeCallOnce(previousCall);
-
-            try {
-                removeRemoteTile?.({ peerId, reason, tile });
-            } catch (error) {
-                warn(`Could not remove remote tile for ${peerId}.`, error);
-            }
-
-            entry.call = null;
-            entry.lastIncomingStream = null;
-            entry.pendingToken = null;
-            entry.remoteStream = null;
-            entry.replacement = null;
-            entry.state = 'closed';
-            entry.tile = null;
-            entries.delete(peerId);
-            onPeerCleanup?.({ peerId, reason });
-            return true;
+        const getDirectionState = (entry, direction) => entry[direction];
+        const isOwnedRecord = (entry, direction, record) => {
+            const state = getDirectionState(entry, direction);
+            return state.current === record || state.pending === record;
         };
 
-        const restorePreviousCall = (entry, failedCall, reason, error) => {
-            const previous = entry.replacement;
-            unbindCall(entry, failedCall);
-            if (reason === 'call-error') {
-                closeCallOnce(failedCall);
-            }
-            entry.replacement = null;
-
-            if (!previous?.call) {
-                cleanupPeer(entry.peerId, reason, {
-                    closeCall: false,
-                    expectedCall: failedCall,
-                });
-                onReplacementFailed?.({
-                    error,
-                    peerId: entry.peerId,
-                    reason,
-                    refreshKey: entry.refreshKey,
-                });
-                return;
-            }
-
-            entry.call = previous.call;
-            entry.direction = previous.direction;
-            entry.generation = previous.generation;
-            entry.refreshKey = previous.refreshKey;
-            entry.state = previous.state === 'active' ? 'active' : 'pending';
-            onReplacementFailed?.({
-                error,
+        const notifyState = (entry, reason) =>
+            onRemoteMediaState?.({
+                incomingState:
+                    entry.incoming.current?.state ||
+                    entry.incoming.pending?.state ||
+                    'idle',
+                outgoingState:
+                    entry.outgoing.current?.state ||
+                    entry.outgoing.pending?.state ||
+                    'idle',
                 peerId: entry.peerId,
                 reason,
-                refreshKey: failedCall?.metadata?.[REFRESH_METADATA_KEY],
+                stream: entry.remoteStream,
+                tile: entry.tile,
             });
+
+        const clearRemoteMedia = (entry, reason) => {
+            const stream = entry.remoteStream;
+            detachStreamListeners(entry);
+            entry.lastIncomingStream = null;
+            entry.remoteStream = null;
+            try {
+                detachRemoteStream?.({
+                    peerId: entry.peerId,
+                    reason,
+                    stream,
+                    tile: entry.tile,
+                });
+            } catch (error) {
+                warn(
+                    `Could not detach remote stream for ${entry.peerId}.`,
+                    error
+                );
+            }
             notifyState(entry, reason);
         };
 
-        const handleCallTerminal = (peerId, call, reason, error) => {
-            const entry = entries.get(peerId);
-            if (!entry) {
-                return;
-            }
-
-            if (entry.replacement?.call === call) {
-                retireCall(entry, call, { close: reason === 'call-error' });
-                entry.replacement = null;
-                return;
-            }
-
-            if (entry.call !== call) {
-                return;
-            }
-
-            if (entry.replacement) {
-                restorePreviousCall(entry, call, reason, error);
-                return;
-            }
-
-            cleanupPeer(peerId, reason, {
-                closeCall: reason === 'call-error',
-                expectedCall: call,
-            });
-        };
-
-        const bindCall = (entry, call) => {
-            if (entry.callListeners.has(call)) {
-                return;
-            }
-
-            const listeners = [
-                {
-                    event: 'stream',
-                    listener: (stream) => registerRemoteStream(call, stream),
-                },
-                {
-                    event: 'close',
-                    listener: () =>
-                        handleCallTerminal(entry.peerId, call, 'call-close'),
-                },
-                {
-                    event: 'error',
-                    listener: (error) =>
-                        handleCallTerminal(
-                            entry.peerId,
-                            call,
-                            'call-error',
-                            error
-                        ),
-                },
-            ];
-
-            entry.callListeners.set(call, listeners);
-            listeners.forEach(({ event, listener }) =>
-                call.on(event, listener)
-            );
-        };
-
-        const bindRemoteStream = (entry, stream) => {
-            const generation = entry.generation;
+        const bindRemoteStream = (entry, stream, generation) => {
             const isCurrent = () =>
                 entries.get(entry.peerId) === entry &&
                 entry.remoteStream === stream &&
-                entry.generation === generation;
+                entry.incoming.current?.generation === generation;
 
             addStreamListener(entry, stream, 'inactive', () => {
                 if (isCurrent()) {
-                    cleanupPeer(entry.peerId, 'stream-inactive');
+                    clearRemoteMedia(entry, 'stream-inactive');
                 }
             });
 
@@ -290,11 +192,9 @@
                     }
 
                     stream.removeTrack?.(track);
-                    const liveTracks = (stream.getTracks?.() || []).filter(
-                        (currentTrack) => currentTrack.readyState !== 'ended'
-                    );
+                    const liveTracks = getLiveTracks(stream);
                     if (liveTracks.length === 0) {
-                        cleanupPeer(entry.peerId, 'all-tracks-ended');
+                        clearRemoteMedia(entry, 'all-tracks-ended');
                         return;
                     }
 
@@ -309,222 +209,372 @@
             });
         };
 
-        function registerRemoteStream(call, incomingStream) {
-            const peerId = call?.peer;
-            const entry = entries.get(peerId);
+        const promoteOutgoing = (entry, record, reason) => {
+            if (!isOwnedRecord(entry, 'outgoing', record)) {
+                return false;
+            }
+
+            record.state = 'active';
+            debug({
+                direction: 'outgoing',
+                event: reason,
+                generation: record.generation,
+                peerId: entry.peerId,
+            });
+            return true;
+        };
+
+        const registerRemoteStream = (entry, record, incomingStream) => {
             if (
-                !entry ||
-                entry.call !== call ||
                 !incomingStream ||
-                entry.lastIncomingStream === incomingStream
+                !isOwnedRecord(entry, 'incoming', record) ||
+                (entry.incoming.current === record &&
+                    entry.lastIncomingStream === incomingStream)
             ) {
                 return false;
             }
 
-            detachStreamListeners(entry);
             let nextStream;
             try {
                 nextStream =
                     createRemoteStream?.({
-                        clearVideo: call.metadata?.videoState === 'audio-only',
                         currentStream: entry.remoteStream,
                         incomingStream,
-                        peerId,
+                        peerId: entry.peerId,
+                        replaceAll: true,
                     }) || incomingStream;
+
+                detachStreamListeners(entry);
                 entry.remoteStream = nextStream;
                 entry.lastIncomingStream = incomingStream;
-                bindRemoteStream(entry, nextStream);
+                record.state = 'active';
+                bindRemoteStream(entry, nextStream, record.generation);
                 entry.tile =
                     attachRemoteStream?.({
-                        peerId,
+                        peerId: entry.peerId,
                         stream: nextStream,
                         tile: entry.tile,
                     }) || entry.tile;
             } catch (error) {
-                warn(`Could not attach remote stream for ${peerId}.`, error);
-                cleanupPeer(peerId, 'stream-attach-error', {
-                    expectedCall: call,
-                });
+                warn(
+                    `Could not attach remote stream for ${entry.peerId}.`,
+                    error
+                );
+                handleCallTerminal(entry, 'incoming', record, 'stream-error');
                 return false;
             }
 
-            entry.state = 'active';
-            if (entry.replacement?.call) {
-                retireCall(entry, entry.replacement.call);
-                entry.replacement = null;
-            }
+            debug({
+                direction: 'incoming',
+                event: 'remote-stream',
+                generation: record.generation,
+                peerId: entry.peerId,
+                tracks: getLiveTracks(nextStream).map(({ kind }) => kind),
+            });
             notifyState(entry, 'stream');
             return true;
-        }
+        };
 
-        const captureCallState = (entry) => ({
-            call: entry.call,
-            direction: entry.direction,
-            generation: entry.generation,
-            pendingToken: entry.pendingToken,
-            refreshKey: entry.refreshKey,
-            replacement: entry.replacement,
-            state: entry.state,
-        });
-
-        const restoreEntrySnapshot = (entry, snapshot, existed) => {
-            entry.pendingToken = null;
-            if (existed) {
-                Object.assign(entry, snapshot);
+        const handleCallTerminal = (
+            entry,
+            direction,
+            record,
+            reason,
+            error
+        ) => {
+            if (!entry || !isOwnedRecord(entry, direction, record)) {
                 return;
             }
 
-            if (!entry.remoteStream && !entry.tile) {
-                entries.delete(entry.peerId);
-            } else {
-                entry.call = null;
-                entry.direction = undefined;
-                entry.refreshKey = undefined;
-                entry.state = 'idle';
+            const state = getDirectionState(entry, direction);
+            const wasPending = state.pending === record;
+            unbindCall(entry, record);
+            if (reason === 'call-error' || reason === 'stream-error') {
+                closeCallOnce(record.call);
             }
+
+            if (wasPending) {
+                state.pending = null;
+            } else {
+                state.current = null;
+                if (state.pending) {
+                    state.current = state.pending;
+                    state.pending = null;
+                }
+            }
+
+            if (direction === 'incoming' && !state.current) {
+                clearRemoteMedia(entry, reason);
+            }
+
+            debug({
+                direction,
+                error: error?.name || undefined,
+                event: reason,
+                generation: record.generation,
+                peerId: entry.peerId,
+            });
         };
 
-        const installCall = (
-            entry,
-            call,
-            { direction, previous, refreshKey }
-        ) => {
-            entry.call = call;
-            entry.direction = direction;
-            entry.generation += 1;
-            entry.pendingToken = null;
-            entry.refreshKey = refreshKey;
-            entry.replacement = isCall(previous?.call) ? previous : null;
-            entry.state = entry.replacement
-                ? 'replacing'
-                : `pending-${direction}`;
-            bindCall(entry, call);
-            return entries.get(entry.peerId) === entry && entry.call === call;
-        };
+        const bindCall = (entry, direction, record) => {
+            const call = record.call;
+            const listeners = [
+                {
+                    event: 'stream',
+                    listener: (stream) => {
+                        if (direction === 'incoming') {
+                            registerRemoteStream(entry, record, stream);
+                        }
+                    },
+                    target: call,
+                    type: 'emitter',
+                },
+                {
+                    event: 'close',
+                    listener: () =>
+                        handleCallTerminal(
+                            entry,
+                            direction,
+                            record,
+                            'call-close'
+                        ),
+                    target: call,
+                    type: 'emitter',
+                },
+                {
+                    event: 'error',
+                    listener: (error) =>
+                        handleCallTerminal(
+                            entry,
+                            direction,
+                            record,
+                            'call-error',
+                            error
+                        ),
+                    target: call,
+                    type: 'emitter',
+                },
+            ];
 
-        const canReplace = (entry, direction, refreshKey) =>
-            isCall(entry.call) &&
-            refreshKey !== undefined &&
-            entry.direction === direction &&
-            entry.refreshKey !== refreshKey;
+            const peerConnection = call.peerConnection;
+            if (typeof peerConnection?.addEventListener === 'function') {
+                const handleConnectionState = () => {
+                    debug({
+                        connection:
+                            protocol.describePeerConnection?.(peerConnection),
+                        direction,
+                        event: 'connection-state',
+                        generation: record.generation,
+                        peerId: entry.peerId,
+                    });
+
+                    if (
+                        direction === 'outgoing' &&
+                        (peerConnection.connectionState === 'connected' ||
+                            peerConnection.iceConnectionState === 'connected' ||
+                            peerConnection.iceConnectionState === 'completed')
+                    ) {
+                        promoteOutgoing(entry, record, 'connected');
+                    }
+                };
+
+                ['connectionstatechange', 'iceconnectionstatechange'].forEach(
+                    (event) => {
+                        peerConnection.addEventListener(
+                            event,
+                            handleConnectionState
+                        );
+                        listeners.push({
+                            event,
+                            listener: handleConnectionState,
+                            target: peerConnection,
+                            type: 'event-target',
+                        });
+                    }
+                );
+            }
+
+            entry.callListeners.set(call, listeners);
+            listeners
+                .filter(({ type }) => type === 'emitter')
+                .forEach(({ event, listener, target }) =>
+                    target.on(event, listener)
+                );
+        };
 
         const callPeer = ({
+            generation,
             options = {},
             peer,
             peerId,
-            refreshKey,
             stream,
         } = {}) => {
-            if (sessionDisconnected || !peer || !peerId || !stream) {
-                return undefined;
-            }
-
-            const existed = entries.has(peerId);
-            const entry = ensureEntry(peerId);
-            if (entry.pendingToken) {
-                return undefined;
-            }
+            const normalizedGeneration = Number(generation);
+            const tracks = getLiveTracks(stream);
             if (
-                isCall(entry.call) &&
-                !canReplace(entry, 'outgoing', refreshKey)
+                sessionDisconnected ||
+                !peer ||
+                !peerId ||
+                !isGeneration(normalizedGeneration)
             ) {
-                return entry.call;
+                return undefined;
             }
 
-            const snapshot = captureCallState(entry);
-            const previous = isCall(entry.call) ? snapshot : null;
-            entry.pendingToken = {};
-            entry.state = previous ? 'replacing' : 'pending-outgoing';
+            if (tracks.length === 0) {
+                stopOutgoing(peerId, {
+                    generation: normalizedGeneration,
+                    reason: 'local-no-media',
+                });
+                return undefined;
+            }
 
+            const entry = ensureEntry(peerId);
+            if (
+                normalizedGeneration <= entry.lastOutgoingGeneration ||
+                entry.outgoingCreatingGeneration
+            ) {
+                return (
+                    entry.outgoing.pending?.call ||
+                    entry.outgoing.current?.call ||
+                    undefined
+                );
+            }
+
+            entry.outgoingCreatingGeneration = normalizedGeneration;
             let call;
             try {
-                const metadata =
-                    refreshKey === undefined
-                        ? options.metadata
-                        : {
-                              ...options.metadata,
-                              [REFRESH_METADATA_FLAG]: true,
-                              [REFRESH_METADATA_KEY]: refreshKey,
-                          };
+                const metadata = {
+                    ...options.metadata,
+                    [MEDIA_DIRECTION_METADATA]: SEND_DIRECTION,
+                    [MEDIA_GENERATION_METADATA]: normalizedGeneration,
+                    [MEDIA_KINDS_METADATA]: tracks.map(({ kind }) => kind),
+                };
                 call = peer.call(peerId, stream, { ...options, metadata });
             } catch (error) {
-                restoreEntrySnapshot(entry, snapshot, existed);
                 warn(`Could not call peer ${peerId}.`, error);
                 return undefined;
+            } finally {
+                entry.outgoingCreatingGeneration = 0;
             }
 
-            if (!call) {
-                restoreEntrySnapshot(entry, snapshot, existed);
+            if (!isCall(call)) {
                 warn(`Peer call for ${peerId} returned no MediaConnection.`);
                 return undefined;
             }
 
-            try {
-                if (
-                    !installCall(entry, call, {
-                        direction: 'outgoing',
-                        previous,
-                        refreshKey,
-                    })
-                ) {
-                    return undefined;
-                }
-                return call;
-            } catch (error) {
-                retireCall(entry, call);
-                restoreEntrySnapshot(entry, snapshot, existed);
-                warn(`Could not bind outgoing call for ${peerId}.`, error);
-                return undefined;
-            }
+            const record = {
+                call,
+                generation: normalizedGeneration,
+                state: 'pending',
+            };
+            const previousCurrent = entry.outgoing.current;
+            const previousPending = entry.outgoing.pending;
+            entry.outgoing.current = record;
+            entry.outgoing.pending = null;
+            entry.lastOutgoingGeneration = normalizedGeneration;
+            bindCall(entry, 'outgoing', record);
+            retireRecord(entry, previousPending);
+            retireRecord(entry, previousCurrent);
+
+            debug({
+                direction: 'outgoing',
+                event: 'offer-start',
+                generation: normalizedGeneration,
+                peerId,
+                tracks: tracks.map(({ kind }) => kind),
+            });
+            return call;
         };
 
-        const answerCall = ({ call, stream } = {}) => {
+        const answerCall = ({ call } = {}) => {
             const peerId = call?.peer;
-            if (sessionDisconnected || !call || !peerId || !stream) {
+            const generation = Number(
+                call?.metadata?.[MEDIA_GENERATION_METADATA]
+            );
+            const direction = call?.metadata?.[MEDIA_DIRECTION_METADATA];
+            if (
+                sessionDisconnected ||
+                !isCall(call) ||
+                !peerId ||
+                direction !== SEND_DIRECTION ||
+                !isGeneration(generation)
+            ) {
                 closeCallOnce(call);
                 return undefined;
             }
 
-            const existed = entries.has(peerId);
             const entry = ensureEntry(peerId);
-            if (entry.call === call) {
-                return call;
-            }
-
-            const refreshKey = call.metadata?.[REFRESH_METADATA_KEY];
-            const refreshing = call.metadata?.[REFRESH_METADATA_FLAG] === true;
-            if (
-                entry.pendingToken ||
-                (isCall(entry.call) &&
-                    (!refreshing || !canReplace(entry, 'incoming', refreshKey)))
-            ) {
+            if (generation <= entry.lastIncomingGeneration) {
                 closeCallOnce(call);
-                return entry.call || undefined;
+                return (
+                    entry.incoming.pending?.call ||
+                    entry.incoming.current?.call ||
+                    undefined
+                );
             }
 
-            const snapshot = captureCallState(entry);
-            const previous = isCall(entry.call) ? snapshot : null;
-            entry.pendingToken = {};
-            entry.state = previous ? 'replacing' : 'pending-incoming';
+            const record = { call, generation, state: 'pending' };
+            const previousCurrent = entry.incoming.current;
+            const previousPending = entry.incoming.pending;
+            entry.incoming.current = record;
+            entry.incoming.pending = null;
 
             try {
-                if (
-                    !installCall(entry, call, {
-                        direction: 'incoming',
-                        previous,
-                        refreshKey,
-                    })
-                ) {
-                    return undefined;
-                }
-                call.answer(stream);
-                return call;
+                bindCall(entry, 'incoming', record);
+                call.answer();
             } catch (error) {
-                retireCall(entry, call);
-                restoreEntrySnapshot(entry, snapshot, existed);
+                unbindCall(entry, record);
+                entry.incoming.current = previousCurrent;
+                entry.incoming.pending = previousPending;
+                closeCallOnce(call);
                 warn(`Could not answer peer ${peerId}.`, error);
                 return undefined;
             }
+
+            entry.lastIncomingGeneration = generation;
+            retireRecord(entry, previousPending);
+            retireRecord(entry, previousCurrent);
+            debug({
+                direction: 'incoming',
+                event: 'answer-receive-only',
+                generation,
+                offeredKinds: call.metadata?.[MEDIA_KINDS_METADATA] || [],
+                peerId,
+            });
+            return call;
+        };
+
+        const stopOutgoing = (
+            peerId,
+            { generation, reason = 'stop-outgoing' } = {}
+        ) => {
+            const entry = entries.get(peerId);
+            if (!entry) {
+                return false;
+            }
+
+            const normalizedGeneration = Number(generation);
+            if (isGeneration(normalizedGeneration)) {
+                if (normalizedGeneration < entry.lastOutgoingGeneration) {
+                    return false;
+                }
+                entry.lastOutgoingGeneration = normalizedGeneration;
+            }
+
+            const records = [
+                entry.outgoing.pending,
+                entry.outgoing.current,
+            ].filter(Boolean);
+            entry.outgoing.pending = null;
+            entry.outgoing.current = null;
+            records.forEach((record) => retireRecord(entry, record));
+            debug({
+                direction: 'outgoing',
+                event: reason,
+                generation: entry.lastOutgoingGeneration,
+                peerId,
+            });
+            return records.length > 0;
         };
 
         const ensurePeerTile = (peerId) => {
@@ -542,6 +592,7 @@
                         currentStream: null,
                         incomingStream: null,
                         peerId,
+                        replaceAll: true,
                     }) || null;
             }
             entry.tile =
@@ -553,27 +604,71 @@
             return entry.tile;
         };
 
-        const getCall = (peerId) => {
-            const call = entries.get(peerId)?.call;
-            return isCall(call) ? call : undefined;
+        const cleanupPeer = (peerId, reason = 'cleanup') => {
+            const entry = entries.get(peerId);
+            if (!entry) {
+                return false;
+            }
+
+            entry.cleanupGeneration += 1;
+            [entry.incoming, entry.outgoing].forEach((state) => {
+                retireRecord(entry, state.pending);
+                retireRecord(entry, state.current);
+                state.pending = null;
+                state.current = null;
+            });
+            detachStreamListeners(entry);
+
+            try {
+                detachRemoteStream?.({
+                    peerId,
+                    reason,
+                    stream: entry.remoteStream,
+                    tile: entry.tile,
+                });
+            } catch (error) {
+                warn(`Could not detach remote stream for ${peerId}.`, error);
+            }
+            try {
+                removeRemoteTile?.({ peerId, reason, tile: entry.tile });
+            } catch (error) {
+                warn(`Could not remove remote tile for ${peerId}.`, error);
+            }
+
+            entries.delete(peerId);
+            onPeerCleanup?.({ peerId, reason });
+            debug({ event: 'peer-cleanup', peerId, reason });
+            return true;
         };
 
         const getPeerIds = ({ direction } = {}) =>
             Array.from(entries.values())
-                .filter(
-                    (entry) =>
-                        isCall(entry.call) &&
-                        (!direction || entry.direction === direction)
-                )
-                .map((entry) => entry.peerId);
+                .filter((entry) => {
+                    if (direction === 'incoming' || direction === 'outgoing') {
+                        const state = entry[direction];
+                        return Boolean(state.current || state.pending);
+                    }
+                    return Boolean(
+                        entry.incoming.current ||
+                            entry.incoming.pending ||
+                            entry.outgoing.current ||
+                            entry.outgoing.pending
+                    );
+                })
+                .map(({ peerId }) => peerId);
 
         const getState = (peerId) => {
             const entry = entries.get(peerId);
             return entry
                 ? {
-                      direction: entry.direction,
-                      refreshKey: entry.refreshKey,
-                      state: entry.state,
+                      incoming:
+                          entry.incoming.pending?.state ||
+                          entry.incoming.current?.state ||
+                          'idle',
+                      outgoing:
+                          entry.outgoing.pending?.state ||
+                          entry.outgoing.current?.state ||
+                          'idle',
                   }
                 : undefined;
         };
@@ -582,46 +677,19 @@
             const entry = entries.get(peerId);
             return entry
                 ? {
-                      call: getCall(peerId),
                       cleanupGeneration: entry.cleanupGeneration,
-                      direction: entry.direction,
+                      incomingCall: entry.incoming.current?.call,
+                      incomingGeneration: entry.lastIncomingGeneration,
+                      incomingPendingCall: entry.incoming.pending?.call,
+                      outgoingCall: entry.outgoing.current?.call,
+                      outgoingGeneration: entry.lastOutgoingGeneration,
+                      outgoingPendingCall: entry.outgoing.pending?.call,
                       peerId,
-                      refreshKey: entry.refreshKey,
                       remoteStream: entry.remoteStream,
-                      state: entry.state,
+                      state: getState(peerId),
                       tile: entry.tile,
                   }
                 : undefined;
-        };
-
-        const replaceTrack = async (peerId, kind, track) => {
-            const call = getCall(peerId);
-            const peerConnection = call?.peerConnection;
-            const senders = peerConnection?.getSenders?.() || [];
-            const transceivers = peerConnection?.getTransceivers?.() || [];
-            const sender = senders.find((currentSender) => {
-                if (currentSender.track?.kind === kind) {
-                    return true;
-                }
-
-                return transceivers.some(
-                    (transceiver) =>
-                        transceiver.sender === currentSender &&
-                        transceiver.receiver?.track?.kind === kind
-                );
-            });
-
-            if (!sender) {
-                return false;
-            }
-
-            try {
-                await sender.replaceTrack(track || null);
-                return true;
-            } catch (error) {
-                warn(`Could not replace ${kind} track for ${peerId}.`, error);
-                return false;
-            }
         };
 
         const teardown = (reason = 'teardown') => {
@@ -641,16 +709,15 @@
             callPeer,
             cleanupPeer,
             ensurePeerTile,
-            getCall,
             getPeerIds,
             getSnapshot,
             getState,
             isSessionDisconnected: () => sessionDisconnected,
-            replaceTrack,
             reset,
             setSessionDisconnected: (value) => {
                 sessionDisconnected = Boolean(value);
             },
+            stopOutgoing,
             teardown,
         };
     };

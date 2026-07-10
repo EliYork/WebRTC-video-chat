@@ -60,7 +60,8 @@ window namespaces, module exports, or the ownership boundaries below.
 37. `/js/room/cursor-share-ui.js`
 38. `/js/voice/voice-call-protocol.js`
 39. `/js/voice/voice-peer-registry.js`
-40. `/script.js`
+40. `/js/voice/voice-media-lifecycle.js`
+41. `/script.js`
 
 Modules that use `window.VoiceViewUtils` must load after
 `/js/shared/view-utils.js` and before `/script.js`. All view modules must load
@@ -267,12 +268,18 @@ room, or overlay behavior.
 rendering, idle state, and removal. It must not emit or listen for cursor
 socket events.
 
-`voice/voice-call-protocol.js` owns only refresh metadata and revision ordering.
-It does not store active calls. `voice/voice-peer-registry.js` is the sole owner
-of current/replacement call identity, direction and state, remote stream and
-track listeners, participant tile identity, idempotent cleanup, and lookup of
-the single sender used for track replacement. Presence and socket event
-orchestration remain in `script.js` and call the registry's narrow APIs.
+`voice/voice-call-protocol.js` owns directional media metadata and bounded,
+opt-in negotiation diagnostics. It does not store active calls.
+`voice/voice-peer-registry.js` is the sole owner of the independent incoming
+and outgoing call identity/generation for each peer, remote stream/track
+listeners, participant tile identity, and idempotent cleanup. Presence and
+socket event orchestration remain in `script.js` and call the registry's narrow
+APIs.
+
+`voice/voice-media-lifecycle.js` builds immutable current-media snapshots,
+normalizes screen-picker resolve/reject state, stops local tracks at most once,
+and coordinates best-effort non-BFCache page teardown. It does not own room,
+presence, registry entry, or layout state.
 
 ## Main Flow Still Owned By `script.js`
 
@@ -281,7 +288,7 @@ explicitly opens a new boundary and adds tests first:
 
 - PeerJS session creation, socket events, and local media capture lifecycles.
 - `requestAudioStream()`, `createAudioPipeline()`,
-  remote stream composition, call-refresh orchestration, and
+  remote stream composition, directional media publication, and
   `joinVoiceChannel()`.
 - Main page orchestration and page-layout dependency wiring.
 - Page layout DOM apply, resize/drag orchestration, and storage migration.

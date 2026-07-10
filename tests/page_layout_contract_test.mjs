@@ -1613,12 +1613,12 @@ const MODULE_SCRIPTS = [
         ],
         requiredExports: [
             [
-                /createRefreshRevisionGate/,
-                'voice call protocol must suppress stale refresh events',
+                /MEDIA_GENERATION_METADATA/,
+                'voice call protocol must expose directional generation metadata',
             ],
             [
-                /releasePeer/,
-                'voice call protocol must release peer state for retry',
+                /createMediaDebugLog/,
+                'voice call protocol must expose bounded opt-in diagnostics',
             ],
         ],
     },
@@ -1644,9 +1644,36 @@ const MODULE_SCRIPTS = [
             [/cleanupPeer/, 'peer registry must expose idempotent cleanup'],
             [/teardown/, 'peer registry must expose session teardown'],
             [
-                /replaceTrack/,
-                'peer registry must own unique-call track replacement',
+                /stopOutgoing/,
+                'peer registry must independently stop local send calls',
             ],
+            [
+                /answerCall/,
+                'peer registry must answer incoming calls receive-only',
+            ],
+        ],
+    },
+    {
+        path: '/js/voice/voice-media-lifecycle.js',
+        sourcePath: '../src/views/js/voice/voice-media-lifecycle.js',
+        namespace: 'VoiceMediaLifecycle',
+        mustLoadBeforeMain: true,
+        dependsOnViewUtils: false,
+        allowsMediaOrchestration: true,
+        forbiddenKeywords: [
+            'document',
+            'navigator',
+            'peer.connections',
+            'socket.emit',
+        ],
+        requiredExports: [
+            [
+                /attachAndPlayMedia/,
+                'media lifecycle must attach and play remote media',
+            ],
+            [/createMediaSnapshot/, 'media lifecycle must build snapshots'],
+            [/requestScreenCapture/, 'media lifecycle must handle capture'],
+            [/createPageTeardown/, 'media lifecycle must expose teardown'],
         ],
     },
 ];
@@ -2131,6 +2158,32 @@ assertSourceContains(script, 'script.js', [
         pattern: /const applyOutputSettingsToRemoteMedia = /,
         message: 'applyOutputSettingsToRemoteMedia must stay in script.js',
     },
+]);
+assertSourceContains(script, 'remote live-media presentation', [
+    [
+        /const \[liveVideoTrack\] = voiceMediaLifecycle\.getLiveTracks\(stream, 'video'\);/,
+        'remote presentation must derive video state from a live track',
+    ],
+    [
+        /voiceMediaLifecycle\.clearMediaElement\(\{[\s\S]*?body\.replaceChildren\(\);/,
+        'audio-only replacement must clear the old decoder before rendering the placeholder',
+    ],
+    [
+        /detachRemoteStream: \(\{ peerId, tile \}\) => \{[\s\S]*?addVideoStream\(document\.createElement\('video'\), null, peerId\);/,
+        'detached remote media must immediately render the no-video state on the owned tile',
+    ],
+    [
+        /mediaElementVideoTracks\.get\(mediaElement\) !== liveVideoTrack[\s\S]*?forceRebind,/,
+        'same-stream video replacement must force a media element rebind',
+    ],
+    [
+        /member\.screenSharing && hasVideo \? 'screen-share' : 'local'/,
+        'screen-share tile type must require a live video track',
+    ],
+    [
+        /const restoreCameraAfterScreenShare = \(peer\) => \{[\s\S]*?sharingNow = false;[\s\S]*?setActiveVideoTrack\(peer, nextVideoTrack\);/,
+        'screen stop must restore camera or publish no-video even without a microphone stream',
+    ],
 ]);
 assertSourceContains(pageLayoutStorage, 'page-layout-storage.js', [
     [

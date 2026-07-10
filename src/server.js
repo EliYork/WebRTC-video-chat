@@ -97,6 +97,7 @@ const getChannel = (slug) => CHANNELS.find((channel) => channel.slug === slug);
 const voiceCallSignaling = createVoiceCallSignaling({
     io,
     logger: Log,
+    onScreenShareChange: (event) => syncPresenceScreenSharing(event),
     resolveRoomId: (roomId) => getChannel(roomId)?.slug,
 });
 const CHAT_HISTORY_LIMIT = 50;
@@ -149,6 +150,23 @@ const emitPresenceToSocket = (socket) => {
 
 const broadcastPresence = () => {
     io.sockets.sockets.forEach(emitPresenceToSocket);
+};
+
+const syncPresenceScreenSharing = ({ peerId, roomId, sharing, socket }) => {
+    const members = onlineMembersByRoom.get(roomId);
+    const member = members?.get(socket.id);
+
+    if (!member || member.peerId !== peerId || member.roomId !== roomId) {
+        return false;
+    }
+
+    members.set(socket.id, {
+        ...member,
+        screenSharing: sharing,
+        updatedAt: new Date().toISOString(),
+    });
+    broadcastPresence();
+    return true;
 };
 
 const removePresenceMember = (socket) => {
@@ -254,24 +272,25 @@ const handleVoicePeerLeft = (socket) => {
     void voiceCallSignaling.leave(socket, { reason: 'voicePeerLeft' });
 };
 
+const hasOnlyOptionalBooleans = (values) =>
+    values.every((value) => value === undefined || typeof value === 'boolean');
+
 const handlePresenceJoinVoice = (
-    {
-        senderName,
-        hasMic,
-        micPermissionDenied,
-        muted,
-        cameraOn,
-        screenSharing,
-    } = {},
+    { senderName, hasMic, micPermissionDenied, muted, cameraOn } = {},
     socket
 ) => {
-    const roomId = socket.data.voiceRoomId;
-    const peerId = socket.data.voicePeerId;
-    const channel = getChannel(roomId);
+    const owner = voiceCallSignaling.getVoiceOwner(socket);
+    const channel = getChannel(owner?.roomId);
 
-    if (!channel || !peerId) {
+    if (
+        !channel ||
+        !owner ||
+        !hasOnlyOptionalBooleans([hasMic, micPermissionDenied, muted, cameraOn])
+    ) {
         return;
     }
+
+    const { peerId } = owner;
 
     if (
         socket.data.presenceRoomId &&
@@ -287,11 +306,11 @@ const handlePresenceJoinVoice = (
         roomId: channel.slug,
         senderName: normalizeSenderName(senderName),
         joinedVoice: true,
-        hasMic: Boolean(hasMic),
-        micPermissionDenied: Boolean(micPermissionDenied),
-        muted: Boolean(muted),
-        cameraOn: Boolean(cameraOn),
-        screenSharing: Boolean(screenSharing),
+        hasMic: hasMic === true,
+        micPermissionDenied: micPermissionDenied === true,
+        muted: muted === true,
+        cameraOn: cameraOn === true,
+        screenSharing: socket.data.voiceScreenSharing === true,
         updatedAt: new Date().toISOString(),
     });
 
@@ -301,22 +320,21 @@ const handlePresenceJoinVoice = (
 };
 
 const handlePresenceUpdate = (
-    {
-        senderName,
-        hasMic,
-        micPermissionDenied,
-        muted,
-        cameraOn,
-        screenSharing,
-    } = {},
+    { senderName, hasMic, micPermissionDenied, muted, cameraOn } = {},
     socket
 ) => {
-    const channel = getChannel(socket.data.voiceRoomId);
-    const peerId = socket.data.voicePeerId;
+    const owner = voiceCallSignaling.getVoiceOwner(socket);
+    const channel = getChannel(owner?.roomId);
 
-    if (!channel || !peerId) {
+    if (
+        !channel ||
+        !owner ||
+        !hasOnlyOptionalBooleans([hasMic, micPermissionDenied, muted, cameraOn])
+    ) {
         return;
     }
+
+    const { peerId } = owner;
 
     const members = onlineMembersByRoom.get(channel.slug) || new Map();
     const member = members.get(socket.id) || {};
@@ -331,20 +349,14 @@ const handlePresenceUpdate = (
                 ? normalizeSenderName(senderName)
                 : member.senderName || 'Guest',
         peerId,
-        hasMic: hasMic !== undefined ? Boolean(hasMic) : Boolean(member.hasMic),
+        hasMic: hasMic !== undefined ? hasMic : member.hasMic === true,
         micPermissionDenied:
             micPermissionDenied !== undefined
-                ? Boolean(micPermissionDenied)
-                : Boolean(member.micPermissionDenied),
-        muted: muted !== undefined ? Boolean(muted) : Boolean(member.muted),
-        cameraOn:
-            cameraOn !== undefined
-                ? Boolean(cameraOn)
-                : Boolean(member.cameraOn),
-        screenSharing:
-            screenSharing !== undefined
-                ? Boolean(screenSharing)
-                : Boolean(member.screenSharing),
+                ? micPermissionDenied
+                : member.micPermissionDenied === true,
+        muted: muted !== undefined ? muted : member.muted === true,
+        cameraOn: cameraOn !== undefined ? cameraOn : member.cameraOn === true,
+        screenSharing: socket.data.voiceScreenSharing === true,
         updatedAt: new Date().toISOString(),
     });
     onlineMembersByRoom.set(channel.slug, members);
@@ -468,9 +480,6 @@ io.on('connection', (socket) => {
         const result = await handleVoiceJoin(payload, socket);
         acknowledge?.(result);
     });
-    socket.on('voice:call-refresh', () =>
-        voiceCallSignaling.requestRefresh(socket)
-    );
     socket.on('chat:join', (payload) => handleChatJoin(payload, socket));
     socket.on('chat:send', (payload) => handleChatSend(payload, socket));
     socket.on('presence:joinVoice', (payload) =>
@@ -483,24 +492,9 @@ io.on('connection', (socket) => {
     socket.on('voicePeerLeft', () => handleVoicePeerLeft(socket));
     socket.on('cursor:move', (payload) => handleCursorMove(payload, socket));
     socket.on('cursor:leave', (payload) => handleCursorLeave(payload, socket));
-    socket.on('screen:shareStart', ({ roomId } = {}) => {
-        const peerId = socket.data.voicePeerId;
-
-        if (!roomId || !peerId) {
-            return;
-        }
-
-        socket.to(roomId).emit('screen:shareStart', { peerId });
-    });
-    socket.on('screen:shareStop', ({ roomId } = {}) => {
-        const peerId = socket.data.voicePeerId;
-
-        if (!roomId || !peerId) {
-            return;
-        }
-
-        socket.to(roomId).emit('screen:shareStop', { peerId });
-    });
+    socket.on('screen:share', (payload) =>
+        voiceCallSignaling.updateScreenShare(payload, socket)
+    );
 });
 
 httpServer.listen(PORT, () =>

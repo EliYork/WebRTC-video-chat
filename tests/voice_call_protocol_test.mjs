@@ -10,77 +10,11 @@ const protocolSource = readFileSync(
     'utf8'
 );
 const protocolWindow = {};
-vm.runInNewContext(protocolSource, { window: protocolWindow });
-const registrySource = readFileSync(
-    new URL('../src/views/js/voice/voice-peer-registry.js', import.meta.url),
-    'utf8'
-);
-vm.runInNewContext(registrySource, { window: protocolWindow });
-const { createRefreshRevisionGate } = protocolWindow.VoiceCallProtocol;
-const { createRegistry } = protocolWindow.VoicePeerRegistry;
-
-class FakeCall {
-    constructor(peer, { metadata, peerConnection } = {}) {
-        this.answerCount = 0;
-        this.closeCount = 0;
-        this.listeners = new Map();
-        this.metadata = metadata;
-        this.peer = peer;
-        this.peerConnection = peerConnection;
-    }
-
-    on(event, listener) {
-        const listeners = this.listeners.get(event) || [];
-        listeners.push(listener);
-        this.listeners.set(event, listeners);
-    }
-
-    emit(event, value) {
-        (this.listeners.get(event) || [])
-            .slice()
-            .forEach((listener) => listener(value));
-    }
-
-    listenerCount(event) {
-        return (this.listeners.get(event) || []).length;
-    }
-
-    answer(stream) {
-        this.answerCount += 1;
-        this.answerStream = stream;
-    }
-
-    close() {
-        this.closeCount += 1;
-        this.emit('close');
-    }
-}
-
-class FakePeer {
-    constructor() {
-        this.calls = [];
-        this.mode = 'call';
-    }
-
-    call(peerId, stream, options) {
-        this.calls.push({ options, peerId, stream });
-        this.onCall?.();
-
-        if (this.mode === 'throw') {
-            throw new Error('call creation failed');
-        }
-        if (this.mode === 'empty') {
-            return undefined;
-        }
-
-        const call = new FakeCall(peerId, {
-            metadata: options.metadata,
-            peerConnection: options.peerConnection,
-        });
-        this.calls.at(-1).call = call;
-        return call;
-    }
-}
+vm.runInNewContext(protocolSource, {
+    URLSearchParams,
+    window: protocolWindow,
+});
+const { createMediaDebugLog } = protocolWindow.VoiceCallProtocol;
 
 class FakeSocket {
     constructor(io, id) {
@@ -130,377 +64,173 @@ class FakeIo {
     }
 }
 
-const createSignalingFixture = () => {
+const createFixture = () => {
     const io = new FakeIo();
-    const validRooms = new Set(['lobby', 'game', 'project']);
+    const rooms = new Set(['lobby', 'game']);
     const signaling = createVoiceCallSignaling({
         io,
-        resolveRoomId: (roomId) =>
-            validRooms.has(roomId) ? roomId : undefined,
+        resolveRoomId: (roomId) => (rooms.has(roomId) ? roomId : undefined),
     });
-
     return { io, signaling };
 };
 
-const getEvents = (socket, event) =>
+const events = (socket, event) =>
     socket.emitted.filter((entry) => entry.event === event);
 
-const createGate = (streams = []) =>
-    createRegistry({
-        attachRemoteStream: ({ peerId, stream }) => {
-            streams.push({ peerId, stream });
-            return { peerId, stream };
-        },
-        createRemoteStream: ({ incomingStream }) => incomingStream,
-    });
+test('join tells every side to publish its own one-way media direction', async () => {
+    const { io, signaling } = createFixture();
+    const a = new FakeSocket(io, 'socket-a');
+    const b = new FakeSocket(io, 'socket-b');
 
-test('two sequential joins assign only the new peer as caller', async () => {
-    const { io, signaling } = createSignalingFixture();
-    const socketA = new FakeSocket(io, 'socket-a');
-    const socketB = new FakeSocket(io, 'socket-b');
+    await signaling.join({ peerId: 'A', roomId: 'lobby' }, a);
+    await signaling.join({ peerId: 'B', roomId: 'lobby' }, b);
 
-    await signaling.join({ roomId: 'lobby', peerId: 'A' }, socketA);
-    await signaling.join({ roomId: 'lobby', peerId: 'B' }, socketB);
-    await signaling.join({ roomId: 'lobby', peerId: 'B' }, socketB);
-
-    assert.deepEqual(getEvents(socketA, 'voice:call-targets')[0].payload, {
-        peerIds: [],
-        roomId: 'lobby',
-    });
-    assert.deepEqual(getEvents(socketB, 'voice:call-targets')[0].payload, {
+    assert.deepEqual(events(b, 'voice:call-targets')[0].payload, {
         peerIds: ['A'],
         roomId: 'lobby',
+        voiceSessionGeneration: 1,
     });
-    assert.equal(getEvents(socketB, 'voice:call-targets').length, 1);
-
-    const aStreams = [];
-    const bStreams = [];
-    const gateA = createGate(aStreams);
-    const gateB = createGate(bStreams);
-    const peerB = new FakePeer();
-    const streamA = { id: 'stream-a' };
-    const streamB = { id: 'stream-b' };
-    const outgoing = gateB.callPeer({
-        peer: peerB,
-        peerId: 'A',
-        stream: streamB,
-    });
-    const incoming = new FakeCall('B', { metadata: outgoing.metadata });
-
-    gateA.answerCall({ call: incoming, stream: streamA });
-    outgoing.emit('stream', streamA);
-    incoming.emit('stream', streamB);
-
-    assert.equal(peerB.calls.length, 1);
-    assert.equal(incoming.answerCount, 1);
-    assert.deepEqual(aStreams, [{ peerId: 'B', stream: streamB }]);
-    assert.deepEqual(bStreams, [{ peerId: 'A', stream: streamA }]);
-});
-
-test('three sequential joins produce exactly the three unique peer pairs', async () => {
-    const { io, signaling } = createSignalingFixture();
-    const sockets = ['A', 'B', 'C'].map(
-        (peerId) => new FakeSocket(io, `socket-${peerId}`)
-    );
-
-    await sockets.reduce(
-        (previous, socket, index) =>
-            previous.then(() =>
-                signaling.join(
-                    { roomId: 'lobby', peerId: ['A', 'B', 'C'][index] },
-                    socket
-                )
-            ),
-        Promise.resolve()
-    );
-
-    const peers = new Map(
-        ['A', 'B', 'C'].map((peerId) => [peerId, new FakePeer()])
-    );
-    const gates = new Map(
-        ['A', 'B', 'C'].map((peerId) => [peerId, createGate()])
-    );
-    const pairs = [];
-
-    sockets.forEach((socket, index) => {
-        const callerId = ['A', 'B', 'C'][index];
-        const { peerIds } = getEvents(socket, 'voice:call-targets')[0].payload;
-        peerIds.forEach((peerId) => {
-            gates.get(callerId).callPeer({
-                peer: peers.get(callerId),
-                peerId,
-                stream: { id: `stream-${callerId}` },
-            });
-            pairs.push(`${callerId}->${peerId}`);
-        });
-    });
-
-    assert.deepEqual(pairs, ['B->A', 'C->A', 'C->B']);
-    assert.equal(
-        Array.from(peers.values()).reduce(
-            (total, peer) => total + peer.calls.length,
-            0
-        ),
-        3
-    );
-});
-
-test('duplicate call instructions are idempotent while pending or active', () => {
-    const gate = createGate();
-    const peer = new FakePeer();
-    const stream = { id: 'stream' };
-    let pendingResult;
-    peer.onCall = () => {
-        peer.onCall = undefined;
-        pendingResult = gate.callPeer({ peer, peerId: 'A', stream });
-    };
-
-    const first = gate.callPeer({ peer, peerId: 'A', stream });
-    const second = gate.callPeer({ peer, peerId: 'A', stream });
-
-    assert.equal(pendingResult, undefined);
-    assert.equal(first, second);
-    assert.equal(peer.calls.length, 1);
-    assert.equal(first.listenerCount('stream'), 1);
-    assert.equal(first.listenerCount('close'), 1);
-    assert.deepEqual(
-        { ...gate.getState('A') },
-        {
-            direction: 'outgoing',
-            refreshKey: undefined,
-            state: 'pending-outgoing',
-        }
-    );
-});
-
-test('close, error, leave, and same-peer-id rejoin all release the gate', () => {
-    const gate = createGate();
-    const peer = new FakePeer();
-    const stream = { id: 'stream' };
-
-    const first = gate.callPeer({ peer, peerId: 'A', stream });
-    first.emit('close');
-    const second = gate.callPeer({ peer, peerId: 'A', stream });
-    second.emit('error', new Error('network'));
-    const third = gate.callPeer({ peer, peerId: 'A', stream });
-    gate.cleanupPeer('A', 'voice-peer-left');
-    const rejoined = gate.callPeer({ peer, peerId: 'A', stream });
-
-    assert.notEqual(first, second);
-    assert.notEqual(second, third);
-    assert.notEqual(third, rejoined);
-    assert.equal(third.closeCount, 1);
-    assert.equal(peer.calls.length, 4);
-});
-
-test('throwing and empty peer.call results release pending state for retry', () => {
-    const gate = createGate();
-    const peer = new FakePeer();
-    const stream = { id: 'stream' };
-
-    peer.mode = 'throw';
-    assert.equal(gate.callPeer({ peer, peerId: 'A', stream }), undefined);
-    assert.equal(gate.getState('A'), undefined);
-
-    peer.mode = 'empty';
-    assert.equal(gate.callPeer({ peer, peerId: 'A', stream }), undefined);
-    assert.equal(gate.getState('A'), undefined);
-
-    peer.mode = 'call';
-    assert.ok(gate.callPeer({ peer, peerId: 'A', stream }));
-    assert.equal(peer.calls.length, 3);
-});
-
-test('incoming calls answer once, bind one stream handler, and never dial back', () => {
-    const streams = [];
-    const gate = createGate(streams);
-    const incoming = new FakeCall('B');
-    const duplicate = new FakeCall('B');
-    const localStream = { id: 'local' };
-
-    gate.answerCall({ call: incoming, stream: localStream });
-    gate.answerCall({ call: incoming, stream: localStream });
-    gate.answerCall({ call: duplicate, stream: localStream });
-    incoming.emit('stream', { id: 'remote' });
-
-    assert.equal(incoming.answerCount, 1);
-    assert.equal(incoming.listenerCount('stream'), 1);
-    assert.equal(duplicate.answerCount, 0);
-    assert.equal(duplicate.closeCount, 1);
-    assert.deepEqual(streams, [{ peerId: 'B', stream: { id: 'remote' } }]);
-});
-
-test('refresh keeps the original caller direction and replaces calls sequentially', () => {
-    const outgoingGate = createGate();
-    const incomingGate = createGate();
-    const peer = new FakePeer();
-    const stream = { id: 'stream' };
-    const firstOutgoing = outgoingGate.callPeer({
-        peer,
-        peerId: 'A',
-        stream,
-    });
-    const firstIncoming = new FakeCall('B');
-    incomingGate.answerCall({ call: firstIncoming, stream });
-
-    const refreshedOutgoing = outgoingGate.callPeer({
-        peer,
-        peerId: 'A',
-        refreshKey: 'B:1',
-        stream,
-    });
-    const refreshedIncoming = new FakeCall('B', {
-        metadata: refreshedOutgoing.metadata,
-    });
-    incomingGate.answerCall({ call: refreshedIncoming, stream });
-    refreshedOutgoing.emit('stream', { id: 'remote-a' });
-    refreshedIncoming.emit('stream', { id: 'remote-b' });
-    outgoingGate.callPeer({
-        peer,
-        peerId: 'A',
-        refreshKey: 'B:1',
-        stream,
-    });
-
-    assert.equal(firstOutgoing.closeCount, 1);
-    assert.equal(firstIncoming.closeCount, 1);
-    assert.equal(refreshedIncoming.answerCount, 1);
-    assert.equal(peer.calls.length, 2);
-    assert.equal(outgoingGate.getState('A').direction, 'outgoing');
-    assert.equal(incomingGate.getState('B').direction, 'incoming');
-});
-
-test('duplicate and out-of-order refresh revisions are idempotent but failures retry', () => {
-    const revisions = createRefreshRevisionGate();
-    const applied = [];
-
-    revisions.apply('A', 2, () => applied.push(2));
-    revisions.apply('A', 1, () => applied.push(1));
-    revisions.apply('A', 2, () => applied.push(2));
-    revisions.apply('A', 3, () => undefined);
-    revisions.apply('A', 3, () => applied.push(3));
-
-    assert.deepEqual(applied, [2, 3]);
-});
-
-test('track replacement targets one sender on the gated call only', async () => {
-    const replacedTracks = [];
-    const audioSender = {
-        track: { kind: 'audio' },
-        replaceTrack: async (track) => replacedTracks.push(track),
-    };
-    const videoSender = {
-        track: { kind: 'video' },
-        replaceTrack: async (track) => replacedTracks.push(track),
-    };
-    const peer = new FakePeer();
-    const gate = createGate();
-    const call = gate.callPeer({
-        peer,
-        peerId: 'A',
-        stream: { id: 'stream' },
-        options: {
-            peerConnection: {
-                getSenders: () => [audioSender, videoSender],
-                getTransceivers: () => [],
-            },
-        },
-    });
-    call.peerConnection = peer.calls[0].options.peerConnection;
-    const nextVideoTrack = { id: 'camera', kind: 'video' };
-
-    assert.equal(await gate.replaceTrack('A', 'video', nextVideoTrack), true);
-    assert.deepEqual(replacedTracks, [nextVideoTrack]);
-    assert.equal(peer.calls.length, 1);
-});
-
-test('server refresh uses socket-owned room and peer state', async () => {
-    const { io, signaling } = createSignalingFixture();
-    const socketA = new FakeSocket(io, 'socket-a');
-    const socketB = new FakeSocket(io, 'socket-b');
-    await signaling.join({ roomId: 'lobby', peerId: 'A' }, socketA);
-    await signaling.join({ roomId: 'lobby', peerId: 'B' }, socketB);
-
-    const result = signaling.requestRefresh(socketA);
-
-    assert.deepEqual(result, { ok: true, revision: 1 });
-    assert.deepEqual(getEvents(socketB, 'voice:refresh-peer')[0].payload, {
-        peerId: 'A',
-        revision: 1,
+    assert.deepEqual(events(a, 'voice:peer-joined')[0].payload, {
+        peerId: 'B',
         roomId: 'lobby',
     });
 });
 
-test('server voice leave uses socket owner and broadcasts only once', async () => {
-    const { io, signaling } = createSignalingFixture();
-    const socketA = new FakeSocket(io, 'socket-a');
-    const socketB = new FakeSocket(io, 'socket-b');
-    await signaling.join({ roomId: 'lobby', peerId: 'A' }, socketA);
-    await signaling.join({ roomId: 'lobby', peerId: 'B' }, socketB);
+test('three sequential joins produce all six send directions without duplicate instructions', async () => {
+    const { io, signaling } = createFixture();
+    const a = new FakeSocket(io, 'socket-a');
+    const b = new FakeSocket(io, 'socket-b');
+    const c = new FakeSocket(io, 'socket-c');
 
-    const first = await signaling.leave(socketB, {
-        peerId: 'A',
-        reason: 'voicePeerLeft',
-        roomId: 'game',
+    await signaling.join({ peerId: 'A', roomId: 'lobby' }, a);
+    await signaling.join({ peerId: 'B', roomId: 'lobby' }, b);
+    await signaling.join({ peerId: 'C', roomId: 'lobby' }, c);
+
+    assert.deepEqual(
+        events(a, 'voice:peer-joined').map((e) => e.payload.peerId),
+        ['B', 'C']
+    );
+    assert.deepEqual(
+        events(b, 'voice:peer-joined').map((e) => e.payload.peerId),
+        ['C']
+    );
+    assert.deepEqual(events(c, 'voice:call-targets')[0].payload.peerIds, [
+        'A',
+        'B',
+    ]);
+});
+
+test('duplicate join is idempotent and does not rebroadcast peer joined', async () => {
+    const { io, signaling } = createFixture();
+    const a = new FakeSocket(io, 'socket-a');
+    const b = new FakeSocket(io, 'socket-b');
+    await signaling.join({ peerId: 'A', roomId: 'lobby' }, a);
+    await signaling.join({ peerId: 'B', roomId: 'lobby' }, b);
+
+    const result = await signaling.join({ peerId: 'B', roomId: 'lobby' }, b);
+
+    assert.equal(result.duplicate, true);
+    assert.equal(events(a, 'voice:peer-joined').length, 1);
+    assert.equal(events(b, 'voice:call-targets').length, 1);
+});
+
+test('duplicate peer identity is rejected before room ownership changes', async () => {
+    const { io, signaling } = createFixture();
+    const a = new FakeSocket(io, 'socket-a');
+    const duplicate = new FakeSocket(io, 'socket-duplicate');
+    await signaling.join({ peerId: 'A', roomId: 'lobby' }, a);
+
+    const result = await signaling.join(
+        { peerId: 'A', roomId: 'lobby' },
+        duplicate
+    );
+
+    assert.deepEqual(result, {
+        ok: false,
+        reason: 'voice-peer-id-in-use',
     });
-    const duplicate = await signaling.leave(socketB, {
-        reason: 'socket-disconnect',
-    });
+    assert.equal(duplicate.rooms.has('lobby'), false);
+    assert.deepEqual(duplicate.data, {});
+});
+
+test('leave uses the server owner and broadcasts removal once', async () => {
+    const { io, signaling } = createFixture();
+    const a = new FakeSocket(io, 'socket-a');
+    const b = new FakeSocket(io, 'socket-b');
+    await signaling.join({ peerId: 'A', roomId: 'lobby' }, a);
+    await signaling.join({ peerId: 'B', roomId: 'lobby' }, b);
+
+    const first = await signaling.leave(b, { reason: 'user-left' });
+    const duplicate = await signaling.leave(b, { reason: 'disconnect' });
 
     assert.deepEqual(first, {
         ok: true,
         peerId: 'B',
-        reason: 'voicePeerLeft',
+        reason: 'user-left',
         roomId: 'lobby',
     });
-    assert.deepEqual(duplicate, { duplicate: true, ok: true });
-    assert.deepEqual(getEvents(socketA, 'removeUserVideo'), [
-        {
-            event: 'removeUserVideo',
-            payload: { peerId: 'B', roomId: 'lobby' },
-        },
-    ]);
-    assert.equal(socketB.rooms.has('lobby'), false);
-    assert.deepEqual(socketB.data, {});
+    assert.equal(duplicate.duplicate, true);
+    assert.equal(events(a, 'removeUserVideo').length, 1);
+    assert.deepEqual(events(a, 'removeUserVideo')[0].payload, {
+        peerId: 'B',
+        roomId: 'lobby',
+    });
 });
 
-test('invalid voice join cannot leave room or owner state behind', async () => {
-    const { io, signaling } = createSignalingFixture();
-    const socket = new FakeSocket(io, 'socket-invalid');
+test('invalid join cannot create room or owner state', async () => {
+    const { io, signaling } = createFixture();
+    const socket = new FakeSocket(io, 'socket');
 
-    const result = await signaling.join(
-        { roomId: 'arbitrary', peerId: '../peer' },
-        socket
+    assert.deepEqual(
+        await signaling.join({ peerId: '../bad', roomId: 'lobby' }, socket),
+        { ok: false, reason: 'invalid-voice-join' }
     );
-
-    assert.equal(result.ok, false);
-    assert.deepEqual(Array.from(socket.rooms), ['socket-invalid']);
+    assert.deepEqual(
+        await signaling.join({ peerId: 'A', roomId: 'missing' }, socket),
+        { ok: false, reason: 'invalid-voice-join' }
+    );
     assert.deepEqual(socket.data, {});
-    assert.equal(getEvents(socket, 'voice:call-targets').length, 0);
 });
 
-test('client and server contain only the new voice call signaling events', () => {
-    const serverSource = readFileSync(
-        new URL('../src/server.js', import.meta.url),
-        'utf8'
-    );
+test('media debug log is opt-in bounded and exports only concise records', () => {
+    const disabled = createMediaDebugLog({
+        location: { search: '' },
+        storage: { getItem: () => null },
+    });
+    assert.equal(disabled.record({ event: 'hidden' }), false);
+    assert.equal(disabled.export().length, 0);
+
+    const enabled = createMediaDebugLog({
+        console: { debug() {} },
+        location: { search: '?voiceMediaDebug=1' },
+        storage: { getItem: () => null },
+    });
+    for (let index = 0; index < 205; index += 1) {
+        enabled.record({ event: 'state', generation: index });
+    }
+    const exported = enabled.export();
+    assert.equal(exported.length, 200);
+    assert.equal(exported[0].generation, 5);
+    assert.equal(Object.hasOwn(exported[0], 'sdp'), false);
+});
+
+test('client and server use peer-joined signaling and contain no fixed-caller refresh events', () => {
     const scriptSource = readFileSync(
         new URL('../src/views/script.js', import.meta.url),
         'utf8'
     );
-    const templateSource = readFileSync(
-        new URL('../src/views/room/index.ejs', import.meta.url),
+    const serverSource = readFileSync(
+        new URL('../src/server.js', import.meta.url),
+        'utf8'
+    );
+    const signalingSource = readFileSync(
+        new URL('../src/utils/VoiceCallSignaling.js', import.meta.url),
         'utf8'
     );
 
-    assert.match(serverSource, /socket\.on\('voice:join'/);
-    assert.match(scriptSource, /'voice:call-targets'/);
-    assert.doesNotMatch(serverSource, /userConnected|socket\.on\('joinRoom'/);
-    assert.doesNotMatch(scriptSource, /userConnected|'joinRoom'/);
-    assert.ok(
-        templateSource.indexOf('/js/voice/voice-call-protocol.js') <
-            templateSource.indexOf('/js/voice/voice-peer-registry.js') &&
-            templateSource.indexOf('/js/voice/voice-peer-registry.js') <
-                templateSource.indexOf('/script.js')
-    );
+    assert.match(scriptSource, /'voice:peer-joined'/);
+    assert.match(signalingSource, /'voice:peer-joined'/);
+    assert.doesNotMatch(scriptSource, /voice:call-refresh|voice:refresh-peer/);
+    assert.doesNotMatch(serverSource, /voice:call-refresh/);
+    assert.doesNotMatch(signalingSource, /voice:refresh-peer/);
 });
