@@ -16,6 +16,11 @@ import { fileURLToPath } from 'url';
 import Logger from './utils/Log.js';
 
 import { iceServers as iceServersList } from './utils/iceServers.js';
+import {
+    emitViewCursorRemove,
+    resolveOwnedViewChatRoom,
+    switchViewChatRoom,
+} from './utils/ViewChatRoomLifecycle.js';
 // import { getMemoryUsageMessage, getCpuUsageMessage } from "./utils/LogMemoryUsage.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -391,21 +396,23 @@ const handlePresenceLeaveVoice = (socket) => {
 };
 
 const handleChatJoin = async ({ roomId } = {}, socket) => {
-    const channel = getChannel(roomId);
+    const transition = await switchViewChatRoom(socket, roomId, {
+        isAllowedRoomId: (candidateRoomId) =>
+            Boolean(getChannel(candidateRoomId)),
+    });
 
-    if (!channel) {
+    if (!transition.valid) {
         return;
     }
 
-    socket.data.chatRoomId = channel.slug;
-    socket.data.viewRoomId = channel.slug;
-    await socket.join(channel.slug);
+    const channel = getChannel(transition.roomId);
     socket.emit('chat:history', getChatHistory(channel.slug));
     emitPresenceToSocket(socket);
 };
 
-const handleChatSend = async ({ roomId, senderName, content } = {}, socket) => {
-    const channel = getChannel(roomId || socket.data.chatRoomId);
+const handleChatSend = ({ roomId, senderName, content } = {}, socket) => {
+    const ownedRoom = resolveOwnedViewChatRoom(socket, roomId, 'chatRoomId');
+    const channel = getChannel(ownedRoom?.roomId);
 
     if (!channel) {
         return;
@@ -417,10 +424,6 @@ const handleChatSend = async ({ roomId, senderName, content } = {}, socket) => {
         return;
     }
 
-    if (!socket.rooms.has(channel.slug)) {
-        await socket.join(channel.slug);
-    }
-
     const message = {
         id: createChatMessageId(),
         roomId: channel.slug,
@@ -430,11 +433,12 @@ const handleChatSend = async ({ roomId, senderName, content } = {}, socket) => {
     };
 
     saveChatMessage(message);
-    io.to(channel.slug).emit('chat:message', message);
+    io.to(ownedRoom.socketRoom).emit('chat:message', message);
 };
 
-const handleCursorMove = async ({ roomId, x, y, senderName } = {}, socket) => {
-    const channel = getChannel(roomId || socket.data.viewRoomId);
+const handleCursorMove = ({ roomId, x, y, senderName } = {}, socket) => {
+    const ownedRoom = resolveOwnedViewChatRoom(socket, roomId, 'viewRoomId');
+    const channel = getChannel(ownedRoom?.roomId);
     const normalizedX = normalizeCursorPosition(x);
     const normalizedY = normalizeCursorPosition(y);
 
@@ -446,11 +450,7 @@ const handleCursorMove = async ({ roomId, x, y, senderName } = {}, socket) => {
         return;
     }
 
-    if (!socket.rooms.has(channel.slug)) {
-        await socket.join(channel.slug);
-    }
-
-    socket.to(channel.slug).emit('cursor:move', {
+    socket.to(ownedRoom.socketRoom).emit('cursor:move', {
         roomId: channel.slug,
         socketId: socket.id,
         x: normalizedX,
@@ -461,30 +461,20 @@ const handleCursorMove = async ({ roomId, x, y, senderName } = {}, socket) => {
 };
 
 const handleCursorLeave = ({ roomId } = {}, socket) => {
-    const channel = getChannel(roomId || socket.data.viewRoomId);
+    const ownedRoom = resolveOwnedViewChatRoom(socket, roomId, 'viewRoomId');
+    const channel = getChannel(ownedRoom?.roomId);
 
     if (!channel) {
         return;
     }
 
-    socket.to(channel.slug).emit('cursor:leave', {
+    socket.to(ownedRoom.socketRoom).emit('cursor:leave', {
         roomId: channel.slug,
         socketId: socket.id,
     });
 };
 
-const handleCursorRemove = (socket) => {
-    const roomId = socket.data.viewRoomId || socket.data.chatRoomId;
-
-    if (!roomId) {
-        return;
-    }
-
-    socket.to(roomId).emit('cursor:remove', {
-        roomId,
-        socketId: socket.id,
-    });
-};
+const handleCursorRemove = (socket) => emitViewCursorRemove(socket);
 
 const handlePresenceRemove = (socket) => {
     removePresenceMember(socket);
