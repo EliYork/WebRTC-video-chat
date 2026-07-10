@@ -7,7 +7,34 @@
     const SEND_DIRECTION = 'send';
     const DEBUG_STORAGE_KEY = 'voiceMediaDebug';
     const DEBUG_QUERY_KEY = 'voiceMediaDebug';
-    const DEBUG_LIMIT = 200;
+    const DEBUG_LIMIT = 300;
+    const PRIVATE_DEBUG_KEYS = new Set([
+        'candidate',
+        'deviceLabel',
+        'ip',
+        'nickname',
+        'sdp',
+        'senderName',
+        'trackId',
+    ]);
+
+    const sanitizeDebugEvent = (event = {}) =>
+        Object.fromEntries(
+            Object.entries(event)
+                .filter(([key]) => !PRIVATE_DEBUG_KEYS.has(key))
+                .map(([key, value]) => [
+                    key,
+                    Array.isArray(value)
+                        ? value.map((item) =>
+                              item && typeof item === 'object'
+                                  ? sanitizeDebugEvent(item)
+                                  : item
+                          )
+                        : value && typeof value === 'object'
+                          ? sanitizeDebugEvent(value)
+                          : value,
+                ])
+        );
 
     const isDebugEnabled = ({ location, storage } = {}) => {
         let queryEnabled = false;
@@ -81,7 +108,7 @@
             }
 
             const entry = {
-                ...event,
+                ...sanitizeDebugEvent(event),
                 at: new Date().toISOString(),
             };
             entries.push(entry);
@@ -112,5 +139,6 @@
         createMediaDebugLog,
         describePeerConnection,
         describeTracks,
+        sanitizeDebugEvent,
     };
 })(window);

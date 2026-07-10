@@ -205,13 +205,25 @@ test('media debug log is opt-in bounded and exports only concise records', () =>
         location: { search: '?voiceMediaDebug=1' },
         storage: { getItem: () => null },
     });
-    for (let index = 0; index < 205; index += 1) {
+    for (let index = 0; index < 305; index += 1) {
         enabled.record({ event: 'state', generation: index });
     }
     const exported = enabled.export();
-    assert.equal(exported.length, 200);
+    assert.equal(exported.length, 300);
     assert.equal(exported[0].generation, 5);
     assert.equal(Object.hasOwn(exported[0], 'sdp'), false);
+
+    enabled.reset();
+    enabled.record({
+        candidate: 'private candidate',
+        deviceLabel: 'private label',
+        event: 'sanitized',
+        nested: { nickname: 'private name', trackId: 'private track' },
+        sdp: 'private sdp',
+    });
+    assert.deepEqual({ ...enabled.export()[0].nested }, {});
+    assert.equal(Object.hasOwn(enabled.export()[0], 'candidate'), false);
+    assert.equal(Object.hasOwn(enabled.export()[0], 'deviceLabel'), false);
 });
 
 test('client and server use peer-joined signaling and contain no fixed-caller refresh events', () => {

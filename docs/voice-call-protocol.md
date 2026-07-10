@@ -47,10 +47,11 @@ media section.
 ## Join and media publication
 
 1. After PeerJS `open`, the client binds the incoming-call handler and emits
-   `voice:join` with the requested fixed room and its PeerJS id.
+   `voice:join` with the requested fixed room, PeerJS id, and client epoch.
 2. The server validates and records the socket-owned voice room/id, assigns a
    monotonic voice-session generation, and serializes joins in that room.
-3. The joining socket receives `voice:call-targets` with all existing peers.
+3. The joining socket receives an epoch-tagged `voice:call-targets` with all
+   existing peers and can verify it with `voice:snapshot`.
 4. Existing sockets receive `voice:peer-joined` for the new peer.
 5. Every side adds the other to its media-target set and publishes its own
    current snapshot if that snapshot contains live tracks.
@@ -124,6 +125,11 @@ The participant tile remains while presence still owns the peer.
 listeners, detaches the remote stream, and removes the tile. Leave, refresh
 replacement, page teardown, and late close/error paths are idempotent.
 
+Socket transport loss does not use this cleanup path. Existing local tracks,
+P2P calls, registry entries, and tiles remain while the Socket owner is
+restored. PeerJS signaling `disconnected` likewise pauses new calls without
+closing established calls.
+
 For a non-BFCache `pagehide`, the page stops screen/camera/microphone tracks at
 most once, notifies voice leave, tears down the registry, destroys PeerJS, and
 disconnects Socket.IO. BFCache pagehide is preserved.
@@ -137,7 +143,8 @@ Diagnostics are disabled by default. Enable them for one page with
 localStorage.setItem('voiceMediaDebug', '1');
 ```
 
-The bounded log retains at most 200 entries and records peer id, direction,
+The bounded log retains at most 300 entries and records session epoch/state,
+transport, retry, peer lifecycle/error type, peer id, direction,
 generation, track kinds/enabled state, sender/transceiver kinds, SDP media-kind
 summaries, connection state, sharing state, remote stream kinds, and cleanup
 reason. It does not record full SDP, candidates, IPs, device labels, track ids,
@@ -157,7 +164,8 @@ owner.
 
 | Event                                    | Client business payload               | Server identity/room owner               | Broadcast target                |
 | ---------------------------------------- | ------------------------------------- | ---------------------------------------- | ------------------------------- |
-| `voice:join`                             | fixed room and PeerJS id claim        | validated room/id and session generation | joiner plus existing room peers |
+| `voice:join`                             | fixed room, PeerJS id, client epoch   | validated room/id and session generation | joiner plus existing room peers |
+| `voice:snapshot`                         | none                                  | current socket voice owner               | requesting socket               |
 | `voice:call-targets`                     | none                                  | current room membership                  | joining socket                  |
 | `voice:peer-joined`                      | none                                  | newly joined socket owner                | existing sockets in owned room  |
 | `presence:joinVoice` / `presence:update` | bounded display/media booleans        | current voice owner                      | presence snapshot               |
@@ -172,6 +180,7 @@ answer that tries to add more audio/video sections than the offer. It covers
 late mic/video, both microphones, screen media, two audio tracks, video-source
 replacement, audio-only fallback, stale events, leave/rejoin, and three peers.
 
-The remaining acceptance gate is a real Edge retest. The successful dump must
-show required `m=audio`/`m=video`, sender-side `outbound-rtp`, receiver-side
-`inbound-rtp`, registry-owned remote tracks, and visible screen video.
+The directional media matrix has already passed real Edge testing. Resilience
+changes remain at the browser retest gate: transport loss, PeerServer loss,
+offline/online, permission denial, device detach/output fallback, BFCache, and
+multi-participant recovery. No browser acceptance was run in this code task.

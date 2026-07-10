@@ -153,12 +153,21 @@
             `[data-device-list="${type}"]`
         );
         const status = byId(
-            type === 'mic' ? 'micDeviceStatus' : 'outputDeviceStatus'
+            type === 'mic'
+                ? 'micDeviceStatus'
+                : type === 'camera'
+                  ? 'cameraDeviceStatus'
+                  : 'outputDeviceStatus'
         );
         const warning = global.document.querySelector(
             '[data-output-unsupported]'
         );
-        const fallbackPrefix = type === 'mic' ? '麦克风' : '输出设备';
+        const fallbackPrefix =
+            type === 'mic'
+                ? '麦克风'
+                : type === 'camera'
+                  ? '摄像头'
+                  : '输出设备';
         const normalizedSelected = selectedDeviceId || 'default';
         const defaultDevice = {
             deviceId: 'default',

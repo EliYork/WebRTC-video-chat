@@ -138,6 +138,20 @@
     gap: 6px;
 }
 
+.voice-status-messages {
+    display: grid;
+    gap: 0.3rem;
+    margin: 0.15rem 0 0.45rem;
+}
+
+.voice-status-message {
+    border-left: 3px solid var(--color-warning, #d7a33d);
+    color: var(--color-text-muted, #c8c8cf);
+    font-size: 0.78rem;
+    line-height: 1.35;
+    padding-left: 0.45rem;
+}
+
 .media-dock-pill {
     display: inline-flex;
     min-width: 0;

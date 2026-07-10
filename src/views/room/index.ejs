@@ -87,6 +87,7 @@
                             <i class="fas fa-phone-slash" aria-hidden="true"></i>
                         </button>
                     </div>
+                    <div id="voiceStatusMessages" class="voice-status-messages hidden" role="status" aria-live="polite" aria-atomic="false"></div>
                     <div class="media-dock-actions" aria-label="语音控制按钮">
                         <button id="copyRoomLink" class="media-dock-action-button copy-room-link" type="button" title="复制频道链接" aria-label="复制频道链接">
                             <i class="fas fa-link" aria-hidden="true"></i>
@@ -96,10 +97,15 @@
                             <i class="far fa-newspaper"></i>
                             <span>共享</span>
                         </button>
-                        <button id="toggleVideo" class="media-dock-action-button" type="button" title="摄像头" aria-label="摄像头" aria-pressed="false">
-                            <i class="fas fa-video"></i>
-                            <span>视频</span>
-                        </button>
+                        <div class="media-dock-control-group control-button-wrap" data-device-control="camera">
+                            <button id="toggleVideo" class="media-dock-action-button" type="button" title="摄像头" aria-label="摄像头" aria-pressed="false">
+                                <i class="fas fa-video"></i>
+                                <span>视频</span>
+                            </button>
+                            <button class="control-menu-toggle" type="button" aria-label="摄像头设置" aria-expanded="false" data-control-menu="camera">
+                                <i class="fas fa-chevron-up"></i>
+                            </button>
+                        </div>
                         <div class="media-dock-control-group control-button-wrap" data-device-control="mic">
                             <button id="toggleAudio" type="button" title="麦克风" aria-label="麦克风" aria-pressed="false">
                                 <i class="fas fa-microphone"></i>
@@ -128,6 +134,13 @@
                             <input id="micGainSlider" type="range" min="0" max="150" step="5" value="100">
                             <strong id="micGainValue">100%</strong>
                         </label>
+                    </section>
+                    <section class="media-device-popover" data-control-panel="camera" data-device-popover="camera" role="dialog" aria-label="摄像头设备">
+                        <div class="media-device-popover-header">
+                            <strong>摄像头</strong>
+                            <span id="cameraDeviceStatus">默认设备</span>
+                        </div>
+                        <div class="media-device-list" data-device-list="camera"></div>
                     </section>
                     <section class="media-device-popover" data-control-panel="output" data-device-popover="output" role="dialog" aria-label="输出设备">
                         <div class="media-device-popover-header">
@@ -207,6 +220,11 @@
     <script src="/js/voice/voice-call-protocol.js"></script>
     <script src="/js/voice/voice-peer-registry.js"></script>
     <script src="/js/voice/voice-media-lifecycle.js"></script>
+    <script src="/js/voice/voice-retry-controller.js"></script>
+    <script src="/js/voice/voice-session-runtime.js"></script>
+    <script src="/js/voice/voice-media-operation-runtime.js"></script>
+    <script src="/js/voice/voice-device-runtime.js"></script>
+    <script src="/js/voice/voice-status-view.js"></script>
     <script type="module" src="/script.js"></script> <!-- So we defined the static files of the server so we can use it here-->
 </body>
 </html>

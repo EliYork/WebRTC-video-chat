@@ -61,7 +61,12 @@ window namespaces, module exports, or the ownership boundaries below.
 38. `/js/voice/voice-call-protocol.js`
 39. `/js/voice/voice-peer-registry.js`
 40. `/js/voice/voice-media-lifecycle.js`
-41. `/script.js`
+41. `/js/voice/voice-retry-controller.js`
+42. `/js/voice/voice-session-runtime.js`
+43. `/js/voice/voice-media-operation-runtime.js`
+44. `/js/voice/voice-device-runtime.js`
+45. `/js/voice/voice-status-view.js`
+46. `/script.js`
 
 Modules that use `window.VoiceViewUtils` must load after
 `/js/shared/view-utils.js` and before `/script.js`. All view modules must load
@@ -281,12 +286,38 @@ normalizes screen-picker resolve/reject state, stops local tracks at most once,
 and coordinates best-effort non-BFCache page teardown. It does not own room,
 presence, registry entry, or layout state.
 
+`voice/voice-retry-controller.js` owns one finite exponential-backoff operation,
+including jitter, offline pause, online wake, cancellation, attempt reset, and
+timer cleanup. Socket.IO does not use this timer; its Manager owns Socket retry.
+
+`voice/voice-session-runtime.js` owns desired voice state, actual connection
+state, legal transitions, client epoch, server-generation correlation, and
+PeerJS error classification. It does not create a Socket, Peer, call, or media
+track.
+
+`voice/voice-media-operation-runtime.js` owns per-media operation state/token,
+stale-result disposal, desired mic/camera/screen flags, and stable browser media
+error taxonomy. Its track-ended controller owns current listener identity,
+intentional-stop suppression, epoch rejection, and one recovery claim per media
+and epoch. `script.js` remains responsible for committing accepted streams and
+performing an approved recovery.
+
+`voice/voice-device-runtime.js` owns debounced enumeration, selected device ids,
+stale enumeration rejection, selected-device-missing notification, and
+supported/unsupported `setSinkId` plus default fallback results. It does not
+request permission or replace input tracks itself.
+
+`voice/voice-status-view.js` owns connection labels and isolated media error DOM
+inside the existing media dock. It binds no buttons and owns no recovery policy.
+
 ## Main Flow Still Owned By `script.js`
 
 These high-risk flows remain in `src/views/script.js` unless a later phase
 explicitly opens a new boundary and adds tests first:
 
-- PeerJS session creation, socket events, and local media capture lifecycles.
+- PeerJS/Socket instance creation and accepted local stream composition. Session
+  state, retries, media operation tokens, and device enumeration are delegated
+  to the narrow voice runtimes above.
 - `requestAudioStream()`, `createAudioPipeline()`,
   remote stream composition, directional media publication, and
   `joinVoiceChannel()`.

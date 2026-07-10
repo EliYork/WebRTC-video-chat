@@ -149,7 +149,12 @@ const getPresenceSnapshot = () => ({
 });
 
 const emitPresenceToSocket = (socket) => {
-    socket.emit('presence:state', getPresenceSnapshot());
+    const owner = voiceCallSignaling.getVoiceOwner(socket);
+    socket.emit('presence:state', {
+        ...getPresenceSnapshot(),
+        clientSessionEpoch: owner?.clientSessionEpoch,
+        voiceSessionGeneration: owner?.voiceSessionGeneration,
+    });
 };
 
 const broadcastPresence = () => {
@@ -459,6 +464,7 @@ const clearDisconnectedSocketOwners = (socket) => {
         'viewRoomId',
         'voicePeerId',
         'voiceRoomId',
+        'voiceClientSessionEpoch',
         'voiceScreenSharing',
         'voiceSessionGeneration',
     ].forEach((key) => delete socket.data[key]);
@@ -511,6 +517,9 @@ io.on('connection', (socket) => {
     socket.on('voice:join', async (payload, acknowledge) => {
         const result = await handleVoiceJoin(payload, socket);
         acknowledge?.(result);
+    });
+    socket.on('voice:snapshot', async (acknowledge) => {
+        acknowledge?.(await voiceCallSignaling.getSnapshot(socket));
     });
     socket.on('chat:join', (payload) => handleChatJoin(payload, socket));
     socket.on('chat:send', (payload) => handleChatSend(payload, socket));
