@@ -5,7 +5,12 @@
 
     const renderChannelItemState = (
         element,
-        { isSelectedTarget = false, isViewing = false, isVoice = false } = {}
+        {
+            hasMembers,
+            isSelectedTarget = false,
+            isViewing = false,
+            isVoice = false,
+        } = {}
     ) => {
         if (!element) {
             return;
@@ -14,6 +19,9 @@
         toggleClass(element, 'is-viewing', isViewing);
         toggleClass(element, 'is-voice', isVoice);
         toggleClass(element, 'is-voice-target', isSelectedTarget);
+        if (hasMembers !== undefined) {
+            toggleClass(element, 'has-members', hasMembers);
+        }
 
         const link = element.querySelector('.tree-channel-link');
         if (link) {
@@ -27,12 +35,18 @@
 
     const renderChannelListState = (
         channels = [],
-        { joinedRoomId = '', selectedRoomId = '', viewingRoomId = '' } = {}
+        {
+            joinedRoomId = '',
+            memberCounts = new Map(),
+            selectedRoomId = '',
+            viewingRoomId = '',
+        } = {}
     ) => {
         channels.forEach((channel) => {
             const roomId = channel.dataset.channelRoom;
 
             renderChannelItemState(channel, {
+                hasMembers: (memberCounts.get(roomId) || 0) > 0,
                 isSelectedTarget: !joinedRoomId && roomId === selectedRoomId,
                 isViewing: roomId === viewingRoomId,
                 isVoice: roomId === joinedRoomId,

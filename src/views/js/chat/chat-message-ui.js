@@ -54,8 +54,16 @@
             return;
         }
 
+        const fragment = global.document.createDocumentFragment();
+
+        messages.forEach((message) => {
+            if (message?.content) {
+                fragment.append(renderChatMessageItem(message));
+            }
+        });
         clearMessages(container);
-        messages.forEach((message) => appendChatMessage(container, message));
+        container.append(fragment);
+        scrollToBottom(container);
     };
 
     global.VoiceChatMessageUI = {

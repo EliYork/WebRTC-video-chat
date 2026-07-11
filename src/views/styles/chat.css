@@ -8,6 +8,23 @@
     color: var(--text);
 }
 
+.chat-panel-status,
+.chat-empty-state {
+    color: var(--muted);
+    font-size: 0.82rem;
+}
+
+.chat-panel-status[data-status-kind='error'] {
+    color: var(--danger, #f87171);
+}
+
+.chat-empty-state {
+    align-self: center;
+    margin: auto;
+    list-style: none;
+    text-align: center;
+}
+
 .chat-form textarea {
     border: 1px solid var(--line);
     border-radius: 8px;

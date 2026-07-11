@@ -8,10 +8,12 @@ The view modules are now grouped by feature domain:
 
 - `shared/`: generic helpers and reusable UI helpers.
 - `layout/`: page-layout data, geometry, editor, toolbar, and component UI.
-- `chat/`: chat name, form, and message UI helpers.
+- `chat/`: Chat Panel runtime, Socket adapter, and delegated name/form/message
+  helpers.
 - `media/`: voice/media control UI, output volume, fullscreen, noise, and join
   overlay helpers.
 - `room/`: room, participant, channel, presence, tile, and cursor UI helpers.
+- `sidebar/`: Sidebar lifecycle and narrow presence/connection transport.
 
 This grouping is directory organization only. It does not change behavior,
 window namespaces, module exports, or the ownership boundaries below.
@@ -56,17 +58,23 @@ window namespaces, module exports, or the ownership boundaries below.
 33. `/js/room/video-tile-structure-ui.js`
 34. `/js/chat/chat-message-ui.js`
 35. `/js/chat/chat-form-ui.js`
-36. `/js/room/channel-sidebar-ui.js`
-37. `/js/room/cursor-share-ui.js`
-38. `/js/voice/voice-call-protocol.js`
-39. `/js/voice/voice-peer-registry.js`
-40. `/js/voice/voice-media-lifecycle.js`
-41. `/js/voice/voice-retry-controller.js`
-42. `/js/voice/voice-session-runtime.js`
-43. `/js/voice/voice-media-operation-runtime.js`
-44. `/js/voice/voice-device-runtime.js`
-45. `/js/voice/voice-status-view.js`
-46. `/script.js`
+36. `/js/chat/chat-socket-transport.js`
+37. `/js/chat/chat-panel-runtime.js`
+38. `/js/room/channel-sidebar-ui.js`
+39. `/js/sidebar/sidebar-socket-transport.js`
+40. `/js/sidebar/sidebar-runtime.js`
+41. `/js/room/cursor-share-ui.js`
+42. `/js/voice/voice-call-protocol.js`
+43. `/js/voice/voice-peer-registry.js`
+44. `/js/voice/voice-media-lifecycle.js`
+45. `/js/voice/voice-retry-controller.js`
+46. `/js/voice/voice-session-runtime.js`
+47. `/js/voice/voice-media-operation-runtime.js`
+48. `/js/voice/voice-device-runtime.js`
+49. `/js/voice/voice-status-view.js`
+50. `/js/voice/voice-media-quality-view.js`
+51. `/js/voice/voice-media-quality-runtime.js`
+52. `/script.js`
 
 Modules that use `window.VoiceViewUtils` must load after
 `/js/shared/view-utils.js` and before `/script.js`. All view modules must load
@@ -198,16 +206,39 @@ This move is a layout store/runtime migration, not a test closeout.
 ## Chat
 
 `chat/chat-name-state.js` owns the chat display-name storage key, stored-name
-fallback, input normalization, and name persistence. It must not read DOM, send
-chat messages, update presence, or own socket flow.
+fallback, input normalization, and name persistence. It is a state helper used
+by the Chat Panel runtime; it must not read DOM, send chat messages, update
+presence, or own socket flow.
 
 `chat/chat-message-ui.js` owns chat message DOM creation, history rendering,
-append behavior, and scroll-to-bottom UI sync. It must not own `chat:send`,
-`chat:message`, or `chat:history` socket flow.
+fragment-batched history rendering, append behavior, and scroll-to-bottom UI
+sync. It receives the runtime-owned messages container and must not subscribe to
+Socket.IO.
 
 `chat/chat-form-ui.js` owns chat form value normalization, submit state,
-input state, reset, and focus helpers. It must not send messages or own socket
-flow.
+input state, reset, and focus helpers. It only accepts runtime-owned refs; it
+must not query the page, send messages, or own socket flow.
+
+`chat/chat-socket-transport.js` adapts the existing Socket.IO protocol to a
+narrow Chat Panel transport. It serializes `chat:join` requests until each
+`chat:history` response arrives, tags the unchanged history array with its
+requested room for the runtime, emits `chat:send`, maps connection/reconnect
+events, and returns an unsubscribe for every subscription. It does not create
+or disconnect the Socket and does not decide server room membership.
+
+`chat/chat-panel-runtime.js` is the single Chat Panel owner. It caches the real
+EJS root/form/input/button/messages/name nodes during `init()`, owns room and
+connection state, submit/composition/sending behavior, safe history/live
+rendering, empty/error states, stable-id dedupe, and idempotent `destroy()`.
+It never clones or replaces the panel root and does not depend on a fixed
+parent, so page-layout moves and recovery preserve its refs and listeners.
+Re-initialization after destroy is intentionally rejected.
+
+`script.js` is only the composition root for chat: it injects the real
+`#chat-panel`, the narrow transport, renderer/state helpers, time formatting,
+and the high-level display-name callback; it calls `setRoom()` for view changes,
+`rejoinCurrentRoom()` after Socket reconnect, and `destroy()` during page
+teardown. It does not query or write Chat Panel internals.
 
 ## Media
 
@@ -255,8 +286,9 @@ view models: mic status, tile text, status icons, and participant list data. It
 must not touch the DOM, storage, sockets, PeerJS, or media streams.
 
 `room/participants-list-ui.js` owns participant list DOM rendering and item
-class sync. It should consume view models rather than deciding room, socket, or
-media state.
+class sync. Large member lists are assembled in a `DocumentFragment` before one
+append. It consumes view models rather than deciding room, socket, or media
+state.
 
 `room/tile-status-ui.js` owns tile status text, badges, placeholders, and CSS
 class sync. It must not attach streams or add/remove media tracks.
@@ -266,8 +298,24 @@ header, body, overlay, actions, footer, avatar text, and resize handle
 elements. It must not bind pointer events or read/write layout storage.
 
 `room/channel-sidebar-ui.js` owns channel list item rendering, active-channel
-classes, and related aria state. It must not decide viewing room, voice target
-room, or overlay behavior.
+classes, member-presence class, and related aria state. It is a delegated view
+helper used by the Sidebar runtime and must not decide viewing room, voice
+target room, or overlay behavior.
+
+`sidebar/sidebar-socket-transport.js` adapts the page-owned Socket to exact
+`presence:state` and connection subscriptions. Every subscription returns an
+exact `off()` cleanup. It does not create/disconnect Socket.IO, emit room
+events, or own view/voice room membership.
+
+`sidebar/sidebar-runtime.js` is the single owner of the real EJS-created
+`#channel-sidebar` navigation node, fixed channel refs, delegated click and
+double-click listeners, viewing/voice/target state, counts, member rows,
+presence snapshot dedupe, connection state, optional copy action, and
+init/destroy lifecycle. It emits high-level navigation callbacks and never
+calls Socket room APIs, Chat Panel, Stage, Media Dock, or layout state. The
+runtime root is `.sidebar-channel-tree`, because the current layout runtime
+moves that real channel tree independently from `.sidebar-brand` and the Media
+Dock.
 
 `room/cursor-share-ui.js` owns cursor overlay creation, remote cursor
 rendering, idle state, and removal. It must not emit or listen for cursor
@@ -277,9 +325,9 @@ socket events.
 opt-in negotiation diagnostics. It does not store active calls.
 `voice/voice-peer-registry.js` is the sole owner of the independent incoming
 and outgoing call identity/generation for each peer, remote stream/track
-listeners, participant tile identity, and idempotent cleanup. Presence and
-socket event orchestration remain in `script.js` and call the registry's narrow
-APIs.
+listeners, participant tile identity, and idempotent cleanup. Sidebar owns the
+presence subscription and member DOM; its high-level snapshot callback lets
+`script.js` retain only voice/session/tile reconciliation.
 
 `voice/voice-media-lifecycle.js` builds immutable current-media snapshots,
 normalizes screen-picker resolve/reject state, stops local tracks at most once,
@@ -323,7 +371,12 @@ explicitly opens a new boundary and adds tests first:
   `joinVoiceChannel()`.
 - Main page orchestration and page-layout dependency wiring.
 - Page layout DOM apply, resize/drag orchestration, and storage migration.
-- Chat socket flow, including message payload decisions and history handling.
+- Socket.IO instance/reconnect ownership and the decision to change the viewed
+  room. Chat subscriptions, payload normalization, history/live rendering, and
+  form lifecycle are delegated to the Chat Panel runtime and adapter.
+- View/chat URL orchestration and voice/session/tile reconciliation. Sidebar
+  navigation, member DOM, presence subscription, and connection display state
+  are delegated to the Sidebar runtime and adapter.
 - Screen-share and cursor-share network flow.
 - Output-device application to remote media.
 
@@ -334,7 +387,8 @@ New modules should follow these rules:
 - Place the module in the closest feature-domain folder instead of flattening
   it into `src/views/js/`.
 - `script.js` provides the live state, view model, and callbacks.
-- Modules own either pure UI rendering or pure mapping/state logic.
+- Modules own one explicit lifecycle, pure UI rendering, or pure mapping/state
+  boundary; they must not duplicate an existing owner.
 - Modules must not secretly read or write global business state.
 - Modules that need app behavior must call an explicit callback back into
   `script.js`.

@@ -1322,6 +1322,10 @@ const MODULE_SCRIPTS = [
                 /updateParticipantItemClasses/,
                 'participants list UI must expose participant class sync',
             ],
+            [
+                /createDocumentFragment/,
+                'participants list UI must batch large member rendering',
+            ],
         ],
     },
     {
@@ -1465,6 +1469,10 @@ const MODULE_SCRIPTS = [
                 /scrollToBottom/,
                 'chat message UI may own scroll-to-bottom UI sync',
             ],
+            [
+                /createDocumentFragment/,
+                'chat history must use the batch fragment rendering path',
+            ],
         ],
     },
     {
@@ -1501,6 +1509,82 @@ const MODULE_SCRIPTS = [
             ],
             [/resetForm/, 'chat form UI must expose form reset helper'],
             [/focusInput/, 'chat form UI must expose focus helper'],
+        ],
+    },
+    {
+        path: '/js/chat/chat-socket-transport.js',
+        sourcePath: '../src/views/js/chat/chat-socket-transport.js',
+        namespace: 'VoiceChatSocketTransport',
+        mustLoadBeforeMain: true,
+        allowsMediaOrchestration: true,
+        forbiddenKeywords: [
+            'Peer',
+            'getUserMedia',
+            'getDisplayMedia',
+            'presence:',
+            'voice:',
+            'screen:',
+            'saveLayoutToStorage',
+        ],
+        requiredExports: [
+            [
+                /createChatSocketTransport/,
+                'chat socket transport must expose its adapter factory',
+            ],
+            [
+                /subscribeHistory/,
+                'chat transport must expose history subscription',
+            ],
+            [
+                /subscribeMessage/,
+                'chat transport must expose live subscription',
+            ],
+            [
+                /subscribeConnectionState/,
+                'chat transport must expose connection-state subscription',
+            ],
+            [
+                /return \(\) => socket\.off/,
+                'chat subscriptions must be removable',
+            ],
+        ],
+    },
+    {
+        path: '/js/chat/chat-panel-runtime.js',
+        sourcePath: '../src/views/js/chat/chat-panel-runtime.js',
+        namespace: 'VoiceChatPanelRuntime',
+        mustLoadBeforeMain: true,
+        allowsMediaOrchestration: true,
+        forbiddenKeywords: [
+            'socket.emit',
+            'socket.on',
+            'new Peer',
+            'getUserMedia',
+            'getDisplayMedia',
+            'presence:',
+            'voice:',
+            'screen:',
+            'cloneNode',
+            'innerHTML',
+            'saveLayoutToStorage',
+        ],
+        requiredExports: [
+            [
+                /createChatPanelRuntime/,
+                'chat panel runtime must expose its factory',
+            ],
+            [/const init = /, 'chat panel runtime must own init'],
+            [/const setRoom = /, 'chat panel runtime must own room UI state'],
+            [/const renderHistory = /, 'chat panel runtime must own history'],
+            [
+                /const appendMessage = /,
+                'chat panel runtime must own live messages',
+            ],
+            [/const destroy = /, 'chat panel runtime must own destroy'],
+            [
+                /subscriptions\.splice\(0\)\.forEach/,
+                'chat panel destroy must unsubscribe transport listeners',
+            ],
         ],
     },
     {
@@ -1543,6 +1627,79 @@ const MODULE_SCRIPTS = [
             [
                 /aria-current/,
                 'channel sidebar UI may own current-channel aria sync',
+            ],
+            [/has-members/, 'channel sidebar UI must expose member state'],
+        ],
+    },
+    {
+        path: '/js/sidebar/sidebar-socket-transport.js',
+        sourcePath: '../src/views/js/sidebar/sidebar-socket-transport.js',
+        namespace: 'VoiceSidebarSocketTransport',
+        mustLoadBeforeMain: true,
+        allowsMediaOrchestration: true,
+        forbiddenKeywords: [
+            'socket.emit',
+            'Peer',
+            'getUserMedia',
+            'getDisplayMedia',
+            'voice:',
+            'screen:',
+            'chat:',
+            'saveLayoutToStorage',
+        ],
+        requiredExports: [
+            [
+                /createSidebarSocketTransport/,
+                'Sidebar transport must expose its factory',
+            ],
+            [
+                /subscribePresence/,
+                'Sidebar transport must expose presence subscription',
+            ],
+            [
+                /subscribeConnectionState/,
+                'Sidebar transport must expose connection subscription',
+            ],
+            [
+                /return \(\) => socket\.off\('presence:state', handler\)/,
+                'Sidebar presence subscription must be removable',
+            ],
+        ],
+    },
+    {
+        path: '/js/sidebar/sidebar-runtime.js',
+        sourcePath: '../src/views/js/sidebar/sidebar-runtime.js',
+        namespace: 'VoiceSidebarRuntime',
+        mustLoadBeforeMain: true,
+        dependsOnViewUtils: false,
+        forbiddenKeywords: [
+            'socket.emit',
+            'socket.on',
+            'new Peer',
+            'getUserMedia',
+            'getDisplayMedia',
+            'cloneNode',
+            'innerHTML',
+            'saveLayoutToStorage',
+            'chatPanel',
+            'video-grid',
+        ],
+        requiredExports: [
+            [/createSidebarRuntime/, 'Sidebar runtime must expose its factory'],
+            [/const init = /, 'Sidebar runtime must own init'],
+            [
+                /const setViewingRoom = /,
+                'Sidebar runtime must own viewing state',
+            ],
+            [/const setVoiceRoom = /, 'Sidebar runtime must own voice state'],
+            [
+                /const renderPresence = /,
+                'Sidebar runtime must own presence DOM rendering',
+            ],
+            [/const destroy = /, 'Sidebar runtime must own destroy'],
+            [
+                /subscriptions\.splice\(0\)\.forEach/,
+                'Sidebar destroy must unsubscribe transport listeners',
             ],
         ],
     },
@@ -1842,32 +1999,121 @@ const assertModuleScriptContracts = (moduleScripts) => {
 
 assertModuleScriptContracts(MODULE_SCRIPTS);
 
-assertSourceContains(script, 'chat name state delegation', [
+assertSourceContains(script, 'Chat Panel composition root', [
     [
         /const chatNameState = window\.VoiceChatNameState/,
-        'script.js must load the chat name state module',
+        'script.js must inject the chat name state helper',
     ],
     [
-        /const getStoredChatName = \(\) => chatNameState\.getStoredChatName\(\);/,
-        'script.js must keep getStoredChatName as a thin state-module wrapper',
+        /const chatSocketTransportApi = window\.VoiceChatSocketTransport/,
+        'script.js must load the narrow chat transport factory',
     ],
     [
-        /const getChatName = \(\) => chatNameState\.getChatName\(chatNameInput\?\.value\);/,
-        'script.js must keep chatNameInput DOM reads outside the state module',
+        /const chatPanelRuntimeApi = window\.VoiceChatPanelRuntime/,
+        'script.js must load the Chat Panel runtime factory',
     ],
     [
-        /const saveChatName = \(\) => \{[\s\S]*?if \(!chatNameInput\) \{[\s\S]*?return;[\s\S]*?\}[\s\S]*?const name = chatNameState\.saveChatName\(chatNameInput\.value\);[\s\S]*?chatNameInput\.value = name;[\s\S]*?\};/,
-        'script.js must keep saveChatName as a DOM-input wrapper around chat name state',
+        /const chatPanelRoot = byId\('chat-panel'\)/,
+        'script.js may inject only the real Chat Panel root',
     ],
     [
-        /chatNameInput\.addEventListener\('change', \(\) => \{[\s\S]*?saveChatName\(\);[\s\S]*?updatePresenceName\(\);[\s\S]*?\}\);/,
-        'chat name input change must still save before updating presence',
+        /chatPanelRuntime = chatPanelRuntimeApi\.createChatPanelRuntime\([\s\S]*?root: chatPanelRoot,[\s\S]*?transport: chatTransport,[\s\S]*?onDisplayNameChange: updatePresenceName/,
+        'script.js must compose the runtime with root, transport, and high-level callback',
+    ],
+    [
+        /const setViewingRoom = [\s\S]*?chatPanelRuntime\?\.setRoom\(viewingRoomId\)/,
+        'room switches must notify Chat Panel through setRoom',
+    ],
+    [
+        /beforeStopMedia: \(\) => \{[\s\S]*?chatPanelRuntime\?\.destroy\(\)/,
+        'page teardown must destroy Chat Panel',
     ],
 ]);
-assertSourceDoesNotContain(script, 'chat name state delegation', [
+assertSourceDoesNotContain(script, 'Chat Panel single owner', [
     [
         /const CHAT_NAME_STORAGE_KEY = 'webrtc-video-chat-name'/,
         'script.js must not retain the chat name storage key after extraction',
+    ],
+    [/byId\('chatName'\)/, 'script.js must not query chat name input'],
+    [/byId\('chatMessages'\)/, 'script.js must not query chat messages'],
+    [/byId\('chatForm'\)/, 'script.js must not query chat form'],
+    [/byId\('chatInput'\)/, 'script.js must not query chat input'],
+    [/socket\.on\('chat:/, 'script.js must not own chat socket subscriptions'],
+    [/socket\.emit\('chat:/, 'script.js must not emit chat protocol directly'],
+    [/chatForm\?\.addEventListener/, 'script.js must not bind chat submit'],
+    [/chatInput\?\.addEventListener/, 'script.js must not bind chat input'],
+    [
+        /chatMessageUI\.(?:appendChatMessage|renderChatHistory|clearMessages)/,
+        'script.js must not write chat message DOM',
+    ],
+    [
+        /chatFormUI\.(?:getMessageContent|renderSubmitState|renderInputState|resetForm|focusInput)/,
+        'script.js must not write chat form DOM',
+    ],
+]);
+
+assertSourceContains(script, 'Sidebar composition root', [
+    [
+        /const sidebarRoot = byId\('channel-sidebar'\)/,
+        'script.js may inject only the real Sidebar root',
+    ],
+    [
+        /const sidebarSocketTransportApi = window\.VoiceSidebarSocketTransport/,
+        'script.js must load the Sidebar transport factory',
+    ],
+    [
+        /const sidebarRuntimeApi = window\.VoiceSidebarRuntime/,
+        'script.js must load the Sidebar runtime factory',
+    ],
+    [
+        /sidebarRuntime = sidebarRuntimeApi\.createSidebarRuntime\([\s\S]*?root: sidebarRoot,[\s\S]*?transport: sidebarTransport,[\s\S]*?onRequestViewRoom:[\s\S]*?onPresenceSnapshot: reconcilePresenceState/,
+        'script.js must compose Sidebar through root, transport, navigation, and presence callbacks',
+    ],
+    [
+        /const setViewingRoom = [\s\S]*?sidebarRuntime\?\.setViewingRoom\(roomId\)/,
+        'view room changes must sync Sidebar through its public API',
+    ],
+    [
+        /sidebarRuntime\?\.getRoomMemberCount\(/,
+        'layout previews must read Sidebar member counts through a public API',
+    ],
+    [
+        /beforeStopMedia: \(\) => \{[\s\S]*?sidebarRuntime\?\.destroy\(\)/,
+        'page teardown must destroy Sidebar',
+    ],
+]);
+assertSourceDoesNotContain(script, 'Sidebar single owner', [
+    [
+        /queryAll\('\[data-channel-room\]'\)/,
+        'script.js must not query Sidebar channel nodes',
+    ],
+    [
+        /queryAll\('\[data-members-for\]'\)/,
+        'script.js must not query Sidebar member lists',
+    ],
+    [
+        /queryAll\('\[data-channel-count\]'\)/,
+        'script.js must not query Sidebar count badges',
+    ],
+    [
+        /socket\.on\('presence:state'/,
+        'script.js must not own the Sidebar presence subscription',
+    ],
+    [
+        /channelSidebarUI\.renderChannelListState/,
+        'script.js must not write Sidebar active state',
+    ],
+    [
+        /participantsListUI\.(?:renderChannelCountBadge|renderParticipantsList)/,
+        'script.js must not write Sidebar member DOM',
+    ],
+    [
+        /document\.querySelector\(\s*`\[data-members-for=/,
+        'script.js must not query Sidebar member DOM for layout previews',
+    ],
+    [
+        /treeChannels\.forEach/,
+        'script.js must not bind channel link listeners directly',
     ],
 ]);
 
@@ -1875,6 +2121,11 @@ assert.match(
     roomIndex,
     /<aside\b[^>]*id="chat-panel"[^>]*class="chat-panel"[\s\S]*?<form\b[^>]*id="chatForm"[\s\S]*?<textarea\b[^>]*id="chatInput"/,
     '.chat-panel must remain intact and contain #chatForm / #chatInput'
+);
+assert.match(
+    roomIndex,
+    /<nav\b[^>]*id="channel-sidebar"[^>]*class="sidebar-channel-tree"[\s\S]*?data-channel-room[\s\S]*?data-channel-count[\s\S]*?data-members-for/,
+    'Sidebar must keep one intact EJS-created channel navigation root'
 );
 assert.match(
     roomIndex,

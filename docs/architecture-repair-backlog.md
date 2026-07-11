@@ -3,6 +3,12 @@
 | 项目                                             | 状态                         | 备注                                                                                                                                                       |
 | ------------------------------------------------ | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Socket.IO 浏览/聊天 room 生命周期                | 已完成                       | view/chat 底层 room 已与 voice 隔离，切换、清理与事件隔离测试通过。                                                                                        |
+| Chat Panel 正式组件化                            | 代码完成，待浏览器复测       | 单一 runtime owner、窄 transport、room revision、init/destroy、真实 DOM identity 与行为测试已完成；本轮按要求未进行浏览器验收。                            |
+| Sidebar 正式组件化                               | 代码完成，待浏览器复测       | 单一 channel-tree runtime owner、窄 presence transport、view/voice 独立状态、init/destroy、真实 DOM identity 与行为测试已完成；本轮未执行浏览器验收。      |
+| Stage / Video Grid 正式组件化                    | 未开始                       | 后续独立收敛，不与 Chat Panel 或 WebRTC/media owner 混做。                                                                                                 |
+| Mobile Nav 正式组件化                            | 未开始                       | 保留为独立组件化任务，本轮未提前实施。                                                                                                                     |
+| Media Dock 正式组件化                            | 未开始                       | 后续独立收敛，保持 media pipeline 与设备状态机边界。                                                                                                       |
+| script loader / bootstrap 收敛                   | 未开始                       | 待正式组件边界稳定后再统一加载与 composition bootstrap。                                                                                                   |
 | 每对参与者的双向重复 PeerJS media call           | 已完成并浏览器验收通过       | 每方向最多一条职责明确的单向发送 call；双方后增媒体、双向共享、screen audio 与同方向去重均已通过真实 Edge 验收。                                           |
 | 布局恢复克隆 DOM 导致缓存引用失效                | 已完成                       | 原业务节点 identity 恢复与六项行为测试均已通过。                                                                                                           |
 | 实时协议信任客户端 roomId / peerId               | 已完成                       | 全事件扫描完成；view/chat 使用已记录 owner，voice/presence/screen-share 使用 socket voice owner 与 session generation，伪造 roomId/peerId 行为测试已通过。 |
@@ -10,6 +16,8 @@
 | Socket.IO WebSocket `Invalid frame header`       | 未处理                       | 业务代码已兼容 polling fallback，但线上 WebSocket frame/Nginx/宝塔代理问题仍保留独立诊断，本轮未修改反代。                                                 |
 | 生产依赖的 high / moderate 漏洞                  | 未开始                       | 保留依赖升级与回归验证任务。                                                                                                                               |
 | 核心实时协议行为测试不足                         | 部分完成                     | strict SDP、registry、session/retry/media/device/server rejoin 行为测试已覆盖；仍没有真实浏览器自动 E2E。                                                  |
+| 真实浏览器 E2E                                   | 未开始                       | 当前只有 Node 行为/合同测试；浏览器自动化留作独立任务。                                                                                                    |
+| TURN                                             | 未开始                       | 公网/NAT 场景的 TURN 配置、凭据与连通性验证尚未实施。                                                                                                      |
 | 远端 call / stream / tile 缺少统一生命周期 owner | 已完成                       | registry 分别持有 incoming/outgoing call generation、remote stream、tile、listener、方向替换与幂等 cleanup；行为测试已覆盖。                               |
 | 屏幕共享状态已广播但远端没有实际 screen video    | 已完成并浏览器验收通过       | 双向 screen video、system audio、RTP、停止共享后的 placeholder/camera 恢复与最后一帧清理均保持已完成状态。                                                 |
 | 页面刷新时本地 screen capture 未立即停止         | 已完成并浏览器验收通过       | 非 BFCache `pagehide` 会停止 screen/camera/mic track，并销毁 Peer、registry 和 Socket transport；真实刷新后共享标志立即消失。                              |

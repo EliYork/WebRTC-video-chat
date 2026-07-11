@@ -1,14 +1,9 @@
 (function (global) {
-    const { byId } = global.VoiceViewUtils;
-
-    const getRefs = (refs = {}) => {
-        const form = refs.form || byId('chatForm');
-        const input = refs.input || byId('chatInput');
-        const submitButton =
-            refs.submitButton || form?.querySelector('button[type="submit"]');
-
-        return { form, input, submitButton };
-    };
+    const getRefs = (refs = {}) => ({
+        form: refs.form,
+        input: refs.input,
+        submitButton: refs.submitButton,
+    });
 
     const getMessageContent = ({ refs = {}, maxLength = 500 } = {}) => {
         const { input } = getRefs(refs);

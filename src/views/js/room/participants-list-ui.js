@@ -112,9 +112,11 @@
             return;
         }
 
+        const fragment = global.document.createDocumentFragment();
         participants.forEach((participant) => {
-            container.append(renderParticipantItem(participant));
+            fragment.append(renderParticipantItem(participant));
         });
+        container.append(fragment);
     };
 
     const renderChannelCountBadge = (badge, count = 0) => {

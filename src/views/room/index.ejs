@@ -24,7 +24,7 @@
                 <p>今晚在哪个频道集合？</p>
             </div>
 
-            <nav class="sidebar-channel-tree">
+            <nav id="channel-sidebar" class="sidebar-channel-tree">
                 <% channels.forEach((channel) => { %>
                     <div
                         class="tree-channel voice-channel <%= channel.slug === roomId ? 'is-viewing' : '' %>"
@@ -215,7 +215,11 @@
     <script src="/js/room/video-tile-structure-ui.js"></script>
     <script src="/js/chat/chat-message-ui.js"></script>
     <script src="/js/chat/chat-form-ui.js"></script>
+    <script src="/js/chat/chat-socket-transport.js"></script>
+    <script src="/js/chat/chat-panel-runtime.js"></script>
     <script src="/js/room/channel-sidebar-ui.js"></script>
+    <script src="/js/sidebar/sidebar-socket-transport.js"></script>
+    <script src="/js/sidebar/sidebar-runtime.js"></script>
     <script src="/js/room/cursor-share-ui.js"></script>
     <script src="/js/voice/voice-call-protocol.js"></script>
     <script src="/js/voice/voice-peer-registry.js"></script>

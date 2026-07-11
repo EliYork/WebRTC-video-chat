@@ -2,7 +2,7 @@
 console.info('[page-layout] script boot v2 ' + new Date().toISOString());
 let socket;
 
-const { byId, formatTime, queryAll } = window.VoiceViewUtils;
+const { byId } = window.VoiceViewUtils;
 
 const videoGrid = byId('video-grid');
 const mainLayout = byId('main');
@@ -13,13 +13,8 @@ myVideo.playsInline = 'true';
 const callControls = byId('buttons');
 const destroyPeerBtn = byId('destroyPeer');
 const copyRoomLinkBtn = byId('copyRoomLink');
-const chatNameInput = byId('chatName');
-const chatMessages = byId('chatMessages');
-const chatForm = byId('chatForm');
-const chatInput = byId('chatInput');
-const treeChannels = queryAll('[data-channel-room]');
-const channelMemberLists = queryAll('[data-members-for]');
-const channelCountBadges = queryAll('[data-channel-count]');
+const chatPanelRoot = byId('chat-panel');
+const sidebarRoot = byId('channel-sidebar');
 const chatTitle = byId('chatTitle');
 const localUserCard = document.querySelector('.local-user-card');
 const localUserName = byId('localUserName');
@@ -62,7 +57,11 @@ const videoTileStructureUI = window.VoiceVideoTileStructureUI;
 const chatMessageUI = window.VoiceChatMessageUI;
 const chatFormUI = window.VoiceChatFormUI;
 const chatNameState = window.VoiceChatNameState;
+const chatSocketTransportApi = window.VoiceChatSocketTransport;
+const chatPanelRuntimeApi = window.VoiceChatPanelRuntime;
 const channelSidebarUI = window.VoiceChannelSidebarUI;
+const sidebarSocketTransportApi = window.VoiceSidebarSocketTransport;
+const sidebarRuntimeApi = window.VoiceSidebarRuntime;
 const cursorShareUI = window.VoiceCursorShareUI;
 const voiceCallProtocol = window.VoiceCallProtocol;
 const voicePeerRegistryApi = window.VoicePeerRegistry;
@@ -74,12 +73,8 @@ const voiceDeviceRuntimeApi = window.VoiceDeviceRuntime;
 const voiceStatusViewApi = window.VoiceStatusView;
 const voiceMediaQualityView = window.VoiceMediaQualityView;
 const voiceMediaQualityRuntimeApi = window.VoiceMediaQualityRuntime;
-const {
-    buildParticipantViewModel,
-    getMemberMicStatus,
-    getMemberStatusIcons,
-    getMemberTileText,
-} = presenceViewModel;
+const { getMemberMicStatus, getMemberStatusIcons, getMemberTileText } =
+    presenceViewModel;
 const {
     PAGE_COMPONENT_TYPES,
     LAYOUT_ITEM_TYPES,
@@ -118,7 +113,6 @@ const getCameraConstraints = () =>
         ? { deviceId: { exact: selectedCameraDeviceId } }
         : true;
 
-const CHAT_MESSAGE_MAX_LENGTH = 500;
 const CURSOR_THROTTLE_MS = 40;
 const CURSOR_IDLE_MS = 700;
 const MOBILE_BREAKPOINT = 768;
@@ -162,6 +156,8 @@ const PAGE_TILE_MIN_HEIGHT = 80;
 let pageLayoutBoard;
 let pageLayoutRuntime;
 let pageLayoutStoreRuntime;
+let chatPanelRuntime;
+let sidebarRuntime;
 
 const updateLayoutItemConfig = (id, patch) => {
     const item = getTileLayoutItem(id);
@@ -791,6 +787,8 @@ const resetLocalVoiceState = () => {
 
 const pageVoiceTeardown = voiceMediaLifecycle.createPageTeardown({
     beforeStopMedia: () => {
+        chatPanelRuntime?.destroy();
+        sidebarRuntime?.destroy();
         voiceMediaDebug.record({
             event: 'teardown',
             reason: 'page-teardown',
@@ -822,23 +820,19 @@ const pageVoiceTeardown = voiceMediaLifecycle.createPageTeardown({
     teardownRegistry: (reason) => voicePeerRegistry.teardown(reason),
 });
 
-const getChannelElement = (roomId) =>
-    Array.from(treeChannels).find(
-        (channel) => channel.dataset.channelRoom === roomId
-    );
-
 const getChannelName = (roomId) =>
-    getChannelElement(roomId)?.dataset.channelName || roomId;
+    sidebarRuntime?.getRoomName(roomId) || roomId;
+
+const isKnownRoom = (roomId) => sidebarRuntime?.hasRoom(roomId) === true;
 
 const getChannelUrl = (roomId) => `${window.location.origin}/room/${roomId}`;
 
 const getCopyRoomId = () => joinedVoiceRoomId || viewingRoomId;
 
-const updateChannelIndicators = () => {
-    channelSidebarUI.renderChannelListState(treeChannels, {
-        joinedRoomId: joinedVoiceRoomId,
-        selectedRoomId: selectedVoiceRoomId,
-        viewingRoomId,
+const syncRoomCompositionState = () => {
+    sidebarRuntime?.setViewingRoom(viewingRoomId);
+    sidebarRuntime?.setVoiceRoom(joinedVoiceRoomId, {
+        targetRoomId: selectedVoiceRoomId,
     });
 
     const viewingName = getChannelName(viewingRoomId);
@@ -1043,58 +1037,8 @@ const bindVoiceSocketHandlers = (activeSocket) => {
     activeSocket.on('removeUserVideo', handleSocketRemoveUserVideo);
 };
 
-const getStoredChatName = () => chatNameState.getStoredChatName();
-
-const getChatName = () => chatNameState.getChatName(chatNameInput?.value);
-
-const saveChatName = () => {
-    if (!chatNameInput) {
-        return;
-    }
-
-    const name = chatNameState.saveChatName(chatNameInput.value);
-    chatNameInput.value = name;
-};
-
-const getChatMessageViewModel = (message) => ({
-    content: message.content,
-    isLocal: message.senderName === getChatName(),
-    isSystem: message.type === 'system',
-    roomId: message.roomId,
-    senderName: message.senderName,
-    timeText: formatTime(message.createdAt),
-    type: message.type || 'normal',
-});
-
-const appendChatMessage = (message) => {
-    if (!chatMessages || !message?.content) {
-        return;
-    }
-
-    if (message.roomId && message.roomId !== viewingRoomId) {
-        return;
-    }
-
-    chatMessageUI.appendChatMessage(
-        chatMessages,
-        getChatMessageViewModel(message)
-    );
-};
-
-const renderChatHistory = (messages) => {
-    if (!chatMessages) {
-        return;
-    }
-
-    chatMessageUI.renderChatHistory(
-        chatMessages,
-        (Array.isArray(messages) ? messages : [])
-            .filter(
-                (message) => !message.roomId || message.roomId === viewingRoomId
-            )
-            .map(getChatMessageViewModel)
-    );
-};
+const getChatName = () =>
+    chatPanelRuntime?.getDisplayName() || chatNameState.getStoredChatName();
 
 const getMemberTileToggle = (member) => {
     const memberPeerId = member.peerId;
@@ -1135,17 +1079,7 @@ const getMemberTileToggle = (member) => {
     };
 };
 
-const getParticipantViewModel = (member) => {
-    const isLocal = Boolean(member.socketId && socket?.id === member.socketId);
-
-    return buildParticipantViewModel(member, {
-        isLocal,
-        roomName: getChannelName(member.roomId),
-        tileToggle: getMemberTileToggle(member),
-    });
-};
-
-const renderPresenceState = ({
+const reconcilePresenceState = ({
     channels = [],
     clientSessionEpoch,
     voiceSessionGeneration,
@@ -1174,35 +1108,6 @@ const renderPresenceState = ({
                 }
             }
         });
-    });
-
-    channelCountBadges.forEach((badge) => {
-        const channel = channels.find(
-            (currentChannel) =>
-                currentChannel.slug === badge.dataset.channelCount
-        );
-
-        participantsListUI.renderChannelCountBadge(badge, channel?.count || 0);
-    });
-
-    channelMemberLists.forEach((list) => {
-        const channel = channels.find(
-            (currentChannel) => currentChannel.slug === list.dataset.membersFor
-        );
-        const membersBySocket = new Map();
-
-        (channel?.members || []).forEach((member) => {
-            if (!member.socketId) {
-                return;
-            }
-
-            membersBySocket.set(member.socketId, member);
-        });
-
-        participantsListUI.renderParticipantsList(
-            list,
-            Array.from(membersBySocket.values()).map(getParticipantViewModel)
-        );
     });
 
     if (currentVoiceSnapshot) {
@@ -1351,7 +1256,7 @@ const restoreServerVoiceOwner = (reason = 'restore') => {
             if (sharingNow) {
                 emitScreenShareState(true, result.voiceSessionGeneration);
             }
-            updateChannelIndicators();
+            syncRoomCompositionState();
             updateLocalUserCard();
             voiceMediaDebug.record({
                 epoch,
@@ -1400,9 +1305,6 @@ const ensureSocket = () => {
         reconnectionDelayMax: 8000,
     });
 
-    socket.on('chat:history', renderChatHistory);
-    socket.on('chat:message', appendChatMessage);
-    socket.on('presence:state', renderPresenceState);
     socket.on('cursor:move', renderRemoteCursor);
     socket.on('cursor:leave', markRemoteCursorIdle);
     socket.on('cursor:remove', removeRemoteCursor);
@@ -1435,7 +1337,8 @@ const ensureSocket = () => {
     socket.on('connect', () => {
         const transport = socket.io?.engine?.transport?.name || 'unknown';
         voiceMediaDebug.record({ event: 'socket-connect', transport });
-        joinChatRoom(viewingRoomId);
+        chatPanelRuntime?.setConnectionState('connected');
+        chatPanelRuntime?.rejoinCurrentRoom();
         if (voiceSessionRuntime.socketConnected('socket-connect')) {
             void restoreServerVoiceOwner('socket-connect');
         }
@@ -1482,63 +1385,34 @@ const ensureSocket = () => {
     return socket;
 };
 
-const joinChatRoom = (roomId = viewingRoomId) => {
-    const activeSocket = ensureSocket();
-
-    activeSocket.emit('chat:join', {
-        roomId,
-        senderName: getChatName(),
-    });
-};
-
-const getChatFormRefs = () => ({
-    form: chatForm,
-    input: chatInput,
-});
-
-const getPendingChatContent = () =>
-    chatFormUI.getMessageContent({
-        refs: getChatFormRefs(),
-        maxLength: CHAT_MESSAGE_MAX_LENGTH,
-    });
-
-const syncChatFormUI = () => {
-    const hasContent = Boolean(getPendingChatContent());
-
-    chatFormUI.renderInputState({
-        refs: getChatFormRefs(),
-        maxLength: CHAT_MESSAGE_MAX_LENGTH,
-    });
-    chatFormUI.renderSubmitState({
-        refs: getChatFormRefs(),
-        disabled: !hasContent,
-    });
-};
-
 const updatePresenceName = () => {
     emitLocalPresenceUpdate();
     updateLocalUserCard();
 };
 
 const setViewingRoom = (roomId, { updateHistory = true } = {}) => {
-    if (!getChannelElement(roomId)) {
-        return;
+    if (!isKnownRoom(roomId)) {
+        return false;
+    }
+    if (viewingRoomId === roomId) {
+        sidebarRuntime?.setViewingRoom(roomId);
+        return false;
     }
 
     viewingRoomId = roomId;
-    updateChannelIndicators();
+    syncRoomCompositionState();
     clearRemoteCursors();
-    renderChatHistory([]);
-    joinChatRoom(viewingRoomId);
+    chatPanelRuntime?.setRoom(viewingRoomId);
 
     if (updateHistory) {
         window.history.pushState({ roomId }, '', `/room/${roomId}`);
     }
+    return true;
 };
 
 const setVoiceTargetRoom = (roomId) => {
-    if (!getChannelElement(roomId)) {
-        return;
+    if (!isKnownRoom(roomId)) {
+        return false;
     }
 
     if (joinedVoiceRoomId === roomId) {
@@ -1554,43 +1428,23 @@ const setVoiceTargetRoom = (roomId) => {
                     void restoreServerVoiceOwner('manual-retry');
                 }
             }
-            return;
+            return true;
         }
         console.info(`Already in voice channel ${getChannelName(roomId)}.`);
-        return;
+        return false;
     }
 
     if (joinedVoiceRoomId && joinedVoiceRoomId !== roomId) {
         selectedVoiceRoomId = roomId;
         pendingVoiceRoomId = roomId;
         document.getElementById('destroyPeer')?.click();
-        updateChannelIndicators();
-        return;
+        syncRoomCompositionState();
+        return true;
     }
 
     selectedVoiceRoomId = roomId;
-    updateChannelIndicators();
-    joinVoiceChannel(roomId);
-};
-
-const sendChatMessage = () => {
-    const content = getPendingChatContent();
-
-    if (!content) {
-        syncChatFormUI();
-        return;
-    }
-
-    saveChatName();
-    updatePresenceName();
-    ensureSocket().emit('chat:send', {
-        roomId: viewingRoomId,
-        senderName: getChatName(),
-        content,
-    });
-
-    chatFormUI.resetForm({ refs: getChatFormRefs(), focus: true });
-    syncChatFormUI();
+    syncRoomCompositionState();
+    return joinVoiceChannel(roomId);
 };
 
 const clampCursorPosition = (position) =>
@@ -2676,11 +2530,10 @@ const applySavedTileLayout = (tile) => {
 const getLayoutComponentDisplayContext = (type) => {
     if (type === LAYOUT_ITEM_TYPES.ROOM) {
         const channelName = getChannelName(viewingRoomId || joinedVoiceRoomId);
-        const currentMemberList = document.querySelector(
-            `[data-members-for="${viewingRoomId || joinedVoiceRoomId}"]`
-        );
         const memberCount =
-            currentMemberList?.querySelectorAll('.channel-member').length || 0;
+            sidebarRuntime?.getRoomMemberCount(
+                viewingRoomId || joinedVoiceRoomId
+            ) || 0;
 
         return {
             channelName,
@@ -2691,12 +2544,7 @@ const getLayoutComponentDisplayContext = (type) => {
 
     if (type === LAYOUT_ITEM_TYPES.CHAT) {
         return {
-            chatMessages: Array.from(
-                chatMessages?.querySelectorAll('.chat-message') || []
-            )
-                .slice(-3)
-                .map((message) => message.textContent.trim())
-                .filter(Boolean),
+            chatMessages: chatPanelRuntime?.getMessagePreviews(3) || [],
         };
     }
 
@@ -4644,7 +4492,7 @@ const createPeerInstance = (roomToJoin, { recreate = false } = {}) => {
         showCallControls();
         updateOutputButtonState();
         updateScreenShareButtonState();
-        updateChannelIndicators();
+        syncRoomCompositionState();
         startCallTimer();
 
         bindVoiceSocketHandlers(activeSocket);
@@ -4754,14 +4602,14 @@ const leaveVoiceSession = (reason = 'user-leave') => {
     updateMobileTileView();
     updateMobileRoomState();
     hideCallControls();
-    updateChannelIndicators();
+    syncRoomCompositionState();
     if (nextRoomId) {
         joinVoiceChannel(nextRoomId);
     }
 };
 
 const joinVoiceChannel = (roomId) => {
-    if (!getChannelElement(roomId)) {
+    if (!isKnownRoom(roomId)) {
         console.warn(`Voice channel ${roomId} is not available.`);
         return false;
     }
@@ -4790,7 +4638,7 @@ const joinVoiceChannel = (roomId) => {
     setAudioButtonNoMic();
     setCameraButtonState(false);
     showCallControls();
-    updateChannelIndicators();
+    syncRoomCompositionState();
     createPeerInstance(roomId);
     document.getElementById('destroyPeer').onclick = () =>
         leaveVoiceSession('user-leave');
@@ -4814,14 +4662,6 @@ function removeRemoteTile(peerId, ownedTile) {
     }
 }
 
-if (chatNameInput) {
-    chatNameInput.value = getStoredChatName();
-    chatNameInput.addEventListener('change', () => {
-        saveChatName();
-        updatePresenceName();
-    });
-}
-
 const showVoiceJoinConfirm = (roomId) => {
     voiceJoinOverlayUI.show({
         title: getChannelName(roomId),
@@ -4831,25 +4671,6 @@ const showVoiceJoinConfirm = (roomId) => {
     });
 };
 
-treeChannels.forEach((channel) => {
-    const link = channel.querySelector('.tree-channel-link');
-    const roomId = channel.dataset.channelRoom;
-
-    link?.addEventListener('click', (event) => {
-        event.preventDefault();
-        setViewingRoom(roomId);
-
-        if (isMobileLayout()) {
-            showVoiceJoinConfirm(roomId);
-        }
-    });
-
-    link?.addEventListener('dblclick', (event) => {
-        event.preventDefault();
-        setVoiceTargetRoom(roomId);
-    });
-});
-
 window.addEventListener('popstate', () => {
     const [, roomId] = window.location.pathname.match(/^\/room\/([^/]+)/) || [];
 
@@ -4857,22 +4678,6 @@ window.addEventListener('popstate', () => {
         setViewingRoom(roomId, { updateHistory: false });
     }
 });
-
-chatForm?.addEventListener('submit', (event) => {
-    event.preventDefault();
-    sendChatMessage();
-});
-
-chatInput?.addEventListener('keydown', (event) => {
-    if (event.key !== 'Enter' || event.shiftKey) {
-        return;
-    }
-
-    event.preventDefault();
-    sendChatMessage();
-});
-
-chatInput?.addEventListener('input', syncChatFormUI);
 
 outputVolumeUI.init({
     getState: () => ({ muted: outputMuted, volume: outputVolume }),
@@ -4950,6 +4755,8 @@ window.addEventListener('resize', () => {
 });
 
 const handleNetworkOffline = () => {
+    chatPanelRuntime?.setConnectionState('offline');
+    sidebarRuntime?.setConnectionState('offline');
     peerRetryController.setOnline(false);
     if (voiceSessionRuntime.socketDisconnected('network-offline')) {
         rebindLiveLocalTrackEndedHandlers();
@@ -4959,14 +4766,20 @@ const handleNetworkOffline = () => {
 };
 
 const handleNetworkOnline = () => {
+    chatPanelRuntime?.setConnectionState(
+        socket?.connected ? 'connected' : 'connecting'
+    );
+    sidebarRuntime?.setConnectionState(
+        socket?.connected ? 'connected' : 'connecting'
+    );
     peerRetryController.setOnline(true);
     voiceMediaDebug.record({ event: 'network-online' });
+    if (!socket?.connected) {
+        socket?.connect?.();
+    }
     const session = voiceSessionRuntime.getSnapshot();
     if (session.desiredVoiceState !== 'joined') {
         return;
-    }
-    if (!socket?.connected) {
-        socket?.connect?.();
     }
     if (currentPeer?.disconnected && !currentPeer.destroyed) {
         void schedulePeerRecovery('reconnect', 'network-online');
@@ -5007,12 +4820,56 @@ window.addEventListener('pageshow', (event) => {
     handleNetworkOnline();
 });
 
-updateChannelIndicators();
+const sidebarTransport = sidebarSocketTransportApi.createSidebarSocketTransport(
+    {
+        getSocket: ensureSocket,
+    }
+);
+sidebarRuntime = sidebarRuntimeApi.createSidebarRuntime({
+    root: sidebarRoot,
+    transport: sidebarTransport,
+    stateView: channelSidebarUI,
+    participantsView: participantsListUI,
+    presenceViewModel,
+    initialViewingRoomId: viewingRoomId,
+    initialVoiceRoomId: joinedVoiceRoomId,
+    initialVoiceTargetRoomId: selectedVoiceRoomId,
+    onRequestViewRoom: (roomId) => {
+        const changed = setViewingRoom(roomId);
+        if (changed && isMobileLayout()) {
+            showVoiceJoinConfirm(roomId);
+        }
+        return changed;
+    },
+    onRequestVoiceRoom: setVoiceTargetRoom,
+    onPresenceSnapshot: reconcilePresenceState,
+    onCopyRoomLink: ({ url }) => copyLinkUI.writeClipboardText(url),
+    getRoomUrl: getChannelUrl,
+    isLocalMember: (member) =>
+        Boolean(member.socketId && socket?.id === member.socketId),
+    getMemberTileToggle,
+});
+sidebarRuntime.init();
+
+const chatTransport = chatSocketTransportApi.createChatSocketTransport({
+    getSocket: ensureSocket,
+});
+chatPanelRuntime = chatPanelRuntimeApi.createChatPanelRuntime({
+    root: chatPanelRoot,
+    transport: chatTransport,
+    messageView: chatMessageUI,
+    formView: chatFormUI,
+    nameState: chatNameState,
+    formatTime: window.VoiceViewUtils.formatTime,
+    onDisplayNameChange: updatePresenceName,
+});
+chatPanelRuntime.init();
+chatPanelRuntime.setRoom(viewingRoomId);
+
+syncRoomCompositionState();
 updateOutputButtonState();
 updateScreenShareButtonState();
-syncChatFormUI();
 syncNoiseSettingsUI();
-joinChatRoom(viewingRoomId);
 enablePageCursorSharing();
 
 copyLinkUI.bindCopyButton({
