@@ -64,6 +64,7 @@ const lifecycleSource = readFileSync(
 const lifecycleWindow = { MediaStream: FakeStream };
 vm.runInNewContext(lifecycleSource, { window: lifecycleWindow });
 const lifecycle = lifecycleWindow.VoiceMediaLifecycle;
+const plain = (value) => JSON.parse(JSON.stringify(value));
 
 test('screen sharing snapshot keeps microphone screen-audio and one active video', () => {
     const mic = new FakeTrack('audio', 'mic');
@@ -120,6 +121,100 @@ test('successful picker completion releases pending before follow-up media work'
     assert.equal(result.ok, true);
     assert.equal(result.stream, stream);
     assert.deepEqual(pendingStates, [true, false]);
+});
+
+test('screen capture constraints map stable defaults and every resolution preset without exact', () => {
+    const defaults = plain(lifecycle.buildScreenCaptureConstraints());
+    assert.deepEqual(defaults, {
+        audio: true,
+        video: {
+            frameRate: { ideal: 30, max: 30 },
+            height: { ideal: 1080, max: 1080 },
+            width: { ideal: 1920, max: 1920 },
+        },
+    });
+
+    const expectedResolutions = {
+        '720p': { height: 720, width: 1280 },
+        '1080p': { height: 1080, width: 1920 },
+        '1440p': { height: 1440, width: 2560 },
+    };
+    Object.entries(expectedResolutions).forEach(
+        ([resolutionPreset, resolution]) => {
+            const constraints = plain(
+                lifecycle.buildScreenCaptureConstraints({
+                    frameRate: 30,
+                    resolutionPreset,
+                })
+            );
+            assert.deepEqual(constraints.video.height, {
+                ideal: resolution.height,
+                max: resolution.height,
+            });
+            assert.deepEqual(constraints.video.width, {
+                ideal: resolution.width,
+                max: resolution.width,
+            });
+        }
+    );
+
+    const automatic = plain(
+        lifecycle.buildScreenCaptureConstraints({ resolutionPreset: 'auto' })
+    );
+    const original = plain(
+        lifecycle.buildScreenCaptureConstraints({
+            resolutionPreset: 'original',
+        })
+    );
+    assert.deepEqual(automatic.video.height, { ideal: 1080 });
+    assert.deepEqual(automatic.video.width, { ideal: 1920 });
+    assert.equal(Object.hasOwn(original.video, 'height'), false);
+    assert.equal(Object.hasOwn(original.video, 'width'), false);
+    assert.equal(
+        JSON.stringify({ defaults, automatic, original }).includes('exact'),
+        false
+    );
+});
+
+test('screen capture constraints accept 15 30 and 60 fps targets and normalize invalid input', () => {
+    [15, 30, 60].forEach((frameRate) => {
+        const constraints = plain(
+            lifecycle.buildScreenCaptureConstraints({ frameRate })
+        );
+        assert.deepEqual(constraints.video.frameRate, {
+            ideal: frameRate,
+            max: frameRate,
+        });
+    });
+
+    assert.deepEqual(
+        plain(
+            lifecycle.normalizeScreenShareOptions({
+                frameRate: 120,
+                resolutionPreset: '8k',
+            })
+        ),
+        { frameRate: 30, resolutionPreset: '1080p' }
+    );
+});
+
+test('screen capture runtime owns option-to-constraint mapping before calling the picker', async () => {
+    let receivedConstraints;
+    const stream = new FakeStream([new FakeTrack('video', 'screen')]);
+    const result = await lifecycle.requestScreenCapture({
+        getDisplayMedia: async (constraints) => {
+            receivedConstraints = plain(constraints);
+            return stream;
+        },
+        options: { frameRate: 60, resolutionPreset: '1440p' },
+    });
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(receivedConstraints.video, {
+        frameRate: { ideal: 60, max: 60 },
+        height: { ideal: 1440, max: 1440 },
+        width: { ideal: 2560, max: 2560 },
+    });
 });
 
 test('remote media attachment updates srcObject and starts playback', async () => {

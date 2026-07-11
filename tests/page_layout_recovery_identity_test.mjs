@@ -81,6 +81,10 @@ const createFixture = () => {
     const members = new FakeNode('nav', 'members');
     const localCard = new FakeNode('section', 'local-card');
     const media = new FakeNode('div', 'buttons');
+    const mediaHandle = new FakeNode('div', 'media-dock-layout-handle');
+    mediaHandle.dataset = { dragHandle: 'true' };
+    const screenResolution = new FakeNode('select', 'screenShareResolution');
+    const screenButton = new FakeNode('button', 'shareScreen');
     const stage = new FakeNode('main', 'stage');
     const canvas = new FakeNode('section', 'canvas');
     const videoGrid = new FakeNode('div', 'video-grid');
@@ -90,6 +94,7 @@ const createFixture = () => {
     const input = new FakeNode('textarea', 'chat-input');
 
     sidebar.append(brand, members, localCard);
+    media.append(mediaHandle, screenResolution, screenButton);
     localCard.append(media);
     dynamicTile.append(video);
     videoGrid.append(dynamicTile);
@@ -107,7 +112,10 @@ const createFixture = () => {
         localCard,
         main,
         media,
+        mediaHandle,
         members,
+        screenButton,
+        screenResolution,
         sidebar,
         stage,
         video,
@@ -188,8 +196,17 @@ test('recovery preserves business node identity, listeners, and runtime state', 
     const runtimeMarker = {};
     const fakeStream = {};
     let inputEvents = 0;
+    let mediaHandlePointerDowns = 0;
+    let screenButtonClicks = 0;
 
     fixture.media.runtimeMarker = runtimeMarker;
+    fixture.mediaHandle.addEventListener('pointerdown', () => {
+        mediaHandlePointerDowns += 1;
+    });
+    fixture.screenResolution.value = '1440p';
+    fixture.screenButton.addEventListener('click', () => {
+        screenButtonClicks += 1;
+    });
     fixture.video.srcObject = fakeStream;
     fixture.input.value = 'unfinished message';
     fixture.input.addEventListener('input', () => {
@@ -215,13 +232,29 @@ test('recovery preserves business node identity, listeners, and runtime state', 
     assert.deepEqual(fixture.videoGrid.childNodes, [fixture.dynamicTile]);
     assert.equal(findById(fixture.main, 'chat-panel'), fixture.chat);
     assert.equal(findById(fixture.main, 'buttons'), fixture.media);
+    assert.equal(
+        findById(fixture.main, 'media-dock-layout-handle'),
+        fixture.mediaHandle
+    );
     assert.equal(findById(fixture.main, 'video-grid'), fixture.videoGrid);
     assert.equal(fixture.media.runtimeMarker, runtimeMarker);
+    assert.equal(fixture.media.childNodes[0], fixture.mediaHandle);
+    assert.equal(fixture.mediaHandle.dataset.dragHandle, 'true');
+    assert.equal(
+        findById(fixture.main, 'screenShareResolution'),
+        fixture.screenResolution
+    );
+    assert.equal(findById(fixture.main, 'shareScreen'), fixture.screenButton);
+    assert.equal(fixture.screenResolution.value, '1440p');
     assert.equal(fixture.video.srcObject, fakeStream);
     assert.equal(fixture.input.value, 'unfinished message');
 
     fixture.input.dispatchEvent(new Event('input'));
+    fixture.mediaHandle.dispatchEvent(new Event('pointerdown'));
+    fixture.screenButton.dispatchEvent(new Event('click'));
     assert.equal(inputEvents, 1);
+    assert.equal(mediaHandlePointerDowns, 1);
+    assert.equal(screenButtonClicks, 1);
 });
 
 test('recovery is idempotent and removes runtime-only wrappers', () => {

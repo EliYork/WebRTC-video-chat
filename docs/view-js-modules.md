@@ -32,49 +32,51 @@ window namespaces, module exports, or the ownership boundaries below.
 7. `/js/media/output-volume-state.js`
 8. `/js/media/output-volume-ui.js`
 9. `/js/media/media-controls-ui.js`
-10. `/js/media/fullscreen-controls.js`
-11. `/js/media/voice-join-overlay-ui.js`
-12. `/js/layout/page-layout-snap-utils.js`
-13. `/js/layout/page-layout-resize-utils.js`
-14. `/js/layout/page-layout-edit-ui.js`
-15. `/js/layout/page-layout-component-actions-ui.js`
-16. `/js/layout/page-layout-storage.js`
-17. `/js/layout/page-layout-config.js`
-18. `/js/layout/page-layout-ids.js`
-19. `/js/layout/page-layout-placement-utils.js`
-20. `/js/layout/page-layout-components.js`
-21. `/js/layout/page-layout-toolbar-ui.js`
-22. `/js/layout/page-layout-component-menu-ui.js`
-23. `/js/layout/page-layout-recovery-ui.js`
-24. `/js/layout/page-layout-runtime.js`
-25. `/js/layout/page-layout-editor-runtime.js`
-26. `/js/layout/page-layout-component-runtime.js`
-27. `/js/layout/page-layout-store-runtime.js`
-28. `/js/room/room-ui-state.js`
-29. `/js/room/mobile-room-state.js`
-30. `/js/room/presence-view-model.js`
-31. `/js/room/participants-list-ui.js`
-32. `/js/room/tile-status-ui.js`
-33. `/js/room/video-tile-structure-ui.js`
-34. `/js/chat/chat-message-ui.js`
-35. `/js/chat/chat-form-ui.js`
-36. `/js/chat/chat-socket-transport.js`
-37. `/js/chat/chat-panel-runtime.js`
-38. `/js/room/channel-sidebar-ui.js`
-39. `/js/sidebar/sidebar-socket-transport.js`
-40. `/js/sidebar/sidebar-runtime.js`
-41. `/js/room/cursor-share-ui.js`
-42. `/js/voice/voice-call-protocol.js`
-43. `/js/voice/voice-peer-registry.js`
-44. `/js/voice/voice-media-lifecycle.js`
-45. `/js/voice/voice-retry-controller.js`
-46. `/js/voice/voice-session-runtime.js`
-47. `/js/voice/voice-media-operation-runtime.js`
-48. `/js/voice/voice-device-runtime.js`
-49. `/js/voice/voice-status-view.js`
-50. `/js/voice/voice-media-quality-view.js`
-51. `/js/voice/voice-media-quality-runtime.js`
-52. `/script.js`
+10. `/js/media/media-dock-adapter.js`
+11. `/js/media/media-dock-runtime.js`
+12. `/js/media/fullscreen-controls.js`
+13. `/js/media/voice-join-overlay-ui.js`
+14. `/js/layout/page-layout-snap-utils.js`
+15. `/js/layout/page-layout-resize-utils.js`
+16. `/js/layout/page-layout-edit-ui.js`
+17. `/js/layout/page-layout-component-actions-ui.js`
+18. `/js/layout/page-layout-storage.js`
+19. `/js/layout/page-layout-config.js`
+20. `/js/layout/page-layout-ids.js`
+21. `/js/layout/page-layout-placement-utils.js`
+22. `/js/layout/page-layout-components.js`
+23. `/js/layout/page-layout-toolbar-ui.js`
+24. `/js/layout/page-layout-component-menu-ui.js`
+25. `/js/layout/page-layout-recovery-ui.js`
+26. `/js/layout/page-layout-runtime.js`
+27. `/js/layout/page-layout-editor-runtime.js`
+28. `/js/layout/page-layout-component-runtime.js`
+29. `/js/layout/page-layout-store-runtime.js`
+30. `/js/room/room-ui-state.js`
+31. `/js/room/mobile-room-state.js`
+32. `/js/room/presence-view-model.js`
+33. `/js/room/participants-list-ui.js`
+34. `/js/room/tile-status-ui.js`
+35. `/js/room/video-tile-structure-ui.js`
+36. `/js/chat/chat-message-ui.js`
+37. `/js/chat/chat-form-ui.js`
+38. `/js/chat/chat-socket-transport.js`
+39. `/js/chat/chat-panel-runtime.js`
+40. `/js/room/channel-sidebar-ui.js`
+41. `/js/sidebar/sidebar-socket-transport.js`
+42. `/js/sidebar/sidebar-runtime.js`
+43. `/js/room/cursor-share-ui.js`
+44. `/js/voice/voice-call-protocol.js`
+45. `/js/voice/voice-peer-registry.js`
+46. `/js/voice/voice-media-lifecycle.js`
+47. `/js/voice/voice-retry-controller.js`
+48. `/js/voice/voice-session-runtime.js`
+49. `/js/voice/voice-media-operation-runtime.js`
+50. `/js/voice/voice-device-runtime.js`
+51. `/js/voice/voice-status-view.js`
+52. `/js/voice/voice-media-quality-view.js`
+53. `/js/voice/voice-media-quality-runtime.js`
+54. `/script.js`
 
 Modules that use `window.VoiceViewUtils` must load after
 `/js/shared/view-utils.js` and before `/script.js`. All view modules must load
@@ -242,9 +244,10 @@ teardown. It does not query or write Chat Panel internals.
 
 ## Media
 
-`media/noise-settings-ui.js` owns the noise suppression settings UI: stored UI
-preferences, labels, notices, and controls for configuring suppression. It must
-not own media pipeline creation.
+`media/noise-settings-ui.js` owns stored noise-suppression and microphone-gain
+preferences plus audio-constraint helpers. Media Dock owns the live controls,
+labels, notices, and listener lifecycle; this helper must not own media pipeline
+creation.
 
 `media/peer-volume-ui.js` exposes `VoiceRemoteVolumeUI` and owns remote peer
 volume popover rendering, slider display, and per-peer UI sync. It must not
@@ -254,13 +257,28 @@ apply output-device settings or touch media tracks directly.
 volume storage reads/writes, volume clamping, and effective output volume
 calculation. It must not write media element volume or muted state directly.
 
-`media/output-volume-ui.js` owns output volume control UI, selected output
-state display, and output menu rendering. It must not apply output settings to
-remote media elements.
+`media/output-volume-ui.js` retains reusable output-volume formatting/rendering
+helpers. The formal Media Dock runtime owns the live output control and does
+not initialize a second listener owner. Neither module applies output settings
+to remote media elements.
 
-`media/media-controls-ui.js` owns call controls, mic/camera button rendering,
-and leave button rendering. It must not enumerate devices, replace tracks, or
-own media pipeline flow.
+`media/media-controls-ui.js` retains narrow legacy render helpers but is no
+longer initialized as a Dock owner. It must not enumerate devices, replace
+tracks, or own media pipeline flow.
+
+`media/media-dock-adapter.js` exposes the narrow intent/snapshot boundary used
+by the Dock: join/leave/hangup, mic/camera/screen actions, device selection,
+output volume/mute, `subscribe()`, and `getSnapshot()`. It reads no DOM and owns
+no media, Socket, PeerJS, or layout lifecycle.
+
+`media/media-dock-runtime.js` is the single owner of the real EJS-created
+`#buttons.media-dock` node and every live listener/render path inside it. It
+owns mic/camera/screen/session buttons, device menus, output volume/mute,
+permission/pending/error display, noise controls, and the page-session screen
+share targets (automatic/720p/1080p/1440p/original and 15/30/60 fps). It emits
+intent only through the adapter, subscribes to runtime facts, uses the same root
+through normal/edit/recovery moves, and removes all DOM/global listeners and
+the adapter subscription during idempotent `destroy()`.
 
 `media/fullscreen-controls.js` owns fullscreen button creation, labels, icon
 state, tile/video fullscreen toggling, and browser fullscreen event binding. It
@@ -272,9 +290,9 @@ back to `script.js` for room and voice decisions.
 
 ## Room
 
-`room/room-ui-state.js` owns room header, local user card, call timer, and
-mobile tile nav rendering. It should receive state snapshots from `script.js`
-rather than reading live socket or media state.
+`room/room-ui-state.js` owns room header and mobile tile-nav helpers. The
+formal Media Dock runtime now owns the live local-user status and call timer
+inside the Dock; this helper must not become a second renderer for those nodes.
 
 `room/mobile-room-state.js` owns mobile tile ordering, active tile index,
 mobile room class sync, and previous/next tile navigation. It receives live
@@ -330,9 +348,10 @@ presence subscription and member DOM; its high-level snapshot callback lets
 `script.js` retain only voice/session/tile reconciliation.
 
 `voice/voice-media-lifecycle.js` builds immutable current-media snapshots,
-normalizes screen-picker resolve/reject state, stops local tracks at most once,
-and coordinates best-effort non-BFCache page teardown. It does not own room,
-presence, registry entry, or layout state.
+maps screen-share resolution/frame-rate targets to non-`exact` picker
+constraints, invokes and normalizes screen-picker resolve/reject state, stops
+local tracks at most once, and coordinates best-effort non-BFCache page
+teardown. It does not own room, presence, registry entry, Dock, or layout state.
 
 `voice/voice-retry-controller.js` owns one finite exponential-backoff operation,
 including jitter, offline pause, online wake, cancellation, attempt reset, and
@@ -355,8 +374,9 @@ stale enumeration rejection, selected-device-missing notification, and
 supported/unsupported `setSinkId` plus default fallback results. It does not
 request permission or replace input tracks itself.
 
-`voice/voice-status-view.js` owns connection labels and isolated media error DOM
-inside the existing media dock. It binds no buttons and owns no recovery policy.
+`voice/voice-status-view.js` owns connection/error labels and the isolated media
+error snapshot. Media Dock renders that snapshot; the status helper binds no
+buttons and owns no recovery policy.
 
 ## Main Flow Still Owned By `script.js`
 
@@ -377,7 +397,8 @@ explicitly opens a new boundary and adds tests first:
 - View/chat URL orchestration and voice/session/tile reconciliation. Sidebar
   navigation, member DOM, presence subscription, and connection display state
   are delegated to the Sidebar runtime and adapter.
-- Screen-share and cursor-share network flow.
+- Screen-share media/network flow (the Dock only emits start options or stop
+  intent) and cursor-share network flow.
 - Output-device application to remote media.
 
 ## Adding New Modules

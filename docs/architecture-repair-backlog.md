@@ -7,7 +7,8 @@
 | Sidebar 正式组件化                               | 代码完成，待浏览器复测       | 单一 channel-tree runtime owner、窄 presence transport、view/voice 独立状态、init/destroy、真实 DOM identity 与行为测试已完成；本轮未执行浏览器验收。      |
 | Stage / Video Grid 正式组件化                    | 未开始                       | 后续独立收敛，不与 Chat Panel 或 WebRTC/media owner 混做。                                                                                                 |
 | Mobile Nav 正式组件化                            | 未开始                       | 保留为独立组件化任务，本轮未提前实施。                                                                                                                     |
-| Media Dock 正式组件化                            | 未开始                       | 后续独立收敛，保持 media pipeline 与设备状态机边界。                                                                                                       |
+| Media Dock 正式组件化                            | 代码完成，待浏览器复测       | 单一真实 DOM owner、窄 adapter/snapshot、按钮/设备/音量/状态渲染、init/destroy、recovery identity 与 listener 累积测试已完成；未接管媒体生命周期。         |
+| 屏幕共享开始前目标画质选择                       | 代码完成，待浏览器复测       | Dock 提供自动/720p/1080p/1440p/原始分辨率与 15/30/60 fps；media lifecycle 使用 ideal/max 约束，picker 取消、pending 与重复点击有自动测试。                 |
 | script loader / bootstrap 收敛                   | 未开始                       | 待正式组件边界稳定后再统一加载与 composition bootstrap。                                                                                                   |
 | 每对参与者的双向重复 PeerJS media call           | 已完成并浏览器验收通过       | 每方向最多一条职责明确的单向发送 call；双方后增媒体、双向共享、screen audio 与同方向去重均已通过真实 Edge 验收。                                           |
 | 布局恢复克隆 DOM 导致缓存引用失效                | 已完成                       | 原业务节点 identity 恢复与六项行为测试均已通过。                                                                                                           |

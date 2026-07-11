@@ -156,15 +156,21 @@
         setText(micGainValue, micGain + '%');
     };
 
-    const setMicGain = (percent, { refs = {}, onMicGainChange } = {}) => {
+    const setMicGain = (
+        percent,
+        { refs = {}, onMicGainChange, syncUI = true } = {}
+    ) => {
         const clamped = clampMicGain(percent);
 
         safeStorageSet(MIC_GAIN_KEY, clamped);
-        syncMicGainUI(refs);
+        if (syncUI) {
+            syncMicGainUI(refs);
+        }
 
         if (typeof onMicGainChange === 'function') {
             onMicGainChange(clamped);
         }
+        return clamped;
     };
 
     const addKeyboardClickProxy = (element) => {

@@ -361,6 +361,64 @@ const MODULE_SCRIPTS = [
         ],
     },
     {
+        path: '/js/media/media-dock-adapter.js',
+        sourcePath: '../src/views/js/media/media-dock-adapter.js',
+        namespace: 'VoiceMediaDockAdapter',
+        mustLoadBeforeMain: true,
+        dependsOnViewUtils: false,
+        forbiddenKeywords: [
+            'document',
+            'querySelector',
+            'getUserMedia',
+            'getDisplayMedia',
+            'MediaStreamTrack',
+            'socket.emit',
+            'new Peer',
+            'cloneNode',
+            'innerHTML',
+        ],
+        requiredExports: [
+            [
+                /createMediaDockAdapter/,
+                'Media Dock adapter must expose its narrow factory',
+            ],
+            [/subscribe/, 'Media Dock adapter must expose subscriptions'],
+            [/getSnapshot/, 'Media Dock adapter must expose snapshots'],
+            [
+                /startScreenShare/,
+                'Media Dock adapter must forward screen share options',
+            ],
+        ],
+    },
+    {
+        path: '/js/media/media-dock-runtime.js',
+        sourcePath: '../src/views/js/media/media-dock-runtime.js',
+        namespace: 'VoiceMediaDockRuntime',
+        mustLoadBeforeMain: true,
+        dependsOnViewUtils: false,
+        forbiddenKeywords: [
+            'getUserMedia',
+            'getDisplayMedia',
+            'MediaStreamTrack',
+            'socket.emit',
+            'new Peer',
+            'cloneNode',
+            'innerHTML',
+            'applyConstraints',
+        ],
+        requiredExports: [
+            [
+                /createMediaDockRuntime/,
+                'Media Dock runtime must expose its component factory',
+            ],
+            [/destroy/, 'Media Dock runtime must expose teardown'],
+            [
+                /DEFAULT_SCREEN_SHARE_OPTIONS/,
+                'Media Dock runtime must expose stable screen share defaults',
+            ],
+        ],
+    },
+    {
         path: '/js/media/fullscreen-controls.js',
         sourcePath: '../src/views/js/media/fullscreen-controls.js',
         namespace: 'VoiceFullscreenControls',
@@ -1830,6 +1888,10 @@ const MODULE_SCRIPTS = [
             ],
             [/createMediaSnapshot/, 'media lifecycle must build snapshots'],
             [/requestScreenCapture/, 'media lifecycle must handle capture'],
+            [
+                /buildScreenCaptureConstraints/,
+                'media lifecycle must own screen capture constraint mapping',
+            ],
             [/createPageTeardown/, 'media lifecycle must expose teardown'],
         ],
     },
@@ -2049,6 +2111,90 @@ assertSourceDoesNotContain(script, 'Chat Panel single owner', [
     [
         /chatFormUI\.(?:getMessageContent|renderSubmitState|renderInputState|resetForm|focusInput)/,
         'script.js must not write chat form DOM',
+    ],
+]);
+
+assertSourceContains(script, 'Media Dock composition root', [
+    [
+        /const mediaDockRoot = byId\('buttons'\)/,
+        'script.js may inject only the real Media Dock root',
+    ],
+    [
+        /const mediaDockAdapterApi = window\.VoiceMediaDockAdapter/,
+        'script.js must load the narrow Media Dock adapter factory',
+    ],
+    [
+        /const mediaDockRuntimeApi = window\.VoiceMediaDockRuntime/,
+        'script.js must load the formal Media Dock runtime factory',
+    ],
+    [
+        /mediaDockAdapter = mediaDockAdapterApi\.createMediaDockAdapter\([\s\S]*?getSnapshot: getMediaDockSnapshot/,
+        'script.js must compose runtime facts and actions behind the narrow adapter',
+    ],
+    [
+        /mediaDockRuntime = mediaDockRuntimeApi\.createMediaDockRuntime\(\{[\s\S]*?root: mediaDockRoot,[\s\S]*?adapter: mediaDockAdapter/,
+        'script.js must initialize the component with only its root and adapter',
+    ],
+    [
+        /beforeStopMedia: \(\) => \{[\s\S]*?mediaDockRuntime\?\.destroy\(\)[\s\S]*?mediaDockAdapter\?\.destroy\(\)/,
+        'page teardown must destroy Media Dock and its subscription adapter',
+    ],
+]);
+assertSourceDoesNotContain(script, 'Media Dock single owner', [
+    [
+        /byId\('(toggleAudio|toggleVideo|shareScreen|destroyPeer|outputVolume|micGainSlider)'\)/,
+        'script.js must not query Media Dock internal controls',
+    ],
+    [
+        /getElementById\('(toggleAudio|toggleVideo|shareScreen|destroyPeer)'\)/,
+        'script.js must not find Media Dock buttons for binding or rendering',
+    ],
+    [
+        /\.onclick\s*=/,
+        'script.js must not install legacy Media Dock onclick owners',
+    ],
+    [
+        /outputVolumeUI\.init\(/,
+        'script.js must not retain the old output UI listener owner',
+    ],
+    [
+        /mediaControlsUI\.bindMediaDevicePopovers\(/,
+        'script.js must not retain the old Dock popover listener owner',
+    ],
+    [
+        /noiseSettingsUI\.init\(/,
+        'script.js must not retain the old Dock noise listener owner',
+    ],
+    [
+        /copyLinkUI\.bindCopyButton\(/,
+        'script.js must not retain the old Dock copy listener owner',
+    ],
+]);
+assertSourceContains(roomIndex, 'Media Dock DOM contract', [
+    [
+        /id="buttons"[^>]*>\s*<div class="media-dock-layout-handle" data-drag-handle="true"/,
+        'Media Dock must keep one real drag handle as its first child',
+    ],
+    [
+        /id="buttons"[\s\S]*?data-screen-share-resolution/,
+        'Media Dock must keep resolution selection inside its real root',
+    ],
+    [
+        /id="buttons"[\s\S]*?data-screen-share-frame-rate/,
+        'Media Dock must keep frame-rate selection inside its real root',
+    ],
+    [
+        /value="1080p" selected/,
+        'Media Dock must default screen sharing to 1080p',
+    ],
+    [/value="30" selected/, 'Media Dock must default screen sharing to 30 fps'],
+    [
+        /value="auto"[\s\S]*?value="720p"[\s\S]*?value="1080p"[\s\S]*?value="1440p"[\s\S]*?value="original"/,
+        'Media Dock must expose automatic, fixed, and original resolution targets',
+    ],
+    [
+        /value="15"[\s\S]*?value="30"[\s\S]*?value="60"/,
+        'Media Dock must expose 15, 30, and 60 fps targets',
     ],
 ]);
 
@@ -2398,8 +2544,18 @@ assertSourceContains(script, 'script.js', [
         message: 'toggleCamera must stay in script.js',
     },
     {
-        pattern: /async function toggleScreenShare/,
-        message: 'toggleScreenShare must stay in script.js',
+        pattern: /const startScreenShare = async/,
+        message: 'screen share orchestration must stay in script.js',
+    },
+    {
+        pattern: /const stopScreenShare = /,
+        message: 'screen share stop orchestration must stay in script.js',
+    },
+    {
+        pattern:
+            /voiceMediaLifecycle\.requestScreenCapture\(\{[\s\S]*?getDisplayMedia: requestDisplayMedia,[\s\S]*?options/,
+        message:
+            'script.js must delegate picker invocation and constraint mapping to media lifecycle',
     },
     {
         pattern: /const applyOutputSettings = /,
@@ -2946,6 +3102,8 @@ const ignoreDragTargetBody = script.slice(
     'button',
     'select',
     'a',
+    'form',
+    'label',
     '[contenteditable]',
     '.panel-action-button',
 ].forEach((selector) => {
@@ -2954,6 +3112,27 @@ const ignoreDragTargetBody = script.slice(
         `drag ignore list must include ${selector}`
     );
 });
+assert.match(
+    script,
+    /const isLayoutDragHandleTarget = \(event, tile\) => \{[\s\S]*?closest\?\.\('\[data-drag-handle="true"\]'\)[\s\S]*?tile\?\.contains\?\.\(handle\)[\s\S]*?handle\.closest\?\.\('\.video-tile'\) === tile/,
+    'layout dragging must accept only an explicit handle inside the same tile'
+);
+assert.match(
+    script,
+    /const startTileDrag = \(event, tile\) => \{[\s\S]*?isTilePointerDisabled\(event\)[\s\S]*?!isLayoutDragHandleTarget\(event, tile\)[\s\S]*?!canDragLayoutItem/,
+    'the drag entry point must reject controls and non-handle targets'
+);
+const bindTileLayoutControlsBody = getSourceBetween(
+    script,
+    /const bindTileLayoutControls = \(tile, header\) => \{/,
+    /\npageLayoutStoreRuntime = /,
+    'tile layout listener binding'
+);
+assert.match(
+    bindTileLayoutControlsBody,
+    /if \(!tile\.dataset\.layoutBound\) \{[\s\S]*?shouldIgnoreLayoutDragTarget\([\s\S]*?isLayoutDragHandleTarget\(event, tile\)[\s\S]*?startTileDrag\(event, tile\)[\s\S]*?tile\.dataset\.layoutBound = 'true'/,
+    'tile pointer listeners must bind once and start drag only from a non-interactive handle'
+);
 assert.match(
     script,
     /const finalizeLayoutItemDrag = [\s\S]*?snapTileLayoutToGrid[\s\S]*?saveLayoutToStorage[\s\S]*?hideSnapPreview/,
@@ -3228,6 +3407,40 @@ assert.doesNotMatch(
     mediaDockStyleMatch.groups.body,
     /position:\s*fixed|left:\s*max\(16px, env\(safe-area-inset-left\)\)|bottom:\s*max\(16px, env\(safe-area-inset-bottom\)\)/,
     'normal mode media dock must not escape the page layout system with fixed left-bottom positioning'
+);
+const mediaDockHandleStyleMatch = style.match(
+    /\.media-dock-layout-handle\s*\{(?<body>[\s\S]*?)\}/
+);
+assert.ok(mediaDockHandleStyleMatch, 'media dock drag handle style must exist');
+assert.match(
+    mediaDockHandleStyleMatch.groups.body,
+    /display:\s*none/,
+    'media dock drag handle must stay hidden outside layout edit mode'
+);
+assert.match(
+    mediaDockHandleStyleMatch.groups.body,
+    /height:\s*26px[\s\S]*?min-height:\s*26px/,
+    'media dock drag handle must stay thin'
+);
+assert.match(
+    mediaDockHandleStyleMatch.groups.body,
+    /cursor:\s*grab[\s\S]*?pointer-events:\s*auto/,
+    'media dock drag handle must remain the explicit pointer target'
+);
+assert.match(
+    style,
+    /\.page-layout-board\.is-layout-editing[\s\S]*?\.page-tile-media-controls-panel[\s\S]*?> \.tile-header\s*\{[\s\S]*?display:\s*none/,
+    'layout edit mode must hide the generic media panel header'
+);
+assert.match(
+    style,
+    /\.page-layout-board\.is-layout-editing[\s\S]*?\.page-tile-media-controls-panel[\s\S]*?#buttons[\s\S]*?> \.media-dock-layout-handle\s*\{[\s\S]*?display:\s*flex/,
+    'layout edit mode must reveal the real Media Dock drag handle'
+);
+assert.match(
+    style,
+    /> \.media-dock-layout-handle:hover\s*\{[\s\S]*?opacity:\s*0\.9/,
+    'media dock drag handle must become more visible on hover'
 );
 assert.match(
     style,

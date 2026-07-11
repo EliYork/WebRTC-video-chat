@@ -53,6 +53,10 @@
 
             <section class="local-user-card" aria-label="本地用户控制">
                 <div id="buttons" class="hidden media-dock" aria-label="通话控制">
+                    <div class="media-dock-layout-handle" data-drag-handle="true" title="拖动媒体控制">
+                        <span class="media-dock-layout-grip" aria-hidden="true">⋮⋮</span>
+                        <span>媒体控制</span>
+                    </div>
                     <div class="media-dock-header">
                         <div class="local-user-header media-dock-user">
                             <div class="local-avatar" aria-hidden="true">♡</div>
@@ -83,7 +87,7 @@
                             <i class="fas fa-magic" aria-hidden="true"></i>
                             AI <strong id="aiNoiseStatusText">关</strong>
                         </span>
-                        <button id="destroyPeer" class="hidden media-dock-hangup" type="button" title="离开当前语音频道" aria-label="离开当前语音频道">
+                        <button id="destroyPeer" class="media-dock-hangup" type="button" title="加入当前语音频道" aria-label="加入当前语音频道" data-session-action="join">
                             <i class="fas fa-phone-slash" aria-hidden="true"></i>
                         </button>
                     </div>
@@ -93,10 +97,15 @@
                             <i class="fas fa-link" aria-hidden="true"></i>
                             <span>链接</span>
                         </button>
-                        <button id="shareScreen" class="media-dock-action-button" type="button" title="屏幕共享" aria-label="屏幕共享" aria-pressed="false">
-                            <i class="far fa-newspaper"></i>
-                            <span>共享</span>
-                        </button>
+                        <div class="media-dock-control-group control-button-wrap" data-device-control="screen">
+                            <button id="shareScreen" class="media-dock-action-button" type="button" title="开始屏幕共享" aria-label="开始屏幕共享" aria-pressed="false">
+                                <i class="far fa-newspaper"></i>
+                                <span>共享</span>
+                            </button>
+                            <button class="control-menu-toggle" type="button" aria-label="屏幕共享设置" aria-expanded="false" data-control-menu="screen">
+                                <i class="fas fa-chevron-up"></i>
+                            </button>
+                        </div>
                         <div class="media-dock-control-group control-button-wrap" data-device-control="camera">
                             <button id="toggleVideo" class="media-dock-action-button" type="button" title="摄像头" aria-label="摄像头" aria-pressed="false">
                                 <i class="fas fa-video"></i>
@@ -155,6 +164,31 @@
                             <strong id="outputVolumeValue">100%</strong>
                         </label>
                     </section>
+                    <section class="media-device-popover screen-share-settings-popover" data-control-panel="screen" data-device-popover="screen" role="dialog" aria-label="屏幕共享设置">
+                        <div class="media-device-popover-header">
+                            <strong>屏幕共享画质</strong>
+                            <span data-screen-share-settings-status>开始共享时生效</span>
+                        </div>
+                        <label class="media-select-row">
+                            <span>分辨率</span>
+                            <select id="screenShareResolution" data-screen-share-resolution>
+                                <option value="auto">自动</option>
+                                <option value="720p">720p</option>
+                                <option value="1080p" selected>1080p</option>
+                                <option value="1440p">1440p</option>
+                                <option value="original">原始分辨率</option>
+                            </select>
+                        </label>
+                        <label class="media-select-row">
+                            <span>帧率</span>
+                            <select id="screenShareFrameRate" data-screen-share-frame-rate>
+                                <option value="15">15 fps</option>
+                                <option value="30" selected>30 fps</option>
+                                <option value="60">60 fps</option>
+                            </select>
+                        </label>
+                        <p class="media-device-hint">目标值由浏览器尽力满足，不使用严格 exact 约束。</p>
+                    </section>
                 </div>
             </section>
         </aside>
@@ -189,6 +223,8 @@
     <script src="/js/media/output-volume-state.js"></script>
     <script src="/js/media/output-volume-ui.js"></script>
     <script src="/js/media/media-controls-ui.js"></script>
+    <script src="/js/media/media-dock-adapter.js"></script>
+    <script src="/js/media/media-dock-runtime.js"></script>
     <script src="/js/media/fullscreen-controls.js"></script>
     <script src="/js/media/voice-join-overlay-ui.js"></script>
     <script src="/js/layout/page-layout-snap-utils.js"></script>

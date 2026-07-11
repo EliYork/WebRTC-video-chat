@@ -11,7 +11,7 @@ A self-hosted fixed-channel voice room for small groups of friends, combining vo
 - Five server-defined channels: `lobby`, `game`, `project`, `screen`, and `idle`; `/` redirects to `/room/lobby`.
 - Viewing a channel and joining voice are independent: a single click changes the viewed channel, while a double click requests its voice room.
 - Voice join is microphone-first; the camera starts only when the user enables it.
-- Microphone mute, camera, screen video and system-audio sharing, output device/volume controls, per-peer volume, and fullscreen viewing.
+- Microphone mute, camera, screen video and system-audio sharing, output device/volume controls, per-peer volume, and fullscreen viewing. Before sharing, users can target automatic, 720p, 1080p, 1440p, or original resolution at 15/30/60 fps.
 - Per-channel text chat; the server keeps the latest 50 messages per channel in memory and limits each message to 500 characters.
 - Per-channel member presence, microphone/camera/screen status, and full-page shared cursors.
 - View, chat, cursor, and voice traffic are channel-isolated; the server validates realtime events against Socket-owned room state.
@@ -21,14 +21,15 @@ A self-hosted fixed-channel voice room for small groups of friends, combining vo
 
 ## Componentization Status
 
-| Area                                | Current status                           | Ownership boundary                                                                                                                                                    |
-| ----------------------------------- | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Chat Panel                          | Code complete; browser retest pending    | `VoiceChatPanelRuntime` solely owns chat business DOM, form state, message rendering, and lifecycle. Its Socket adapter neither creates nor destroys the page Socket. |
-| Sidebar                             | Code complete; browser retest pending    | `VoiceSidebarRuntime` solely owns the real channel tree, viewing/voice-target state, and member list. Its presence adapter only subscribes.                           |
-| Page Layout                         | Implemented with contract/identity tests | It moves real business nodes instead of cloning or rebuilding fallback shells, and persists layouts per room in `localStorage`.                                       |
-| Voice Session / Media               | Modularized with Node behavior tests     | `script.js` remains the page composition owner; session, retry, device, operation, registry, and quality modules have narrow boundaries.                              |
-| Stage / Video Grid                  | Not yet a formal component               | It is still jointly managed by page composition and the media registry.                                                                                               |
-| Mobile Nav / Media Dock / bootstrap | Not yet formal components                | They remain separate follow-up tasks and are not absorbed by Chat Panel or Sidebar.                                                                                   |
+| Area                   | Current status                           | Ownership boundary                                                                                                                                                                      |
+| ---------------------- | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Chat Panel             | Code complete; browser retest pending    | `VoiceChatPanelRuntime` solely owns chat business DOM, form state, message rendering, and lifecycle. Its Socket adapter neither creates nor destroys the page Socket.                   |
+| Sidebar                | Code complete; browser retest pending    | `VoiceSidebarRuntime` solely owns the real channel tree, viewing/voice-target state, and member list. Its presence adapter only subscribes.                                             |
+| Page Layout            | Implemented with contract/identity tests | It moves real business nodes instead of cloning or rebuilding fallback shells, and persists layouts per room in `localStorage`.                                                         |
+| Voice Session / Media  | Modularized with Node behavior tests     | `script.js` remains the page composition owner; session, retry, device, operation, registry, and quality modules have narrow boundaries.                                                |
+| Media Dock             | Code complete; browser retest pending    | `VoiceMediaDockRuntime` solely owns the real Dock DOM, media buttons, device/volume UI, state rendering, and listener lifecycle. Its narrow adapter only forwards intent and snapshots. |
+| Stage / Video Grid     | Not yet a formal component               | It is still jointly managed by page composition and the media registry.                                                                                                                 |
+| Mobile Nav / bootstrap | Not yet formal components                | They remain separate follow-up tasks; Media Dock does not absorb Stage / Video Grid ownership.                                                                                          |
 
 “Code complete; browser retest pending” means static checks and Node behavior/contract tests exist, while real browsers, weak networks, permissions, device unplugging, and deployed environments still need acceptance testing. It does not mean production verification is complete.
 
@@ -164,7 +165,7 @@ npx prettier README.md README.en.md --check
 git diff --check
 ```
 
-The suite covers voice protocol/negotiation, the peer registry, session recovery, media quality, server trust and disconnect lifecycles, view/chat room lifecycle, page-layout identity, and Chat Panel/Sidebar lifecycles. These are Node model and contract tests, not browser E2E tests.
+The suite covers voice protocol/negotiation, the peer registry, session recovery, media quality, server trust and disconnect lifecycles, view/chat room lifecycle, page-layout identity, Chat Panel/Sidebar/Media Dock lifecycles, and target screen-capture constraints. These are Node model and contract tests, not browser E2E tests.
 
 Real acceptance should use at least two independent browser contexts and cover two-way microphones, late media enablement, camera/screen switching, system audio, join/leave/refresh, network reconnection, permission denial, device unplugging, channel isolation, chat, shared cursors, and layout recovery.
 
@@ -194,8 +195,8 @@ When investigating a Socket listener warning in production, first restart the ne
 - Presence, channel chat history, and related server state are in memory and disappear on restart.
 - A deployed Socket.IO WebSocket has produced `Invalid frame header`. The client can fall back to polling, but the proxy/Upgrade root cause still needs a separate diagnosis.
 - There is no automated real-browser E2E suite. Current automation is primarily Node behavior, model, and source-contract testing.
-- Voice Session Resilience, permission/device recovery, Chat Panel, Sidebar, and the screen-share quality label still need more real-browser, weak-network, and device-unplug testing.
-- Mobile Nav is not yet a formal component. Stage / Video Grid, Media Dock, and the script loader/bootstrap are also pending consolidation.
+- Voice Session Resilience, permission/device recovery, Chat Panel, Sidebar, Media Dock, screen-share selections, and the quality label still need more real-browser, weak-network, and device-unplug testing.
+- Mobile Nav is not yet a formal component. Stage / Video Grid and the script loader/bootstrap are also pending consolidation.
 - Production dependencies still have high/moderate vulnerabilities that require a separate upgrade and full regression pass.
 - Third-party CDN/self-hosting policy, security headers, CSS/z-index cleanup, legacy layout components, and duplicate popover ownership remain open work.
 
@@ -222,6 +223,18 @@ See the continuously maintained [Architecture Repair Backlog](./docs/architectur
 - [Sidebar component boundary](./docs/sidebar-component.md)
 - [Page layout contract and recovery tests](./tests/page_layout_contract_test.mjs)
 - [Architecture Repair Backlog](./docs/architecture-repair-backlog.md)
+
+## Special Thanks / Credits
+
+This project learned from and referenced the following open-source projects. Many thanks to their authors:
+
+| Project                                                                               | What it helped with                                                  | License |
+| ------------------------------------------------------------------------------------- | -------------------------------------------------------------------- | ------- |
+| [nlukic97/WebRTC-video-chat](https://github.com/nlukic97/WebRTC-video-chat)           | Video calls, WebRTC / PeerJS, and screen sharing ideas               | ISC     |
+| [nlukic97/WebSocket-Cursor-Room](https://github.com/nlukic97/WebSocket-Cursor-Room)   | Multi-user cursor position sync / shared cursor ideas                | MIT     |
+| [sapphi-red/web-noise-suppressor](https://github.com/sapphi-red/web-noise-suppressor) | Web Audio API noise suppression nodes and noise reduction references | MIT     |
+
+The projects above remain owned by their original authors and follow their own repository licenses. This project's license is listed below.
 
 ## License
 

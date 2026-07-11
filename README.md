@@ -11,7 +11,7 @@
 - 五个服务端固定频道：`lobby`、`game`、`project`、`screen`、`idle`；访问 `/` 会跳转到 `/room/lobby`。
 - 浏览频道与加入语音相互独立：单击切换所查看的频道，双击频道请求加入对应语音房间。
 - 加入语音时优先请求麦克风；摄像头由用户按需开启。
-- 支持麦克风静音、摄像头、屏幕画面与系统音频共享、输出设备/音量控制、远端音量和全屏观看。
+- 支持麦克风静音、摄像头、屏幕画面与系统音频共享、输出设备/音量控制、远端音量和全屏观看；开始屏幕共享前可选择自动、720p、1080p、1440p 或原始分辨率，以及 15/30/60 fps 目标值。
 - 同频道文字聊天；服务端在内存中保存每个频道最近 50 条消息，每条消息最多 500 个字符。
 - 同频道在线成员、麦克风/摄像头/屏幕共享状态和全页面共享鼠标。
 - 浏览、聊天、共享鼠标和语音均按频道隔离；服务端以 Socket 所拥有的房间状态校验实时事件。
@@ -27,8 +27,9 @@
 | Sidebar | 代码完成，待浏览器复测 | `VoiceSidebarRuntime` 单独拥有真实频道树、浏览/语音目标状态和成员列表；presence 适配器只负责订阅。 |
 | Page Layout | 已实现并有合同/identity 测试 | 移动真实业务节点，不克隆或用备用 shell 重建；布局按房间保存在 `localStorage`。 |
 | Voice Session / Media | 已模块化并有 Node 行为测试 | `script.js` 仍是页面 composition owner；session、retry、device、operation、registry 和 quality 模块各自维护窄边界。 |
+| Media Dock | 代码完成，待浏览器复测 | `VoiceMediaDockRuntime` 单独拥有真实 Dock DOM、媒体按钮、设备/音量 UI、状态与 listener 生命周期；窄 adapter 只转发意图和 snapshot。 |
 | Stage / Video Grid | 尚未正式组件化 | 仍由页面 composition 与媒体 registry 协作管理。 |
-| Mobile Nav / Media Dock / bootstrap | 尚未正式组件化 | 保留为后续独立任务，不由 Chat Panel 或 Sidebar 越界接管。 |
+| Mobile Nav / bootstrap | 尚未正式组件化 | 保留为后续独立任务；Stage / Video Grid 也未被 Media Dock 越界接管。 |
 
 “代码完成，待浏览器复测”表示静态检查和 Node 行为/合同测试已覆盖，但真实浏览器、弱网、权限、设备拔插或部署环境仍需要验收；它不等同于生产验证完成。
 
@@ -164,7 +165,7 @@ npx prettier README.md README.en.md --check
 git diff --check
 ```
 
-测试覆盖 voice 协议/协商、peer registry、会话恢复、媒体质量、服务端信任边界与 disconnect 生命周期、view/chat room 生命周期、页面布局 identity、Chat Panel 和 Sidebar 生命周期。它们是 Node 模型与合同测试，不是浏览器 E2E。
+测试覆盖 voice 协议/协商、peer registry、会话恢复、媒体质量、服务端信任边界与 disconnect 生命周期、view/chat room 生命周期、页面布局 identity，以及 Chat Panel、Sidebar、Media Dock 生命周期和屏幕共享目标约束。它们是 Node 模型与合同测试，不是浏览器 E2E。
 
 真实验收至少应使用两个独立浏览器上下文，检查双向麦克风、后开媒体、摄像头与屏幕切换、系统音频、加入/离开/刷新、断网重连、权限拒绝、设备拔插、频道隔离、聊天、共享鼠标和布局恢复。
 
@@ -194,8 +195,8 @@ exportVoiceMediaDebug();
 - presence、频道聊天历史和相关服务端状态只存在内存中，服务重启即丢失。
 - 线上 Socket.IO WebSocket 曾出现 `Invalid frame header`，业务端可回退 polling，但代理/Upgrade 根因尚未完成独立诊断。
 - 没有真实浏览器自动 E2E；当前自动化主要是 Node 行为、模型和源码合同测试。
-- Voice Session Resilience、权限/设备错误恢复、Chat Panel、Sidebar 和屏幕共享质量标签仍需要更多真实浏览器、弱网与设备拔插复测。
-- Mobile Nav 尚未正式组件化；Stage / Video Grid、Media Dock 和 script loader/bootstrap 也仍待收敛。
+- Voice Session Resilience、权限/设备错误恢复、Chat Panel、Sidebar、Media Dock、屏幕共享选择和质量标签仍需要更多真实浏览器、弱网与设备拔插复测。
+- Mobile Nav 尚未正式组件化；Stage / Video Grid 和 script loader/bootstrap 也仍待收敛。
 - 生产依赖仍有待单独处理的 high/moderate 漏洞，升级前后需要完整回归。
 - 第三方 CDN、自托管资源策略、安全 header、CSS/z-index、旧布局组件和重复 popover owner 仍待整理。
 
@@ -222,6 +223,18 @@ exportVoiceMediaDebug();
 - [Sidebar 组件边界](./docs/sidebar-component.md)
 - [页面布局合同与恢复测试](./tests/page_layout_contract_test.mjs)
 - [架构修复待办](./docs/architecture-repair-backlog.md)
+
+## 特别感谢 / Credits
+
+本项目在开发过程中参考和学习了以下开源项目，感谢这些项目作者的分享：
+
+| 项目 | 参考内容 | 协议 |
+| --- | --- | --- |
+| [nlukic97/WebRTC-video-chat](https://github.com/nlukic97/WebRTC-video-chat) | 视频通话、WebRTC / PeerJS、屏幕共享相关实现思路 | ISC |
+| [nlukic97/WebSocket-Cursor-Room](https://github.com/nlukic97/WebSocket-Cursor-Room) | 多用户鼠标位置同步 / 共享鼠标思路 | MIT |
+| [sapphi-red/web-noise-suppressor](https://github.com/sapphi-red/web-noise-suppressor) | Web Audio API 降噪节点与降噪方案参考 | MIT |
+
+以上项目仍归原作者所有，并遵循各自仓库中的开源协议。本项目自己的协议见下方 License。
 
 ## License
 

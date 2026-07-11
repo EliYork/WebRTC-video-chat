@@ -10,18 +10,10 @@ const myVideo = document.createElement('video');
 myVideo.muted = true; // ensures that we do not hear ourselves
 myVideo.playsInline = 'true';
 
-const callControls = byId('buttons');
-const destroyPeerBtn = byId('destroyPeer');
-const copyRoomLinkBtn = byId('copyRoomLink');
+const mediaDockRoot = byId('buttons');
 const chatPanelRoot = byId('chat-panel');
 const sidebarRoot = byId('channel-sidebar');
 const chatTitle = byId('chatTitle');
-const localUserCard = document.querySelector('.local-user-card');
-const localUserName = byId('localUserName');
-const localVoiceChannelName = byId('localVoiceChannelName');
-const callStatusText = byId('callStatusText');
-const callDuration = byId('callDuration');
-const screenStatusText = byId('screenStatusText');
 const mobileBackToChannelsBtn = byId('mobileBackToChannels');
 const mobilePrevTileBtn = byId('mobilePrevTile');
 const mobileNextTileBtn = byId('mobileNextTile');
@@ -30,8 +22,8 @@ const noiseSettingsUI = window.VoiceNoiseSettingsUI;
 const remoteVolumeUI = window.VoiceRemoteVolumeUI;
 const copyLinkUI = window.VoiceCopyLinkUI;
 const outputVolumeState = window.VoiceOutputVolumeState;
-const outputVolumeUI = window.VoiceOutputVolumeUI;
-const mediaControlsUI = window.VoiceMediaControlsUI;
+const mediaDockAdapterApi = window.VoiceMediaDockAdapter;
+const mediaDockRuntimeApi = window.VoiceMediaDockRuntime;
 const fullscreenControls = window.VoiceFullscreenControls;
 const voiceJoinOverlayUI = window.VoiceJoinOverlayUI;
 const layoutEditUI = window.PageLayoutEditUI;
@@ -158,6 +150,10 @@ let pageLayoutRuntime;
 let pageLayoutStoreRuntime;
 let chatPanelRuntime;
 let sidebarRuntime;
+let mediaDockAdapter;
+let mediaDockRuntime;
+
+const notifyMediaDock = () => mediaDockAdapter?.notify();
 
 const updateLayoutItemConfig = (id, patch) => {
     const item = getTileLayoutItem(id);
@@ -195,7 +191,6 @@ let viewingRoomId;
 let selectedVoiceRoomId;
 let joinedVoiceRoomId;
 let currentPeer;
-let isConnectingToPeer = false;
 let pendingVoiceRoomId;
 let callStartedAt;
 let callDurationTimer;
@@ -221,22 +216,13 @@ let screenShareRequestPending = false;
 const localMediaTrackStopper = voiceMediaLifecycle.createTrackStopper();
 const voiceMediaDebug = voiceCallProtocol.createMediaDebugLog();
 const voiceStatusView = voiceStatusViewApi.createStatusView({
-    connectionElement: callStatusText,
-    container: byId('voiceStatusMessages'),
+    connectionElement: undefined,
+    container: undefined,
 });
 const voiceSessionRuntime = voiceSessionRuntimeApi.createSessionRuntime({
     onDebug: (event) => voiceMediaDebug.record(event),
-    onStateChange: (session) => {
-        isConnectingToPeer = [
-            'joining',
-            'reconnecting-peer',
-            'reconnecting-socket',
-            'restoring',
-        ].includes(session.state);
+    onStateChange: () => {
         updateLocalUserCard();
-        voiceStatusView.setConnection(
-            navigator.onLine === false ? 'offline' : session.state
-        );
     },
 });
 const peerRetryController = voiceRetryControllerApi.createRetryController({
@@ -325,43 +311,12 @@ let noiseProcessorActive = false;
 let noiseRawStream = null;
 let noiseMode = 'raw';
 let noiseGainNode = null;
-let noiseSettingsControls;
 let micPermissionDenied = false;
-
-const syncNoiseSettingsUI = () => {
-    if (noiseSettingsControls) {
-        noiseSettingsControls.sync();
-        return;
-    }
-
-    noiseSettingsUI.updateNoiseToggleUI();
-    noiseSettingsUI.updateAiExperimentToggleUI({
-        supported: isAiExperimentSupported(),
-        noiseMode,
-    });
-};
 
 // eslint-disable-next-line no-undef
 viewingRoomId = ROOM_ID;
 // eslint-disable-next-line no-undef
 selectedVoiceRoomId = ROOM_ID;
-
-const showCallControls = () => {
-    mediaControlsUI.renderCallControls({
-        refs: { controls: callControls, leaveButton: destroyPeerBtn },
-        visible: true,
-    });
-    mediaControlsUI.renderLeaveButtonState({
-        refs: { leaveButton: destroyPeerBtn },
-    });
-};
-
-const hideCallControls = () => {
-    mediaControlsUI.renderCallControls({
-        refs: { controls: callControls, leaveButton: destroyPeerBtn },
-        visible: false,
-    });
-};
 
 const isMobileLayout = () => window.innerWidth <= MOBILE_BREAKPOINT;
 
@@ -427,14 +382,10 @@ const updateMobileRoomState = () => {
 };
 
 const updateCallDuration = () => {
-    if (!callStartedAt || !callDuration) {
+    if (!callStartedAt) {
         return;
     }
-
-    roomUIState.renderCallTimer({
-        refs: { duration: callDuration },
-        elapsedMs: Date.now() - callStartedAt,
-    });
+    notifyMediaDock();
 };
 
 const startCallTimer = () => {
@@ -448,11 +399,7 @@ const stopCallTimer = () => {
     clearInterval(callDurationTimer);
     callDurationTimer = undefined;
     callStartedAt = undefined;
-
-    roomUIState.renderCallTimer({
-        refs: { duration: callDuration },
-        text: '00:00',
-    });
+    notifyMediaDock();
 };
 
 const hasLiveCameraTrack = () =>
@@ -533,31 +480,77 @@ const getCallStatusLabel = (
     return '未开麦';
 };
 
-const updateLocalUserCard = () => {
-    const micStatus = getMemberMicStatus(getLocalPresenceMember());
+const getMediaDockSnapshot = () => {
+    const session = voiceSessionRuntime.getSnapshot();
+    const microphoneOperation =
+        mediaOperationController.getSnapshot('microphone');
+    const cameraOperation = mediaOperationController.getSnapshot('camera');
+    const screenOperation = mediaOperationController.getSnapshot('screen');
+    const microphoneTrack = myVideoStream?.getAudioTracks?.()[0];
+    const mediaErrors = voiceStatusView.getSnapshot();
+    const connectionState =
+        navigator.onLine === false ? 'offline' : session.state;
+    const actualVoiceJoined = Boolean(
+        joinedVoiceRoomId &&
+            currentPeer &&
+            !currentPeer.destroyed &&
+            session.state === 'joined'
+    );
 
-    roomUIState.renderLocalUserCard({
-        refs: {
-            card: callControls || localUserCard,
-            channelName: localVoiceChannelName,
-            name: localUserName,
-            screenStatus: screenStatusText,
-            statusText: callStatusText,
-        },
+    return {
+        actualVoiceJoined,
+        aiNoiseEnabled: noiseSettingsUI.getAiExperimentEnabled(),
+        aiNoiseSupported: isAiExperimentSupported(),
+        availableCameras: mediaDevicesCache.camera,
+        availableMicrophones: mediaDevicesCache.mic,
+        availableOutputs: mediaDevicesCache.output,
+        callDurationMs: callStartedAt ? Date.now() - callStartedAt : 0,
+        callStatusText: getCallStatusLabel(),
+        cameraEnabled: hasLiveCameraTrack(),
+        cameraError: mediaErrors.camera,
+        cameraPending: Boolean(cameraOperation.promise),
+        cameraPermissionState:
+            cameraOperation.errorType === 'permission-denied'
+                ? 'denied'
+                : hasLiveCameraTrack()
+                  ? 'granted'
+                  : 'prompt',
         channelName: getChannelName(joinedVoiceRoomId || viewingRoomId),
-        connected: Boolean(joinedVoiceRoomId),
-        connecting: isConnectingToPeer,
+        connectionState,
+        desiredVoiceJoined: session.desiredVoiceState === 'joined',
         displayName: getChatName(),
-        micStatusKey: micStatus.key,
-        muted: micStatus.key === 'muted',
-        screenHidden: true,
-        speaking: micStatus.key === 'speaking',
-        statusText: isConnectingToPeer
-            ? '正在连接语音'
-            : getCallStatusLabel(micStatus),
-    });
+        mediaControlsAvailable: actualVoiceJoined,
+        mediaErrors,
+        microphoneEnabled: Boolean(
+            microphoneTrack?.readyState === 'live' && microphoneTrack.enabled
+        ),
+        microphoneError: mediaErrors.microphone,
+        microphoneGain: noiseSettingsUI.getMicGain(),
+        microphonePending: Boolean(microphoneOperation.promise),
+        microphonePermissionState:
+            micPermissionDenied ||
+            microphoneOperation.errorType === 'permission-denied'
+                ? 'denied'
+                : microphoneTrack?.readyState === 'live'
+                  ? 'granted'
+                  : 'prompt',
+        noiseMode,
+        noiseSuppressionEnabled: noiseSettingsUI.getNoiseSuppressionEnabled(),
+        outputMuted,
+        outputSelectionUnsupported: !canSelectAudioOutput(),
+        outputVolume,
+        screenShareEnabled: Boolean(sharingNow),
+        screenShareError: mediaErrors.screen,
+        screenSharePending:
+            screenShareRequestPending || Boolean(screenOperation.promise),
+        selectedCameraId: selectedCameraDeviceId,
+        selectedMicrophoneId: selectedInputDeviceId,
+        selectedOutputId: selectedOutputDeviceId,
+    };
+};
 
-    syncNoiseSettingsUI();
+const updateLocalUserCard = () => {
+    notifyMediaDock();
     updateAllVideoTileStatus();
 };
 
@@ -588,6 +581,7 @@ const applyOutputDevice = async (mediaElement, isRemote) => {
     });
     if (result.ok) {
         voiceStatusView.clearMediaError('output');
+        notifyMediaDock();
         return true;
     }
     voiceMediaDebug.record({
@@ -596,8 +590,8 @@ const applyOutputDevice = async (mediaElement, isRemote) => {
     });
     selectedOutputDeviceId = 'default';
     voiceDeviceRuntime?.setSelected('output', 'default');
-    renderMediaDeviceList('output');
     voiceStatusView.setMediaError('output', result.errorType);
+    notifyMediaDock();
     console.warn(
         'Could not switch output device; falling back to default.',
         result.error
@@ -642,44 +636,9 @@ const applyOutputSettingsToRemoteMedia = () => {
     return Promise.all(pending);
 };
 
-const updateOutputButtonState = () => {
-    outputVolumeUI.renderState({ muted: outputMuted, volume: outputVolume });
-};
-
-const updateScreenShareButtonState = () => {
-    mediaControlsUI.renderScreenShareButtonState({
-        disabled: screenShareRequestPending,
-        sharing: Boolean(sharingNow),
-    });
-};
-
 const setScreenShareRequestPending = (pending) => {
     screenShareRequestPending = Boolean(pending);
-    const button = byId('shareScreen');
-    if (button) {
-        button.setAttribute('aria-busy', String(screenShareRequestPending));
-    }
-    updateScreenShareButtonState();
-};
-
-const renderMediaDeviceList = (type) => {
-    mediaControlsUI.renderDeviceList({
-        type,
-        devices: mediaDevicesCache[type],
-        selectedDeviceId:
-            type === 'mic'
-                ? selectedInputDeviceId
-                : type === 'camera'
-                  ? selectedCameraDeviceId
-                  : selectedOutputDeviceId,
-        unsupported: type === 'output' && !canSelectAudioOutput(),
-        onSelect:
-            type === 'mic'
-                ? selectInputDevice
-                : type === 'camera'
-                  ? selectCameraDevice
-                  : selectOutputDevice,
-    });
+    notifyMediaDock();
 };
 
 const voiceDeviceRuntime = voiceDeviceRuntimeApi.createDeviceRuntime({
@@ -694,9 +653,7 @@ const voiceDeviceRuntime = voiceDeviceRuntimeApi.createDeviceRuntime({
         selectedInputDeviceId = selected.mic;
         selectedCameraDeviceId = selected.camera;
         selectedOutputDeviceId = selected.output;
-        renderMediaDeviceList('mic');
-        renderMediaDeviceList('camera');
-        renderMediaDeviceList('output');
+        notifyMediaDock();
     },
     onMissing: ({ type }) => handleMissingMediaDevice(type),
 });
@@ -707,7 +664,7 @@ const selectInputDevice = async (deviceId = 'default') => {
     const previousDeviceId = selectedInputDeviceId;
     selectedInputDeviceId = deviceId;
     voiceDeviceRuntime.setSelected('mic', deviceId);
-    renderMediaDeviceList('mic');
+    notifyMediaDock();
 
     if (
         mediaOperationController.getSnapshot().desired.microphone &&
@@ -725,7 +682,7 @@ const selectInputDevice = async (deviceId = 'default') => {
         if (!switched) {
             selectedInputDeviceId = previousDeviceId;
             voiceDeviceRuntime.setSelected('mic', previousDeviceId);
-            renderMediaDeviceList('mic');
+            notifyMediaDock();
         }
     }
 };
@@ -734,7 +691,7 @@ const selectCameraDevice = async (deviceId = 'default') => {
     const previousDeviceId = selectedCameraDeviceId;
     selectedCameraDeviceId = deviceId;
     voiceDeviceRuntime.setSelected('camera', deviceId);
-    renderMediaDeviceList('camera');
+    notifyMediaDock();
 
     if (
         mediaOperationController.getSnapshot().desired.camera &&
@@ -752,7 +709,7 @@ const selectCameraDevice = async (deviceId = 'default') => {
         if (!switched) {
             selectedCameraDeviceId = previousDeviceId;
             voiceDeviceRuntime.setSelected('camera', previousDeviceId);
-            renderMediaDeviceList('camera');
+            notifyMediaDock();
         }
     }
 };
@@ -760,8 +717,9 @@ const selectCameraDevice = async (deviceId = 'default') => {
 const selectOutputDevice = async (deviceId = 'default') => {
     selectedOutputDeviceId = deviceId;
     voiceDeviceRuntime.setSelected('output', deviceId);
-    renderMediaDeviceList('output');
+    notifyMediaDock();
     await applyOutputSettingsToRemoteMedia();
+    notifyMediaDock();
 };
 
 const resetLocalVoiceState = () => {
@@ -781,7 +739,6 @@ const resetLocalVoiceState = () => {
     setCameraButtonState(false);
     setAudioButtonNoMic();
     stopCallTimer();
-    updateScreenShareButtonState();
     updateLocalUserCard();
 };
 
@@ -789,6 +746,12 @@ const pageVoiceTeardown = voiceMediaLifecycle.createPageTeardown({
     beforeStopMedia: () => {
         chatPanelRuntime?.destroy();
         sidebarRuntime?.destroy();
+        mediaDockRuntime?.destroy();
+        mediaDockAdapter?.destroy();
+        navigator.mediaDevices?.removeEventListener?.(
+            'devicechange',
+            voiceDeviceRuntime.handleDeviceChange
+        );
         voiceMediaDebug.record({
             event: 'teardown',
             reason: 'page-teardown',
@@ -1437,7 +1400,7 @@ const setVoiceTargetRoom = (roomId) => {
     if (joinedVoiceRoomId && joinedVoiceRoomId !== roomId) {
         selectedVoiceRoomId = roomId;
         pendingVoiceRoomId = roomId;
-        document.getElementById('destroyPeer')?.click();
+        mediaDockAdapter?.hangUp();
         syncRoomCompositionState();
         return true;
     }
@@ -3804,13 +3767,7 @@ const setActiveVideoTrack = (peer, track) => {
     sendVideoTrackToPeers(peer);
 };
 
-const setCameraButtonState = (enabled) => {
-    const rendered = mediaControlsUI.renderCameraButtonState({ enabled });
-
-    if (!rendered) {
-        console.warn('toggleVideo button not found in DOM.');
-    }
-};
+const setCameraButtonState = () => notifyMediaDock();
 
 const unbindLocalTrackEnded = (type, track) => {
     return localTrackEndedController.unbind(type, track);
@@ -3838,6 +3795,7 @@ const rebindLiveLocalTrackEndedHandlers = () => {
 const setMediaOperationError = (type, result) => {
     if (result?.ok) {
         voiceStatusView.clearMediaError(type);
+        notifyMediaDock();
         voiceMediaDebug.record({
             event: 'ui-error-state',
             mediaType: type,
@@ -3845,8 +3803,14 @@ const setMediaOperationError = (type, result) => {
         });
         return;
     }
-    if (result?.errorType && result.errorType !== 'user-cancelled') {
+    if (result?.errorType === 'user-cancelled') {
+        voiceStatusView.clearMediaError(type);
+        notifyMediaDock();
+        return;
+    }
+    if (result?.errorType) {
         voiceStatusView.setMediaError(type, result.errorType);
+        notifyMediaDock();
         voiceMediaDebug.record({
             errorType: result.errorType,
             event: 'ui-error-state',
@@ -3863,7 +3827,7 @@ const startCamera = async (
     const previousStream = cameraStream;
     const previousTrack = previousStream?.getVideoTracks?.()[0];
     const epoch = voiceSessionRuntime.getSnapshot().epoch;
-    const result = await mediaOperationController.run(
+    const pendingCamera = mediaOperationController.run(
         'camera',
         () =>
             navigator.mediaDevices.getUserMedia({
@@ -3875,6 +3839,8 @@ const startCamera = async (
             state: preserveOldTrack ? 'switching' : 'requesting',
         }
     );
+    notifyMediaDock();
+    const result = await pendingCamera;
     setMediaOperationError('camera', result);
     if (
         result.ok &&
@@ -3898,6 +3864,7 @@ const startCamera = async (
     if (!nextTrack) {
         localMediaTrackStopper.stopStream(nextStream);
         voiceStatusView.setMediaError('camera', 'device-not-found');
+        notifyMediaDock();
         return false;
     }
     if (previousTrack && previousTrack !== nextTrack) {
@@ -3988,7 +3955,6 @@ const restoreCameraAfterScreenShare = (peer) => {
     unbindScreenTrackEnded();
     currentScreenStream = undefined;
     currentScreenShareSession = undefined;
-    updateScreenShareButtonState();
     updateLocalUserCard();
     if (
         !nextVideoTrack &&
@@ -3999,123 +3965,131 @@ const restoreCameraAfterScreenShare = (peer) => {
     }
 };
 
-async function toggleScreenShare(peer) {
-    if (screenShareRequestPending) {
-        return;
+const requestDisplayMedia = navigator.mediaDevices?.getDisplayMedia?.bind(
+    navigator.mediaDevices
+);
+
+const startScreenShare = async (peer, options = {}) => {
+    if (screenShareRequestPending || sharingNow) {
+        return false;
     }
 
-    if (sharingNow === false) {
-        mediaOperationController.setDesired('screen', true);
-        setScreenShareRequestPending(true);
-        const capture = await mediaOperationController.run(
-            'screen',
-            () =>
-                navigator.mediaDevices.getDisplayMedia({
-                    video: true,
-                    audio: true,
-                }),
-            {
-                epoch: voiceSessionRuntime.getSnapshot().epoch,
-                state: 'requesting',
-            }
-        );
-        setScreenShareRequestPending(false);
-        if (!capture.ok) {
-            mediaOperationController.setDesired('screen', false);
-            setMediaOperationError('screen', capture);
-            updateScreenShareButtonState();
-            return;
-        }
-
-        const shareScreen = capture.value;
-        const [track] = shareScreen.getVideoTracks();
-        const screenAudioTracks = shareScreen.getAudioTracks();
-
-        if (!track) {
-            console.warn('Screen sharing did not provide a video track.');
-            localMediaTrackStopper.stopStream(shareScreen);
-            return;
-        }
-
-        currentScreenStream = shareScreen;
-        const screenShareSession = {
-            stream: shareScreen,
-            track,
-            voiceSessionGeneration: localVoiceSessionGeneration,
-        };
-        currentScreenShareSession = screenShareSession;
-        activeVideoTrack = track;
-        sharingNow = true;
-        mediaOperationController.setActive('screen', shareScreen);
-        setLocalVideoStream(getActiveStream());
-        const handleScreenTrackEnded = () => {
-            if (
-                !voiceMediaLifecycle.isCurrentScreenCapture({
-                    currentSession: currentScreenShareSession,
-                    currentStream: currentScreenStream,
-                    session: screenShareSession,
-                    sharing: sharingNow,
-                    stream: shareScreen,
-                })
-            ) {
-                return;
-            }
-
-            console.warn('Screen sharing stopped by the browser.');
-            mediaOperationController.setDesired('screen', false);
-            mediaOperationController.invalidate('screen');
-            emitScreenShareState(
-                false,
-                screenShareSession.voiceSessionGeneration
-            );
-            restoreCameraAfterScreenShare(peer);
-            emitLocalPresenceUpdate();
-        };
-        screenShareSession.endedListener = handleScreenTrackEnded;
-        track.addEventListener('ended', handleScreenTrackEnded);
-
-        sendVideoTrackToPeers(peer, track);
-        if (screenAudioTracks.length > 0) {
-            console.info('[screen] sending screen audio track', {
-                count: screenAudioTracks.length,
+    mediaOperationController.setDesired('screen', true);
+    setScreenShareRequestPending(true);
+    const capture = await mediaOperationController.run(
+        'screen',
+        async () => {
+            const result = await voiceMediaLifecycle.requestScreenCapture({
+                getDisplayMedia: requestDisplayMedia,
+                options,
             });
-        } else {
-            console.info('[screen] no screen audio track was provided');
+            if (result.ok) {
+                return result.stream;
+            }
+
+            if (result.error) {
+                throw result.error;
+            }
+            const error = new Error(result.reason || 'screen-capture-failed');
+            error.name = 'NotSupportedError';
+            throw error;
+        },
+        {
+            epoch: voiceSessionRuntime.getSnapshot().epoch,
+            state: 'requesting',
+        }
+    );
+    setScreenShareRequestPending(false);
+    if (!capture.ok) {
+        mediaOperationController.setDesired('screen', false);
+        setMediaOperationError('screen', capture);
+        return false;
+    }
+
+    const shareScreen = capture.value;
+    const [track] = shareScreen.getVideoTracks();
+    const screenAudioTracks = shareScreen.getAudioTracks();
+
+    if (!track) {
+        console.warn('Screen sharing did not provide a video track.');
+        mediaOperationController.setDesired('screen', false);
+        mediaOperationController.invalidate('screen', { stopValue: true });
+        voiceStatusView.setMediaError('screen', 'unknown');
+        notifyMediaDock();
+        return false;
+    }
+
+    setMediaOperationError('screen', capture);
+    currentScreenStream = shareScreen;
+    const screenShareSession = {
+        stream: shareScreen,
+        track,
+        voiceSessionGeneration: localVoiceSessionGeneration,
+    };
+    currentScreenShareSession = screenShareSession;
+    activeVideoTrack = track;
+    sharingNow = true;
+    mediaOperationController.setActive('screen', shareScreen);
+    setLocalVideoStream(getActiveStream());
+    const handleScreenTrackEnded = () => {
+        if (
+            !voiceMediaLifecycle.isCurrentScreenCapture({
+                currentSession: currentScreenShareSession,
+                currentStream: currentScreenStream,
+                session: screenShareSession,
+                sharing: sharingNow,
+                stream: shareScreen,
+            })
+        ) {
+            return;
         }
 
-        emitScreenShareState(true, screenShareSession.voiceSessionGeneration);
-        emitLocalPresenceUpdate();
-        updateScreenShareButtonState();
-        updateLocalUserCard();
-    } else {
+        console.warn('Screen sharing stopped by the browser.');
         mediaOperationController.setDesired('screen', false);
         mediaOperationController.invalidate('screen');
-        const screenShareSession = currentScreenShareSession;
-        stopCurrentScreenStream();
-        emitScreenShareState(false, screenShareSession?.voiceSessionGeneration);
+        emitScreenShareState(false, screenShareSession.voiceSessionGeneration);
         restoreCameraAfterScreenShare(peer);
         emitLocalPresenceUpdate();
-        // toggleVideo()
+    };
+    screenShareSession.endedListener = handleScreenTrackEnded;
+    track.addEventListener('ended', handleScreenTrackEnded);
+
+    sendVideoTrackToPeers(peer, track);
+    if (screenAudioTracks.length > 0) {
+        console.info('[screen] sending screen audio track', {
+            count: screenAudioTracks.length,
+        });
+    } else {
+        console.info('[screen] no screen audio track was provided');
     }
-}
+
+    emitScreenShareState(true, screenShareSession.voiceSessionGeneration);
+    emitLocalPresenceUpdate();
+    updateLocalUserCard();
+    return true;
+};
+
+const stopScreenShare = (peer) => {
+    if (screenShareRequestPending || !sharingNow) {
+        return false;
+    }
+
+    mediaOperationController.setDesired('screen', false);
+    mediaOperationController.invalidate('screen');
+    const screenShareSession = currentScreenShareSession;
+    stopCurrentScreenStream();
+    emitScreenShareState(false, screenShareSession?.voiceSessionGeneration);
+    restoreCameraAfterScreenShare(peer);
+    emitLocalPresenceUpdate();
+    return true;
+};
 
 // ----------------------------------------------------------------------------------------
 
 //muting my audio
-const setAudioButtonState = (enabled) => {
-    const rendered = mediaControlsUI.renderMicButtonState({ enabled });
+const setAudioButtonState = () => notifyMediaDock();
 
-    if (!rendered) {
-        console.warn('toggleAudio button not found in DOM.');
-    }
-};
-
-const setAudioButtonNoMic = () => {
-    mediaControlsUI.renderMicButtonState({
-        enabled: false,
-        unavailable: true,
-    });
-};
+const setAudioButtonNoMic = () => notifyMediaDock();
 
 const toggleAudio = (myVideoStream) => {
     const audioTrack = myVideoStream?.getAudioTracks()[0];
@@ -4153,7 +4127,7 @@ const restartLocalMicrophone = async (
     const wasMuted = Boolean(previousAudioTrack && !previousAudioTrack.enabled);
     const previousStream = myVideoStream;
     const epoch = voiceSessionRuntime.getSnapshot().epoch;
-    const rawResult = await mediaOperationController.run(
+    const pendingMicrophone = mediaOperationController.run(
         'microphone',
         () =>
             requestAudioStream({
@@ -4166,6 +4140,8 @@ const restartLocalMicrophone = async (
             state: preserveOldTrack ? 'switching' : 'requesting',
         }
     );
+    notifyMediaDock();
+    const rawResult = await pendingMicrophone;
     setMediaOperationError('microphone', rawResult);
     if (
         rawResult.ok &&
@@ -4329,11 +4305,13 @@ async function handleMissingMediaDevice(type) {
     if (type === 'output') {
         selectedOutputDeviceId = 'default';
         voiceStatusView.setMediaError('output', 'device-not-found');
+        notifyMediaDock();
         await applyOutputSettingsToRemoteMedia();
         return true;
     }
     if (type === 'mic') {
         selectedInputDeviceId = 'default';
+        notifyMediaDock();
         if (
             mediaOperationController.getSnapshot().desired.microphone &&
             currentPeer &&
@@ -4348,6 +4326,7 @@ async function handleMissingMediaDevice(type) {
     }
     if (type === 'camera') {
         selectedCameraDeviceId = 'default';
+        notifyMediaDock();
         if (
             mediaOperationController.getSnapshot().desired.camera &&
             currentPeer &&
@@ -4481,17 +4460,9 @@ const createPeerInstance = (roomToJoin, { recreate = false } = {}) => {
 
         selectedVoiceRoomId = roomToJoin;
 
-        document.getElementById('toggleAudio').onclick = () =>
-            handleMicClick(currentPeer);
-        document.getElementById('toggleVideo').onclick = () =>
-            toggleCamera(currentPeer);
-        document.getElementById('shareScreen').onclick = () =>
-            toggleScreenShare(currentPeer);
         bindPeerCallHandler(peer);
 
-        showCallControls();
-        updateOutputButtonState();
-        updateScreenShareButtonState();
+        notifyMediaDock();
         syncRoomCompositionState();
         startCallTimer();
 
@@ -4601,11 +4572,12 @@ const leaveVoiceSession = (reason = 'user-leave') => {
     videoGrid.replaceChildren();
     updateMobileTileView();
     updateMobileRoomState();
-    hideCallControls();
+    notifyMediaDock();
     syncRoomCompositionState();
     if (nextRoomId) {
         joinVoiceChannel(nextRoomId);
     }
+    return true;
 };
 
 const joinVoiceChannel = (roomId) => {
@@ -4637,11 +4609,9 @@ const joinVoiceChannel = (roomId) => {
     selectedVoiceRoomId = roomId;
     setAudioButtonNoMic();
     setCameraButtonState(false);
-    showCallControls();
+    notifyMediaDock();
     syncRoomCompositionState();
     createPeerInstance(roomId);
-    document.getElementById('destroyPeer').onclick = () =>
-        leaveVoiceSession('user-leave');
     return true;
 };
 
@@ -4679,60 +4649,13 @@ window.addEventListener('popstate', () => {
     }
 });
 
-outputVolumeUI.init({
-    getState: () => ({ muted: outputMuted, volume: outputVolume }),
-    onToggleMuted: () => {
-        outputMuted = !outputMuted;
-        applyOutputSettingsToRemoteMedia();
-    },
-    onVolumeInput: (nextVolume) => {
-        outputVolume = nextVolume;
-        applyOutputSettingsToRemoteMedia();
-    },
-    onVolumeCommit: (nextVolume) => {
-        outputVolume = nextVolume;
-        applyOutputSettingsToRemoteMedia();
-    },
-});
-
-mediaControlsUI.bindMediaDevicePopovers({
-    isMobile: isMobileLayout,
-    onOpen: refreshMediaDeviceLists,
-});
-refreshMediaDeviceLists();
-navigator.mediaDevices?.addEventListener?.(
-    'devicechange',
-    voiceDeviceRuntime.handleDeviceChange
-);
-
 remoteVolumeUI.init();
-
-noiseSettingsControls = noiseSettingsUI.init({
-    refs: {
-        noiseToggle: byId('noiseToggle'),
-        noiseStatusText: byId('noiseStatusText'),
-        aiNoiseToggle: byId('aiNoiseToggle'),
-        aiNoiseStatusText: byId('aiNoiseStatusText'),
-        micGainSlider: byId('micGainSlider'),
-        micGainValue: byId('micGainValue'),
-        restartNoticePanel: callControls?.querySelector(
-            '.media-dock-activity-row'
-        ),
-    },
-    isAiExperimentSupported,
-    getNoiseMode: () => noiseMode,
-    onMicGainChange: (micGainPercent) => {
-        if (noiseGainNode) {
-            noiseGainNode.gain.value = Math.max(0.001, micGainPercent / 100);
-        }
-    },
-});
 
 fullscreenControls.bindFullscreenChange();
 
 mobileBackToChannelsBtn?.addEventListener('click', () => {
     if (currentPeer && !currentPeer.destroyed) {
-        byId('destroyPeer')?.click();
+        mediaDockAdapter?.hangUp();
     }
 
     setMobileRoomView(false);
@@ -4761,7 +4684,7 @@ const handleNetworkOffline = () => {
     if (voiceSessionRuntime.socketDisconnected('network-offline')) {
         rebindLiveLocalTrackEndedHandlers();
     }
-    voiceStatusView.setConnection('offline');
+    notifyMediaDock();
     voiceMediaDebug.record({ event: 'network-offline' });
 };
 
@@ -4774,6 +4697,7 @@ const handleNetworkOnline = () => {
     );
     peerRetryController.setOnline(true);
     voiceMediaDebug.record({ event: 'network-online' });
+    notifyMediaDock();
     if (!socket?.connected) {
         socket?.connect?.();
     }
@@ -4866,16 +4790,70 @@ chatPanelRuntime = chatPanelRuntimeApi.createChatPanelRuntime({
 chatPanelRuntime.init();
 chatPanelRuntime.setRoom(viewingRoomId);
 
-syncRoomCompositionState();
-updateOutputButtonState();
-updateScreenShareButtonState();
-syncNoiseSettingsUI();
-enablePageCursorSharing();
-
-copyLinkUI.bindCopyButton({
-    button: copyRoomLinkBtn,
-    getLink: () => getChannelUrl(getCopyRoomId()),
-    onError: (error) => {
-        console.warn('Could not copy channel link.', error);
+mediaDockAdapter = mediaDockAdapterApi.createMediaDockAdapter({
+    actions: {
+        copyRoomLink: () =>
+            copyLinkUI.writeClipboardText(getChannelUrl(getCopyRoomId())),
+        hangUp: () => leaveVoiceSession('media-dock-hangup'),
+        joinVoice: () => joinVoiceChannel(selectedVoiceRoomId || viewingRoomId),
+        leaveVoice: () => leaveVoiceSession('media-dock-leave'),
+        refreshDevices: () => refreshMediaDeviceLists(),
+        selectCamera: selectCameraDevice,
+        selectMicrophone: selectInputDevice,
+        selectOutput: selectOutputDevice,
+        setMicrophoneGain: (micGainPercent) => {
+            const nextGain = noiseSettingsUI.setMicGain(micGainPercent, {
+                syncUI: false,
+                onMicGainChange: (value) => {
+                    if (noiseGainNode) {
+                        noiseGainNode.gain.value = Math.max(0.001, value / 100);
+                    }
+                },
+            });
+            notifyMediaDock();
+            return nextGain;
+        },
+        setOutputMuted: (muted) => {
+            outputMuted = Boolean(muted);
+            notifyMediaDock();
+            return applyOutputSettingsToRemoteMedia();
+        },
+        setOutputVolume: (volume) => {
+            outputVolume = Math.max(0, Math.min(1, Number(volume) || 0));
+            notifyMediaDock();
+            return applyOutputSettingsToRemoteMedia();
+        },
+        startScreenShare: (options) => startScreenShare(currentPeer, options),
+        stopScreenShare: () => stopScreenShare(currentPeer),
+        toggleAiNoiseSuppression: () => {
+            noiseSettingsUI.setAiExperimentEnabled(
+                !noiseSettingsUI.getAiExperimentEnabled()
+            );
+            notifyMediaDock();
+            return true;
+        },
+        toggleCamera: () => toggleCamera(currentPeer),
+        toggleMicrophone: () => handleMicClick(currentPeer),
+        toggleNoiseSuppression: () => {
+            noiseSettingsUI.setNoiseSuppressionEnabled(
+                !noiseSettingsUI.getNoiseSuppressionEnabled()
+            );
+            notifyMediaDock();
+            return true;
+        },
     },
+    getSnapshot: getMediaDockSnapshot,
 });
+mediaDockRuntime = mediaDockRuntimeApi.createMediaDockRuntime({
+    root: mediaDockRoot,
+    adapter: mediaDockAdapter,
+});
+mediaDockRuntime.init();
+navigator.mediaDevices?.addEventListener?.(
+    'devicechange',
+    voiceDeviceRuntime.handleDeviceChange
+);
+void refreshMediaDeviceLists();
+
+syncRoomCompositionState();
+enablePageCursorSharing();

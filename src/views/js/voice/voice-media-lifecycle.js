@@ -1,6 +1,84 @@
 (function exposeVoiceMediaLifecycle(global) {
     'use strict';
 
+    const SCREEN_SHARE_DEFAULTS = Object.freeze({
+        frameRate: 30,
+        resolutionPreset: '1080p',
+    });
+    const SCREEN_SHARE_FRAME_RATES = Object.freeze([15, 30, 60]);
+    const SCREEN_SHARE_RESOLUTIONS = Object.freeze({
+        '720p': { height: 720, width: 1280 },
+        '1080p': { height: 1080, width: 1920 },
+        '1440p': { height: 1440, width: 2560 },
+    });
+    const SCREEN_SHARE_RESOLUTION_PRESETS = Object.freeze([
+        'auto',
+        ...Object.keys(SCREEN_SHARE_RESOLUTIONS),
+        'original',
+    ]);
+
+    const normalizeScreenShareOptions = (options = {}) => {
+        const requestedFrameRate = Number(options.frameRate);
+        const requestedResolution = options.resolutionPreset;
+        return {
+            frameRate: SCREEN_SHARE_FRAME_RATES.includes(requestedFrameRate)
+                ? requestedFrameRate
+                : SCREEN_SHARE_DEFAULTS.frameRate,
+            resolutionPreset: SCREEN_SHARE_RESOLUTION_PRESETS.includes(
+                requestedResolution
+            )
+                ? requestedResolution
+                : SCREEN_SHARE_DEFAULTS.resolutionPreset,
+        };
+    };
+
+    const buildScreenCaptureConstraints = (options = {}) => {
+        const { frameRate, resolutionPreset } =
+            normalizeScreenShareOptions(options);
+        const frameRateConstraint = {
+            ideal: frameRate,
+            max: frameRate,
+        };
+
+        if (resolutionPreset === 'original') {
+            return {
+                audio: true,
+                video: {
+                    frameRate: frameRateConstraint,
+                },
+            };
+        }
+
+        if (resolutionPreset === 'auto') {
+            return {
+                audio: true,
+                video: {
+                    frameRate: frameRateConstraint,
+                    height: { ideal: 1080 },
+                    width: { ideal: 1920 },
+                },
+            };
+        }
+
+        const resolution =
+            SCREEN_SHARE_RESOLUTIONS[resolutionPreset] ||
+            SCREEN_SHARE_RESOLUTIONS[SCREEN_SHARE_DEFAULTS.resolutionPreset];
+        return {
+            audio: true,
+            video: {
+                frameRate: frameRateConstraint,
+                height: {
+                    ideal: resolution.height,
+                    max: resolution.height,
+                },
+                width: {
+                    ideal: resolution.width,
+                    max: resolution.width,
+                },
+            },
+        };
+    };
+
     const createMediaSnapshot = ({
         MediaStreamCtor = global.MediaStream,
         microphoneStream,
@@ -113,10 +191,11 @@
     };
 
     const requestScreenCapture = async ({
-        constraints = { audio: true, video: true },
+        constraints,
         getDisplayMedia,
         onPendingChange,
         onWarning,
+        options,
     } = {}) => {
         if (typeof getDisplayMedia !== 'function') {
             return { ok: false, reason: 'screen-capture-unavailable' };
@@ -124,7 +203,9 @@
 
         onPendingChange?.(true);
         try {
-            const stream = await getDisplayMedia(constraints);
+            const stream = await getDisplayMedia(
+                constraints || buildScreenCaptureConstraints(options)
+            );
             return stream
                 ? { ok: true, stream }
                 : { ok: false, reason: 'screen-capture-empty' };
@@ -207,7 +288,11 @@
     };
 
     global.VoiceMediaLifecycle = {
+        SCREEN_SHARE_DEFAULTS,
+        SCREEN_SHARE_FRAME_RATES,
+        SCREEN_SHARE_RESOLUTION_PRESETS,
         attachAndPlayMedia,
+        buildScreenCaptureConstraints,
         clearMediaElement,
         createMediaSnapshot,
         createPageTeardown,
@@ -226,6 +311,7 @@
                     currentStream === stream
             ),
         requestScreenCapture,
+        normalizeScreenShareOptions,
         shouldTeardownPage: (event) => event?.persisted !== true,
     };
 })(window);
