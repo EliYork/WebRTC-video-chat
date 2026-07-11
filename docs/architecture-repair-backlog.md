@@ -21,3 +21,5 @@
 | CSS 重复规则、`!important` 和 z-index 层级未统一 | 未开始                       | 不进行全量视觉重写。                                                                                                                                       |
 | 第三方 CDN、自托管资源和安全 header 基线         | 未开始                       | 公开部署前处理。                                                                                                                                           |
 | 文档、格式化门禁和死页面漂移                     | 未开始                       | 作为独立 housekeeping 任务。                                                                                                                               |
+
+- 屏幕共享右上角显示实际接收分辨率和帧率：代码完成，待浏览器复测。实现仅显示 screen-sharing 远端 live video 的观看者实际接收质量；自动化覆盖标准/非标准分辨率、fps 字段/差值/平滑、camera/audio-only/ended/cleanup/call replacement/多人独立 timer/异常降级。

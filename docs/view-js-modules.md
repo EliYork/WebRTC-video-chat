@@ -346,3 +346,9 @@ New modules should follow these rules:
   `page-layout-component-runtime.js`, and `page-layout-store-runtime.js`
   migrations intentionally deferred that contract sync because they were large
   runtime moves, not test closeouts.
+
+### Screen share media quality overlay
+
+`voice/voice-media-quality-runtime.js` owns the screen-share quality sampling loop. It reads the current incoming call from the peer registry's `getQualitySource(peerId)` interface, unwraps the active PeerJS `MediaConnection` peer connection inside the runtime only, and samples `getStats()` for the current live remote video track. The label describes the viewer's actual received/decoded quality, not the sharer's requested capture settings. Width and height prefer inbound-rtp `framesWidth`/`framesHeight`, then the displayed video element's intrinsic `videoWidth`/`videoHeight`, then live track settings; CSS layout size is never used. FPS prefers inbound-rtp `framesPerSecond`, then frame counter deltas from `framesDecoded`/`framesReceived`, rounded after a three-sample smoothing window.
+
+`voice/voice-media-quality-view.js` owns only the right-corner read-only DOM pill. It does not access PeerJS, registry internals, or timers, uses `aria-hidden="true"`, and renders nothing for camera, audio-only, stopped, stale, ended, or stats-unavailable states.
