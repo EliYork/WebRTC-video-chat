@@ -11,7 +11,7 @@
 - 五个服务端固定频道：`lobby`、`game`、`project`、`screen`、`idle`；访问 `/` 会跳转到 `/room/lobby`。
 - 浏览频道与加入语音相互独立：单击切换所查看的频道，双击频道请求加入对应语音房间。
 - 加入语音时优先请求麦克风；摄像头由用户按需开启。
-- 支持麦克风静音、摄像头、屏幕画面与系统音频共享、输出设备/音量控制、远端音量和全屏观看；开始屏幕共享前可选择自动、720p、1080p、1440p 或原始分辨率，以及 15/30/60 fps 目标值。
+- 支持麦克风静音、摄像头、屏幕画面与系统音频共享、输出设备/音量控制、远端音量和全屏观看；参与者麦克风与屏幕共享系统音频可分别调节音量和静音，本地共享 Tile 也可隐藏预览而不停止发送。开始屏幕共享前可选择自动、720p、1080p、1440p 或原始分辨率，以及 15/30/60 fps 目标值。
 - 同频道文字聊天；服务端在内存中保存每个频道最近 50 条消息，每条消息最多 500 个字符。
 - 同频道在线成员、麦克风/摄像头/屏幕共享状态和全页面共享鼠标。
 - 浏览、聊天、共享鼠标和语音均按频道隔离；服务端以 Socket 所拥有的房间状态校验实时事件。
@@ -165,9 +165,9 @@ npx prettier README.md README.en.md --check
 git diff --check
 ```
 
-测试覆盖 voice 协议/协商、peer registry、会话恢复、媒体质量、服务端信任边界与 disconnect 生命周期、view/chat room 生命周期、页面布局 identity，以及 Chat Panel、Sidebar、Media Dock 生命周期和屏幕共享目标约束。它们是 Node 模型与合同测试，不是浏览器 E2E。
+测试覆盖 voice 协议/协商、peer registry、会话恢复、媒体质量、服务端信任边界与 disconnect 生命周期、view/chat room 生命周期、页面布局 identity，以及 Chat Panel、Sidebar、Media Dock 生命周期、屏幕共享独立音量和本地预览显隐。它们是 Node 模型与合同测试，不是浏览器 E2E。
 
-真实验收至少应使用两个独立浏览器上下文，检查双向麦克风、后开媒体、摄像头与屏幕切换、系统音频、加入/离开/刷新、断网重连、权限拒绝、设备拔插、频道隔离、聊天、共享鼠标和布局恢复。
+真实验收至少应使用两个独立浏览器上下文，检查双向麦克风、后开媒体、摄像头与屏幕切换、系统音频、麦克风与共享音量独立性、本地预览隐藏/恢复、加入/离开/刷新、断网重连、权限拒绝、设备拔插、频道隔离、聊天、共享鼠标和布局恢复。
 
 ## 调试
 
@@ -195,7 +195,7 @@ exportVoiceMediaDebug();
 - presence、频道聊天历史和相关服务端状态只存在内存中，服务重启即丢失。
 - 线上 Socket.IO WebSocket 曾出现 `Invalid frame header`，业务端可回退 polling，但代理/Upgrade 根因尚未完成独立诊断。
 - 没有真实浏览器自动 E2E；当前自动化主要是 Node 行为、模型和源码合同测试。
-- Voice Session Resilience、权限/设备错误恢复、Chat Panel、Sidebar、Media Dock、屏幕共享选择和质量标签仍需要更多真实浏览器、弱网与设备拔插复测。
+- Voice Session Resilience、权限/设备错误恢复、Chat Panel、Sidebar、Media Dock，以及屏幕共享选择、独立音量、本地预览显隐和质量标签仍需要更多真实浏览器、弱网与设备拔插复测。
 - Mobile Nav 尚未正式组件化；Stage / Video Grid 和 script loader/bootstrap 也仍待收敛。
 - 生产依赖仍有待单独处理的 high/moderate 漏洞，升级前后需要完整回归。
 - 第三方 CDN、自托管资源策略、安全 header、CSS/z-index、旧布局组件和重复 popover owner 仍待整理。
