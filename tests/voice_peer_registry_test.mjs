@@ -26,12 +26,15 @@ vm.runInNewContext(registrySource, { window: registryWindow });
 const { createRegistry } = registryWindow.VoicePeerRegistry;
 
 const createFixture = (id, network) => {
+    const attachments = [];
     const cleanups = [];
     const debug = [];
     const tiles = new Map();
     const peer = network.addPeer(id);
     const registry = createRegistry({
-        attachRemoteStream: ({ peerId, stream }) => {
+        attachRemoteStream: (attachment) => {
+            const { peerId, stream } = attachment;
+            attachments.push(attachment);
             const tile = tiles.get(peerId) || { peerId, srcObject: null };
             tile.srcObject = stream;
             tiles.set(peerId, tile);
@@ -55,15 +58,16 @@ const createFixture = (id, network) => {
         removeRemoteTile: ({ peerId }) => tiles.delete(peerId),
     });
     peer.onCall = (call) => registry.answerCall({ call });
-    return { cleanups, debug, peer, registry, tiles };
+    return { attachments, cleanups, debug, peer, registry, tiles };
 };
 
 const audio = (id) => new StrictTrack('audio', id);
 const video = (id) => new StrictTrack('video', id);
 const stream = (...tracks) => new StrictStream(tracks);
-const publish = (fixture, peerId, generation, mediaStream) =>
+const publish = (fixture, peerId, generation, mediaStream, options = {}) =>
     fixture.registry.callPeer({
         generation,
+        options,
         peer: fixture.peer,
         peerId,
         stream: mediaStream,
@@ -92,6 +96,31 @@ test('incoming send calls are answered once without a reverse local stream', () 
     assert.equal(incoming.answerStream, undefined);
     assert.equal(b.registry.getSnapshot('A').incomingCall, incoming);
     assert.equal(b.registry.getSnapshot('A').outgoingCall, undefined);
+});
+
+test('current incoming generation and track-role metadata reach the playback owner', () => {
+    const network = new StrictMediaNetwork();
+    const a = createFixture('A', network);
+    const b = createFixture('B', network);
+    const trackRoles = [
+        { role: 'participant-audio', trackId: 'mic' },
+        { role: 'screen-share-audio', trackId: 'screen' },
+    ];
+
+    publish(
+        a,
+        'B',
+        3,
+        stream(audio('mic'), audio('screen'), video('screen-video')),
+        { metadata: { voiceMediaTrackRoles: trackRoles } }
+    );
+    network.flush();
+
+    assert.equal(b.attachments.at(-1).generation, 3);
+    assert.deepEqual(
+        b.attachments.at(-1).metadata.voiceMediaTrackRoles,
+        trackRoles
+    );
 });
 
 test('duplicate and stale outgoing generations cannot create duplicate calls', () => {

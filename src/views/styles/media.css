@@ -99,6 +99,37 @@
     text-align: right;
 }
 
+.peer-volume-mute {
+    width: 100%;
+    margin-top: 8px;
+    padding: 7px 9px;
+    border: 1px solid rgba(216, 111, 154, 0.24);
+    border-radius: 7px;
+    background-color: #fff8fc;
+    color: #7f5369;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 700;
+    text-align: left;
+}
+
+.peer-volume-mute[aria-pressed='true'] {
+    border-color: rgba(216, 111, 154, 0.46);
+    background-color: #fbe8f1;
+}
+
+.peer-volume-mute:disabled,
+.peer-volume-popover input:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
+.peer-volume-empty {
+    margin: 8px 0 0;
+    color: var(--muted);
+    font-size: 12px;
+}
+
 .voice-placeholder {
     display: grid;
     width: 100%;

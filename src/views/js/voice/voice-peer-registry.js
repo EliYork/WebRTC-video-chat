@@ -173,7 +173,7 @@
             notifyState(entry, reason);
         };
 
-        const bindRemoteStream = (entry, stream, generation) => {
+        const bindRemoteStream = (entry, stream, generation, metadata) => {
             const isCurrent = () =>
                 entries.get(entry.peerId) === entry &&
                 entry.remoteStream === stream &&
@@ -200,6 +200,8 @@
 
                     entry.tile =
                         attachRemoteStream?.({
+                            generation,
+                            metadata,
                             peerId: entry.peerId,
                             stream,
                             tile: entry.tile,
@@ -248,9 +250,16 @@
                 entry.remoteStream = nextStream;
                 entry.lastIncomingStream = incomingStream;
                 record.state = 'active';
-                bindRemoteStream(entry, nextStream, record.generation);
+                bindRemoteStream(
+                    entry,
+                    nextStream,
+                    record.generation,
+                    record.call?.metadata
+                );
                 entry.tile =
                     attachRemoteStream?.({
+                        generation: record.generation,
+                        metadata: record.call?.metadata,
                         peerId: entry.peerId,
                         stream: nextStream,
                         tile: entry.tile,

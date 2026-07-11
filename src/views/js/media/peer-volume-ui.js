@@ -4,6 +4,7 @@
     const { setText } = global.VoiceViewUtils;
     const popoverSelector = '.peer-volume-popover';
     let rootDocument = global.document;
+    let documentBinding;
 
     const getPopover = () => rootDocument.querySelector(popoverSelector);
 
@@ -39,7 +40,17 @@
         popover.style.top = `${top}px`;
     };
 
-    const createPopover = ({ currentVolume = 100, onVolumeInput } = {}) => {
+    const createPopover = ({
+        currentVolume = 100,
+        disabled = false,
+        emptyText = '',
+        iconClass = 'fas fa-microphone',
+        muteLabel = '',
+        muted = false,
+        onMutedChange,
+        onVolumeInput,
+        titleText: requestedTitle = '设置用户音量',
+    } = {}) => {
         const popover = rootDocument.createElement('div');
         const title = rootDocument.createElement('div');
         const titleText = rootDocument.createElement('span');
@@ -50,12 +61,13 @@
 
         popover.className = 'peer-volume-popover';
         title.className = 'peer-volume-title';
-        titleText.textContent = '设置用户音量';
-        icon.className = 'fas fa-microphone';
+        titleText.textContent = requestedTitle;
+        icon.className = iconClass;
         range.type = 'range';
         range.min = '0';
         range.max = '100';
         range.step = '5';
+        range.disabled = disabled;
         value.className = 'peer-volume-value';
 
         syncVolumeLabel(range, value, volumePercent);
@@ -73,13 +85,49 @@
         title.append(titleText, icon);
         popover.append(title, range, value);
 
+        if (muteLabel) {
+            const muteButton = rootDocument.createElement('button');
+            const syncMuted = (nextMuted) => {
+                muted = Boolean(nextMuted);
+                muteButton.textContent = `${muteLabel}：${muted ? '开' : '关'}`;
+                muteButton.setAttribute('aria-pressed', String(muted));
+            };
+
+            muteButton.className = 'peer-volume-mute';
+            muteButton.type = 'button';
+            muteButton.disabled = disabled;
+            syncMuted(muted);
+            muteButton.addEventListener('click', () => {
+                if (muteButton.disabled) {
+                    return;
+                }
+                syncMuted(!muted);
+                onMutedChange?.(muted);
+            });
+            popover.append(muteButton);
+        }
+
+        if (disabled && emptyText) {
+            const empty = rootDocument.createElement('p');
+            empty.className = 'peer-volume-empty';
+            empty.textContent = emptyText;
+            popover.append(empty);
+        }
+
         return popover;
     };
 
     const openPopover = ({
         event,
         currentVolume = 100,
+        disabled = false,
+        emptyText = '',
+        iconClass,
+        muteLabel,
+        muted = false,
+        onMutedChange,
         onVolumeInput,
+        titleText,
     } = {}) => {
         if (!event) {
             return null;
@@ -89,7 +137,14 @@
 
         const popover = createPopover({
             currentVolume,
+            disabled,
+            emptyText,
+            iconClass,
+            muteLabel,
+            muted,
+            onMutedChange,
             onVolumeInput,
+            titleText,
         });
 
         rootDocument.body.append(popover);
@@ -99,28 +154,47 @@
     };
 
     const init = ({ root = global.document } = {}) => {
-        rootDocument = root;
+        if (documentBinding?.root === root) {
+            return documentBinding;
+        }
 
-        rootDocument.addEventListener('click', (event) => {
+        documentBinding?.destroy();
+        rootDocument = root;
+        const handleDocumentClick = (event) => {
             if (!event.target.closest(popoverSelector)) {
                 closePopover();
             }
-        });
-
-        rootDocument.addEventListener('keydown', (event) => {
+        };
+        const handleDocumentKeydown = (event) => {
             if (event.key === 'Escape') {
                 closePopover();
             }
-        });
-
-        return {
+        };
+        const binding = {
+            root,
             closePopover,
+            destroy: () => {
+                root.removeEventListener('click', handleDocumentClick);
+                root.removeEventListener('keydown', handleDocumentKeydown);
+                closePopover();
+                if (documentBinding === binding) {
+                    documentBinding = undefined;
+                }
+            },
             openPopover,
         };
+
+        root.addEventListener('click', handleDocumentClick);
+        root.addEventListener('keydown', handleDocumentKeydown);
+        documentBinding = binding;
+        return binding;
     };
+
+    const destroy = () => documentBinding?.destroy();
 
     global.VoiceRemoteVolumeUI = {
         closePopover,
+        destroy,
         init,
         openPopover,
         syncVolumeLabel,

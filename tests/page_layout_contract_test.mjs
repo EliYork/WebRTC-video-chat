@@ -187,6 +187,56 @@ const MODULE_SCRIPTS = [
             'joinVoiceChannel',
             'setupCallStreamHandler',
         ],
+        requiredExports: [
+            [/openPopover/, 'remote volume UI must expose one shared popover'],
+            [/destroy/, 'remote volume UI must expose listener teardown'],
+            [
+                /muteLabel/,
+                'remote volume UI must support explicit target mute copy',
+            ],
+        ],
+    },
+    {
+        path: '/js/media/screen-share-volume-controller.js',
+        sourcePath: '../src/views/js/media/screen-share-volume-controller.js',
+        namespace: 'VoiceScreenShareVolumeController',
+        mustLoadBeforeMain: true,
+        dependsOnViewUtils: false,
+        forbiddenKeywords: [
+            'Peer',
+            'socket.emit',
+            'getUserMedia',
+            'getDisplayMedia',
+            'replaceTrack',
+            'track.enabled',
+            'saveLayoutToStorage',
+            'cloneNode',
+            'innerHTML',
+        ],
+        requiredExports: [
+            [
+                /SCREEN_AUDIO_ROLE/,
+                'screen volume controller must expose its target role',
+            ],
+            [
+                /createController/,
+                'screen volume controller must expose its state owner',
+            ],
+            [
+                /buildTrackRoles/,
+                'screen volume controller must map sender audio roles',
+            ],
+            [
+                /bindSource/,
+                'screen volume controller must bind current media sources',
+            ],
+            [
+                /setVolume/,
+                'screen volume controller must own independent volume',
+            ],
+            [/setMuted/, 'screen volume controller must own independent mute'],
+            [/destroy/, 'screen volume controller must expose cleanup'],
+        ],
     },
     {
         path: '/js/shared/copy-link-ui.js',
@@ -1845,6 +1895,10 @@ const MODULE_SCRIPTS = [
                 'voice call protocol must expose directional generation metadata',
             ],
             [
+                /MEDIA_TRACK_ROLES_METADATA/,
+                'voice call protocol must expose stable audio role metadata',
+            ],
+            [
                 /createMediaDebugLog/,
                 'voice call protocol must expose bounded opt-in diagnostics',
             ],
@@ -2612,6 +2666,65 @@ assertSourceContains(script, 'remote live-media presentation', [
         'screen stop must restore camera or publish no-video even without a microphone stream',
     ],
 ]);
+assertSourceContains(script, 'screen-share volume separation contract', [
+    [
+        /MEDIA_TRACK_ROLES_METADATA[\s\S]*?buildTrackRoles/,
+        'outgoing call metadata must distinguish microphone and screen audio tracks',
+    ],
+    [
+        /attachRemoteStream: \(\{ generation, metadata, peerId, stream \}\)[\s\S]*?trackRoles:/,
+        'remote presentation must receive the owned call generation and track roles',
+    ],
+    [
+        /screenShareVolumeController\.bindSource\(\{[\s\S]*?ownerKey: videoId,[\s\S]*?sourceStream: stream,[\s\S]*?trackRoles/,
+        'screen audio must bind through the dedicated playback controller',
+    ],
+    [
+        /stream: playbackStream/,
+        'participant media element must receive the screen-audio-free playback stream',
+    ],
+    [
+        /titleText: '屏幕共享音量'/,
+        'screen-share context menu must use explicit volume copy',
+    ],
+    [
+        /muteLabel: '共享静音'/,
+        'screen-share context menu must expose independent mute',
+    ],
+    [
+        /disabled: !snapshot\.hasAudio[\s\S]*?emptyText: '无共享音频'/,
+        'screen-share context menu must not fall back to participant audio',
+    ],
+    [
+        /screenShareVolumeController\.cleanup\(peerId\)[\s\S]*?vidElement\.remove\(\)/,
+        'tile cleanup must release screen audio element ownership',
+    ],
+    [
+        /beforeStopMedia:[\s\S]*?remoteVolumeUI\.destroy\(\)[\s\S]*?screenShareVolumeController\.destroy\(\)/,
+        'page teardown must release popover listeners and screen audio references',
+    ],
+]);
+const screenVolumeControllerSource = getModuleSource(
+    '/js/media/screen-share-volume-controller.js'
+);
+assertSourceContains(
+    screenVolumeControllerSource,
+    'screen-share source replacement contract',
+    [
+        [
+            /normalizedGeneration < current\.generation/,
+            'older screen sources must not replace the current binding',
+        ],
+        [
+            /Number\(generation\) !== binding\.generation/,
+            'stale popover operations must not update a replacement element',
+        ],
+        [
+            /clearMediaElement\?\.\(binding\.element\)[\s\S]*?binding\.element\.remove/,
+            'source cleanup must clear and remove the old playback element',
+        ],
+    ]
+);
 assertSourceContains(pageLayoutStorage, 'page-layout-storage.js', [
     [
         /knownTypes\.has\(type\)/,

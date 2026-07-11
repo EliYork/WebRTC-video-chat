@@ -16,6 +16,13 @@ vm.runInNewContext(protocolSource, {
 });
 const { createMediaDebugLog } = protocolWindow.VoiceCallProtocol;
 
+test('client protocol exposes stable media track-role metadata', () => {
+    assert.equal(
+        protocolWindow.VoiceCallProtocol.MEDIA_TRACK_ROLES_METADATA,
+        'voiceMediaTrackRoles'
+    );
+});
+
 class FakeSocket {
     constructor(io, id) {
         this.data = {};

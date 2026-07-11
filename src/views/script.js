@@ -24,6 +24,7 @@ const copyLinkUI = window.VoiceCopyLinkUI;
 const outputVolumeState = window.VoiceOutputVolumeState;
 const mediaDockAdapterApi = window.VoiceMediaDockAdapter;
 const mediaDockRuntimeApi = window.VoiceMediaDockRuntime;
+const screenShareVolumeControllerApi = window.VoiceScreenShareVolumeController;
 const fullscreenControls = window.VoiceFullscreenControls;
 const voiceJoinOverlayUI = window.VoiceJoinOverlayUI;
 const layoutEditUI = window.PageLayoutEditUI;
@@ -248,9 +249,33 @@ const localTrackEndedController =
         stopTrack: (track) => localMediaTrackStopper.stopTrack(track),
     });
 let voiceMediaQualityRuntime;
+const screenShareVolumeController =
+    screenShareVolumeControllerApi.createController({
+        MediaStreamCtor: MediaStream,
+        applyElementState: ({ element, muted, volume }) =>
+            applyScreenShareOutputSettings(element, { muted, volume }),
+        attachMediaElement: (mediaElement, stream) =>
+            voiceMediaLifecycle.attachAndPlayMedia({
+                mediaElement,
+                onWarning: (message, error) =>
+                    console.warn(message, error || ''),
+                stream,
+            }),
+        clearMediaElement: (mediaElement) =>
+            voiceMediaLifecycle.clearMediaElement({
+                mediaElement,
+                onWarning: (message, error) =>
+                    console.warn(message, error || ''),
+            }),
+        createAudioElement: () => document.createElement('audio'),
+    });
 const voicePeerRegistry = voicePeerRegistryApi.createRegistry({
-    attachRemoteStream: ({ peerId, stream }) =>
-        addVideoStream(document.createElement('video'), stream, peerId),
+    attachRemoteStream: ({ generation, metadata, peerId, stream }) =>
+        addVideoStream(document.createElement('video'), stream, peerId, {
+            generation,
+            trackRoles:
+                metadata?.[voiceCallProtocol.MEDIA_TRACK_ROLES_METADATA] || [],
+        }),
     createRemoteStream: ({
         currentStream,
         incomingStream,
@@ -274,10 +299,12 @@ const voicePeerRegistry = voicePeerRegistryApi.createRegistry({
         });
     },
     onDebug: (event) => voiceMediaDebug.record(event),
-    onPeerCleanup: ({ peerId }) =>
+    onPeerCleanup: ({ peerId }) => {
+        screenShareVolumeController.cleanup(peerId);
         voiceMediaQualityRuntime?.stop(peerId, 'peer-cleanup', {
             remove: true,
-        }),
+        });
+    },
     onRemoteMediaState: ({ peerId }) =>
         voiceMediaQualityRuntime?.syncPeer(peerId),
     onWarning: (message, error) => console.warn(message, error || ''),
@@ -288,9 +315,13 @@ voiceMediaQualityRuntime = voiceMediaQualityRuntimeApi.createRuntime({
     getQualitySource: (peerId) => {
         const snapshot = voicePeerRegistry.getQualitySource(peerId);
         const tile = snapshot?.tile || document.getElementById(peerId);
+        const playbackStream =
+            screenShareVolumeController.getPrimaryStream(peerId) ||
+            snapshot?.stream;
         return {
             ...snapshot,
             isScreenSharing: screenSharers.has(peerId),
+            stream: playbackStream,
             video: tile?.querySelector('video'),
         };
     },
@@ -626,13 +657,35 @@ const applyOutputSettings = (mediaElement, isRemote) => {
     return applyOutputDevice(mediaElement, isRemote);
 };
 
+const applyScreenShareOutputSettings = (
+    mediaElement,
+    { muted = false, volume = 1 } = {}
+) => {
+    if (!mediaElement) {
+        return;
+    }
+    mediaElement.volume = outputVolumeState.getEffectiveOutputVolume(
+        outputVolume,
+        volume
+    );
+    mediaElement.muted = outputMuted || Boolean(muted);
+    return applyOutputDevice(mediaElement, true);
+};
+
+const getPrimaryTileMediaElement = (tile) =>
+    tile?.querySelector('video') ||
+    Array.from(tile?.querySelectorAll('audio') || []).find(
+        (element) => !element.classList.contains('screen-share-audio')
+    );
+
 const applyOutputSettingsToRemoteMedia = () => {
     const pending = Array.from(document.querySelectorAll('.video-tile')).map(
         (tile) => {
-            const mediaElement = tile.querySelector('video, audio');
+            const mediaElement = getPrimaryTileMediaElement(tile);
             return applyOutputSettings(mediaElement, tile.id !== 'local-video');
         }
     );
+    screenShareVolumeController.reapplyAll();
     return Promise.all(pending);
 };
 
@@ -748,6 +801,8 @@ const pageVoiceTeardown = voiceMediaLifecycle.createPageTeardown({
         sidebarRuntime?.destroy();
         mediaDockRuntime?.destroy();
         mediaDockAdapter?.destroy();
+        remoteVolumeUI.destroy();
+        screenShareVolumeController.destroy();
         fullscreenControls.destroy();
         navigator.mediaDevices?.removeEventListener?.(
             'devicechange',
@@ -809,10 +864,21 @@ const syncRoomCompositionState = () => {
     updateMobileRoomState();
 };
 
-const getVoiceCallMetadata = () => ({
-    sharing: sharingNow,
-    videoSource: activeVideoTrack ? (sharingNow ? 'screen' : 'camera') : 'none',
-});
+const getVoiceCallMetadata = (stream) => {
+    return {
+        sharing: sharingNow,
+        videoSource: activeVideoTrack
+            ? sharingNow
+                ? 'screen'
+                : 'camera'
+            : 'none',
+        [voiceCallProtocol.MEDIA_TRACK_ROLES_METADATA]:
+            screenShareVolumeControllerApi.buildTrackRoles({
+                screenStream: currentScreenStream,
+                stream,
+            }),
+    };
+};
 
 const publishLocalMediaToPeer = (
     peer,
@@ -829,7 +895,7 @@ const publishLocalMediaToPeer = (
         options: {
             ...options,
             metadata: {
-                ...getVoiceCallMetadata(),
+                ...getVoiceCallMetadata(stream),
                 ...options.metadata,
             },
         },
@@ -3320,6 +3386,34 @@ const showPeerVolumePopover = (event, tile) => {
     }
 
     event.preventDefault();
+    const isScreenShare =
+        tile.dataset.tileType === 'screen-share' || screenSharers.has(peerId);
+
+    if (isScreenShare) {
+        const snapshot = screenShareVolumeController.getSnapshot(peerId);
+        remoteVolumeUI.openPopover({
+            currentVolume: Math.round(snapshot.volume * 100),
+            disabled: !snapshot.hasAudio,
+            emptyText: '无共享音频',
+            event,
+            iconClass: 'fas fa-desktop',
+            muted: snapshot.muted,
+            muteLabel: '共享静音',
+            onMutedChange: (muted) =>
+                screenShareVolumeController.setMuted(peerId, muted, {
+                    generation: snapshot.generation,
+                }),
+            onVolumeInput: (nextVolume) =>
+                screenShareVolumeController.setVolume(
+                    peerId,
+                    nextVolume / 100,
+                    { generation: snapshot.generation }
+                ),
+            titleText: '屏幕共享音量',
+        });
+        return;
+    }
+
     const currentVolume = Math.round(getPeerVolume(peerId) * 100);
 
     remoteVolumeUI.openPopover({
@@ -3562,7 +3656,12 @@ const syncPresenceTilesForJoinedRoom = (channels = []) => {
     });
 };
 
-const addVideoStream = (video, stream, videoId) => {
+const addVideoStream = (
+    video,
+    stream,
+    videoId,
+    { generation = 0, trackRoles = [] } = {}
+) => {
     const tileId = videoId || 'local-video';
     let tile = document.getElementById(tileId);
     const [liveVideoTrack] = voiceMediaLifecycle.getLiveTracks(stream, 'video');
@@ -3593,7 +3692,7 @@ const addVideoStream = (video, stream, videoId) => {
 
     const { body } = ensureTileStructure(tile);
 
-    let mediaElement = body.querySelector('video, audio');
+    let mediaElement = getPrimaryTileMediaElement(tile);
     if (!mediaElement || mediaElement.tagName !== mediaTag) {
         if (mediaElement) {
             voiceMediaLifecycle.clearMediaElement({
@@ -3602,6 +3701,9 @@ const addVideoStream = (video, stream, videoId) => {
                     console.warn(message, error || ''),
             });
             mediaElementVideoTracks.delete(mediaElement);
+        }
+        if (videoId) {
+            screenShareVolumeController.unbind(videoId);
         }
         body.replaceChildren();
         fullscreenControls.detachTile(tile);
@@ -3632,16 +3734,30 @@ const addVideoStream = (video, stream, videoId) => {
         }
     }
 
+    let playbackStream = stream;
+    if (videoId && stream) {
+        const screenBinding = screenShareVolumeController.bindSource({
+            generation,
+            ownerKey: videoId,
+            sourceStream: stream,
+            target: body,
+            trackRoles,
+        });
+        playbackStream = screenBinding.primaryStream;
+    } else if (videoId) {
+        screenShareVolumeController.unbind(videoId);
+    }
+
     const forceRebind = Boolean(
         hasVideo &&
-            mediaElement.srcObject === stream &&
+            mediaElement.srcObject === playbackStream &&
             mediaElementVideoTracks.get(mediaElement) !== liveVideoTrack
     );
     voiceMediaLifecycle.attachAndPlayMedia({
         forceRebind,
         mediaElement,
         onWarning: (message, error) => console.warn(message, error || ''),
-        stream,
+        stream: playbackStream,
     });
     if (hasVideo) {
         mediaElementVideoTracks.set(mediaElement, liveVideoTrack);
@@ -4625,6 +4741,7 @@ function removeRemoteTile(peerId, ownedTile) {
         ownedTile?.id === peerId ? ownedTile : document.getElementById(peerId);
 
     if (vidElement) {
+        screenShareVolumeController.cleanup(peerId);
         fullscreenControls.detachTile(vidElement);
         const mediaElement = vidElement.querySelector('video, audio');
         if (mediaElement) {

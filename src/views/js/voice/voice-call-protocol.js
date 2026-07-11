@@ -4,6 +4,7 @@
     const MEDIA_DIRECTION_METADATA = 'voiceMediaDirection';
     const MEDIA_GENERATION_METADATA = 'voiceMediaGeneration';
     const MEDIA_KINDS_METADATA = 'voiceMediaKinds';
+    const MEDIA_TRACK_ROLES_METADATA = 'voiceMediaTrackRoles';
     const SEND_DIRECTION = 'send';
     const DEBUG_STORAGE_KEY = 'voiceMediaDebug';
     const DEBUG_QUERY_KEY = 'voiceMediaDebug';
@@ -135,6 +136,7 @@
         MEDIA_DIRECTION_METADATA,
         MEDIA_GENERATION_METADATA,
         MEDIA_KINDS_METADATA,
+        MEDIA_TRACK_ROLES_METADATA,
         SEND_DIRECTION,
         createMediaDebugLog,
         describePeerConnection,
