@@ -673,6 +673,22 @@
                 : undefined;
         };
 
+        const getQualitySource = (peerId) => {
+            const entry = entries.get(peerId);
+            const incoming = entry?.incoming.current;
+            return entry
+                ? {
+                      call: incoming?.call,
+                      generation:
+                          incoming?.generation || entry.lastIncomingGeneration,
+                      pc: incoming?.call?.peerConnection || incoming?.call?._pc,
+                      peerId,
+                      stream: entry.remoteStream,
+                      tile: entry.tile,
+                  }
+                : undefined;
+        };
+
         const getSnapshot = (peerId) => {
             const entry = entries.get(peerId);
             return entry
@@ -710,6 +726,7 @@
             cleanupPeer,
             ensurePeerTile,
             getPeerIds,
+            getQualitySource,
             getSnapshot,
             getState,
             isSessionDisconnected: () => sessionDisconnected,

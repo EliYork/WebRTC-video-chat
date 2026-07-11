@@ -72,6 +72,8 @@ const voiceSessionRuntimeApi = window.VoiceSessionRuntime;
 const voiceMediaOperationApi = window.VoiceMediaOperationRuntime;
 const voiceDeviceRuntimeApi = window.VoiceDeviceRuntime;
 const voiceStatusViewApi = window.VoiceStatusView;
+const voiceMediaQualityView = window.VoiceMediaQualityView;
+const voiceMediaQualityRuntimeApi = window.VoiceMediaQualityRuntime;
 const {
     buildParticipantViewModel,
     getMemberMicStatus,
@@ -263,6 +265,7 @@ const localTrackEndedController =
             void handleUnexpectedLocalTrackEnded(type, track, epoch),
         stopTrack: (track) => localMediaTrackStopper.stopTrack(track),
     });
+let voiceMediaQualityRuntime;
 const voicePeerRegistry = voicePeerRegistryApi.createRegistry({
     attachRemoteStream: ({ peerId, stream }) =>
         addVideoStream(document.createElement('video'), stream, peerId),
@@ -289,8 +292,27 @@ const voicePeerRegistry = voicePeerRegistryApi.createRegistry({
         });
     },
     onDebug: (event) => voiceMediaDebug.record(event),
+    onPeerCleanup: ({ peerId }) =>
+        voiceMediaQualityRuntime?.stop(peerId, 'peer-cleanup', {
+            remove: true,
+        }),
+    onRemoteMediaState: ({ peerId }) =>
+        voiceMediaQualityRuntime?.syncPeer(peerId),
     onWarning: (message, error) => console.warn(message, error || ''),
     removeRemoteTile: ({ peerId, tile }) => removeRemoteTile(peerId, tile),
+});
+voiceMediaQualityRuntime = voiceMediaQualityRuntimeApi.createRuntime({
+    debug: (event) => voiceMediaDebug.record(event),
+    getQualitySource: (peerId) => {
+        const snapshot = voicePeerRegistry.getQualitySource(peerId);
+        const tile = snapshot?.tile || document.getElementById(peerId);
+        return {
+            ...snapshot,
+            isScreenSharing: screenSharers.has(peerId),
+            video: tile?.querySelector('video'),
+        };
+    },
+    view: voiceMediaQualityView,
 });
 window.exportVoiceMediaDebug = () => voiceMediaDebug.export();
 let tileLayoutZIndex = TILE_BASE_Z_INDEX;
@@ -1407,6 +1429,7 @@ const ensureSocket = () => {
             }
         }
         updateAllVideoTileStatus();
+        voiceMediaQualityRuntime?.syncPeer(peerId);
         updateMobileTileView();
     });
     socket.on('connect', () => {
@@ -3811,6 +3834,9 @@ const addVideoStream = (video, stream, videoId) => {
     }
     applyOutputSettings(mediaElement, Boolean(videoId));
     updateVideoTileStatus(tile);
+    if (videoId) {
+        voiceMediaQualityRuntime?.syncPeer(videoId);
+    }
     updateFullscreenButtonStates();
     console.info('[tile] add/update', {
         peerId: tile.dataset.peerId,

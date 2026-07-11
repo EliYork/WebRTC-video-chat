@@ -184,3 +184,9 @@ The directional media matrix has already passed real Edge testing. Resilience
 changes remain at the browser retest gate: transport loss, PeerServer loss,
 offline/online, permission denial, device detach/output fallback, BFCache, and
 multi-participant recovery. No browser acceptance was run in this code task.
+
+## Remote screen-share quality label
+
+The screen-share quality pill is a viewer-side enhancement layered on top of the existing directional media protocol. It does not change offer/answer direction, incoming answer behavior, registry ownership, reconnect, backoff, or media operation state. For each remote peer, the registry exposes a narrow read-only quality source containing the current incoming call, generation, remote stream, tile, and peer connection reference. The stats runtime samples only the current live remote video track when the server/UI state says the peer is sharing their screen and the tile's video element is still bound to that same registry stream.
+
+Resolution labels map 1280×720 to 720p, 1920×1080 to 1080p, 2560×1440 to 1440p, and 3840×2160 to 4K; non-standard and portrait sizes render as raw width×height. FPS comes from inbound `framesPerSecond` or from decoded/received frame deltas and is smoothed over the latest three valid samples. If stats fields, `getStats()`, or peer connection state are unavailable, the missing part is hidden quietly and media playback continues. Debug logging is limited to low-frequency lifecycle events and never records SDP, ICE candidates, IP addresses, SSRCs, track IDs, device labels, or full peer IDs.
