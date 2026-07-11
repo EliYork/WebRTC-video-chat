@@ -10,25 +10,46 @@
     const ensureHeader = (tile) => {
         let header = tile.querySelector('.tile-header');
 
-        if (header) {
-            return header;
+        if (!header) {
+            header = global.document.createElement('div');
+            header.className = 'tile-header';
+            header.setAttribute('data-drag-handle', 'true');
+            tile.prepend(header);
         }
 
-        header = global.document.createElement('div');
-        header.className = 'tile-header';
-        header.setAttribute('data-drag-handle', 'true');
+        const ensureHeaderChild = (selector, className) => {
+            let child = header.querySelector(selector);
+            if (!child) {
+                child = global.document.createElement('div');
+                child.className = className;
+                header.append(child);
+            }
+            return child;
+        };
 
-        const avatar = global.document.createElement('div');
-        avatar.className = 'tile-avatar';
+        ensureHeaderChild('.tile-avatar', 'tile-avatar');
+        ensureHeaderChild('.tile-title', 'tile-title');
+        ensureHeaderChild('.tile-badges', 'tile-badges');
 
-        const title = global.document.createElement('div');
-        title.className = 'tile-title';
+        const controls = ensureHeaderChild(
+            '.tile-header-controls',
+            'tile-header-controls'
+        );
+        let quality = controls.querySelector('.voice-media-quality-pill');
+        if (!quality) {
+            quality = global.document.createElement('div');
+            quality.className = 'voice-media-quality-pill hidden';
+            quality.setAttribute('aria-hidden', 'true');
+            controls.append(quality);
+        }
 
-        const badges = global.document.createElement('div');
-        badges.className = 'tile-badges';
+        let actions = controls.querySelector('.tile-header-actions');
+        if (!actions) {
+            actions = global.document.createElement('div');
+            actions.className = 'tile-header-actions';
+            controls.append(actions);
+        }
 
-        header.append(avatar, title, badges);
-        tile.prepend(header);
         return header;
     };
 
@@ -62,6 +83,7 @@
 
     const ensureTileStructure = (tile, { resizeDirections = [] } = {}) => {
         const header = ensureHeader(tile);
+        const headerActions = header.querySelector('.tile-header-actions');
         const body = ensureChild(tile, '.tile-body', 'tile-body');
         const overlay = ensureChild(tile, '.tile-overlay', 'tile-overlay');
         const footer = ensureChild(tile, '.tile-footer', 'tile-footer');
@@ -69,7 +91,7 @@
 
         ensureResizeHandles(tile, resizeDirections);
 
-        return { actions, body, footer, header, overlay };
+        return { actions, body, footer, header, headerActions, overlay };
     };
 
     global.VoiceVideoTileStructureUI = {

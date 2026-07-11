@@ -7,6 +7,11 @@
         if (!tile) {
             return undefined;
         }
+        const header = tile.querySelector('.tile-header');
+        const controls = header?.querySelector('.tile-header-controls');
+        if (!header || !controls) {
+            return undefined;
+        }
         let overlay = tile.querySelector(`.${CLASS_NAME}`);
         if (!overlay) {
             overlay = global.document.createElement('div');
@@ -14,7 +19,14 @@
             overlay.classList?.add?.(CLASS_NAME);
             overlay.classList?.add?.('hidden');
             overlay.setAttribute('aria-hidden', 'true');
-            tile.append(overlay);
+        }
+        const actions = controls.querySelector('.tile-header-actions');
+        if (overlay.parentElement !== controls) {
+            if (actions) {
+                actions.before(overlay);
+            } else {
+                controls.append(overlay);
+            }
         }
         return overlay;
     };
@@ -25,8 +37,9 @@
             return undefined;
         }
         const normalizedText = String(text || '').trim();
-        overlay.textContent = normalizedText;
+        overlay.textContent = normalizedText ? `接收 ${normalizedText}` : '';
         overlay.classList.toggle('hidden', !normalizedText);
+        overlay.setAttribute('aria-hidden', String(!normalizedText));
         return overlay;
     };
 
@@ -37,6 +50,7 @@
         }
         overlay.textContent = '';
         overlay.classList.add('hidden');
+        overlay.setAttribute('aria-hidden', 'true');
     };
 
     const remove = (tile) => tile?.querySelector?.(`.${CLASS_NAME}`)?.remove();

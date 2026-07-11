@@ -37,8 +37,26 @@ function element(tag) {
         dataset: {},
         attributes: {},
         textContent: '',
-        append: (...nodes) => children.push(...nodes),
+        append(...nodes) {
+            nodes.forEach((node) => {
+                node.remove?.();
+                node.parentElement = this;
+                children.push(node);
+            });
+        },
+        before(node) {
+            const siblings = this.parentElement?.children;
+            if (!siblings) return;
+            node.remove?.();
+            const index = siblings.indexOf(this);
+            node.parentElement = this.parentElement;
+            siblings.splice(index, 0, node);
+        },
         remove() {
+            const siblings = this.parentElement?.children;
+            const index = siblings?.indexOf(this) ?? -1;
+            if (index >= 0) siblings.splice(index, 1);
+            this.parentElement = null;
             this.removed = true;
         },
         setAttribute(k, v) {
@@ -46,14 +64,34 @@ function element(tag) {
         },
         querySelector(selector) {
             const cls = selector.startsWith('.') ? selector.slice(1) : null;
-            return children.find((c) =>
-                cls
-                    ? c.classList?.contains(cls)
-                    : c.tagName?.toLowerCase() === selector
-            );
+            for (const child of children) {
+                if (
+                    cls
+                        ? child.classList?.contains(cls)
+                        : child.tagName?.toLowerCase() === selector
+                ) {
+                    return child;
+                }
+                const descendant = child.querySelector?.(selector);
+                if (descendant) return descendant;
+            }
+            return undefined;
         },
     };
     return el;
+}
+function tileStructure() {
+    const tile = element('div');
+    const header = element('div');
+    const controls = element('div');
+    const actions = element('div');
+    header.classList.add('tile-header');
+    controls.classList.add('tile-header-controls');
+    actions.classList.add('tile-header-actions');
+    controls.append(actions);
+    header.append(controls);
+    tile.append(header);
+    return { actions, controls, header, tile };
 }
 function load() {
     let timerId = 0;
@@ -100,7 +138,7 @@ async function sampleLabel(
     { screen = true, videoSize = {}, videoTrack = track() } = {}
 ) {
     const { runTimers, win } = load();
-    const tile = element('div');
+    const { controls, tile } = tileStructure();
     const video = element('video');
     const s = stream(videoTrack);
     video.srcObject = s;
@@ -130,11 +168,29 @@ async function sampleLabel(
     await runTimers();
     return {
         rt,
+        controls,
         text:
             tile.querySelector('.voice-media-quality-pill')?.textContent || '',
         tile,
     };
 }
+
+test('quality pill mounts in title controls before fullscreen actions', async () => {
+    const sample = await sampleLabel({
+        framesWidth: 1920,
+        framesHeight: 1080,
+        framesPerSecond: 60,
+    });
+    const pill = sample.tile.querySelector('.voice-media-quality-pill');
+    assert.equal(pill.parentElement, sample.controls);
+    assert.equal(
+        sample.controls.children
+            .at(-1)
+            .classList.contains('tile-header-actions'),
+        true
+    );
+    assert.equal(pill.textContent, '接收 1080p · 60fps');
+});
 
 test('formats standard and non-standard resolutions', async () => {
     assert.equal(
@@ -145,19 +201,19 @@ test('formats standard and non-standard resolutions', async () => {
                 framesPerSecond: 60,
             })
         ).text,
-        '1080p · 60fps'
+        '接收 1080p · 60fps'
     );
     assert.equal(
         (await sampleLabel({ framesWidth: 2560, framesHeight: 1440 })).text,
-        '1440p'
+        '接收 1440p'
     );
     assert.equal(
         (await sampleLabel({ framesWidth: 3840, framesHeight: 2160 })).text,
-        '4K'
+        '接收 4K'
     );
     assert.equal(
         (await sampleLabel({ framesWidth: 1600, framesHeight: 900 })).text,
-        '1600×900'
+        '接收 1600×900'
     );
 });
 
@@ -170,9 +226,12 @@ test('omits missing pieces and never renders zero fps', async () => {
                 framesPerSecond: 0,
             })
         ).text,
-        '1080p'
+        '接收 1080p'
     );
-    assert.equal((await sampleLabel({ framesPerSecond: 60 })).text, '60fps');
+    assert.equal(
+        (await sampleLabel({ framesPerSecond: 60 })).text,
+        '接收 60fps'
+    );
     assert.equal((await sampleLabel({})).text, '');
 });
 
@@ -184,7 +243,7 @@ test('falls back to element and track dimensions without CSS sizes', async () =>
                 { videoSize: { width: 1920, height: 1080 } }
             )
         ).text,
-        '1080p · 60fps'
+        '接收 1080p · 60fps'
     );
     assert.equal(
         (
@@ -193,13 +252,13 @@ test('falls back to element and track dimensions without CSS sizes', async () =>
                 { videoTrack: track({ width: 1280, height: 720 }) }
             )
         ).text,
-        '720p'
+        '接收 720p'
     );
 });
 
 test('calculates and smooths fps from decoded frame deltas', async () => {
     const { runTimers, win } = load();
-    const tile = element('div');
+    const { tile } = tileStructure();
     const video = element('video');
     const s = stream(track());
     video.srcObject = s;
@@ -230,7 +289,7 @@ test('calculates and smooths fps from decoded frame deltas', async () => {
     await runTimers();
     assert.equal(
         tile.querySelector('.voice-media-quality-pill').textContent,
-        '1080p · 60fps'
+        '接收 1080p · 60fps'
     );
 });
 
@@ -253,7 +312,7 @@ test('screen-only lifecycle hides camera, ended, audio-only, reject, stale and c
         ''
     );
     const { runTimers, win } = load();
-    const tile = element('div');
+    const { tile } = tileStructure();
     const video = element('video');
     const s = stream(track());
     video.srcObject = s;
@@ -295,7 +354,7 @@ test('independent peers, call replacement and timer cleanup', async () => {
         ['a', 30],
         ['b', 60],
     ]) {
-        const tile = element('div');
+        const { tile } = tileStructure();
         const video = element('video');
         const s = stream(track());
         video.srcObject = s;
@@ -320,15 +379,15 @@ test('independent peers, call replacement and timer cleanup', async () => {
     assert.equal(
         sources.get('a').tile.querySelector('.voice-media-quality-pill')
             .textContent,
-        '30fps'
+        '接收 30fps'
     );
     assert.equal(
         sources.get('b').tile.querySelector('.voice-media-quality-pill')
             .textContent,
-        '60fps'
+        '接收 60fps'
     );
     const oldTile = sources.get('a').tile;
-    const tile = element('div');
+    const { tile } = tileStructure();
     const video = element('video');
     const s = stream(track());
     video.srcObject = s;
@@ -351,7 +410,7 @@ test('independent peers, call replacement and timer cleanup', async () => {
     await runTimers();
     assert.equal(
         tile.querySelector('.voice-media-quality-pill').textContent,
-        '61fps'
+        '接收 61fps'
     );
     assert.equal(
         oldTile.querySelector('.voice-media-quality-pill')?.textContent || '',

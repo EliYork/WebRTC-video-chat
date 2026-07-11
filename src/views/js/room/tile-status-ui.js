@@ -9,19 +9,21 @@
 
     const createStatusBadge = (
         { key = '', label = '', icon = '' } = {},
-        { compact = false } = {}
+        { compact = false, header = false } = {}
     ) => {
         const badge = global.document.createElement('span');
         const badgeIcon = global.document.createElement('i');
 
-        badge.className = compact
-            ? `tile-badge tile-badge-${key}`
-            : `tile-status-badge tile-status-${key}`;
+        badge.className = header
+            ? `tile-header-status tile-header-status-${key}`
+            : compact
+              ? `tile-badge tile-badge-${key}`
+              : `tile-status-badge tile-status-${key}`;
         badge.title = label;
         badgeIcon.className = icon;
         badge.append(badgeIcon);
 
-        if (!compact) {
+        if (!compact || header) {
             badge.append(global.document.createTextNode(label));
         }
 
@@ -62,7 +64,11 @@
         }
     };
 
-    const renderTileBadges = (tile, statuses = []) => {
+    const renderTileBadges = (
+        tile,
+        statuses = [],
+        { headerOnly = false } = {}
+    ) => {
         const overlay = tile?.querySelector('.tile-overlay');
         const badges = tile?.querySelector('.tile-badges');
 
@@ -70,8 +76,15 @@
         clearChildren(badges);
 
         statuses.forEach((status) => {
-            overlay?.append(createStatusBadge(status));
-            badges?.append(createStatusBadge(status, { compact: true }));
+            if (!headerOnly) {
+                overlay?.append(createStatusBadge(status));
+            }
+            badges?.append(
+                createStatusBadge(status, {
+                    compact: !headerOnly,
+                    header: headerOnly,
+                })
+            );
         });
     };
 
@@ -104,8 +117,10 @@
         );
     };
 
-    const renderTileFooter = (tile, text = '') => {
-        setText(tile?.querySelector('.tile-footer'), text);
+    const renderTileFooter = (tile, text = '', { hidden = false } = {}) => {
+        const footer = tile?.querySelector('.tile-footer');
+        setText(footer, hidden ? '' : text);
+        toggleClass(footer, 'is-hidden', hidden);
     };
 
     const renderTileStatus = (tile, state = {}) => {
@@ -115,9 +130,13 @@
 
         updateTileStatusClasses(tile, state);
         renderTileHeader(tile, state);
-        renderTileBadges(tile, state.statuses || []);
+        renderTileBadges(tile, state.statuses || [], {
+            headerOnly: state.isScreenShare === true,
+        });
         renderTilePlaceholder(tile, state);
-        renderTileFooter(tile, state.statusText);
+        renderTileFooter(tile, state.statusText, {
+            hidden: state.isScreenShare === true,
+        });
     };
 
     global.VoiceTileStatusUI = {

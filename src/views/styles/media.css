@@ -14,6 +14,9 @@
 }
 
 .video-tile:fullscreen {
+    position: fixed;
+    z-index: 2147483647;
+    inset: 0;
     width: 100vw;
     height: 100vh !important;
     min-width: 0;
@@ -38,17 +41,19 @@
 }
 
 .fullscreen-btn {
-    position: absolute;
-    right: 10px;
-    bottom: 10px;
+    position: static;
     z-index: 3;
-    min-width: 52px;
-    padding: 6px 9px;
-    border: 1px solid rgba(255, 255, 255, 0.76);
+    display: grid;
+    width: 28px;
+    height: 26px;
+    min-width: 28px;
+    place-items: center;
+    padding: 0;
+    border: 1px solid rgba(216, 111, 154, 0.28);
     border-radius: 6px;
-    background-color: rgba(111, 58, 83, 0.68);
-    box-shadow: 0 4px 12px rgba(104, 52, 76, 0.22);
-    color: #fff;
+    background-color: rgba(255, 248, 252, 0.92);
+    box-shadow: none;
+    color: #7f5369;
     cursor: pointer;
     font-size: 12px;
     line-height: 1.2;
@@ -56,7 +61,8 @@
 
 .fullscreen-btn:hover,
 .fullscreen-btn.is-exit {
-    background-color: rgba(111, 58, 83, 0.9);
+    border-color: rgba(216, 111, 154, 0.5);
+    background-color: #fbe8f1;
 }
 
 .peer-volume-popover {
@@ -190,21 +196,23 @@
 }
 
 .voice-media-quality-pill {
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    z-index: 4;
-    padding: 4px 8px;
-    border: 1px solid rgba(255, 255, 255, 0.34);
+    position: static;
+    z-index: auto;
+    max-width: 150px;
+    padding: 4px 7px;
+    overflow: hidden;
+    border: 1px solid rgba(216, 111, 154, 0.2);
     border-radius: 999px;
-    background: rgba(18, 12, 16, 0.68);
-    box-shadow: 0 4px 12px rgba(18, 12, 16, 0.24);
-    color: #fff;
-    font-size: 12px;
+    background: rgba(255, 248, 252, 0.92);
+    box-shadow: none;
+    color: #7f5369;
+    font-size: 10px;
     font-weight: 700;
     line-height: 1.2;
     pointer-events: none;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
+    text-overflow: ellipsis;
+    text-shadow: none;
+    white-space: nowrap;
 }
 
 .voice-media-quality-pill.hidden {
@@ -213,9 +221,8 @@
 
 @media (max-width: 768px) {
     .voice-media-quality-pill {
-        top: 8px;
-        right: 8px;
-        padding: 3px 7px;
-        font-size: 11px;
+        max-width: 112px;
+        padding: 3px 6px;
+        font-size: 9px;
     }
 }

@@ -483,9 +483,22 @@ const MODULE_SCRIPTS = [
                 'fullscreen controls must keep video lookup scoped to the tile',
             ],
             [
-                /tile\.ondblclick = toggle/,
-                'fullscreen controls must keep tile double-click as a thin toggle wrapper',
+                /tile\.addEventListener\('dblclick', entry\.handleDoubleClick\)/,
+                'fullscreen controls must bind tile double-click through the shared toggle',
             ],
+            [
+                /tile\.removeEventListener\('dblclick', entry\.handleDoubleClick\)/,
+                'fullscreen controls must remove tile double-click during cleanup',
+            ],
+            [
+                /isTileLayoutWriteBlocked/,
+                'fullscreen controls must expose layout-write protection',
+            ],
+            [
+                /restoreTileState/,
+                'fullscreen controls must restore pre-fullscreen tile state',
+            ],
+            [/destroy/, 'fullscreen controls must expose idempotent teardown'],
         ],
     },
     {
@@ -1925,6 +1938,13 @@ const pageLayoutRecoveryUi = getModuleSource(
 const videoTileStructureUi = getModuleSource(
     '/js/room/video-tile-structure-ui.js'
 );
+const tileStatusUi = getModuleSource('/js/room/tile-status-ui.js');
+const fullscreenControlsSource = getModuleSource(
+    '/js/media/fullscreen-controls.js'
+);
+const voiceMediaQualityView = readText(
+    '../src/views/js/voice/voice-media-quality-view.js'
+);
 const style = loadCssWithImports(
     new URL('../src/views/style.css', import.meta.url)
 );
@@ -2954,7 +2974,143 @@ assertSourceContains(videoTileStructureUi, 'video-tile-structure-ui.js', [
     [/overlay'.*?'tile-overlay'/, 'tile overlays must keep class name'],
     [/footer'.*?'tile-footer'/, 'tile footers must keep class name'],
     [/actions'.*?'tile-actions'/, 'tile actions must keep class name'],
+    [
+        /tile-header-controls/,
+        'video tile headers must expose a compact controls group',
+    ],
+    [
+        /tile-header-actions/,
+        'video tile headers must expose a visible action mount',
+    ],
 ]);
+assertSourceContains(tileStatusUi, 'screen-share title status contract', [
+    [
+        /headerOnly:\s*state\.isScreenShare === true/,
+        'screen-share permanent status badges must render in the header only',
+    ],
+    [
+        /if \(!headerOnly\) \{[\s\S]*?overlay\?\.append/,
+        'screen-share status rendering must not append permanent video overlays',
+    ],
+    [
+        /hidden:\s*state\.isScreenShare === true/,
+        'screen-share status rendering must hide the footer without a blank slot',
+    ],
+]);
+assertSourceContains(
+    voiceMediaQualityView,
+    'screen-share quality title contract',
+    [
+        [
+            /tile-header-controls/,
+            'quality UI must mount inside the tile header controls',
+        ],
+        [
+            /actions\.before\(overlay\)/,
+            'quality UI must stay before the fullscreen action',
+        ],
+        [
+            /`接收 \$\{normalizedText\}`/,
+            'remote quality must be labeled as received',
+        ],
+        [
+            /aria-hidden[\s\S]*?!normalizedText/,
+            'quality UI must hide empty, ended, and cleanup states accessibly',
+        ],
+    ]
+);
+assertSourceDoesNotContain(
+    voiceMediaQualityView,
+    'screen-share quality overlay removal',
+    [
+        [
+            /tile\.append\(overlay\)/,
+            'quality UI must not append an absolute overlay to the tile body',
+        ],
+    ]
+);
+assertSourceContains(
+    fullscreenControlsSource,
+    'fullscreen restoration contract',
+    [
+        [
+            /fullscreenSnapshots\.set\(tile,[\s\S]*?styleAttribute/,
+            'fullscreen must snapshot the original inline layout before entry',
+        ],
+        [
+            /fullscreenSnapshots[\s\S]*?restoreTileState\(tile\)/,
+            'fullscreenchange must restore tiles that are no longer fullscreen',
+        ],
+        [
+            /TEMPORARY_FULLSCREEN_CLASSES[\s\S]*?is-expanded[\s\S]*?is-focused[\s\S]*?is-maximized/,
+            'fullscreen exit must clear legacy temporary expansion classes',
+        ],
+        [
+            /fullscreenChangeBinding\?\.root === root/,
+            'fullscreenchange binding must be idempotent',
+        ],
+    ]
+);
+assertSourceContains(script, 'screen-share tile integration contract', [
+    [
+        /const actions = tile\.querySelector\('\.tile-header-actions'\) \|\| tile/,
+        'fullscreen buttons must mount in the visible tile title bar',
+    ],
+    [
+        /isScreenShare[\s\S]*?\? '我的屏幕'/,
+        'local screen share must use the stable title 我的屏幕',
+    ],
+    [
+        /clampPositionedTileLayouts[\s\S]*?!fullscreenControls\.isTileLayoutWriteBlocked\(tile\)/,
+        'resize clamping must not persist fullscreen dimensions',
+    ],
+    [
+        /const bringTileLayoutToFront = \(tile\) => \{[\s\S]*?fullscreenControls\.isTileLayoutWriteBlocked\(tile\)[\s\S]*?return;/,
+        'fullscreen pointer events must not update z-index or persisted layout geometry',
+    ],
+    [
+        /beforeStopMedia:[\s\S]*?fullscreenControls\.destroy\(\)/,
+        'page teardown must release fullscreen listeners and tile bindings',
+    ],
+    [
+        /fullscreenControls\.detachTile\(vidElement\)[\s\S]*?vidElement\.remove\(\)/,
+        'remote tile cleanup must detach fullscreen ownership before removal',
+    ],
+]);
+assertSourceDoesNotContain(script, 'local screen-share fullscreen entry', [
+    [
+        /if \(!tile\.id \|\| tile\.id === 'local-video'\)/,
+        'local screen-share tiles must not be excluded from fullscreen controls',
+    ],
+]);
+const qualityTitleStyle = style.match(
+    /\.voice-media-quality-pill\s*\{(?<body>[\s\S]*?)\}/
+);
+const fullscreenButtonStyle = style.match(
+    /\.fullscreen-btn\s*\{(?<body>[\s\S]*?)\}/
+);
+assert.ok(qualityTitleStyle, 'quality title style must exist');
+assert.match(
+    qualityTitleStyle.groups.body,
+    /position:\s*static/,
+    'quality label must participate in title-bar layout'
+);
+assert.doesNotMatch(
+    qualityTitleStyle.groups.body,
+    /position:\s*absolute|top:|right:|bottom:|left:/,
+    'quality label must not overlay the video area'
+);
+assert.ok(fullscreenButtonStyle, 'fullscreen button style must exist');
+assert.match(
+    fullscreenButtonStyle.groups.body,
+    /position:\s*static/,
+    'fullscreen button must participate in title-bar layout'
+);
+assert.match(
+    style,
+    /\.tile-footer\.is-hidden,[\s\S]*?\.video-tile\.is-screen-share \.tile-overlay\s*\{[\s\S]*?display:\s*none/,
+    'screen-share footer and permanent video overlay must leave no visual slot'
+);
 assertSourceDoesNotContain(script, 'page layout behavior contract', [
     [
         /actions\.prepend\(removeButton\)/,

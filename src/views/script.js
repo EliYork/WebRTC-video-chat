@@ -748,6 +748,7 @@ const pageVoiceTeardown = voiceMediaLifecycle.createPageTeardown({
         sidebarRuntime?.destroy();
         mediaDockRuntime?.destroy();
         mediaDockAdapter?.destroy();
+        fullscreenControls.destroy();
         navigator.mediaDevices?.removeEventListener?.(
             'devicechange',
             voiceDeviceRuntime.handleDeviceChange
@@ -1682,17 +1683,11 @@ const updateFullscreenButtonStates = () => {
 };
 
 const addFullscreenControls = (tile) => {
-    if (!tile.id || tile.id === 'local-video') {
+    if (!tile.id) {
         return;
     }
 
-    const actions = tile.querySelector('.tile-actions') || tile;
-    const existingButton = tile.querySelector('.fullscreen-btn');
-
-    if (existingButton) {
-        updateFullscreenButtonStates();
-        return;
-    }
+    const actions = tile.querySelector('.tile-header-actions') || tile;
 
     fullscreenControls.attachTileButton({
         tile,
@@ -1899,7 +1894,7 @@ const getTileMinimumSize = (tile) => {
 };
 
 const bringTileLayoutToFront = (tile) => {
-    if (!tile) {
+    if (!tile || fullscreenControls.isTileLayoutWriteBlocked(tile)) {
         return;
     }
 
@@ -2360,7 +2355,10 @@ const clampPositionedTileLayouts = () => {
     }
 
     getVideoTiles().forEach((tile) => {
-        if (tile.classList.contains('is-positioned')) {
+        if (
+            tile.classList.contains('is-positioned') &&
+            !fullscreenControls.isTileLayoutWriteBlocked(tile)
+        ) {
             applyTileLayout(tile, getCurrentTileLayout(tile));
             persistCurrentTileLayout(tile);
         }
@@ -3419,15 +3417,22 @@ const updateVideoTileStatus = (tile) => {
         showPeerName = remoteConfig.showPeerName;
     }
 
-    const titleText = isLocal ? `${displayName}（我）` : displayName;
+    const isScreenShare = member.screenSharing === true;
+    const titleText = isScreenShare
+        ? isLocal
+            ? '我的屏幕'
+            : displayName
+        : isLocal
+          ? `${displayName}（我）`
+          : displayName;
     const statusText = getMemberTileText(member);
 
     tileStatusUI.renderTileStatus(tile, {
         avatarText: createTileAvatarText(displayName),
         hasVideo,
         isLayoutEditing: layoutEditMode,
-        isScreenShare: tileType === 'screen-share',
-        showNameLabel: showPeerName,
+        isScreenShare,
+        showNameLabel: isScreenShare || showPeerName,
         statuses: getMemberStatusIcons(member),
         statusText,
         titleText,
@@ -3586,7 +3591,7 @@ const addVideoStream = (video, stream, videoId) => {
         tile.dataset.peerId = localPeerId;
     }
 
-    const { body, actions } = ensureTileStructure(tile);
+    const { body } = ensureTileStructure(tile);
 
     let mediaElement = body.querySelector('video, audio');
     if (!mediaElement || mediaElement.tagName !== mediaTag) {
@@ -3599,7 +3604,7 @@ const addVideoStream = (video, stream, videoId) => {
             mediaElementVideoTracks.delete(mediaElement);
         }
         body.replaceChildren();
-        actions.querySelector('.fullscreen-btn')?.remove();
+        fullscreenControls.detachTile(tile);
         mediaElement = hasVideo ? video : document.createElement('audio');
         mediaElement.autoplay = true;
         mediaElement.playsInline = 'true';
@@ -4620,6 +4625,7 @@ function removeRemoteTile(peerId, ownedTile) {
         ownedTile?.id === peerId ? ownedTile : document.getElementById(peerId);
 
     if (vidElement) {
+        fullscreenControls.detachTile(vidElement);
         const mediaElement = vidElement.querySelector('video, audio');
         if (mediaElement) {
             mediaElement.onloadedmetadata = null;
