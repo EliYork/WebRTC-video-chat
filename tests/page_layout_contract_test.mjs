@@ -239,6 +239,36 @@ const MODULE_SCRIPTS = [
         ],
     },
     {
+        path: '/js/media/local-screen-share-preview-controller.js',
+        sourcePath:
+            '../src/views/js/media/local-screen-share-preview-controller.js',
+        namespace: 'VoiceLocalScreenSharePreviewController',
+        mustLoadBeforeMain: true,
+        dependsOnViewUtils: false,
+        forbiddenKeywords: [
+            'Peer',
+            'socket.emit',
+            'getUserMedia',
+            'getDisplayMedia',
+            'replaceTrack',
+            'track.enabled',
+            'saveLayoutToStorage',
+            'cloneNode',
+            'innerHTML',
+            'setTimeout',
+            'stopScreenShare',
+        ],
+        requiredExports: [
+            [
+                /createController/,
+                'local preview UI must expose its state owner',
+            ],
+            [/bindSource/, 'local preview UI must bind the latest source'],
+            [/stopSession/, 'local preview UI must expose session cleanup'],
+            [/destroy/, 'local preview UI must expose idempotent teardown'],
+        ],
+    },
+    {
         path: '/js/shared/copy-link-ui.js',
         sourcePath: '../src/views/js/shared/copy-link-ui.js',
         namespace: 'VoiceCopyLinkUI',
@@ -2722,6 +2752,61 @@ assertSourceContains(
         [
             /clearMediaElement\?\.\(binding\.element\)[\s\S]*?binding\.element\.remove/,
             'source cleanup must clear and remove the old playback element',
+        ],
+    ]
+);
+const localPreviewControllerSource = getModuleSource(
+    '/js/media/local-screen-share-preview-controller.js'
+);
+assertSourceContains(script, 'local screen-share preview integration', [
+    [
+        /if \(!videoId && localPreviewSession\)[\s\S]*?localScreenSharePreviewController\.bindSource/,
+        'only the local screen-share path may bind preview controls',
+    ],
+    [
+        /localScreenSharePreviewController\.bindSource\(\{[\s\S]*?generation: localPreviewGeneration,[\s\S]*?session: localPreviewSession,[\s\S]*?stream: playbackStream/,
+        'local preview must receive the owned session, generation, and current stream',
+    ],
+    [
+        /localScreenSharePreviewController\.stopSession\(screenShareSession\)[\s\S]*?currentScreenStream = undefined/,
+        'screen stop must clear preview ownership before dropping stream state',
+    ],
+    [
+        /beforeStopMedia:[\s\S]*?localScreenSharePreviewController\.destroy\(\)[\s\S]*?fullscreenControls\.destroy\(\)/,
+        'page teardown must release preview UI before fullscreen ownership',
+    ],
+    [
+        /statusStream =[\s\S]*?localPreview\.active[\s\S]*?localPreview\.stream/,
+        'hidden local preview must retain its screen-share tile classification',
+    ],
+]);
+assertSourceContains(
+    localPreviewControllerSource,
+    'local screen-share preview lifecycle contract',
+    [
+        [
+            /if \(!hidden && isFullscreen\?\.\(tile\)\)[\s\S]*?await exitFullscreen\?\.\(tile\)/,
+            'hiding must exit through the existing fullscreen owner first',
+        ],
+        [
+            /hidden = !hidden;[\s\S]*?clearMediaElement\?\.\(mediaElement\)/,
+            'hiding must stop local element rendering without touching tracks',
+        ],
+        [
+            /nextGeneration < currentGeneration/,
+            'older preview sources must not replace the latest stream',
+        ],
+        [
+            /activeSession !== session/,
+            'late events from an old share session must be rejected',
+        ],
+        [
+            /retiredSessions\.has\(session\)/,
+            'retired share sessions must never become current again',
+        ],
+        [
+            /button\.addEventListener\('click', handleToggle\)/,
+            'the preview toggle must have one controller-owned listener',
         ],
     ]
 );

@@ -26,6 +26,8 @@ const mediaDockAdapterApi = window.VoiceMediaDockAdapter;
 const mediaDockRuntimeApi = window.VoiceMediaDockRuntime;
 const screenShareVolumeControllerApi = window.VoiceScreenShareVolumeController;
 const fullscreenControls = window.VoiceFullscreenControls;
+const localScreenSharePreviewControllerApi =
+    window.VoiceLocalScreenSharePreviewController;
 const voiceJoinOverlayUI = window.VoiceJoinOverlayUI;
 const layoutEditUI = window.PageLayoutEditUI;
 const layoutComponentActionsUI = window.PageLayoutComponentActionsUI;
@@ -268,6 +270,33 @@ const screenShareVolumeController =
                     console.warn(message, error || ''),
             }),
         createAudioElement: () => document.createElement('audio'),
+    });
+const localScreenSharePreviewController =
+    localScreenSharePreviewControllerApi.createController({
+        attachMediaElement: (mediaElement, stream) =>
+            voiceMediaLifecycle.attachAndPlayMedia({
+                mediaElement,
+                onWarning: (message, error) =>
+                    console.warn(message, error || ''),
+                stream,
+            }),
+        clearMediaElement: (mediaElement) =>
+            voiceMediaLifecycle.clearMediaElement({
+                mediaElement,
+                onWarning: (message, error) =>
+                    console.warn(message, error || ''),
+            }),
+        exitFullscreen: (tile) =>
+            fullscreenControls.toggleTileFullscreen({
+                tile,
+                onError: (error) =>
+                    console.warn(
+                        'Could not exit fullscreen before hiding the local preview.',
+                        error
+                    ),
+            }),
+        isFullscreen: (tile) =>
+            fullscreenControls.getFullscreenElement() === tile,
     });
 const voicePeerRegistry = voicePeerRegistryApi.createRegistry({
     attachRemoteStream: ({ generation, metadata, peerId, stream }) =>
@@ -803,6 +832,7 @@ const pageVoiceTeardown = voiceMediaLifecycle.createPageTeardown({
         mediaDockAdapter?.destroy();
         remoteVolumeUI.destroy();
         screenShareVolumeController.destroy();
+        localScreenSharePreviewController.destroy();
         fullscreenControls.destroy();
         navigator.mediaDevices?.removeEventListener?.(
             'devicechange',
@@ -3439,9 +3469,13 @@ const updateVideoTileStatus = (tile) => {
     const member = getTileMember(tile);
     const isLocal = tile.id === 'local-video';
     const mediaElement = tile.querySelector('video, audio');
+    const localPreview = localScreenSharePreviewController.getSnapshot();
+    const statusStream =
+        isLocal && localPreview.active
+            ? localPreview.stream
+            : mediaElement?.srcObject;
     const hasVideo =
-        voiceMediaLifecycle.getLiveTracks(mediaElement?.srcObject, 'video')
-            .length > 0;
+        voiceMediaLifecycle.getLiveTracks(statusStream, 'video').length > 0;
     const displayName = member.senderName || (isLocal ? getChatName() : 'Peer');
     ensureTileStructure(tile);
     const tileType = getTileType(tile, hasVideo, member);
@@ -3660,7 +3694,12 @@ const addVideoStream = (
     video,
     stream,
     videoId,
-    { generation = 0, trackRoles = [] } = {}
+    {
+        generation = 0,
+        localPreviewGeneration = 0,
+        localPreviewSession,
+        trackRoles = [],
+    } = {}
 ) => {
     const tileId = videoId || 'local-video';
     let tile = document.getElementById(tileId);
@@ -3753,12 +3792,26 @@ const addVideoStream = (
             mediaElement.srcObject === playbackStream &&
             mediaElementVideoTracks.get(mediaElement) !== liveVideoTrack
     );
-    voiceMediaLifecycle.attachAndPlayMedia({
-        forceRebind,
-        mediaElement,
-        onWarning: (message, error) => console.warn(message, error || ''),
-        stream: playbackStream,
-    });
+    if (!videoId && localPreviewSession) {
+        localScreenSharePreviewController.bindSource({
+            generation: localPreviewGeneration,
+            mediaElement,
+            session: localPreviewSession,
+            stream: playbackStream,
+            target: body,
+            tile,
+        });
+    } else {
+        if (!videoId) {
+            localScreenSharePreviewController.stopSession();
+        }
+        voiceMediaLifecycle.attachAndPlayMedia({
+            forceRebind,
+            mediaElement,
+            onWarning: (message, error) => console.warn(message, error || ''),
+            stream: playbackStream,
+        });
+    }
     if (hasVideo) {
         mediaElementVideoTracks.set(mediaElement, liveVideoTrack);
     } else {
@@ -3847,7 +3900,14 @@ const setLocalVideoStream = (stream) => {
         return;
     }
 
-    addVideoStream(myVideo, stream);
+    const previewSession = sharingNow ? currentScreenShareSession : undefined;
+    const previewGeneration = previewSession
+        ? (previewSession.previewGeneration += 1)
+        : 0;
+    addVideoStream(myVideo, stream, undefined, {
+        localPreviewGeneration: previewGeneration,
+        localPreviewSession: previewSession,
+    });
 };
 
 const refreshVoiceCallsForLocalMedia = (peer) => {
@@ -4050,6 +4110,7 @@ const unbindScreenTrackEnded = (session = currentScreenShareSession) => {
 
 const stopCurrentScreenStream = () => {
     const screenStream = currentScreenStream;
+    const screenShareSession = currentScreenShareSession;
     if (screenStream) {
         voiceMediaDebug.record({
             epoch: voiceSessionRuntime.getSnapshot().epoch,
@@ -4059,6 +4120,7 @@ const stopCurrentScreenStream = () => {
         });
     }
     unbindScreenTrackEnded();
+    localScreenSharePreviewController.stopSession(screenShareSession);
     currentScreenStream = undefined;
     currentScreenShareSession = undefined;
 
@@ -4070,6 +4132,7 @@ const restoreCameraAfterScreenShare = (peer) => {
     const nextVideoTrack =
         cameraTrack?.readyState === 'live' ? cameraTrack : undefined;
 
+    localScreenSharePreviewController.stopSession(currentScreenShareSession);
     sharingNow = false;
     setActiveVideoTrack(peer, nextVideoTrack);
 
@@ -4143,6 +4206,7 @@ const startScreenShare = async (peer, options = {}) => {
     setMediaOperationError('screen', capture);
     currentScreenStream = shareScreen;
     const screenShareSession = {
+        previewGeneration: 0,
         stream: shareScreen,
         track,
         voiceSessionGeneration: localVoiceSessionGeneration,
