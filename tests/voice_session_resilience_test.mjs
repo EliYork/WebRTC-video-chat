@@ -234,6 +234,43 @@ test('retry pauses offline, online wakes once, success resets and leave cancels 
     assert.equal(timers.tasks.size, 0);
 });
 
+test('retry controller starts a fresh attempt count on a new run after exhaustion', async () => {
+    const timers = new FakeTimers();
+    const retryApi = loadBrowserApi(
+        '../src/views/js/voice/voice-retry-controller.js',
+        'VoiceRetryController',
+        { clearTimeout: timers.clear, setTimeout: timers.set }
+    );
+    const controller = retryApi.createRetryController({
+        baseDelay: 10,
+        clearTimer: timers.clear,
+        jitter: 0,
+        maxAttempts: 2,
+        maxDelay: 40,
+        setTimer: timers.set,
+    });
+
+    let calls = 0;
+    const task = async () => {
+        calls += 1;
+        return false;
+    };
+
+    const first = controller.run({ epoch: 5, task });
+    await timers.runAll();
+    assert.equal((await first).ok, false);
+    assert.equal(calls, 2);
+
+    // After exhaustion, a new run must retry from scratch instead of
+    // failing immediately with the stale attempt counter.
+    const second = controller.run({ epoch: 5, task });
+    await timers.runAll();
+    const result = await second;
+    assert.equal(result.ok, false);
+    assert.equal(result.attempts, 2);
+    assert.equal(calls, 4);
+});
+
 class FakeTrack {
     constructor(kind) {
         this.kind = kind;

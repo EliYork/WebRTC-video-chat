@@ -4435,6 +4435,9 @@ async function handleUnexpectedLocalTrackEnded(type, track, epoch) {
         return false;
     }
     const desired = mediaOperationController.getSnapshot().desired;
+    if (type !== 'microphone' && type !== 'camera') {
+        return false;
+    }
     if (
         !desired[type] ||
         !localTrackEndedController.claimRecovery(type, epoch)
@@ -4444,6 +4447,7 @@ async function handleUnexpectedLocalTrackEnded(type, track, epoch) {
 
     if (type === 'microphone') {
         if (myVideoStream?.getAudioTracks?.()[0] !== track) {
+            localTrackEndedController.releaseRecovery('microphone', epoch);
             return false;
         }
         selectedInputDeviceId = 'default';
@@ -4456,16 +4460,19 @@ async function handleUnexpectedLocalTrackEnded(type, track, epoch) {
             myVideoStream = undefined;
             setLocalVideoStream(getActiveStream());
             refreshVoiceCallsForLocalMedia(currentPeer);
+            localTrackEndedController.releaseRecovery('microphone', epoch);
         }
         return recovered;
     }
 
     if (type === 'camera') {
         if (cameraStream?.getVideoTracks?.()[0] !== track) {
+            localTrackEndedController.releaseRecovery('camera', epoch);
             return false;
         }
         setCameraButtonState(false);
         if (sharingNow) {
+            localTrackEndedController.releaseRecovery('camera', epoch);
             return false;
         }
         selectedCameraDeviceId = 'default';
@@ -4474,6 +4481,7 @@ async function handleUnexpectedLocalTrackEnded(type, track, epoch) {
         if (!recovered) {
             cameraStream = undefined;
             setActiveVideoTrack(currentPeer);
+            localTrackEndedController.releaseRecovery('camera', epoch);
         }
         return recovered;
     }
@@ -4570,6 +4578,7 @@ const schedulePeerRecovery = (strategy, reason) => {
     if (
         session.desiredVoiceState !== 'joined' ||
         session.state === 'disposed' ||
+        session.state === 'failed' ||
         navigator.onLine === false
     ) {
         return Promise.resolve(false);

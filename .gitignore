@@ -3,3 +3,7 @@ node_modules
 cert
 .vscode
 
+
+# Agent tooling artifacts
+.reasonix/
+reasonix.toml

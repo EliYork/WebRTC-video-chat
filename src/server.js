@@ -16,6 +16,7 @@ import { fileURLToPath } from 'url';
 import Logger from './utils/Log.js';
 
 import { iceServers as iceServersList } from './utils/iceServers.js';
+import { createChatRateLimiter } from './utils/ChatRateLimit.js';
 import {
     emitViewCursorRemove,
     resolveOwnedViewChatRoom,
@@ -108,6 +109,7 @@ const CHAT_HISTORY_LIMIT = 50;
 const CHAT_MESSAGE_MAX_LENGTH = 500;
 const chatHistoryByRoom = new Map();
 const onlineMembersByRoom = new Map();
+const chatRateLimiter = createChatRateLimiter({});
 
 const getChatHistory = (roomId) => chatHistoryByRoom.get(roomId) || [];
 
@@ -397,6 +399,10 @@ const handleChatSend = ({ roomId, senderName, content } = {}, socket) => {
         return;
     }
 
+    if (!chatRateLimiter.allow(socket.id)) {
+        return;
+    }
+
     const message = {
         id: createChatMessageId(),
         roomId: channel.slug,
@@ -499,6 +505,10 @@ io.on('connection', (socket) => {
             {
                 name: 'clear-socket-owners',
                 run: () => clearDisconnectedSocketOwners(socket),
+            },
+            {
+                name: 'chat-rate-limit-cleanup',
+                run: () => chatRateLimiter.clear(socket.id),
             },
             {
                 name: 'disconnect-log',

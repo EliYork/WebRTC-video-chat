@@ -137,6 +137,10 @@
             if (active) {
                 return active.promise;
             }
+            // A new run starts a fresh recovery sequence: reset the attempt
+            // counter so a previously exhausted task does not make manual
+            // retries or network-recovery attempts fail immediately.
+            attempt = 0;
 
             const operation = {
                 epoch,
