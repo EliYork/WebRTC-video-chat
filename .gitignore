@@ -1,4 +1,5 @@
 node_modules
+data/chat-history.json
 .env
 cert
 .vscode

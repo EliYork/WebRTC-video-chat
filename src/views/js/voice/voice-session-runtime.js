@@ -44,6 +44,7 @@
             STATES.DISPOSED,
         ],
         [STATES.RECONNECTING_SOCKET]: [
+            STATES.DEGRADED,
             STATES.RESTORING,
             STATES.RECONNECTING_PEER,
             STATES.LEAVING,
@@ -258,6 +259,13 @@
             return transition(STATES.RESTORING, reason);
         };
 
+        const markDegraded = (reason = 'signaling-unavailable') => {
+            if (state === STATES.DISPOSED || desiredVoiceState !== 'joined') {
+                return false;
+            }
+            return transition(STATES.DEGRADED, reason);
+        };
+
         const markJoined = ({
             epoch: eventEpoch = epoch,
             peerId: nextPeerId,
@@ -307,6 +315,7 @@
             join,
             leave,
             markJoined,
+            markDegraded,
             markRestoring,
             peerDisconnected,
             peerRecreated,

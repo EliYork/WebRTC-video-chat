@@ -11,9 +11,10 @@
     <!-- @todo - see to import peerjs, and fontawesome fron nodemodules, not cdn -->
     <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
     <script src="https://kit.fontawesome.com/279db593be.js" crossorigin="anonymous"></script>
-    <script>
-        const ROOM_ID = '<%= roomId %>'
-        const iceServers = JSON.parse('<%- iceServers %>')
+    <script nonce="<%= cspNonce %>">
+        const roomBootstrap = <%- roomBootstrap %>
+        const ROOM_ID = roomBootstrap.roomId
+        const iceServers = roomBootstrap.iceServers
     </script>
 </head>
 <body>

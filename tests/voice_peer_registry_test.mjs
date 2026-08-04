@@ -244,3 +244,53 @@ test('PeerJS disconnect blocks new calls but preserves established directions', 
     assert.equal(publish(a, 'B', 2, stream(video('screen'))), undefined);
     assert.equal(a.registry.getSnapshot('B').outgoingCall, current);
 });
+
+test('local media changes replace existing sender tracks without rebuilding the call', async () => {
+    const network = new StrictMediaNetwork();
+    const a = createFixture('A', network);
+    createFixture('B', network);
+    const current = publish(
+        a,
+        'B',
+        1,
+        stream(audio('mic-old'), video('camera'))
+    );
+    network.flush();
+
+    const firstReplacement = await a.registry.replaceOutgoingTracks({
+        generation: 2,
+        peerId: 'B',
+        stream: stream(audio('mic-new'), video('screen')),
+    });
+    assert.equal(firstReplacement.ok, true);
+    assert.equal(a.peer.calls.length, 1);
+    assert.equal(a.registry.getSnapshot('B').outgoingCall, current);
+    assert.deepEqual(
+        current.peerConnection.getSenders().map(({ track }) => track.id),
+        ['mic-new', 'screen']
+    );
+
+    const secondReplacement = await a.registry.replaceOutgoingTracks({
+        generation: 3,
+        peerId: 'B',
+        stream: stream(audio('mic-new')),
+    });
+    assert.equal(secondReplacement.ok, true);
+    assert.equal(current.peerConnection.getSenders()[1].track, null);
+});
+
+test('adding a sender kind reports one required renegotiation', async () => {
+    const network = new StrictMediaNetwork();
+    const a = createFixture('A', network);
+    createFixture('B', network);
+    publish(a, 'B', 1, stream(audio('mic')));
+    network.flush();
+
+    const replacement = await a.registry.replaceOutgoingTracks({
+        generation: 2,
+        peerId: 'B',
+        stream: stream(audio('mic'), video('camera')),
+    });
+    assert.equal(replacement.ok, false);
+    assert.equal(replacement.reason, 'renegotiation-required');
+});

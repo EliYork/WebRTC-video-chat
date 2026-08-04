@@ -152,6 +152,8 @@ export const createVoiceCallSignaling = ({
                         peerId: replacedPeerId,
                         roomId: ownedRoomId,
                         sharing: false,
+                        voiceSessionGeneration:
+                            socket.data.voiceSessionGeneration,
                     };
                     onScreenShareChange?.({ ...event, socket });
                     socket.to(ownedRoomId).emit('screen:share', event);
@@ -232,6 +234,7 @@ export const createVoiceCallSignaling = ({
             peerId: owner.peerId,
             roomId: owner.roomId,
             sharing,
+            voiceSessionGeneration: owner.voiceSessionGeneration,
         };
         onScreenShareChange?.({ ...event, socket });
         socket.to(owner.roomId).emit('screen:share', event);
@@ -248,7 +251,12 @@ export const createVoiceCallSignaling = ({
         const { peerId, roomId } = owner;
         if (socket.data.voiceScreenSharing === true) {
             socket.data.voiceScreenSharing = false;
-            const event = { peerId, roomId, sharing: false };
+            const event = {
+                peerId,
+                roomId,
+                sharing: false,
+                voiceSessionGeneration: owner.voiceSessionGeneration,
+            };
             onScreenShareChange?.({ ...event, socket });
             socket.to(roomId).emit('screen:share', event);
         }

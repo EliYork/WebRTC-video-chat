@@ -110,6 +110,9 @@ class StrictPeerConnection extends FakeEventTarget {
             : null;
         this.senders = localKinds.map((kind) => ({
             track: { kind },
+            async replaceTrack(track) {
+                this.track = track;
+            },
         }));
         this.transceivers = [
             ...localKinds.map((kind, index) => ({

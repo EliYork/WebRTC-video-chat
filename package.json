@@ -5,6 +5,7 @@
     "main": "index.js",
     "type": "module",
     "scripts": {
+        "test": "node --test tests/*.mjs",
         "start": "node ./src/server.js",
         "dev": "nodemon ./src/server.js",
         "eslint": "eslint",
@@ -21,6 +22,7 @@
         "dotenv": "^16.5.0",
         "ejs": "^3.1.10",
         "express": "^5.1.0",
+        "helmet": "^8.3.0",
         "nodemon": "^3.1.10",
         "peer": "^1.0.2",
         "socket.io": "^4.8.1",

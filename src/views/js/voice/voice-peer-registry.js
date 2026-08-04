@@ -495,6 +495,76 @@
             return call;
         };
 
+        const replaceOutgoingTracks = async ({
+            generation,
+            peerId,
+            stream,
+        } = {}) => {
+            const entry = entries.get(peerId);
+            const record = entry?.outgoing.current;
+            const normalizedGeneration = Number(generation);
+            const peerConnection =
+                record?.call?.peerConnection || record?.call?._pc;
+            const senders = peerConnection?.getSenders?.() || [];
+            if (
+                sessionDisconnected ||
+                !record ||
+                !isGeneration(normalizedGeneration) ||
+                normalizedGeneration <= entry.lastOutgoingGeneration ||
+                senders.some(
+                    (sender) => typeof sender?.replaceTrack !== 'function'
+                )
+            ) {
+                return { ok: false, reason: 'replacement-unavailable' };
+            }
+
+            const nextTracksByKind = new Map();
+            getLiveTracks(stream).forEach((track) => {
+                const tracks = nextTracksByKind.get(track.kind) || [];
+                tracks.push(track);
+                nextTracksByKind.set(track.kind, tracks);
+            });
+            const senderSlotsByKind = new Map();
+            senders.forEach((sender) => {
+                const kind = sender.track?.kind || sender.__voiceTrackKind;
+                if (!kind) {
+                    return;
+                }
+                sender.__voiceTrackKind = kind;
+                const slots = senderSlotsByKind.get(kind) || [];
+                slots.push(sender);
+                senderSlotsByKind.set(kind, slots);
+            });
+            if (
+                Array.from(nextTracksByKind).some(
+                    ([kind, tracks]) =>
+                        tracks.length >
+                        (senderSlotsByKind.get(kind)?.length || 0)
+                )
+            ) {
+                return { ok: false, reason: 'renegotiation-required' };
+            }
+
+            await Promise.all(
+                Array.from(senderSlotsByKind).flatMap(([kind, slots]) => {
+                    const tracks = nextTracksByKind.get(kind) || [];
+                    return slots.map((sender, index) =>
+                        sender.replaceTrack(tracks[index] || null)
+                    );
+                })
+            );
+            record.generation = normalizedGeneration;
+            entry.lastOutgoingGeneration = normalizedGeneration;
+            debug({
+                direction: 'outgoing',
+                event: 'tracks-replaced',
+                generation: normalizedGeneration,
+                peerId,
+                tracks: getLiveTracks(stream).map(({ kind }) => kind),
+            });
+            return { ok: true };
+        };
+
         const answerCall = ({ call } = {}) => {
             const peerId = call?.peer;
             const generation = Number(
@@ -740,6 +810,7 @@
             getState,
             isSessionDisconnected: () => sessionDisconnected,
             reset,
+            replaceOutgoingTracks,
             setSessionDisconnected: (value) => {
                 sessionDisconnected = Boolean(value);
             },

@@ -90,7 +90,11 @@
         const run = (
             type,
             operation,
-            { epoch = getEpoch(), state = 'requesting' } = {}
+            {
+                epoch = getEpoch(),
+                state = 'requesting',
+                surviveEpochChange = false,
+            } = {}
         ) => {
             const record = getRecord(type);
             if (disposed) {
@@ -117,7 +121,7 @@
                     if (
                         disposed ||
                         record.token !== token ||
-                        getEpoch() !== epoch
+                        (!surviveEpochChange && getEpoch() !== epoch)
                     ) {
                         stopStream?.(value);
                         debug('cancelled', type, record, {

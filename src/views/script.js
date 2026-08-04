@@ -1012,6 +1012,7 @@ const handleSocketVoiceCallTargets = ({
     const session = voiceSessionRuntime.getSnapshot();
 
     if (
+        !Array.isArray(peerIds) ||
         roomId !== joinedVoiceRoomId ||
         clientSessionEpoch !== session.epoch ||
         (session.serverGeneration > 0 &&
@@ -1146,6 +1147,8 @@ const reconcilePresenceState = ({
 } = {}) => {
     const session = voiceSessionRuntime.getSnapshot();
     const currentVoiceSnapshot =
+        (clientSessionEpoch === undefined &&
+            voiceSessionGeneration === undefined) ||
         session.desiredVoiceState !== 'joined' ||
         (clientSessionEpoch === session.epoch &&
             voiceSessionGeneration === session.serverGeneration);
@@ -1267,6 +1270,7 @@ const restoreServerVoiceOwner = (reason = 'restore') => {
         return activeVoiceRestore.promise;
     }
 
+    peerRetryController.cancel('voice-restore-started');
     voiceSessionRuntime.markRestoring(reason);
     const epoch = session.epoch;
     const roomId = session.roomId;
@@ -1284,7 +1288,12 @@ const restoreServerVoiceOwner = (reason = 'restore') => {
                 peer !== currentPeer ||
                 peer.destroyed
             ) {
-                if (voiceSessionRuntime.isCurrent(epoch)) {
+                if (
+                    !result?.ok &&
+                    voiceSessionRuntime.isCurrent(epoch) &&
+                    peer === currentPeer &&
+                    !peer.destroyed
+                ) {
                     voiceSessionRuntime.fail(
                         result?.reason || 'voice-join-rejected'
                     );
@@ -1368,32 +1377,42 @@ const ensureSocket = () => {
     socket.on('cursor:move', renderRemoteCursor);
     socket.on('cursor:leave', markRemoteCursorIdle);
     socket.on('cursor:remove', removeRemoteCursor);
-    socket.on('screen:share', ({ peerId, roomId, sharing } = {}) => {
-        if (
-            roomId !== joinedVoiceRoomId ||
-            !peerId ||
-            typeof sharing !== 'boolean'
-        ) {
-            return;
-        }
-
-        if (sharing) {
-            screenSharers.add(peerId);
-        } else {
-            screenSharers.delete(peerId);
-        }
-        if (sharing && getLayoutPreference('autoShowScreenShare')) {
-            const tile = document.getElementById(peerId);
-            if (tile && tile.classList.contains('is-layout-hidden')) {
-                setTileLayoutItemVisibility(tile.dataset.layoutItemId, true);
-                tile.classList.remove('is-layout-hidden');
-                bringTileLayoutToFront(tile);
+    socket.on(
+        'screen:share',
+        ({ peerId, roomId, sharing, voiceSessionGeneration } = {}) => {
+            const session = voiceSessionRuntime.getSnapshot();
+            if (
+                roomId !== joinedVoiceRoomId ||
+                !peerId ||
+                peerId === localPeerId ||
+                !voiceMediaTargets.has(peerId) ||
+                typeof sharing !== 'boolean' ||
+                voiceSessionGeneration !== session.serverGeneration
+            ) {
+                return;
             }
+
+            if (sharing) {
+                screenSharers.add(peerId);
+            } else {
+                screenSharers.delete(peerId);
+            }
+            if (sharing && getLayoutPreference('autoShowScreenShare')) {
+                const tile = document.getElementById(peerId);
+                if (tile && tile.classList.contains('is-layout-hidden')) {
+                    setTileLayoutItemVisibility(
+                        tile.dataset.layoutItemId,
+                        true
+                    );
+                    tile.classList.remove('is-layout-hidden');
+                    bringTileLayoutToFront(tile);
+                }
+            }
+            updateAllVideoTileStatus();
+            voiceMediaQualityRuntime?.syncPeer(peerId);
+            updateMobileTileView();
         }
-        updateAllVideoTileStatus();
-        voiceMediaQualityRuntime?.syncPeer(peerId);
-        updateMobileTileView();
-    });
+    );
     socket.on('connect', () => {
         const transport = socket.io?.engine?.transport?.name || 'unknown';
         voiceMediaDebug.record({ event: 'socket-connect', transport });
@@ -1439,7 +1458,8 @@ const ensureSocket = () => {
     );
     manager?.on?.('reconnect_failed', () => {
         voiceMediaDebug.record({ event: 'socket-reconnect-failed' });
-        voiceSessionRuntime.fail('socket-reconnect-failed');
+        voiceSessionRuntime.markDegraded('socket-reconnect-failed');
+        updateLocalUserCard();
     });
 
     return socket;
@@ -1679,64 +1699,78 @@ const requestAudioStream = async ({ rawOnly = false, ...options } = {}) => {
 
 const createAudioPipeline = async (rawStream) => {
     const ctx = new AudioContext({ sampleRate: 48000 });
-    const source = ctx.createMediaStreamSource(rawStream);
-    const dest = ctx.createMediaStreamDestination();
+    let rnnoiseNode;
+    try {
+        const source = ctx.createMediaStreamSource(rawStream);
+        const dest = ctx.createMediaStreamDestination();
+        let lastOutNode = source;
 
-    let lastOutNode = source;
-
-    if (getAiExperimentEnabled() && isAiExperimentSupported()) {
-        try {
-            const wns = await import('/vendor/web-noise-suppressor.js');
-
-            const wasmBinary = await wns.loadRnnoise({
-                url: '/wasm/rnnoise.wasm',
-                simdUrl: '/wasm/rnnoise_simd.wasm',
-            });
-
-            await ctx.audioWorklet.addModule(
-                '/audio-worklet/rnnoise-processor.js'
-            );
-
-            const rnnoiseNode = new wns.RnnoiseWorkletNode(ctx, {
-                wasmBinary,
-                maxChannels: 2,
-            });
-
-            source.connect(rnnoiseNode);
-            lastOutNode = rnnoiseNode;
-
-            const boost = new GainNode(ctx, { gain: 1.35 });
-            rnnoiseNode.connect(boost);
-            lastOutNode = boost;
-
-            noiseMode = 'rnnoise';
-            noiseProcessorNode = rnnoiseNode;
-            console.log(
-                '[audio-experiment] web-noise-suppressor Rnnoise active'
-            );
-        } catch (error) {
-            console.warn(
-                '[audio-experiment] web-noise-suppressor init failed, gain only.',
-                error
-            );
-            noiseMode = 'passthrough';
+        if (getAiExperimentEnabled() && isAiExperimentSupported()) {
+            try {
+                const wns = await import('/vendor/web-noise-suppressor.js');
+                const wasmBinary = await wns.loadRnnoise({
+                    url: '/wasm/rnnoise.wasm',
+                    simdUrl: '/wasm/rnnoise_simd.wasm',
+                });
+                await ctx.audioWorklet.addModule(
+                    '/audio-worklet/rnnoise-processor.js'
+                );
+                rnnoiseNode = new wns.RnnoiseWorkletNode(ctx, {
+                    wasmBinary,
+                    maxChannels: 2,
+                });
+                source.connect(rnnoiseNode);
+                lastOutNode = rnnoiseNode;
+                const boost = new GainNode(ctx, { gain: 1.35 });
+                rnnoiseNode.connect(boost);
+                lastOutNode = boost;
+                noiseMode = 'rnnoise';
+                console.log(
+                    '[audio-experiment] web-noise-suppressor Rnnoise active'
+                );
+            } catch (error) {
+                try {
+                    rnnoiseNode?.destroy?.();
+                    rnnoiseNode?.disconnect?.();
+                } catch {
+                    /* noop */
+                }
+                rnnoiseNode = undefined;
+                console.warn(
+                    '[audio-experiment] web-noise-suppressor init failed, gain only.',
+                    error
+                );
+                noiseMode = 'passthrough';
+            }
         }
+
+        const micGainPercent = noiseSettingsUI.getMicGain();
+        const micGainNode = new GainNode(ctx, {
+            gain: Math.max(0.001, micGainPercent / 100),
+        });
+        lastOutNode.connect(micGainNode);
+        micGainNode.connect(dest);
+
+        noiseAudioContext = ctx;
+        noiseGainNode = micGainNode;
+        noiseProcessorNode = rnnoiseNode || null;
+        noiseRawStream = rawStream;
+        noiseProcessorActive = true;
+        return dest.stream;
+    } catch (error) {
+        try {
+            rnnoiseNode?.destroy?.();
+            rnnoiseNode?.disconnect?.();
+        } catch {
+            /* noop */
+        }
+        try {
+            await ctx.close();
+        } catch {
+            /* noop */
+        }
+        throw error;
     }
-
-    const micGainPercent = noiseSettingsUI.getMicGain();
-    const micGainNode = new GainNode(ctx, {
-        gain: Math.max(0.001, micGainPercent / 100),
-    });
-
-    lastOutNode.connect(micGainNode);
-    micGainNode.connect(dest);
-
-    noiseAudioContext = ctx;
-    noiseGainNode = micGainNode;
-    noiseRawStream = rawStream;
-    noiseProcessorActive = true;
-
-    return dest.stream;
 };
 
 const destroyProcessedAudioStream = () => {
@@ -3921,20 +3955,67 @@ const refreshVoiceCallsForLocalMedia = (peer) => {
         return;
     }
 
-    localVoiceMediaGeneration += 1;
-    const stream = getActiveStream();
-    voiceMediaDebug.record({
-        event: 'local-media-snapshot',
-        generation: localVoiceMediaGeneration,
-        sharing: sharingNow,
-        tracks: voiceCallProtocol.describeTracks(stream),
-    });
+    scheduleLocalMediaUpdate(peer);
+};
 
-    voiceMediaTargets.forEach((peerId) =>
-        publishLocalMediaToPeer(peer, peerId, stream, {
-            generation: localVoiceMediaGeneration,
-        })
-    );
+let localMediaUpdateTimer;
+let localMediaUpdateSequence = 0;
+let localMediaUpdateQueuedAt = 0;
+
+const scheduleLocalMediaUpdate = (peer) => {
+    const sequence = (localMediaUpdateSequence += 1);
+    localMediaUpdateQueuedAt ||= Date.now();
+    window.clearTimeout(localMediaUpdateTimer);
+    localMediaUpdateTimer = window.setTimeout(async () => {
+        localMediaUpdateTimer = undefined;
+        if (
+            sequence !== localMediaUpdateSequence ||
+            peer !== currentPeer ||
+            peer?.destroyed
+        ) {
+            return;
+        }
+        const hasPendingCapture = ['microphone', 'camera', 'screen'].some(
+            (type) => mediaOperationController.getSnapshot(type).promise
+        );
+        if (hasPendingCapture && Date.now() - localMediaUpdateQueuedAt < 250) {
+            localMediaUpdateTimer = window.setTimeout(
+                () => scheduleLocalMediaUpdate(peer),
+                40
+            );
+            return;
+        }
+        localMediaUpdateQueuedAt = 0;
+        localVoiceMediaGeneration += 1;
+        const generation = localVoiceMediaGeneration;
+        const stream = getActiveStream();
+        voiceMediaDebug.record({
+            event: 'local-media-snapshot',
+            generation,
+            sharing: sharingNow,
+            tracks: voiceCallProtocol.describeTracks(stream),
+        });
+        await Promise.all(
+            Array.from(voiceMediaTargets, async (peerId) => {
+                const replaced = await voicePeerRegistry.replaceOutgoingTracks({
+                    generation,
+                    peerId,
+                    stream,
+                });
+                if (!replaced.ok) {
+                    publishLocalMediaToPeer(peer, peerId, stream, {
+                        generation,
+                    });
+                    voiceMediaDebug.record({
+                        event: 'local-media-renegotiated',
+                        generation,
+                        peerId,
+                        reason: replaced.reason,
+                    });
+                }
+            })
+        );
+    }, 40);
 };
 
 const sendVideoTrackToPeers = (peer) => refreshVoiceCallsForLocalMedia(peer);
@@ -4018,6 +4099,7 @@ const startCamera = async (
         {
             epoch,
             state: preserveOldTrack ? 'switching' : 'requesting',
+            surviveEpochChange: true,
         }
     );
     notifyMediaDock();
@@ -4181,6 +4263,7 @@ const startScreenShare = async (peer, options = {}) => {
         {
             epoch: voiceSessionRuntime.getSnapshot().epoch,
             state: 'requesting',
+            surviveEpochChange: true,
         }
     );
     setScreenShareRequestPending(false);
@@ -4323,6 +4406,7 @@ const restartLocalMicrophone = async (
         {
             epoch,
             state: preserveOldTrack ? 'switching' : 'requesting',
+            surviveEpochChange: true,
         }
     );
     notifyMediaDock();
@@ -4361,9 +4445,8 @@ const restartLocalMicrophone = async (
         console.warn('[audio] Pipeline init failed, using raw.', error);
     }
     if (
-        !voiceSessionRuntime.isCurrent(epoch) ||
         mediaOperationController.getSnapshot('microphone').token !==
-            rawResult.token
+        rawResult.token
     ) {
         localMediaTrackStopper.stopStream(stream);
         localMediaTrackStopper.stopStream(rawResult.value);
@@ -4611,7 +4694,17 @@ const schedulePeerRecovery = (strategy, reason) => {
             });
             return waitForPeerOpen(replacement);
         },
-        onExhausted: () => voiceSessionRuntime.fail('peer-recovery-failed'),
+        onExhausted: ({ epoch }) => {
+            const currentSession = voiceSessionRuntime.getSnapshot();
+            if (
+                voiceSessionRuntime.isCurrent(epoch) &&
+                ['reconnecting-peer', 'reconnecting-socket'].includes(
+                    currentSession.state
+                )
+            ) {
+                voiceSessionRuntime.fail('peer-recovery-failed');
+            }
+        },
     });
 };
 
@@ -5021,20 +5114,30 @@ mediaDockAdapter = mediaDockAdapterApi.createMediaDockAdapter({
         },
         startScreenShare: (options) => startScreenShare(currentPeer, options),
         stopScreenShare: () => stopScreenShare(currentPeer),
-        toggleAiNoiseSuppression: () => {
+        toggleAiNoiseSuppression: async () => {
             noiseSettingsUI.setAiExperimentEnabled(
                 !noiseSettingsUI.getAiExperimentEnabled()
             );
             notifyMediaDock();
+            if (myVideoStream && currentPeer && !currentPeer.destroyed) {
+                await restartLocalMicrophone(currentPeer, {
+                    preserveOldTrack: true,
+                });
+            }
             return true;
         },
         toggleCamera: () => toggleCamera(currentPeer),
         toggleMicrophone: () => handleMicClick(currentPeer),
-        toggleNoiseSuppression: () => {
+        toggleNoiseSuppression: async () => {
             noiseSettingsUI.setNoiseSuppressionEnabled(
                 !noiseSettingsUI.getNoiseSuppressionEnabled()
             );
             notifyMediaDock();
+            if (myVideoStream && currentPeer && !currentPeer.destroyed) {
+                await restartLocalMicrophone(currentPeer, {
+                    preserveOldTrack: true,
+                });
+            }
             return true;
         },
     },

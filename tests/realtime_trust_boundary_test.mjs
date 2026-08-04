@@ -98,7 +98,12 @@ test('legal screen-share broadcasts canonical owner identity and boolean state',
     assert.deepEqual(getEvents(observer, 'screen:share'), [
         {
             event: 'screen:share',
-            payload: { peerId: 'peer-a', roomId: 'lobby', sharing: true },
+            payload: {
+                peerId: 'peer-a',
+                roomId: 'lobby',
+                sharing: true,
+                voiceSessionGeneration: joined.voiceSessionGeneration,
+            },
         },
     ]);
     assert.deepEqual(screenChanges, [
@@ -107,6 +112,7 @@ test('legal screen-share broadcasts canonical owner identity and boolean state',
             roomId: 'lobby',
             sharing: true,
             socketId: 'sharer',
+            voiceSessionGeneration: joined.voiceSessionGeneration,
         },
     ]);
     assert.equal(sharer.data.voiceScreenSharing, true);
@@ -137,6 +143,7 @@ test('cross-room and peer spoof fields cannot select broadcast target or identit
         peerId: 'peer-a',
         roomId: 'lobby',
         sharing: true,
+        voiceSessionGeneration: joined.voiceSessionGeneration,
     });
 });
 
@@ -276,6 +283,7 @@ test('active leave clears sharing before peer removal and disconnect is duplicat
                     peerId: 'peer-a',
                     roomId: 'lobby',
                     sharing: false,
+                    voiceSessionGeneration: joined.voiceSessionGeneration,
                 },
             },
             {
@@ -342,6 +350,7 @@ test('rejoin gets a new session and late old events cannot modify the new room',
         peerId: 'peer-b',
         roomId: 'game',
         sharing: true,
+        voiceSessionGeneration: newSession.voiceSessionGeneration,
     });
 });
 

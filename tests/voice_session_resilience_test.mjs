@@ -363,6 +363,43 @@ test('media operations serialize double clicks and reject stale resolve after st
     assert.equal(staleCamera.tracks[0].stopCount, 1);
 });
 
+test('media capture can survive a transport epoch change when the operation remains desired', async () => {
+    let epoch = 1;
+    let resolveCapture;
+    const stream = { getTracks: () => [] };
+    const controller = mediaApi.createMediaOperationController({
+        getEpoch: () => epoch,
+    });
+    controller.setDesired('camera', true);
+    const capture = controller.run(
+        'camera',
+        () =>
+            new Promise((resolve) => {
+                resolveCapture = resolve;
+            }),
+        { epoch, surviveEpochChange: true }
+    );
+
+    await Promise.resolve();
+    epoch += 1;
+    resolveCapture(stream);
+    const result = await capture;
+    assert.equal(result.ok, true);
+    assert.equal(result.token, 1);
+    assert.equal(result.value, stream);
+});
+
+test('signaling exhaustion degrades an otherwise joined P2P session', () => {
+    const runtime = sessionApi.createSessionRuntime();
+    const epoch = runtime.join('lobby');
+    runtime.markJoined({ epoch, peerId: 'peer-a', serverGeneration: 1 });
+    runtime.socketDisconnected();
+
+    assert.equal(runtime.markDegraded('socket-reconnect-failed'), true);
+    assert.equal(runtime.getSnapshot().state, 'degraded');
+    assert.equal(runtime.getSnapshot().desiredVoiceState, 'joined');
+});
+
 test('media operations isolate types, dispose pending work and map browser errors', async () => {
     let resolveScreen;
     const controller = mediaApi.createMediaOperationController({

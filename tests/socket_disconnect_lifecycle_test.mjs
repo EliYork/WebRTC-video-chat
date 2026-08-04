@@ -287,6 +287,7 @@ test('sharing disconnect broadcasts sharing false and peer leave once', async ()
                     peerId: 'sharer-peer',
                     roomId: 'lobby',
                     sharing: false,
+                    voiceSessionGeneration: joined.voiceSessionGeneration,
                 },
             },
             {

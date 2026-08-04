@@ -1,5 +1,7 @@
 import fs from 'fs';
 import express from 'express';
+import helmet from 'helmet';
+import { randomUUID } from 'node:crypto';
 
 import dotenv from 'dotenv';
 dotenv.config();
@@ -10,13 +12,14 @@ import { createServer as createServerHttps } from 'https';
 import { Server as SocketServer } from 'socket.io';
 import { ExpressPeerServer } from 'peer';
 
-import { dirname } from 'path';
+import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
 import Logger from './utils/Log.js';
 
 import { iceServers as iceServersList } from './utils/iceServers.js';
 import { createChatRateLimiter } from './utils/ChatRateLimit.js';
+import { createChatHistoryStore } from './utils/ChatHistoryStore.js';
 import {
     emitViewCursorRemove,
     resolveOwnedViewChatRoom,
@@ -39,22 +42,30 @@ let key;
 let cert;
 let httpServer;
 
-const useHttps =
+const requestedHttps =
     process.env.USE_HTTPS === 'true'
         ? true
         : process.env.USE_HTTPS === 'false'
           ? false
           : undefined;
-if (useHttps === undefined)
+if (requestedHttps === undefined)
     throw new Error('Please set useHttps to either "true" or "false"');
 
-if (useHttps) {
-    // 1. https server
-    key = fs.readFileSync(__dirname + '/../cert/selfsigned.key', 'utf8');
-    cert = fs.readFileSync(__dirname + '/../cert/selfsigned.crt', 'utf8');
-    httpServer = createServerHttps({ key: key, cert: cert }, app);
+let useHttps = requestedHttps;
+if (requestedHttps) {
+    try {
+        key = fs.readFileSync(__dirname + '/../cert/selfsigned.key', 'utf8');
+        cert = fs.readFileSync(__dirname + '/../cert/selfsigned.crt', 'utf8');
+        httpServer = createServerHttps({ key, cert }, app);
+    } catch (error) {
+        useHttps = false;
+        console.error(
+            '[https] TLS certificate could not be loaded; falling back to HTTP.',
+            error.message
+        );
+        httpServer = createServerHttp(app);
+    }
 } else {
-    // 2. http server
     httpServer = createServerHttp(app);
 }
 
@@ -66,9 +77,43 @@ const peerServer = ExpressPeerServer(httpServer, {
     iceServers: [...iceServersList],
 });
 
-app.use('/peerjs', peerServer);
-
 const Log = new Logger(process.env.ENV);
+
+app.use((req, res, next) => {
+    res.locals.cspNonce = randomUUID().replaceAll('-', '');
+    next();
+});
+app.use((req, res, next) =>
+    helmet({
+        contentSecurityPolicy: {
+            directives: {
+                defaultSrc: ["'self'"],
+                scriptSrc: [
+                    "'self'",
+                    `'nonce-${res.locals.cspNonce}'`,
+                    'https://unpkg.com',
+                    'https://kit.fontawesome.com',
+                ],
+                styleSrc: ["'self'", "'unsafe-inline'"],
+                fontSrc: ["'self'", 'https://ka-f.fontawesome.com', 'data:'],
+                connectSrc: [
+                    "'self'",
+                    'https://ka-f.fontawesome.com',
+                    'ws:',
+                    'wss:',
+                ],
+                imgSrc: ["'self'", 'data:', 'blob:'],
+                mediaSrc: ["'self'", 'blob:'],
+                workerSrc: ["'self'", 'blob:'],
+                objectSrc: ["'none'"],
+                upgradeInsecureRequests: useHttps ? [] : null,
+            },
+        },
+        crossOriginEmbedderPolicy: false,
+        strictTransportSecurity: useHttps,
+    })(req, res, next)
+);
+app.use('/peerjs', peerServer);
 
 const CHANNELS = [
     {
@@ -107,22 +152,18 @@ const voiceCallSignaling = createVoiceCallSignaling({
 });
 const CHAT_HISTORY_LIMIT = 50;
 const CHAT_MESSAGE_MAX_LENGTH = 500;
-const chatHistoryByRoom = new Map();
 const onlineMembersByRoom = new Map();
 const chatRateLimiter = createChatRateLimiter({});
+const chatHistoryStore = createChatHistoryStore({
+    filePath:
+        process.env.CHAT_HISTORY_FILE ||
+        join(__dirname, '..', 'data', 'chat-history.json'),
+    limit: CHAT_HISTORY_LIMIT,
+    logger: Log,
+});
 
-const getChatHistory = (roomId) => chatHistoryByRoom.get(roomId) || [];
-
-const saveChatMessage = (message) => {
-    const history = getChatHistory(message.roomId);
-    history.push(message);
-
-    if (history.length > CHAT_HISTORY_LIMIT) {
-        history.splice(0, history.length - CHAT_HISTORY_LIMIT);
-    }
-
-    chatHistoryByRoom.set(message.roomId, history);
-};
+const getChatHistory = (roomId) => chatHistoryStore.get(roomId);
+const saveChatMessage = (message) => chatHistoryStore.append(message);
 
 const createChatMessageId = () =>
     `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
@@ -159,9 +200,30 @@ const emitPresenceToSocket = (socket) => {
     });
 };
 
+let presenceBroadcastTimer;
 const broadcastPresence = () => {
-    io.sockets.sockets.forEach(emitPresenceToSocket);
+    if (presenceBroadcastTimer) {
+        return;
+    }
+    presenceBroadcastTimer = setTimeout(() => {
+        presenceBroadcastTimer = undefined;
+        io.emit('presence:state', getPresenceSnapshot());
+    }, 25);
+    presenceBroadcastTimer.unref?.();
 };
+
+const samePresenceState = (left, right) =>
+    [
+        'peerId',
+        'roomId',
+        'senderName',
+        'joinedVoice',
+        'hasMic',
+        'micPermissionDenied',
+        'muted',
+        'cameraOn',
+        'screenSharing',
+    ].every((key) => left?.[key] === right?.[key]);
 
 const syncPresenceScreenSharing = ({ peerId, roomId, sharing, socket }) => {
     const members = onlineMembersByRoom.get(roomId);
@@ -171,11 +233,12 @@ const syncPresenceScreenSharing = ({ peerId, roomId, sharing, socket }) => {
         return false;
     }
 
-    members.set(socket.id, {
+    const nextMember = {
         ...member,
         screenSharing: sharing,
         updatedAt: new Date().toISOString(),
-    });
+    };
+    members.set(socket.id, nextMember);
     broadcastPresence();
     return true;
 };
@@ -206,8 +269,23 @@ const normalizeCursorPosition = (value) => {
 };
 
 app.set('view engine', 'ejs');
-app.use(express.static(__dirname + '/views'));
 app.set('views', __dirname + '/views');
+['audio-worklet', 'js', 'styles', 'vendor', 'wasm'].forEach((directory) =>
+    app.use(
+        `/${directory}`,
+        express.static(join(__dirname, 'views', directory), {
+            dotfiles: 'deny',
+            fallthrough: false,
+            index: false,
+        })
+    )
+);
+app.get('/script.js', (_, res) =>
+    res.sendFile(join(__dirname, 'views', 'script.js'))
+);
+app.get('/style.css', (_, res) =>
+    res.sendFile(join(__dirname, 'views', 'style.css'))
+);
 
 /** Routes */
 app.get('/', (_, res) => res.redirect('/room/lobby'));
@@ -223,7 +301,14 @@ app.get('/room/:channel', (req, res) => {
         channels: CHANNELS,
         roomId: channel.slug,
         channelName: channel.name,
-        iceServers: JSON.stringify(iceServersList),
+        roomBootstrap: JSON.stringify({
+            iceServers: iceServersList,
+            roomId: channel.slug,
+        }).replace(
+            /[<>&\u2028\u2029]/g,
+            (character) =>
+                `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`
+        ),
     });
 });
 
@@ -298,7 +383,8 @@ const handlePresenceJoinVoice = (
     }
 
     const members = onlineMembersByRoom.get(channel.slug) || new Map();
-    members.set(socket.id, {
+    const member = members.get(socket.id);
+    const nextMember = {
         socketId: socket.id,
         peerId,
         roomId: channel.slug,
@@ -310,7 +396,11 @@ const handlePresenceJoinVoice = (
         cameraOn: cameraOn === true,
         screenSharing: socket.data.voiceScreenSharing === true,
         updatedAt: new Date().toISOString(),
-    });
+    };
+    if (samePresenceState(member, nextMember)) {
+        return;
+    }
+    members.set(socket.id, nextMember);
 
     onlineMembersByRoom.set(channel.slug, members);
     socket.data.presenceRoomId = channel.slug;
@@ -337,7 +427,7 @@ const handlePresenceUpdate = (
     const members = onlineMembersByRoom.get(channel.slug) || new Map();
     const member = members.get(socket.id) || {};
 
-    members.set(socket.id, {
+    const nextMember = {
         ...member,
         socketId: socket.id,
         roomId: channel.slug,
@@ -356,7 +446,11 @@ const handlePresenceUpdate = (
         cameraOn: cameraOn !== undefined ? cameraOn : member.cameraOn === true,
         screenSharing: socket.data.voiceScreenSharing === true,
         updatedAt: new Date().toISOString(),
-    });
+    };
+    if (samePresenceState(member, nextMember)) {
+        return;
+    }
+    members.set(socket.id, nextMember);
     onlineMembersByRoom.set(channel.slug, members);
     socket.data.presenceRoomId = channel.slug;
     broadcastPresence();
@@ -429,6 +523,12 @@ const handleCursorMove = ({ roomId, x, y, senderName } = {}, socket) => {
         return;
     }
 
+    const now = Date.now();
+    if (now - Number(socket.data.lastCursorMoveAt || 0) < 33) {
+        return;
+    }
+    socket.data.lastCursorMoveAt = now;
+
     socket.to(ownedRoom.socketRoom).emit('cursor:move', {
         roomId: channel.slug,
         socketId: socket.id,
@@ -473,6 +573,7 @@ const clearDisconnectedSocketOwners = (socket) => {
         'voiceClientSessionEpoch',
         'voiceScreenSharing',
         'voiceSessionGeneration',
+        'lastCursorMoveAt',
     ].forEach((key) => delete socket.data[key]);
 };
 
