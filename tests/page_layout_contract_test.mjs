@@ -36,6 +36,13 @@ const pageLayoutWindowManagerRuntime = readText(
 const pageLayoutComponentRuntime = readText(
     '../src/views/js/layout/page-layout-component-runtime.js'
 );
+const morphIconUi = readText('../src/views/js/shared/morph-icon-ui.js');
+const morphiconsVendor = readText(
+    '../src/views/vendor/morphicons/morphicons-dom.min.js'
+);
+const morphiconsLicense = readText(
+    '../src/views/vendor/morphicons/LICENSE.txt'
+);
 
 const MEDIA_ORCHESTRATION_FORBIDDEN_KEYWORDS = [
     'new Peer',
@@ -1149,7 +1156,10 @@ const MODULE_SCRIPTS = [
         requiredExports: [
             [/ensureToolbar/, 'window manager must expose its toolbar'],
             [/renderWindowMenu/, 'window manager must render restore entries'],
-            [/toggleWindowMenu/, 'window manager must toggle restore entries'],
+            [
+                /toggleSettingsMenu/,
+                'window manager must toggle Settings entries',
+            ],
             [/showSaveStatus/, 'window manager must expose save feedback'],
         ],
     },
@@ -1962,6 +1972,9 @@ const tileStatusUi = getModuleSource('/js/room/tile-status-ui.js');
 const fullscreenControlsSource = getModuleSource(
     '/js/media/fullscreen-controls.js'
 );
+const mediaDockRuntimeSource = getModuleSource(
+    '/js/media/media-dock-runtime.js'
+);
 const voiceMediaQualityView = readText(
     '../src/views/js/voice/voice-media-quality-view.js'
 );
@@ -2100,6 +2113,75 @@ const assertModuleScriptContracts = (moduleScripts) => {
 };
 
 assertModuleScriptContracts(MODULE_SCRIPTS);
+
+assert.match(
+    script,
+    /import '\/js\/shared\/morph-icon-ui\.js'/,
+    'the composition root must load the local Morphicons adapter'
+);
+assert.match(
+    morphIconUi,
+    /from '\/vendor\/morphicons\/morphicons-dom\.min\.js'/,
+    'Morphicons must be imported from a self-hosted browser asset'
+);
+assert.match(
+    morphIconUi,
+    /createMorph\(path, ICONS\[iconName\], \{[\s\S]*?reducedMotion: 'user'/,
+    'every morph must explicitly honor prefers-reduced-motion'
+);
+[
+    'settings',
+    'close',
+    'pin',
+    'pin-off',
+    'mic',
+    'mic-off',
+    'video',
+    'video-off',
+    'volume-2',
+    'volume-x',
+    'screen-share',
+    'screen-share-off',
+].forEach((iconName) => {
+    assert.ok(
+        morphIconUi.includes(`${iconName}:`) ||
+            morphIconUi.includes(`'${iconName}':`),
+        `local morph icon data must include ${iconName}`
+    );
+});
+assert.match(morphiconsVendor, /Morphicons v1\.7\.0 \| MIT/);
+assert.match(morphiconsVendor, /requestAnimationFrame/);
+assert.match(morphiconsVendor, /prefers-reduced-motion: reduce/);
+assert.match(morphiconsVendor, /as createMorph/);
+assert.match(
+    morphiconsLicense,
+    /MIT License[\s\S]*?Copyright \(c\) 2026 Guillermo/
+);
+assert.doesNotMatch(
+    `${roomIndex}\n${script}\n${morphIconUi}`,
+    /(?:unpkg|jsdelivr|cdnjs).*morphicons|morphicons.*(?:unpkg|jsdelivr|cdnjs)/i,
+    'Morphicons must not add a CDN runtime dependency'
+);
+assert.match(
+    pageLayoutWindowManagerRuntime,
+    /open \? 'close' : 'settings'/,
+    'the Settings button must morph gear to close within one action'
+);
+assert.match(
+    mediaDockRuntimeSource,
+    /microphoneEnabled \? 'mic' : 'mic-off'[\s\S]*?cameraEnabled \? 'video' : 'video-off'[\s\S]*?sharing \? 'screen-share' : 'screen-share-off'/,
+    'media controls must morph only between semantic states of each button'
+);
+assert.match(
+    mediaDockRuntimeSource,
+    /muted \|\| volume === 0 \? 'volume-x' : 'volume-2'/,
+    'output mute must morph volume to volume-off'
+);
+assert.match(
+    fullscreenControlsSource,
+    /isActive \? 'minimize' : 'maximize'/,
+    'fullscreen must use one consistent stroke morph for enter and exit'
+);
 
 assertSourceContains(script, 'Chat Panel composition root', [
     [
@@ -2425,7 +2507,10 @@ assertSourceDoesNotContain(
     ]
 );
 assertSourceDoesNotContain(pageLayoutConfig, 'page layout config contract', [
-    [/sidebarPanel/, 'PANEL_REGISTRY must not include the removed welcome panel'],
+    [
+        /sidebarPanel/,
+        'PANEL_REGISTRY must not include the removed welcome panel',
+    ],
     [/stagePanel/, 'PANEL_REGISTRY must not include stagePanel'],
     [/舞台 Stage/, 'PANEL_REGISTRY must not expose the Stage panel label'],
     [
@@ -3037,12 +3122,20 @@ assertSourceContains(
             'page-level panel headers must remove the leading avatar/icon marker',
         ],
         [
-            /const ensurePanelShellActions = \(tile, type\) => \{[\s\S]*?panelConfig\.canCollapse[\s\S]*?panelConfig\.canPin/,
-            'panel shell actions must place collapse before pin while using registry capabilities',
+            /const ensurePanelShellActions = \(tile, type\) => \{[\s\S]*?panelConfig\.canCollapse[\s\S]*?panelConfig\.canPin[\s\S]*?panelConfig\.canHide/,
+            'panel shell actions must place collapse, pin, and hide in the shared titlebar',
         ],
         [
             /action:\s*'collapse'[\s\S]*?onTogglePanelCollapse[\s\S]*?action:\s*'pin'[\s\S]*?onTogglePanelPin/,
             'panel shell actions must place the collapse button to the left of the top-right pin button',
+        ],
+        [
+            /action:\s*'hide'[\s\S]*?iconName:\s*'eye-off'[\s\S]*?onHidePanel/,
+            'hide must be a real shared titlebar action recoverable from Settings',
+        ],
+        [
+            /syncButtonIcon[\s\S]*?collapsed \? 'chevron-down' : 'chevron-up'[\s\S]*?pinned \? 'pin-off' : 'pin'/,
+            'collapse and pin must morph only between states of the same action',
         ],
         [
             /pointerdown[\s\S]*?stopPanelActionEvent[\s\S]*?click[\s\S]*?stopPanelActionEvent/,
@@ -3071,10 +3164,6 @@ assertSourceDoesNotContain(
         [
             /ROOM_INFO_PANEL|roomInfoPanel/,
             'runtime must not create a standalone roomInfoPanel',
-        ],
-        [
-            /action:\s*'hide'/,
-            'panel shell titlebar must not render hide action',
         ],
     ]
 );
@@ -3128,6 +3217,15 @@ assertSourceContains(videoTileStructureUi, 'video-tile-structure-ui.js', [
     [
         /tile-header-actions/,
         'video tile headers must expose a visible action mount',
+    ],
+    [/window-title-region/, 'every titlebar must expose one left title region'],
+    [
+        /tile-header-controls window-controls/,
+        'every titlebar must expose one right window-controls region',
+    ],
+    [
+        /controls\.insertBefore\(dragHandle, actions\)/,
+        'the lightweight drag hint must sit before the titlebar actions',
     ],
 ]);
 assertSourceContains(tileStatusUi, 'screen-share title status contract', [
@@ -3283,8 +3381,13 @@ assert.match(
 );
 assert.match(
     pageLayoutWindowManagerRuntime,
-    /buildWindowMenuItems[\s\S]*?is-layout-hidden[\s\S]*?statusText:[\s\S]*?'恢复'/,
-    'hidden windows must remain recoverable from the persistent window menu'
+    /buildWindowMenuItems[\s\S]*?is-layout-hidden[\s\S]*?statusText:[\s\S]*?'隐藏'[\s\S]*?'显示'/,
+    'Settings must expose visible and hidden window states'
+);
+assert.match(
+    pageLayoutWindowManagerRuntime,
+    /if \(visible\) \{[\s\S]*?onHideWindow[\s\S]*?else \{[\s\S]*?onShowWindow/,
+    'Settings must toggle each registered window through the existing hide/show paths'
 );
 assert.match(
     script,
@@ -3354,6 +3457,7 @@ const ignoreDragTargetBody = script.slice(
     'form',
     'label',
     '[contenteditable]',
+    '.window-controls',
     '.panel-action-button',
 ].forEach((selector) => {
     assert.ok(
@@ -3513,14 +3617,24 @@ assert.match(
 const toolbarMatch = style.match(
     /\.desktop-window-toolbar\s*\{(?<body>[\s\S]*?)\}/
 );
-const pageTileHeaderMatch = style.match(
-    /\.page-layout-tile \.tile-header\s*\{(?<body>[\s\S]*?)\}/
+const tileHeaderMatch = style.match(
+    /(?:^|\n)\.tile-header\s*\{(?<body>[\s\S]*?)\}/
 );
 assert.ok(toolbarMatch, 'persistent window manager toolbar style must exist');
 assert.match(toolbarMatch.groups.body, /position:\s*fixed/);
 assert.match(toolbarMatch.groups.body, /pointer-events:\s*none/);
-assert.match(pageLayoutToolbarUi, /labelText:\s*'窗口'/);
-assert.match(pageLayoutToolbarUi, /aria-label', '窗口管理'/);
+assert.match(pageLayoutToolbarUi, /button\.id = 'layoutSettingsToggle'/);
+assert.match(
+    pageLayoutToolbarUi,
+    /button\.setAttribute\('aria-label', '设置'\)/
+);
+assert.match(pageLayoutToolbarUi, /windowGroupLabel\.textContent = '窗口'/);
+assert.match(pageLayoutToolbarUi, /layoutGroupLabel\.textContent = '布局'/);
+assert.match(pageLayoutToolbarUi, /label\.textContent = '恢复默认布局'/);
+assert.doesNotMatch(
+    pageLayoutToolbarUi,
+    /layoutWindowMenuToggle|labelText:\s*'窗口'/
+);
 assert.match(
     pageLayoutToolbarUi,
     /saveStatus\.hidden = true[\s\S]*?saveStatus\.hidden = false[\s\S]*?saveStatus\.hidden = true/,
@@ -3528,20 +3642,45 @@ assert.match(
 );
 assert.match(
     pageLayoutWindowManagerRuntime,
-    /toggleWindowMenu[\s\S]*?renderWindowMenu\(\)[\s\S]*?componentMenuUI\.toggleMenu/,
-    'one persistent window menu must own hidden-window recovery'
+    /toggleSettingsMenu[\s\S]*?renderWindowMenu\(\)[\s\S]*?componentMenuUI\.toggleMenu[\s\S]*?syncSettingsIcon/,
+    'one Settings popover must own hidden-window recovery'
+);
+assert.match(
+    pageLayoutWindowManagerRuntime,
+    /global\.document\.addEventListener\('pointerdown'[\s\S]*?!toolbarRefs\.toolbar\?\.contains/,
+    'clicking outside Settings must close it'
+);
+assert.match(
+    pageLayoutWindowManagerRuntime,
+    /global\.document\.addEventListener\('keydown'[\s\S]*?event\.key === 'Escape'/,
+    'Escape must close Settings'
+);
+assert.match(
+    pageLayoutWindowManagerRuntime,
+    /const handleResetDefaultClick = \(\) => \{[\s\S]*?options\.onApplyDefaultLayout\(\)[\s\S]*?closeSettingsMenu\(\)/,
+    'Settings reset must preserve the existing default-layout action'
 );
 assert.match(style, /--window-titlebar-height:\s*34px/);
-assert.ok(pageTileHeaderMatch, 'page tile header base style must exist');
+assert.ok(tileHeaderMatch, 'shared tile header base style must exist');
 assert.match(
-    pageTileHeaderMatch.groups.body,
+    tileHeaderMatch.groups.body,
     /height:\s*var\(--window-titlebar-height\)[\s\S]*?min-height:\s*var\(--window-titlebar-height\)[\s\S]*?max-height:\s*var\(--window-titlebar-height\)/,
-    'every panel titlebar must use the fixed global titlebar token'
+    'every window titlebar must use the fixed global titlebar token'
 );
 assert.match(
     style,
-    /\.tile-header\s*\{[\s\S]*?height:\s*var\(--window-titlebar-height\)[\s\S]*?cursor:\s*grab/,
-    'video and panel windows must share the same titlebar height and cursor'
+    /\.tile-header\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\) auto[\s\S]*?align-items:\s*center[\s\S]*?cursor:\s*grab/,
+    'titlebars must have a vertically centered left-title/right-controls grid'
+);
+assert.match(
+    style,
+    /\.window-title-region\s*\{[\s\S]*?align-items:\s*center[\s\S]*?overflow:\s*hidden/,
+    'the title region must vertically center and constrain long titles'
+);
+assert.match(
+    style,
+    /\.tile-title\s*\{[\s\S]*?text-overflow:\s*ellipsis[\s\S]*?white-space:\s*nowrap/,
+    'window titles must remain one line with ellipsis'
 );
 assert.match(videoTileStructureUi, /window-drag-handle/);
 assert.match(style, /\.video-tile:hover \.window-drag-handle[\s\S]*?opacity:/);
@@ -3580,5 +3719,39 @@ assert.match(
     style,
     /@media \(max-width:\s*768px\)[\s\S]*?\.tile-resize-handle[\s\S]*?display:\s*none/,
     'mobile layout must keep resize disabled'
+);
+assert.doesNotMatch(
+    style,
+    /\.chat-compact-mode \.tile-header/,
+    'compact chat must not override the shared titlebar shell'
+);
+const panelHeaderOverride = style.match(
+    /\.page-layout-tile \.tile-header\s*\{(?<body>[\s\S]*?)\}/
+);
+assert.ok(panelHeaderOverride, 'panel titlebar visual override must exist');
+assert.doesNotMatch(
+    panelHeaderOverride.groups.body,
+    /(?:min-|max-)?height:|line-height:|padding:/,
+    'individual window types must not override titlebar geometry'
+);
+assert.match(
+    style,
+    /\.window-action-button,[\s\S]*?width:\s*24px;[\s\S]*?height:\s*24px/,
+    'window action buttons must share one compact size'
+);
+assert.match(
+    style,
+    /@media \(max-width:\s*768px\)[\s\S]*?\.desktop-window-toolbar\s*\{[\s\S]*?top:\s*max\(8px, env\(safe-area-inset-top\)\)[\s\S]*?\.layout-settings-menu\s*\{[\s\S]*?calc\(100vw - 16px\)/,
+    'mobile Settings must remain reachable and constrained to the viewport'
+);
+assert.doesNotMatch(
+    style,
+    /\.desktop-window-toolbar\s*\{[^}]*display:\s*none/,
+    'Settings must not disappear on mobile'
+);
+assert.match(
+    style,
+    /@media \(prefers-reduced-motion:\s*reduce\)[\s\S]*?transition:\s*none/,
+    'CSS micro-interactions must expose a reduced-motion path'
 );
 assert.match(style, /--resize-hit-corner:\s*(?:1[6-9]|2[0-4])px/);

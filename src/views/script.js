@@ -1,3 +1,5 @@
+import '/js/shared/morph-icon-ui.js';
+
 /* eslint-disable no-console */
 console.info('[page-layout] script boot v2 ' + new Date().toISOString());
 let socket;
@@ -42,6 +44,7 @@ const layoutPlacementUtils = window.PageLayoutPlacementUtils;
 const layoutWindowManagerRuntime = window.PageLayoutWindowManagerRuntime;
 const layoutComponentRuntime = window.PageLayoutComponentRuntime;
 const layoutStoreRuntime = window.PageLayoutStoreRuntime;
+const morphIconUI = window.VoiceMorphIconUI;
 const roomUIState = window.VoiceRoomUIState;
 const mobileRoomState = window.VoiceMobileRoomState;
 const presenceViewModel = window.VoicePresenceViewModel;
@@ -397,7 +400,7 @@ const restoreOriginalStaticLayout = () => {
 };
 
 const ensureWindowManagerToolbar = () =>
-    pageLayoutWindowManagerRuntime?.ensureToolbar().windowMenuToggle;
+    pageLayoutWindowManagerRuntime?.bindToolbarEvents().settingsToggle;
 
 const syncWindowManagerUI = () =>
     pageLayoutWindowManagerRuntime?.syncWindowManagerUI();
@@ -1964,11 +1967,12 @@ const getNextTileLayoutZIndex = (tile) =>
 
 const getWindowStackBandTiles = (pinned) =>
     getVideoTiles()
-        .filter((candidate) => !candidate.classList.contains('is-layout-hidden'))
+        .filter(
+            (candidate) => !candidate.classList.contains('is-layout-hidden')
+        )
         .filter((candidate) => isPanelTilePinned(candidate) === pinned)
         .sort((a, b) => {
-            const zDifference =
-                getTileLayoutZIndex(a) - getTileLayoutZIndex(b);
+            const zDifference = getTileLayoutZIndex(a) - getTileLayoutZIndex(b);
             if (zDifference !== 0) {
                 return zDifference;
             }
@@ -2392,7 +2396,6 @@ const applyTileLayout = (tile, layout, { syncItem = true } = {}) => {
             positioned: true,
         });
     }
-
 };
 
 const getCurrentTileLayout = (tile) => {
@@ -2670,7 +2673,6 @@ const renderLayoutComponentTile = (tile) => {
     if (syncRequest) {
         syncTileLayoutItemFromElement(tile, syncRequest);
     }
-
 };
 
 const getExistingLayoutComponentTile = (type) =>
@@ -2821,6 +2823,7 @@ const shouldIgnoreLayoutDragTarget = (target) =>
                 '.page-chat-form',
                 '.channel-button',
                 '[data-channel-room]',
+                '.window-controls',
                 '.panel-shell-actions',
                 '.panel-action-button',
                 '.fullscreen-btn',
@@ -3238,11 +3241,13 @@ pageLayoutWindowManagerRuntime = layoutWindowManagerRuntime.createRuntime({
     },
     layoutToolbarUI,
     layoutComponentMenuUI,
+    morphIconUI,
     getCorePageTypes: () => CORE_PAGE_TYPES,
     getExistingLayoutComponentTile,
     getTileLayoutItem,
     getPagePanelLabel,
     onShowWindow: addLayoutComponent,
+    onHideWindow: hideLayoutComponent,
     onApplyDefaultLayout: applyDefaultLayout,
 });
 
@@ -3254,6 +3259,7 @@ pageLayoutRuntime = window.PageLayoutRuntime.createRuntime({
         videoGrid,
     },
     layoutRecoveryUI,
+    morphIconUI,
     pageComponentTypes: PAGE_COMPONENT_TYPES,
     getPanelRegistry,
     getPanelConfig,

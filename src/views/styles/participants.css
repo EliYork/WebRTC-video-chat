@@ -75,7 +75,7 @@
     position: relative;
     z-index: 2;
     display: grid;
-    grid-template-columns: 24px minmax(0, 1fr) minmax(0, auto) auto;
+    grid-template-columns: minmax(0, 1fr) auto;
     gap: 8px;
     align-items: center;
     height: var(--window-titlebar-height);
@@ -87,6 +87,15 @@
     cursor: grab;
     user-select: none;
     touch-action: none;
+}
+
+.window-title-region {
+    display: flex;
+    min-width: 0;
+    height: 100%;
+    align-items: center;
+    gap: 8px;
+    overflow: hidden;
 }
 
 .video-tile.is-dragging .tile-header {
@@ -117,11 +126,13 @@
 }
 
 .tile-title {
+    display: block;
     min-width: 0;
     overflow: hidden;
     color: #57354a;
     font-size: var(--window-title-font-size);
     font-weight: var(--window-title-font-weight);
+    line-height: normal;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
@@ -172,21 +183,31 @@
     gap: 6px;
 }
 
-.window-drag-handle {
+.tile-header-controls {
+    height: 100%;
+    justify-self: end;
+}
+
+.tile-header-actions {
     flex: 0 0 auto;
-    width: 14px;
-    height: 18px;
+}
+
+.window-drag-handle {
+    display: grid;
+    flex: 0 0 auto;
+    width: 12px;
+    height: 20px;
+    place-items: center;
     opacity: 0.04;
-    background-image: radial-gradient(
-        circle,
-        currentColor 1.2px,
-        transparent 1.4px
-    );
-    background-position: center;
-    background-size: 5px 5px;
     color: var(--muted);
     pointer-events: none;
     transition: opacity 160ms ease;
+}
+
+.window-drag-handle svg {
+    width: 12px;
+    height: 18px;
+    fill: currentColor;
 }
 
 .video-tile:hover .window-drag-handle {
@@ -200,9 +221,19 @@
 
 @media (prefers-reduced-motion: reduce) {
     .window-drag-handle,
-    .tile-resize-handle {
+    .tile-resize-handle,
+    .layout-settings-menu,
+    .layout-save-status {
         transition: none;
     }
+}
+
+.morph-icon {
+    display: block;
+    width: 16px;
+    height: 16px;
+    flex: 0 0 auto;
+    pointer-events: none;
 }
 
 .tile-badge {

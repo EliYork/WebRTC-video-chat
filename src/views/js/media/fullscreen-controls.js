@@ -28,15 +28,19 @@
 
         const isActive = Boolean(tile && getFullscreenElement() === tile);
         const label = getButtonLabel(isActive);
-        let icon = button.querySelector('i');
-
-        if (!icon) {
-            icon = global.document.createElement('i');
-            icon.setAttribute('aria-hidden', 'true');
-            button.append(icon);
+        const morphSynced = global.VoiceMorphIconUI?.syncButtonIcon?.(
+            button,
+            isActive ? 'minimize' : 'maximize'
+        );
+        if (!morphSynced) {
+            let icon = button.querySelector('i');
+            if (!icon) {
+                icon = global.document.createElement('i');
+                icon.setAttribute('aria-hidden', 'true');
+                button.append(icon);
+            }
+            icon.className = getIconClass(isActive);
         }
-
-        icon.className = getIconClass(isActive);
         button.title = label;
         button.setAttribute('aria-label', label);
         button.setAttribute('aria-pressed', String(isActive));
@@ -164,6 +168,7 @@
         const button = global.document.createElement('button');
 
         button.className = 'fullscreen-btn';
+        button.classList.add('window-action-button', 'no-drag');
         button.type = 'button';
         syncButtonState(button);
 

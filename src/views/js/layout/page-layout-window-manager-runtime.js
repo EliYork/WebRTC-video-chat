@@ -5,11 +5,16 @@
         const refs = options.refs || {};
         const toolbarUI = options.layoutToolbarUI;
         const componentMenuUI = options.layoutComponentMenuUI;
+        const morphIconUI = options.morphIconUI;
         let toolbarRefs = {};
+        let globalEventsBound = false;
         let resetConfirmTimer;
 
         const ensureToolbar = () => {
-            if (!refs.mainLayout || toolbarRefs.windowMenuToggle) {
+            if (!refs.mainLayout) {
+                return toolbarRefs;
+            }
+            if (toolbarRefs.settingsToggle?.isConnected) {
                 return toolbarRefs;
             }
 
@@ -19,11 +24,23 @@
             return toolbarRefs;
         };
 
-        const closeWindowMenu = () => {
+        const syncSettingsIcon = (open, { animate = true } = {}) => {
+            morphIconUI?.syncButtonIcon?.(
+                toolbarRefs.settingsToggle,
+                open ? 'close' : 'settings',
+                { animate }
+            );
+        };
+
+        const closeSettingsMenu = ({ restoreFocus = false } = {}) => {
             componentMenuUI.closeMenu({
-                menu: toolbarRefs.componentMenu,
-                toggleButton: toolbarRefs.windowMenuToggle,
+                menu: toolbarRefs.settingsMenu,
+                toggleButton: toolbarRefs.settingsToggle,
             });
+            syncSettingsIcon(false);
+            if (restoreFocus) {
+                toolbarRefs.settingsToggle?.focus?.();
+            }
         };
 
         const buildWindowMenuItems = () =>
@@ -37,15 +54,10 @@
                     exists && !tile.classList.contains('is-layout-hidden');
 
                 return {
-                    disabled: Boolean(
-                        exists && visible && item?.visible !== false
-                    ),
+                    disabled: false,
                     label: options.getPagePanelLabel(type),
-                    statusText: visible
-                        ? '已显示'
-                        : exists
-                          ? '恢复'
-                          : '添加',
+                    statusText:
+                        visible && item?.visible !== false ? '隐藏' : '显示',
                     type,
                 };
             });
@@ -59,30 +71,39 @@
                 items: buildWindowMenuItems(),
                 menu: toolbarRefs.componentMenu,
                 onSelect: (type) => {
-                    options.onShowWindow(type);
-                    closeWindowMenu();
+                    const tile = options.getExistingLayoutComponentTile(type);
+                    const visible =
+                        Boolean(tile) &&
+                        !tile.classList.contains('is-layout-hidden');
+                    if (visible) {
+                        options.onHideWindow?.(tile);
+                    } else {
+                        options.onShowWindow(type);
+                    }
+                    closeSettingsMenu();
                 },
             });
         };
 
-        const toggleWindowMenu = () => {
-            if (!toolbarRefs.componentMenu) {
+        const toggleSettingsMenu = () => {
+            if (!toolbarRefs.settingsMenu) {
                 return;
             }
 
             renderWindowMenu();
-            componentMenuUI.toggleMenu({
-                menu: toolbarRefs.componentMenu,
-                toggleButton: toolbarRefs.windowMenuToggle,
+            const open = componentMenuUI.toggleMenu({
+                menu: toolbarRefs.settingsMenu,
+                toggleButton: toolbarRefs.settingsToggle,
             });
+            syncSettingsIcon(open);
         };
 
         const syncWindowManagerUI = () => {
             toolbarUI.renderToolbarState({
                 resetDefaultButton: toolbarRefs.resetDefaultButton,
                 saveStatus: toolbarRefs.saveStatus,
+                settingsToggle: toolbarRefs.settingsToggle,
                 toolbar: toolbarRefs.toolbar,
-                windowMenuToggle: toolbarRefs.windowMenuToggle,
             });
             renderWindowMenu();
         };
@@ -120,30 +141,55 @@
                 resetDefaultButton,
             });
             options.onApplyDefaultLayout();
+            closeSettingsMenu();
         };
 
         const bindToolbarEvents = () => {
             const nextRefs = ensureToolbar();
-            nextRefs.windowMenuToggle?.addEventListener(
-                'click',
-                toggleWindowMenu
-            );
-            nextRefs.resetDefaultButton?.addEventListener(
-                'click',
-                handleResetDefaultClick
-            );
+            if (nextRefs.toolbar?.dataset.settingsBound !== 'true') {
+                syncSettingsIcon(false, { animate: false });
+                nextRefs.settingsToggle?.addEventListener(
+                    'click',
+                    toggleSettingsMenu
+                );
+                nextRefs.resetDefaultButton?.addEventListener(
+                    'click',
+                    handleResetDefaultClick
+                );
+                nextRefs.toolbar.dataset.settingsBound = 'true';
+            }
+
+            if (!globalEventsBound) {
+                global.document.addEventListener('pointerdown', (event) => {
+                    if (
+                        !toolbarRefs.settingsMenu?.hidden &&
+                        !toolbarRefs.toolbar?.contains?.(event.target)
+                    ) {
+                        closeSettingsMenu();
+                    }
+                });
+                global.document.addEventListener('keydown', (event) => {
+                    if (
+                        event.key === 'Escape' &&
+                        !toolbarRefs.settingsMenu?.hidden
+                    ) {
+                        closeSettingsMenu({ restoreFocus: true });
+                    }
+                });
+                globalEventsBound = true;
+            }
             return nextRefs;
         };
 
         return {
             bindToolbarEvents,
-            closeWindowMenu,
+            closeSettingsMenu,
             ensureToolbar,
             handleResetDefaultClick,
             renderWindowMenu,
             showSaveStatus,
             syncWindowManagerUI,
-            toggleWindowMenu,
+            toggleSettingsMenu,
         };
     };
 

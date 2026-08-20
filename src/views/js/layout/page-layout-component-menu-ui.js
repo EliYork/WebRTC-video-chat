@@ -33,7 +33,6 @@
             button.type = 'button';
             button.className = 'layout-component-menu-item';
             button.dataset.layoutComponentType = type;
-            button.setAttribute('role', 'menuitem');
             button.disabled = Boolean(disabled);
             button.textContent = label || type;
             status.className = 'layout-component-menu-status';

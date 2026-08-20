@@ -72,11 +72,6 @@
     font-size: 12px;
 }
 
-.chat-compact-mode .tile-header {
-    min-height: 28px;
-    padding: 4px 8px;
-}
-
 .chat-compact-mode .tile-footer {
     min-height: 22px;
     padding: 4px 8px;

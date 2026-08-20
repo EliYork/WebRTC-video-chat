@@ -64,17 +64,8 @@
 }
 
 .page-layout-tile .tile-header {
-    position: relative;
-    display: grid;
-    flex: 0 0 auto;
-    grid-template-columns: minmax(0, 1fr) auto;
-    height: var(--window-titlebar-height);
-    min-height: var(--window-titlebar-height);
-    max-height: var(--window-titlebar-height);
-    padding: 0 var(--window-titlebar-padding-inline);
     border-bottom-color: rgba(216, 111, 154, 0.14);
     background-color: rgba(255, 252, 254, 0.86);
-    cursor: grab;
 }
 
 .page-layout-tile.is-dragging .tile-header {
@@ -89,8 +80,8 @@
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    opacity: 0;
-    pointer-events: none;
+    opacity: 0.58;
+    pointer-events: auto;
     transition: opacity 120ms ease;
 }
 
@@ -98,9 +89,9 @@
 .page-layout-tile:focus-within .panel-shell-actions,
 .page-layout-tile.is-layout-selected .panel-shell-actions {
     opacity: 1;
-    pointer-events: auto;
 }
 
+.window-action-button,
 .panel-action-button {
     display: grid;
     width: 24px;
@@ -117,6 +108,19 @@
     line-height: 1;
 }
 
+.window-action-button:focus-visible,
+.panel-action-button:focus-visible {
+    outline: 2px solid rgba(189, 84, 128, 0.72);
+    outline-offset: 1px;
+}
+
+.window-action-button:active,
+.panel-action-button:active {
+    background-color: rgba(248, 216, 229, 0.92);
+}
+
+.window-action-button:hover,
+.window-action-button[aria-pressed='true'],
 .panel-action-button:hover,
 .panel-action-button[aria-pressed='true'] {
     border-color: rgba(216, 111, 154, 0.4);

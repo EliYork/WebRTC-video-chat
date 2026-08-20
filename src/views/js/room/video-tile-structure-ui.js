@@ -22,23 +22,31 @@
         header.setAttribute('data-drag-handle', 'true');
         header.removeAttribute('title');
 
-        const ensureHeaderChild = (selector, className) => {
+        const ensureHeaderChild = (parent, selector, className) => {
             let child = header.querySelector(selector);
             if (!child) {
                 child = global.document.createElement('div');
                 child.className = className;
-                header.append(child);
+            }
+            if (child.parentElement !== parent) {
+                parent.append(child);
             }
             return child;
         };
 
-        ensureHeaderChild('.tile-avatar', 'tile-avatar');
-        ensureHeaderChild('.tile-title', 'tile-title');
-        ensureHeaderChild('.tile-badges', 'tile-badges');
+        const titleRegion = ensureHeaderChild(
+            header,
+            '.window-title-region',
+            'window-title-region'
+        );
+        ensureHeaderChild(titleRegion, '.tile-avatar', 'tile-avatar');
+        ensureHeaderChild(titleRegion, '.tile-title', 'tile-title');
+        ensureHeaderChild(titleRegion, '.tile-badges', 'tile-badges');
 
         const controls = ensureHeaderChild(
+            header,
             '.tile-header-controls',
-            'tile-header-controls'
+            'tile-header-controls window-controls'
         );
         let quality = controls.querySelector('.voice-media-quality-pill');
         if (!quality) {
@@ -60,9 +68,32 @@
             dragHandle = global.document.createElement('span');
             dragHandle.className = 'window-drag-handle';
             dragHandle.setAttribute('aria-hidden', 'true');
-            dragHandle.title = '拖动窗口';
-            controls.append(dragHandle);
+            const icon = global.document.createElementNS(
+                'http://www.w3.org/2000/svg',
+                'svg'
+            );
+            icon.setAttribute('viewBox', '0 0 12 18');
+            icon.setAttribute('focusable', 'false');
+            [
+                [3, 4],
+                [9, 4],
+                [3, 9],
+                [9, 9],
+                [3, 14],
+                [9, 14],
+            ].forEach(([cx, cy]) => {
+                const dot = global.document.createElementNS(
+                    'http://www.w3.org/2000/svg',
+                    'circle'
+                );
+                dot.setAttribute('cx', String(cx));
+                dot.setAttribute('cy', String(cy));
+                dot.setAttribute('r', '1');
+                icon.append(dot);
+            });
+            dragHandle.append(icon);
         }
+        controls.insertBefore(dragHandle, actions);
 
         return header;
     };

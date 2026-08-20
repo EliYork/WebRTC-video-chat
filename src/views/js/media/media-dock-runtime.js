@@ -97,6 +97,7 @@
         adapter,
         initialScreenShareOptions = DEFAULT_SCREEN_SHARE_OPTIONS,
         logger = global.console,
+        morphIconUI = global.VoiceMorphIconUI,
     } = {}) => {
         if (!root) {
             throw new Error('Media Dock requires a root element.');
@@ -185,19 +186,22 @@
             enabled,
             disabled,
             iconClass,
+            iconName,
             label,
             pending,
             unavailable,
         }) => {
-            const icon = button.querySelector('i');
             const isOff = unavailable || !enabled;
             button.classList.toggle('is-off', isOff);
             button.disabled = Boolean(disabled || pending);
             button.setAttribute('aria-busy', String(Boolean(pending)));
             button.setAttribute('aria-pressed', String(Boolean(enabled)));
             setButtonLabel(button, label);
-            if (icon) {
-                icon.className = iconClass;
+            if (!morphIconUI?.syncButtonIcon?.(button, iconName)) {
+                const icon = button.querySelector('i');
+                if (icon) {
+                    icon.className = iconClass;
+                }
             }
         };
         const getDeviceLabel = (device, index, fallbackPrefix) =>
@@ -259,7 +263,6 @@
             const volume = clamp(snapshot.outputVolume, 0, 1, 1);
             const percent = Math.round(volume * 100);
             const muted = Boolean(snapshot.outputMuted);
-            const icon = refs.outputButton.querySelector('i');
             const label = refs.outputButton.querySelector('span');
 
             refs.outputButton.classList.toggle('is-off', muted);
@@ -268,13 +271,21 @@
                 refs.outputButton,
                 muted ? `播放已静音，音量 ${percent}%` : `播放音量 ${percent}%`
             );
-            if (icon) {
-                icon.className =
-                    muted || volume === 0
-                        ? 'fas fa-volume-mute'
-                        : volume < 0.5
-                          ? 'fas fa-volume-down'
-                          : 'fas fa-volume-up';
+            if (
+                !morphIconUI?.syncButtonIcon?.(
+                    refs.outputButton,
+                    muted || volume === 0 ? 'volume-x' : 'volume-2'
+                )
+            ) {
+                const icon = refs.outputButton.querySelector('i');
+                if (icon) {
+                    icon.className =
+                        muted || volume === 0
+                            ? 'fas fa-volume-mute'
+                            : volume < 0.5
+                              ? 'fas fa-volume-down'
+                              : 'fas fa-volume-up';
+                }
             }
             setText(label, muted ? '已静音' : '听筒');
             refs.outputSlider.value = String(volume);
@@ -418,6 +429,7 @@
                 disabled: !mediaAvailable,
                 enabled: Boolean(lastSnapshot.microphoneEnabled),
                 iconClass: 'fas fa-microphone',
+                iconName: lastSnapshot.microphoneEnabled ? 'mic' : 'mic-off',
                 label: lastSnapshot.microphoneError
                     ? '麦克风不可用'
                     : lastSnapshot.microphoneEnabled
@@ -433,6 +445,7 @@
                 disabled: !mediaAvailable,
                 enabled: Boolean(lastSnapshot.cameraEnabled),
                 iconClass: 'fas fa-video',
+                iconName: lastSnapshot.cameraEnabled ? 'video' : 'video-off',
                 label: lastSnapshot.cameraError
                     ? '摄像头不可用'
                     : lastSnapshot.cameraEnabled
@@ -448,6 +461,7 @@
                 disabled: !mediaAvailable,
                 enabled: sharing,
                 iconClass: sharing ? 'fas fa-desktop' : 'far fa-newspaper',
+                iconName: sharing ? 'screen-share' : 'screen-share-off',
                 label: sharing ? '停止屏幕共享' : '开始屏幕共享',
                 pending: screenPending,
                 unavailable: Boolean(lastSnapshot.screenShareError),

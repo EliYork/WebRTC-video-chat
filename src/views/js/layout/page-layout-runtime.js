@@ -155,18 +155,25 @@
 
         const getPagePanelLabel = (type) => PAGE_COMPONENT_LABELS[type] || type;
 
-        const createPanelActionButton = ({ action, iconClassName, label }) => {
+        const createPanelActionButton = ({
+            action,
+            iconClassName,
+            iconName,
+            label,
+        }) => {
             const button = documentRef.createElement('button');
-            const icon = documentRef.createElement('i');
 
             button.type = 'button';
-            button.className = `panel-action-button panel-action-${action} no-drag`;
+            button.className = `window-action-button panel-action-button panel-action-${action} no-drag`;
             button.dataset.panelAction = action;
             button.title = label;
             button.setAttribute('aria-label', label);
-            icon.className = iconClassName;
-            icon.setAttribute('aria-hidden', 'true');
-            button.append(icon);
+            if (!options.morphIconUI?.syncButtonIcon?.(button, iconName)) {
+                const icon = documentRef.createElement('i');
+                icon.className = iconClassName;
+                icon.setAttribute('aria-hidden', 'true');
+                button.append(icon);
+            }
             return button;
         };
 
@@ -198,6 +205,10 @@
                     collapsed ? '展开面板' : '收起面板'
                 );
                 collapseButton.setAttribute('aria-pressed', String(collapsed));
+                options.morphIconUI?.syncButtonIcon?.(
+                    collapseButton,
+                    collapsed ? 'chevron-down' : 'chevron-up'
+                );
             }
 
             if (pinButton) {
@@ -207,6 +218,10 @@
                     pinned ? '取消固定' : '固定置顶'
                 );
                 pinButton.setAttribute('aria-pressed', String(pinned));
+                options.morphIconUI?.syncButtonIcon?.(
+                    pinButton,
+                    pinned ? 'pin-off' : 'pin'
+                );
             }
         };
 
@@ -234,6 +249,7 @@
                 const collapseButton = createPanelActionButton({
                     action: 'collapse',
                     iconClassName: 'fas fa-window-minimize',
+                    iconName: 'chevron-up',
                     label: '收起面板',
                 });
                 collapseButton.addEventListener(
@@ -252,6 +268,7 @@
                 const pinButton = createPanelActionButton({
                     action: 'pin',
                     iconClassName: 'fas fa-thumbtack',
+                    iconName: 'pin',
                     label: '固定置顶',
                 });
                 pinButton.addEventListener('pointerdown', stopPanelActionEvent);
@@ -261,6 +278,24 @@
                     syncPanelActions(tile);
                 });
                 actions.append(pinButton);
+            }
+
+            if (panelConfig.canHide !== false) {
+                const hideButton = createPanelActionButton({
+                    action: 'hide',
+                    iconClassName: 'fas fa-eye-slash',
+                    iconName: 'eye-off',
+                    label: '隐藏窗口',
+                });
+                hideButton.addEventListener(
+                    'pointerdown',
+                    stopPanelActionEvent
+                );
+                hideButton.addEventListener('click', (event) => {
+                    stopPanelActionEvent(event);
+                    options.onHidePanel?.(tile);
+                });
+                actions.append(hideButton);
             }
 
             syncPanelActions(tile);
