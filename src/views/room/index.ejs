@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><%= channelName %> - 语音据点</title>
-    <link rel="stylesheet" href="/style.css?v=25564">
+    <link rel="stylesheet" href="/style.css?v=25565">
     
     <script src="/socket.io/socket.io.js"></script>
     
@@ -20,11 +20,6 @@
 <body>
     <div id="main" class="room-layout">
         <aside class="room-sidebar" aria-label="频道列表">
-            <div class="sidebar-brand">
-                <a href="/">朋友语音房间</a>
-                <p>今晚在哪个频道集合？</p>
-            </div>
-
             <nav id="channel-sidebar" class="sidebar-channel-tree">
                 <% channels.forEach((channel) => { %>
                     <div
@@ -54,10 +49,6 @@
 
             <section class="local-user-card" aria-label="本地用户控制">
                 <div id="buttons" class="hidden media-dock" aria-label="通话控制">
-                    <div class="media-dock-layout-handle" data-drag-handle="true" title="拖动媒体控制">
-                        <span class="media-dock-layout-grip" aria-hidden="true">⋮⋮</span>
-                        <span>媒体控制</span>
-                    </div>
                     <div class="media-dock-header">
                         <div class="local-user-header media-dock-user">
                             <div class="local-avatar" aria-hidden="true">♡</div>
@@ -232,8 +223,7 @@
     <script src="/js/media/voice-join-overlay-ui.js"></script>
     <script src="/js/layout/page-layout-snap-utils.js"></script>
     <script src="/js/layout/page-layout-resize-utils.js"></script>
-    <script src="/js/layout/page-layout-edit-ui.js"></script>
-    <script src="/js/layout/page-layout-component-actions-ui.js"></script>
+    <script src="/js/layout/page-layout-interaction-ui.js"></script>
     <script src="/js/layout/page-layout-storage.js"></script>
     <script src="/js/layout/page-layout-config.js"></script>
     <script src="/js/layout/page-layout-ids.js"></script>
@@ -243,7 +233,7 @@
     <script src="/js/layout/page-layout-component-menu-ui.js"></script>
     <script src="/js/layout/page-layout-recovery-ui.js"></script>
     <script src="/js/layout/page-layout-runtime.js"></script>
-    <script src="/js/layout/page-layout-editor-runtime.js"></script>
+    <script src="/js/layout/page-layout-window-manager-runtime.js"></script>
     <script src="/js/layout/page-layout-component-runtime.js"></script>
     <script src="/js/layout/page-layout-store-runtime.js"></script>
     <script src="/js/room/room-ui-state.js"></script>

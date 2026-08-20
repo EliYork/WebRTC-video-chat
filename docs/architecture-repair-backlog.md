@@ -12,6 +12,7 @@
 | script loader / bootstrap 收敛                   | 未开始                       | 待正式组件边界稳定后再统一加载与 composition bootstrap。                                                                                                   |
 | 每对参与者的双向重复 PeerJS media call           | 已完成并浏览器验收通过       | 每方向最多一条职责明确的单向发送 call；双方后增媒体、双向共享、screen audio 与同方向去重均已通过真实 Edge 验收。                                           |
 | 布局恢复克隆 DOM 导致缓存引用失效                | 已完成                       | 原业务节点 identity 恢复与六项行为测试均已通过。                                                                                                           |
+| Desktop Window System 收口                       | 代码完成，待浏览器复测       | Sidebar、Members、Media Dock、Chat 与音视频 tile 已统一使用共享标题栏/内容壳；桌面端常驻拖动、resize、有限层级置顶、隐藏恢复及持久化由页面布局系统统一管理，移动端保留静态布局。 |
 | 实时协议信任客户端 roomId / peerId               | 已完成                       | 全事件扫描完成；view/chat 使用已记录 owner，voice/presence/screen-share 使用 socket voice owner 与 session generation，伪造 roomId/peerId 行为测试已通过。 |
 | Socket.IO `MaxListenersExceededWarning`          | 代码修复完成，待线上日志复测 | 每个 socket 固定一个 disconnecting 与一个 disconnect listener；集中 cleanup、socket 级 guard、异常隔离及 20-socket/重复操作测试已通过。                    |
 | Socket.IO WebSocket `Invalid frame header`       | 未处理                       | 业务代码已兼容 polling fallback，但线上 WebSocket frame/Nginx/宝塔代理问题仍保留独立诊断，本轮未修改反代。                                                 |
@@ -27,7 +28,7 @@
 | 两套 popover controller 并存                     | 未开始                       | 待选择唯一 owner。                                                                                                                                         |
 | 完整媒体权限与设备错误恢复                       | 代码完成，待浏览器复测       | mic/camera/screen 操作 token、错误分类、独立 UI、devicechange/default fallback、输出 sink 回退与 track ended 单次恢复已有行为测试。                        |
 | 真实网络断开与 reconnect                         | 代码完成，待浏览器复测       | desired/actual 状态、client epoch、Socket owner restore、Peer reconnect/recreate、bounded backoff、presence/target reconcile 已完成；尚未做真实断网验收。  |
-| CSS 重复规则、`!important` 和 z-index 层级未统一 | 未开始                       | 不进行全量视觉重写。                                                                                                                                       |
+| CSS 重复规则、`!important` 和 z-index 层级未统一 | 部分完成                     | Window System 的标题栏、resize 与普通/固定窗口层级已统一；媒体浮层、恢复工具条等全局 overlay 层级仍待独立收口，不进行全量视觉重写。                          |
 | 第三方 CDN、自托管资源和安全 header 基线         | 未开始                       | 公开部署前处理。                                                                                                                                           |
 | 文档、格式化门禁和死页面漂移                     | 未开始                       | 作为独立 housekeeping 任务。                                                                                                                               |
 

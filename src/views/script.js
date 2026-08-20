@@ -29,8 +29,7 @@ const fullscreenControls = window.VoiceFullscreenControls;
 const localScreenSharePreviewControllerApi =
     window.VoiceLocalScreenSharePreviewController;
 const voiceJoinOverlayUI = window.VoiceJoinOverlayUI;
-const layoutEditUI = window.PageLayoutEditUI;
-const layoutComponentActionsUI = window.PageLayoutComponentActionsUI;
+const layoutInteractionUI = window.PageLayoutInteractionUI;
 const layoutToolbarUI = window.PageLayoutToolbarUI;
 const layoutComponentMenuUI = window.PageLayoutComponentMenuUI;
 const layoutRecoveryUI = window.PageLayoutRecoveryUI;
@@ -40,7 +39,7 @@ const layoutStorage = window.PageLayoutStorage;
 const layoutConfig = window.PageLayoutConfig;
 const layoutComponents = window.PageLayoutComponents;
 const layoutPlacementUtils = window.PageLayoutPlacementUtils;
-const layoutEditorRuntime = window.PageLayoutEditorRuntime;
+const layoutWindowManagerRuntime = window.PageLayoutWindowManagerRuntime;
 const layoutComponentRuntime = window.PageLayoutComponentRuntime;
 const layoutStoreRuntime = window.PageLayoutStoreRuntime;
 const roomUIState = window.VoiceRoomUIState;
@@ -140,7 +139,7 @@ const PAGE_STORAGE_VERSION = 2;
 const LEGACY_PAGE_STORAGE_VERSIONS = [1];
 const PAGE_LAYOUT_STORAGE_KEY_PREFIX = 'voicePageLayout:v4';
 const MEDIA_DOCK_LAYOUT_ITEM_ID = 'page-mediaControlsPanel';
-const MEDIA_DOCK_DEFAULT_GRID = Object.freeze({ x: 0, y: 12, w: 4, h: 6 });
+const MEDIA_DOCK_DEFAULT_GRID = Object.freeze({ x: 1, y: 12, w: 7, h: 5 });
 const PINNED_TILE_Z_INDEX_BASE = 10000;
 const PAGE_SINGLETON_TYPES = new Set(
     getPanelRegistry().map((panel) => panel.id)
@@ -157,19 +156,6 @@ let mediaDockAdapter;
 let mediaDockRuntime;
 
 const notifyMediaDock = () => mediaDockAdapter?.notify();
-
-const updateLayoutItemConfig = (id, patch) => {
-    const item = getTileLayoutItem(id);
-    if (!item) {
-        return;
-    }
-    item.config = normalizeComponentConfig(item.type, {
-        ...item.config,
-        ...patch,
-    });
-    setTileLayoutItem(item);
-    saveLayoutToStorage('配置已更新');
-};
 
 const getLayoutPreference = (key) =>
     pageLayoutStoreRuntime?.getLayoutPreference(key);
@@ -358,9 +344,7 @@ voiceMediaQualityRuntime = voiceMediaQualityRuntimeApi.createRuntime({
 });
 window.exportVoiceMediaDebug = () => voiceMediaDebug.export();
 let tileLayoutZIndex = TILE_BASE_Z_INDEX;
-let layoutEditMode = false;
-let layoutLocked = false;
-let pageLayoutEditorRuntime;
+let pageLayoutWindowManagerRuntime;
 let pageLayoutComponentRuntime;
 const layoutResizeBoundBoards = new WeakSet();
 const activeLayoutInteractionCancels = new Set();
@@ -412,25 +396,11 @@ const restoreOriginalStaticLayout = () => {
     pageLayoutRuntime?.restoreOriginalStaticLayout();
 };
 
-const ensureLayoutEditModeToggle = () =>
-    pageLayoutEditorRuntime?.ensureToolbar().editModeToggle;
+const ensureWindowManagerToolbar = () =>
+    pageLayoutWindowManagerRuntime?.ensureToolbar().windowMenuToggle;
 
-const syncLayoutEditModeUI = () => pageLayoutEditorRuntime?.syncEditModeUI();
-
-const setLayoutEditMode = (enabled) =>
-    pageLayoutEditorRuntime?.setEditMode(enabled);
-
-const setLayoutLocked = (locked) => {
-    layoutLocked = Boolean(locked);
-    mainLayout?.classList.toggle('is-layout-locked', layoutLocked);
-    pageLayoutBoard?.classList.toggle('is-layout-locked', layoutLocked);
-    resetLayoutResizeCursor();
-    syncLayoutEditModeUI();
-};
-
-const toggleLayoutLocked = () => {
-    setLayoutLocked(!layoutLocked);
-};
+const syncWindowManagerUI = () =>
+    pageLayoutWindowManagerRuntime?.syncWindowManagerUI();
 
 const updateMobileTileView = () => mobileRoomController.updateTileView();
 
@@ -1992,6 +1962,19 @@ const getNextTileLayoutZIndexForBand = (pinned = false) => {
 const getNextTileLayoutZIndex = (tile) =>
     getNextTileLayoutZIndexForBand(isPanelTilePinned(tile));
 
+const getWindowStackBandTiles = (pinned) =>
+    getVideoTiles()
+        .filter((candidate) => !candidate.classList.contains('is-layout-hidden'))
+        .filter((candidate) => isPanelTilePinned(candidate) === pinned)
+        .sort((a, b) => {
+            const zDifference =
+                getTileLayoutZIndex(a) - getTileLayoutZIndex(b);
+            if (zDifference !== 0) {
+                return zDifference;
+            }
+            return getVideoTiles().indexOf(a) - getVideoTiles().indexOf(b);
+        });
+
 const getLayoutBoardForTile = (tile) => {
     if (tile && !tile.dataset.pageLayoutType && videoGrid?.contains(tile)) {
         return videoGrid;
@@ -2028,18 +2011,34 @@ const bringTileLayoutToFront = (tile) => {
         return;
     }
 
-    applyTileLayoutZIndex(tile, getNextTileLayoutZIndex(tile));
-    syncTileLayoutItemFromElement(tile, {
-        layout: {
-            ...getCurrentTileLayout(tile),
-            zIndex: getTileLayoutZIndex(tile),
-        },
+    const pinned = isPanelTilePinned(tile);
+    const baseZIndex = pinned ? PINNED_TILE_Z_INDEX_BASE : TILE_BASE_Z_INDEX;
+    const stack = getWindowStackBandTiles(pinned).filter(
+        (candidate) => candidate !== tile
+    );
+    stack.push(tile);
+
+    let changed = false;
+    stack.forEach((candidate, index) => {
+        const nextZIndex = baseZIndex + index;
+        if (getTileLayoutZIndex(candidate) !== nextZIndex) {
+            changed = true;
+            applyTileLayoutZIndex(candidate, nextZIndex);
+            syncTileLayoutItemFromElement(candidate, {
+                layout: {
+                    ...getCurrentTileLayout(candidate),
+                    zIndex: nextZIndex,
+                },
+            });
+        }
     });
 
-    if (tile.classList.contains('is-positioned')) {
-        persistCurrentTileLayout(tile);
-    } else {
-        saveLayoutToStorage('布局已更新');
+    tileLayoutZIndex = Math.max(
+        TILE_BASE_Z_INDEX,
+        baseZIndex + stack.length - 1
+    );
+    if (changed) {
+        saveLayoutToStorage('窗口已置顶');
     }
 };
 
@@ -2198,30 +2197,14 @@ const showSnapPreview = (tile, layout) => {
         getLayoutSnapContext(tile)
     );
 
-    layoutEditUI.showSnapPreview({
+    layoutInteractionUI.showSnapPreview({
         board: getLayoutBoardForTile(tile),
         tile,
         layout: snappedLayout,
     });
 };
 
-const hideSnapPreview = () => layoutEditUI.hideSnapPreview();
-
-const finalizeLayoutEditing = () => {
-    setLayoutEditMode(false);
-    hideSnapPreview();
-    resetLayoutResizeCursor();
-
-    try {
-        layoutSnapUtils.snapAllLayoutItemsToGrid(
-            getTileLayoutItemsRegistry(),
-            getLayoutSnapContext()
-        );
-        saveLayoutToStorage('布局已吸附');
-    } catch (error) {
-        console.warn('[page-layout] finalize layout failed after exit', error);
-    }
-};
+const hideSnapPreview = () => layoutInteractionUI.hideSnapPreview();
 
 const getLayoutStorageKey = () =>
     layoutStorage.getLayoutStorageKey({
@@ -2241,7 +2224,7 @@ const getSavedRemoteLayoutItemPreference = (peerId, member, preferredId) =>
     pageLayoutStoreRuntime?.getSavedRemoteItem(peerId, member, preferredId);
 
 const showLayoutSaveStatus = (message) =>
-    pageLayoutEditorRuntime?.showSaveStatus(message);
+    pageLayoutWindowManagerRuntime?.showSaveStatus(message);
 
 const saveLayoutToStorage = (message = '已保存') => {
     pageLayoutStoreRuntime?.saveLayoutToStorage(message);
@@ -2318,8 +2301,6 @@ const forEachTileLayoutItem = (callback) => {
     pageLayoutStoreRuntime?.forEachItem(callback);
 };
 
-const getTileLayoutItemsRegistry = () => pageLayoutStoreRuntime?.getRegistry();
-
 const upsertTileLayoutItem = (tile, updates = {}) =>
     pageLayoutStoreRuntime?.upsertTileLayoutItem(tile, updates);
 
@@ -2336,10 +2317,6 @@ const applyTileLayoutItemToElement = (
     tile.dataset.layoutGridW = String(item.grid.w);
     tile.dataset.layoutGridH = String(item.grid.h);
     tile.classList.toggle('is-layout-hidden', !item.visible);
-    tile.classList.toggle(
-        'is-free-move-enabled',
-        item.config?.freeMove === true
-    );
     tile.classList.toggle(
         'is-panel-collapsed',
         item.config?.collapsed === true
@@ -2416,7 +2393,6 @@ const applyTileLayout = (tile, layout, { syncItem = true } = {}) => {
         });
     }
 
-    positionLayoutComponentToolbar(tile);
 };
 
 const getCurrentTileLayout = (tile) => {
@@ -2471,7 +2447,6 @@ const finalizeLayoutItemDrag = (tile) => {
     markTileLayoutUserPlaced(tile);
     saveLayoutToStorage('布局已吸附');
     hideSnapPreview();
-    positionLayoutComponentToolbar(tile);
 };
 
 const finishTileLayoutInteraction = (tile) => {
@@ -2659,7 +2634,6 @@ const renderLayoutComponentTile = (tile) => {
         tile.dataset.tileType = type;
         tile.dataset.peerLabel = getPagePanelLabel(type);
         tile.classList.add('layout-component-tile');
-        tile.classList.toggle('is-layout-editing', layoutEditMode);
         tile.dataset.layoutId = nextLayoutId;
         const syncedItem = syncTileLayoutItemFromElement(tile, {
             id: nextLayoutId,
@@ -2672,9 +2646,6 @@ const renderLayoutComponentTile = (tile) => {
             applyPosition: false,
         });
 
-        if (layoutEditMode) {
-            ensureLayoutComponentActions();
-        }
         return;
     }
 
@@ -2693,7 +2664,6 @@ const renderLayoutComponentTile = (tile) => {
         ensureTileStructure,
         getCopyLink: () => getChannelUrl(getCopyRoomId()),
         getTileLayoutId,
-        layoutEditMode,
         type,
     });
 
@@ -2701,9 +2671,6 @@ const renderLayoutComponentTile = (tile) => {
         syncTileLayoutItemFromElement(tile, syncRequest);
     }
 
-    if (layoutEditMode) {
-        ensureLayoutComponentActions();
-    }
 };
 
 const getExistingLayoutComponentTile = (type) =>
@@ -2729,7 +2696,7 @@ const initializeLayoutFromStorage = () =>
     pageLayoutComponentRuntime?.initializeLayoutFromStorage();
 
 const renderLayoutComponentMenu = () =>
-    pageLayoutEditorRuntime?.renderComponentMenu();
+    pageLayoutWindowManagerRuntime?.renderWindowMenu();
 
 const getLayoutItemForTile = (tile) =>
     getTileLayoutItem(tile?.dataset.layoutItemId || tile?.dataset.layoutId);
@@ -2762,7 +2729,6 @@ const savePanelItemState = (tile, { config, layout, message } = {}) => {
         applyPosition: false,
     });
     saveLayoutToStorage(message || '布局已更新');
-    positionLayoutComponentToolbar(tile);
     return nextItem;
 };
 
@@ -2821,27 +2787,20 @@ const togglePanelPin = (tile) => {
     });
 };
 
-const isTileFreeMoveEnabled = (tile) =>
-    getLayoutItemForTile(tile)?.config?.freeMove === true;
-
 const canDragLayoutItem = (item) => {
-    if (isRegisteredPanelItem(item)) {
-        return !layoutLocked && getPanelConfig(item.type)?.canDrag !== false;
-    }
-
-    return layoutEditMode || item?.config?.freeMove === true;
+    return (
+        Boolean(item) &&
+        (!isRegisteredPanelItem(item) ||
+            getPanelConfig(item.type)?.canDrag !== false)
+    );
 };
 
 const canResizeLayoutItem = (item) => {
-    if (isRegisteredPanelItem(item)) {
-        return (
-            !layoutLocked &&
-            layoutEditMode &&
-            getPanelConfig(item.type)?.canResize !== false
-        );
-    }
-
-    return layoutEditMode || item?.config?.freeMove === true;
+    return (
+        Boolean(item) &&
+        (!isRegisteredPanelItem(item) ||
+            getPanelConfig(item.type)?.canResize !== false)
+    );
 };
 
 const shouldIgnoreLayoutDragTarget = (target) =>
@@ -2862,9 +2821,6 @@ const shouldIgnoreLayoutDragTarget = (target) =>
                 '.page-chat-form',
                 '.channel-button',
                 '[data-channel-room]',
-                '.layout-component-toolbar',
-                '.layout-component-remove',
-                '.layout-component-settings',
                 '.panel-shell-actions',
                 '.panel-action-button',
                 '.fullscreen-btn',
@@ -2882,37 +2838,6 @@ const isLayoutDragHandleTarget = (event, tile) => {
     return handle.closest?.('.video-tile') === tile;
 };
 
-const findLayoutComponentToolbar = (tile) =>
-    pageLayoutEditorRuntime?.findComponentToolbar(tile);
-
-const positionLayoutComponentToolbar = (tile) =>
-    pageLayoutEditorRuntime?.positionComponentToolbar(tile);
-
-const setActiveLayoutToolbarTile = (tile) =>
-    pageLayoutEditorRuntime?.setActiveToolbarTile(tile);
-
-const syncLayoutComponentToolbarState = (tile) =>
-    pageLayoutEditorRuntime?.syncComponentToolbarState(tile);
-
-const toggleTileFreeMove = (tile) => {
-    const item = getLayoutItemForTile(tile);
-
-    if (!item) {
-        return;
-    }
-
-    const nextFreeMove = !isTileFreeMoveEnabled(tile);
-    updateLayoutItemConfig(
-        item.id,
-        nextFreeMove ? { freeMove: true } : { freeMove: false }
-    );
-    syncLayoutComponentToolbarState(tile);
-    positionLayoutComponentToolbar(tile);
-};
-
-const ensureLayoutComponentActions = () =>
-    pageLayoutEditorRuntime?.ensureComponentActions();
-
 const createTileAvatarText = (displayName) =>
     videoTileStructureUI.createTileAvatarText(displayName);
 
@@ -2921,7 +2846,7 @@ const ensureTileStructure = (tile) => {
         resizeDirections: TILE_RESIZE_DIRECTIONS,
     });
 
-    bindTileLayoutControls(tile, structure.header);
+    bindTileLayoutControls(tile);
     bindLayoutResizeBoardControls();
 
     return structure;
@@ -2958,13 +2883,13 @@ const detectTileResizeDirection = (event, tile) => {
 };
 
 const resetLayoutResizeCursor = (board = pageLayoutBoard || videoGrid) =>
-    layoutEditUI.resetResizeCursor({
+    layoutInteractionUI.resetResizeCursor({
         board,
         hoverClasses: LAYOUT_RESIZE_HOVER_CLASSES,
     });
 
 const setLayoutResizeCursor = (hit, board = pageLayoutBoard || videoGrid) => {
-    layoutEditUI.setResizeCursor({
+    layoutInteractionUI.setResizeCursor({
         hit,
         board,
         cursors: TILE_RESIZE_CURSORS,
@@ -2991,12 +2916,6 @@ const getResizeTileAtPoint = (event) => {
 
     return getVideoTiles()
         .filter((tile) => !tile.classList.contains('is-layout-hidden'))
-        .filter(
-            (tile) =>
-                !layoutEditMode ||
-                tile.parentElement === pageLayoutBoard ||
-                tile.dataset.pageLayoutType
-        )
         .sort((a, b) => getTileLayoutZIndex(b) - getTileLayoutZIndex(a))
         .map((tile) => ({
             tile,
@@ -3030,7 +2949,6 @@ const bindLayoutResizeBoardControls = () => {
             return;
         }
 
-        setActiveLayoutToolbarTile(hit.tile);
         startTileResize(event, hit.tile, hit.direction);
     });
     layoutResizeBoundBoards.add(board);
@@ -3074,7 +2992,6 @@ const startTileDrag = (event, tile) => {
         };
         applyTileLayout(tile, nextLayout);
         showSnapPreview(tile, nextLayout);
-        positionLayoutComponentToolbar(tile);
     };
 
     const finishInteraction = (persist = true) => {
@@ -3163,7 +3080,6 @@ const startTileResize = (event, tile, direction = 'se') => {
         );
         applyTileLayout(tile, nextLayout);
         showSnapPreview(tile, nextLayout);
-        positionLayoutComponentToolbar(tile);
     };
 
     const finishInteraction = (persist = true) => {
@@ -3200,7 +3116,7 @@ const cancelActiveLayoutInteractions = () => {
     Array.from(activeLayoutInteractionCancels).forEach((cancel) => cancel());
 };
 
-const bindTileLayoutControls = (tile, header) => {
+const bindTileLayoutControls = (tile) => {
     if (!tile.dataset.layoutBound) {
         tile.addEventListener('pointermove', (event) =>
             updateTileResizeCursor(event, tile)
@@ -3217,14 +3133,11 @@ const bindTileLayoutControls = (tile, header) => {
                     : detectTileResizeDirection(event, tile);
 
                 if (resizeDirection) {
-                    setActiveLayoutToolbarTile(tile);
                     startTileResize(event, tile, resizeDirection);
                     return;
                 }
 
                 bringTileLayoutToFront(tile);
-                setActiveLayoutToolbarTile(tile);
-
                 if (
                     !shouldIgnoreTarget &&
                     isLayoutDragHandleTarget(event, tile) &&
@@ -3235,26 +3148,9 @@ const bindTileLayoutControls = (tile, header) => {
             },
             true
         );
-        tile.addEventListener('click', (event) => {
+        tile.addEventListener('click', () => {
             bringTileLayoutToFront(tile);
-            setActiveLayoutToolbarTile(tile);
-
-            if (layoutEditMode) {
-                event.preventDefault();
-                event.stopPropagation();
-            }
         });
-        header.addEventListener(
-            'pointerdown',
-            (event) =>
-                !shouldIgnoreLayoutDragTarget(event.target) &&
-                isLayoutDragHandleTarget(event, tile) &&
-                canDragLayoutItem(getLayoutItemForTile(tile)) &&
-                startTileDrag(event, tile)
-        );
-        tile.addEventListener('mouseenter', () =>
-            setActiveLayoutToolbarTile(tile)
-        );
         tile.addEventListener('contextmenu', (event) =>
             showPeerVolumePopover(event, tile)
         );
@@ -3332,46 +3228,21 @@ pageLayoutComponentRuntime = layoutComponentRuntime.createComponentRuntime({
     saveLayoutToStorage,
     upsertTileLayoutItem,
     applyTileLayoutItemToElement,
-    findLayoutComponentToolbar,
-    closePeerVolumePopover: () => closePeerVolumePopover(),
     renderLayoutComponentMenu,
     updateMobileTileView,
 });
 
-pageLayoutEditorRuntime = layoutEditorRuntime.createEditorRuntime({
-    document,
+pageLayoutWindowManagerRuntime = layoutWindowManagerRuntime.createRuntime({
     refs: {
         mainLayout,
     },
     layoutToolbarUI,
     layoutComponentMenuUI,
-    layoutComponentActionsUI,
-    initialEditMode: layoutEditMode,
-    getPageLayoutBoard: () => pageLayoutBoard,
-    getVideoTiles,
     getCorePageTypes: () => CORE_PAGE_TYPES,
     getExistingLayoutComponentTile,
     getTileLayoutItem,
     getPagePanelLabel,
-    onAddComponent: addLayoutComponent,
-    onHideComponent: hideLayoutComponent,
-    onToggleFreeMove: toggleTileFreeMove,
-    onToggleLayoutLock: toggleLayoutLocked,
-    isLayoutLocked: () => layoutLocked,
-    isTileFreeMoveEnabled,
-    ensureTileStructure,
-    syncLayoutGridMetadata,
-    onEditModeChange: (enabled) => {
-        layoutEditMode = enabled;
-    },
-    onEnterEditMode: () => {
-        closePeerVolumePopover();
-    },
-    onExitEditMode: () => {
-        hideSnapPreview();
-        resetLayoutResizeCursor();
-    },
-    onFinalizeLayoutEditing: finalizeLayoutEditing,
+    onShowWindow: addLayoutComponent,
     onApplyDefaultLayout: applyDefaultLayout,
 });
 
@@ -3404,12 +3275,10 @@ pageLayoutRuntime = window.PageLayoutRuntime.createRuntime({
     loadLayoutFromStorage,
     clearSavedLayout,
     initializeLayoutFromStorage,
-    ensureLayoutEditModeToggle,
-    syncLayoutEditModeUI,
+    ensureWindowManagerToolbar,
+    syncWindowManagerUI,
     getVideoTiles,
     serializeLayoutItems,
-    setLayoutEditMode,
-    setLayoutLocked,
     cancelLayoutInteractions: cancelActiveLayoutInteractions,
     onBoardChange: (board) => {
         pageLayoutBoard = board;
@@ -3424,26 +3293,16 @@ pageLayoutRuntime.bootstrapRecoveryToolbar();
 try {
     pageLayoutRuntime.bootstrap();
     pageLayoutBoard = pageLayoutRuntime.getBoard();
-    pageLayoutEditorRuntime.bindToolbarEvents();
-    syncLayoutEditModeUI();
+    pageLayoutWindowManagerRuntime.bindToolbarEvents();
+    syncWindowManagerUI();
 } catch (err) {
     console.error('[page-layout] critical init failure', err);
     restoreOriginalStaticLayout();
     pageLayoutRuntime.bootstrapRecoveryToolbar({ visible: true });
 }
 
-const closePeerVolumePopover = () => {
-    remoteVolumeUI.closePopover();
-};
-
 const showPeerVolumePopover = (event, tile) => {
     const peerId = tile.dataset.peerId;
-
-    if (layoutEditMode) {
-        event.preventDefault();
-        closePeerVolumePopover();
-        return;
-    }
 
     if (isMobileLayout() || tile.id === 'local-video' || !peerId) {
         return;
@@ -3555,10 +3414,6 @@ const updateVideoTileStatus = (tile) => {
             applyPosition: false,
         });
     }
-    if (layoutEditMode) {
-        ensureLayoutComponentActions();
-    }
-
     if (member.socketId) {
         tile.dataset.socketId = member.socketId;
     } else {
@@ -3592,7 +3447,6 @@ const updateVideoTileStatus = (tile) => {
     tileStatusUI.renderTileStatus(tile, {
         avatarText: createTileAvatarText(displayName),
         hasVideo,
-        isLayoutEditing: layoutEditMode,
         isScreenShare,
         showNameLabel: isScreenShare || showPeerName,
         statuses: getMemberStatusIcons(member),
@@ -4963,7 +4817,6 @@ window.addEventListener('resize', () => {
     updateMobileRoomState();
     updateMobileTileView();
     clampPositionedTileLayouts();
-    pageLayoutEditorRuntime?.positionActiveToolbarTile();
 });
 
 const handleNetworkOffline = () => {

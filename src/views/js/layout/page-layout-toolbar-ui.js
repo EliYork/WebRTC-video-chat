@@ -5,28 +5,23 @@
 
     const setButtonLabel = (button, text) => {
         const label = button?.querySelector('span');
-
         if (label) {
             label.textContent = text;
         }
     };
 
-    const createIcon = (className) => {
-        const icon = global.document.createElement('i');
-        icon.className = className;
-        icon.setAttribute('aria-hidden', 'true');
-        return icon;
-    };
-
     const createButton = ({ id, className, iconClassName, labelText }) => {
         const button = global.document.createElement('button');
+        const icon = global.document.createElement('i');
         const label = global.document.createElement('span');
 
         button.id = id;
         button.className = className;
         button.type = 'button';
+        icon.className = iconClassName;
+        icon.setAttribute('aria-hidden', 'true');
         label.textContent = labelText;
-        button.append(createIcon(iconClassName), label);
+        button.append(icon, label);
         return button;
     };
 
@@ -35,161 +30,92 @@
             return {};
         }
 
+        const existing = mainLayout.querySelector('.page-layout-toolbar');
+        if (existing) {
+            return {
+                componentMenu: existing.querySelector('.layout-component-menu'),
+                resetDefaultButton: existing.querySelector('#layoutResetDefault'),
+                saveStatus: existing.querySelector('.layout-save-status'),
+                toolbar: existing,
+                windowMenuToggle: existing.querySelector('#layoutWindowMenuToggle'),
+            };
+        }
+
         const toolbar = global.document.createElement('div');
-        const primaryAction = global.document.createElement('div');
-        const secondaryActions = global.document.createElement('div');
-        const editModeToggle = createButton({
-            id: 'layoutEditModeToggle',
-            className: 'layout-edit-toggle layout-edit-primary-button',
-            iconClassName: 'fas fa-border-all',
-            labelText: '编辑',
-        });
-        const addComponentToggle = createButton({
-            id: 'layoutAddComponentToggle',
-            className: 'layout-tool-button',
-            iconClassName: 'fas fa-plus',
-            labelText: '组件',
-        });
-        const lockLayoutToggle = createButton({
-            id: 'layoutLockToggle',
-            className: 'layout-tool-button layout-lock-toggle',
-            iconClassName: 'fas fa-lock-open',
-            labelText: '锁定布局',
+        const windowMenuToggle = createButton({
+            id: 'layoutWindowMenuToggle',
+            className: 'layout-tool-button layout-window-menu-toggle',
+            iconClassName: 'fas fa-layer-group',
+            labelText: '窗口',
         });
         const resetDefaultButton = createButton({
             id: 'layoutResetDefault',
             className: 'layout-tool-button',
             iconClassName: 'fas fa-undo',
-            labelText: '恢复默认布局',
+            labelText: '恢复默认',
         });
         const componentMenu = global.document.createElement('div');
         const saveStatus = global.document.createElement('span');
 
         toolbar.className =
-            'stage-layout-toolbar page-layout-toolbar page-layout-topbar';
-        toolbar.setAttribute('aria-label', '布局工具');
-        primaryAction.className = 'layout-edit-primary-action';
-        secondaryActions.className = 'layout-edit-secondary-actions';
-        editModeToggle.setAttribute('aria-pressed', 'false');
-        addComponentToggle.setAttribute('aria-expanded', 'false');
-        addComponentToggle.hidden = true;
-        lockLayoutToggle.hidden = true;
-        resetDefaultButton.hidden = true;
+            'desktop-window-toolbar page-layout-toolbar page-layout-topbar';
+        toolbar.setAttribute('aria-label', '窗口管理');
+        windowMenuToggle.setAttribute('aria-expanded', 'false');
         componentMenu.className = 'layout-component-menu';
         componentMenu.hidden = true;
         componentMenu.setAttribute('role', 'menu');
-        componentMenu.setAttribute('aria-label', '添加布局组件');
+        componentMenu.setAttribute('aria-label', '窗口列表');
         saveStatus.className = 'layout-save-status';
         saveStatus.textContent = '已保存';
         saveStatus.hidden = true;
 
-        primaryAction.append(editModeToggle);
-        secondaryActions.append(
-            addComponentToggle,
-            lockLayoutToggle,
+        toolbar.append(
+            windowMenuToggle,
             resetDefaultButton,
             saveStatus,
             componentMenu
         );
-        toolbar.append(primaryAction, secondaryActions);
         mainLayout.prepend(toolbar);
 
         return {
-            addComponentToggle,
             componentMenu,
-            editModeToggle,
-            lockLayoutToggle,
             resetDefaultButton,
             saveStatus,
             toolbar,
+            windowMenuToggle,
         };
     };
 
     const renderToolbarState = ({
-        mainLayout,
-        pageLayoutBoard,
         toolbar,
-        editMode = false,
-        editModeToggle,
-        addComponentToggle,
-        lockLayoutToggle,
+        windowMenuToggle,
         resetDefaultButton,
-        saveStatus,
-        layoutLocked = false,
     } = {}) => {
-        mainLayout?.classList.toggle('is-layout-editing', editMode);
-        mainLayout?.classList.toggle('is-layout-locked', layoutLocked);
-        pageLayoutBoard?.classList.toggle('is-layout-editing', editMode);
-        pageLayoutBoard?.classList.toggle('is-layout-locked', layoutLocked);
-
-        if (toolbar) {
-            toolbar.dataset.editing = String(editMode);
-            toolbar.classList.toggle('is-layout-editing', editMode);
-        }
-
-        if (editModeToggle) {
-            editModeToggle.setAttribute('aria-pressed', String(editMode));
-            setButtonLabel(editModeToggle, editMode ? '完成' : '编辑');
-        }
-
-        if (lockLayoutToggle) {
-            lockLayoutToggle.setAttribute('aria-pressed', String(layoutLocked));
-            lockLayoutToggle.title = layoutLocked ? '解除布局锁定' : '锁定布局';
-            setButtonLabel(
-                lockLayoutToggle,
-                layoutLocked ? '解除锁定' : '锁定布局'
-            );
-        }
-
-        if (addComponentToggle) {
-            addComponentToggle.hidden = !editMode;
-        }
-
-        if (lockLayoutToggle) {
-            lockLayoutToggle.hidden = !editMode;
-        }
-
-        if (resetDefaultButton) {
-            resetDefaultButton.hidden = !editMode;
-        }
-
-        if (saveStatus) {
-            saveStatus.hidden = !editMode;
-        }
+        if (toolbar) toolbar.hidden = false;
+        if (windowMenuToggle) windowMenuToggle.hidden = false;
+        if (resetDefaultButton) resetDefaultButton.hidden = false;
     };
 
-    const showSaveStatus = ({
-        saveStatus,
-        message,
-        durationMs = 1800,
-    } = {}) => {
-        if (!saveStatus) {
-            return;
-        }
-
+    const showSaveStatus = ({ saveStatus, message, durationMs = 1800 } = {}) => {
+        if (!saveStatus) return;
         saveStatus.textContent = message;
+        saveStatus.hidden = false;
         clearTimeout(saveStatusTimer);
         saveStatusTimer = setTimeout(() => {
             saveStatus.textContent = '已保存';
+            saveStatus.hidden = true;
         }, durationMs);
     };
 
-    const renderResetConfirmState = ({
-        resetDefaultButton,
-        confirming = false,
-    } = {}) => {
-        if (!resetDefaultButton) {
-            return;
-        }
-
+    const renderResetConfirmState = ({ resetDefaultButton, confirming = false } = {}) => {
+        if (!resetDefaultButton) return;
         if (confirming) {
             resetDefaultButton.dataset.confirmReset = 'true';
-            setButtonLabel(resetDefaultButton, '再次点击确认');
+            setButtonLabel(resetDefaultButton, '再次确认');
             return;
         }
-
         delete resetDefaultButton.dataset.confirmReset;
-        setButtonLabel(resetDefaultButton, '恢复默认布局');
+        setButtonLabel(resetDefaultButton, '恢复默认');
     };
 
     global.PageLayoutToolbarUI = {

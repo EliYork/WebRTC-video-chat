@@ -32,16 +32,11 @@
 
     const updateTileStatusClasses = (
         tile,
-        {
-            hasVideo = false,
-            isLayoutEditing = false,
-            isScreenShare = false,
-        } = {}
+        { hasVideo = false, isScreenShare = false } = {}
     ) => {
         toggleClass(tile, 'has-video', hasVideo);
         toggleClass(tile, 'is-audio-only', !hasVideo);
         toggleClass(tile, 'is-screen-share', isScreenShare);
-        toggleClass(tile, 'is-layout-editing', isLayoutEditing);
     };
 
     const renderTileHeader = (

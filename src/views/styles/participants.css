@@ -78,11 +78,13 @@
     grid-template-columns: 24px minmax(0, 1fr) minmax(0, auto) auto;
     gap: 8px;
     align-items: center;
-    min-height: 38px;
-    padding: 8px 10px;
+    height: var(--window-titlebar-height);
+    min-height: var(--window-titlebar-height);
+    max-height: var(--window-titlebar-height);
+    padding: 0 var(--window-titlebar-padding-inline);
     border-bottom: 1px solid rgba(216, 111, 154, 0.13);
     background-color: rgba(255, 255, 255, 0.78);
-    cursor: default;
+    cursor: grab;
     user-select: none;
     touch-action: none;
 }
@@ -118,8 +120,8 @@
     min-width: 0;
     overflow: hidden;
     color: #57354a;
-    font-size: 13px;
-    font-weight: 700;
+    font-size: var(--window-title-font-size);
+    font-weight: var(--window-title-font-weight);
     text-overflow: ellipsis;
     white-space: nowrap;
 }
@@ -168,6 +170,39 @@
     min-width: 0;
     align-items: center;
     gap: 6px;
+}
+
+.window-drag-handle {
+    flex: 0 0 auto;
+    width: 14px;
+    height: 18px;
+    opacity: 0.04;
+    background-image: radial-gradient(
+        circle,
+        currentColor 1.2px,
+        transparent 1.4px
+    );
+    background-position: center;
+    background-size: 5px 5px;
+    color: var(--muted);
+    pointer-events: none;
+    transition: opacity 160ms ease;
+}
+
+.video-tile:hover .window-drag-handle {
+    opacity: 0.28;
+}
+
+.video-tile .tile-header:hover .window-drag-handle,
+.video-tile.is-dragging .window-drag-handle {
+    opacity: 0.62;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .window-drag-handle,
+    .tile-resize-handle {
+        transition: none;
+    }
 }
 
 .tile-badge {
@@ -277,114 +312,4 @@
 
 .tile-actions > * {
     pointer-events: auto;
-}
-
-.layout-component-remove {
-    display: none;
-    width: 26px;
-    height: 26px;
-    margin: 8px;
-    padding: 0;
-    border: 1px solid rgba(216, 111, 154, 0.32);
-    border-radius: 999px;
-    background-color: rgba(255, 255, 255, 0.92);
-    color: var(--accent-strong);
-    font-size: 18px;
-    line-height: 1;
-}
-
-.layout-component-settings {
-    display: none;
-    width: 26px;
-    height: 26px;
-    margin: 8px 8px 0 0;
-    padding: 0;
-    place-items: center;
-    border: 1px solid rgba(216, 111, 154, 0.24);
-    border-radius: 999px;
-    background-color: rgba(255, 255, 255, 0.92);
-    color: var(--accent-strong);
-    cursor: pointer;
-    font-size: 12px;
-    line-height: 1;
-}
-
-#video-grid.is-layout-editing .layout-component-settings,
-.page-layout-board.is-layout-editing .layout-component-settings {
-    display: none;
-    place-items: center;
-    pointer-events: auto;
-}
-
-#video-grid.is-layout-editing .layout-component-remove,
-.page-layout-board.is-layout-editing .layout-component-remove {
-    display: none;
-    place-items: center;
-    pointer-events: auto;
-}
-
-.layout-component-toolbar {
-    position: absolute;
-    z-index: 15000;
-    display: none;
-    width: 34px;
-    gap: 6px;
-    pointer-events: auto;
-}
-
-.page-layout-board.is-layout-editing .layout-component-toolbar.is-visible {
-    display: grid;
-}
-
-.layout-toolbar-button {
-    display: grid;
-    width: 30px;
-    height: 30px;
-    place-items: center;
-    padding: 0;
-    border: 1px solid rgba(216, 111, 154, 0.24);
-    border-radius: 999px;
-    background-color: rgba(255, 255, 255, 0.96);
-    box-shadow: 0 10px 22px rgba(111, 58, 83, 0.13);
-    color: var(--accent-strong);
-    cursor: pointer;
-    font-size: 13px;
-    font-weight: 800;
-}
-
-.layout-toolbar-button:hover,
-.layout-toolbar-button[aria-pressed='true'] {
-    border-color: rgba(216, 111, 154, 0.46);
-    background-color: var(--accent-soft);
-}
-
-.layout-toolbar-help-wrap {
-    position: relative;
-    display: grid;
-}
-
-.layout-toolbar-tooltip {
-    position: absolute;
-    top: 0;
-    left: 38px;
-    display: none;
-    width: 190px;
-    padding: 7px 9px;
-    border: 1px solid rgba(216, 111, 154, 0.24);
-    border-radius: 8px;
-    background-color: rgba(255, 255, 255, 0.98);
-    box-shadow: 0 12px 26px rgba(111, 58, 83, 0.15);
-    color: var(--text);
-    font-size: 12px;
-    line-height: 1.45;
-}
-
-.layout-component-toolbar.is-left-side .layout-toolbar-tooltip {
-    right: 38px;
-    left: auto;
-}
-
-.layout-toolbar-help-wrap:hover .layout-toolbar-tooltip,
-.layout-toolbar-help:focus + .layout-toolbar-tooltip {
-    display: block;
 }

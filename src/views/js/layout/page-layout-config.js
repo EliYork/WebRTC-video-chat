@@ -2,7 +2,6 @@
     'use strict';
 
     const PAGE_COMPONENT_TYPES = {
-        SIDEBAR_PANEL: 'sidebarPanel',
         MEMBERS_PANEL: 'membersPanel',
         MEDIA_CONTROLS_PANEL: 'mediaControlsPanel',
         CHAT_PANEL: 'chatPanel',
@@ -11,22 +10,9 @@
 
     const PANEL_REGISTRY = [
         {
-            id: PAGE_COMPONENT_TYPES.SIDEBAR_PANEL,
-            title: '侧边栏 Sidebar',
-            defaultLayout: { x: 0, y: 0, w: 6, h: 5 },
-            defaultVisible: false,
-            minWidth: 240,
-            minHeight: 180,
-            canDrag: true,
-            canResize: true,
-            canHide: true,
-            canCollapse: true,
-            canPin: true,
-        },
-        {
             id: PAGE_COMPONENT_TYPES.MEMBERS_PANEL,
-            title: '房间 Room',
-            defaultLayout: { x: 0, y: 0, w: 6, h: 14 },
+            title: '频道',
+            defaultLayout: { x: 1, y: 1, w: 7, h: 10 },
             minWidth: 260,
             minHeight: 220,
             canDrag: true,
@@ -37,8 +23,8 @@
         },
         {
             id: PAGE_COMPONENT_TYPES.MEDIA_CONTROLS_PANEL,
-            title: '语音 Dock',
-            defaultLayout: { x: 0, y: 12, w: 4, h: 6 },
+            title: '媒体控制',
+            defaultLayout: { x: 1, y: 12, w: 7, h: 5 },
             minWidth: 220,
             minHeight: 140,
             canDrag: true,
@@ -49,8 +35,8 @@
         },
         {
             id: PAGE_COMPONENT_TYPES.CHAT_PANEL,
-            title: '聊天 Chat',
-            defaultLayout: { x: 26, y: 0, w: 6, h: 18 },
+            title: '聊天',
+            defaultLayout: { x: 24, y: 2, w: 7, h: 14 },
             minWidth: 280,
             minHeight: 240,
             canDrag: true,
@@ -96,30 +82,25 @@
 
     const COMPONENT_CONFIG_DEFAULTS = {
         [LAYOUT_ITEM_TYPES.ROOM]: {
-            freeMove: true,
             showRoomName: true,
             showCopyLink: true,
             showMemberCount: true,
         },
         [LAYOUT_ITEM_TYPES.CHAT]: {
-            freeMove: true,
             compactMode: false,
             showHeader: true,
         },
         [LAYOUT_ITEM_TYPES.LOCAL_PEER]: {
-            freeMove: true,
             userPlaced: false,
             showSelfPreview: true,
             showControls: true,
         },
         [LAYOUT_ITEM_TYPES.REMOTE_PEER]: {
-            freeMove: true,
             userPlaced: false,
             keepHiddenWhenRejoin: true,
             showPeerName: true,
         },
         [LAYOUT_ITEM_TYPES.SCREEN_SHARE]: {
-            freeMove: true,
             userPlaced: false,
             autoShowScreenShare: true,
             showScreenHeader: true,
@@ -130,7 +111,6 @@
         PANEL_REGISTRY.map((panel) => [
             panel.id,
             {
-                freeMove: true,
                 collapsed: false,
                 pinned: false,
                 expandedHeight: 0,
@@ -149,7 +129,7 @@
         const defaults =
             COMPONENT_CONFIG_DEFAULTS[type] ||
             PANEL_COMPONENT_CONFIG_DEFAULTS[type];
-        return defaults ? { ...defaults } : { freeMove: true };
+        return defaults ? { ...defaults } : {};
     };
 
     const normalizeComponentConfig = (type, config = {}) => {

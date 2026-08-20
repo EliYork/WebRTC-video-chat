@@ -77,7 +77,6 @@ class FakeNode extends EventTarget {
 const createFixture = () => {
     const main = new FakeNode('main', 'main');
     const sidebar = new FakeNode('aside', 'sidebar');
-    const brand = new FakeNode('div', 'brand');
     const members = new FakeNode('nav', 'members');
     const localCard = new FakeNode('section', 'local-card');
     const media = new FakeNode('div', 'buttons');
@@ -93,7 +92,7 @@ const createFixture = () => {
     const chat = new FakeNode('aside', 'chat-panel');
     const input = new FakeNode('textarea', 'chat-input');
 
-    sidebar.append(brand, members, localCard);
+    sidebar.append(members, localCard);
     media.append(mediaHandle, screenResolution, screenButton);
     localCard.append(media);
     dynamicTile.append(video);
@@ -104,7 +103,6 @@ const createFixture = () => {
     main.append(sidebar, stage, chat);
 
     return {
-        brand,
         canvas,
         chat,
         dynamicTile,
@@ -148,10 +146,9 @@ const migrateFixture = (fixture, owner, { partial = false } = {}) => {
     );
     fixture.canvas.insertBefore(videoPlaceholder, fixture.videoGrid);
     board.append(fixture.videoGrid);
-    moveToTile(fixture.brand, 'brand');
+    moveToTile(roomContent, 'members');
 
     if (!partial) {
-        moveToTile(roomContent, 'members');
         moveToTile(fixture.media, 'media');
         moveToTile(fixture.chat, 'chat');
         fixture.main.replaceChildren(board);
@@ -165,7 +162,6 @@ const createOwner = (fixture, logger = { warn() {} }) =>
     createOriginalDomOwner({
         root: fixture.main,
         nodes: [
-            fixture.brand,
             fixture.members,
             fixture.media,
             fixture.chat,
@@ -223,7 +219,6 @@ test('recovery preserves business node identity, listeners, and runtime state', 
         fixture.chat,
     ]);
     assert.deepEqual(fixture.sidebar.childNodes, [
-        fixture.brand,
         fixture.members,
         fixture.localCard,
     ]);
@@ -285,7 +280,6 @@ test('partial bootstrap failure restores moved and untouched nodes together', ()
 
     assert.equal(result.ok, true);
     assert.deepEqual(fixture.sidebar.childNodes, [
-        fixture.brand,
         fixture.members,
         fixture.localCard,
     ]);
@@ -293,23 +287,20 @@ test('partial bootstrap failure restores moved and untouched nodes together', ()
     assert.equal(fixture.chat.parentNode, fixture.main);
 });
 
-test('runtime recovery exits edit mode, cancels interactions, and restores focus', () => {
+test('runtime recovery cancels window interactions and restores focus', () => {
     const fixture = createFixture();
-    const classes = new Set(['is-layout-editing', 'is-layout-locked']);
+    const classes = new Set(['is-window-interacting']);
     fixture.main.classList = {
         add: (...names) => names.forEach((name) => classes.add(name)),
         remove: (...names) => names.forEach((name) => classes.delete(name)),
     };
     fixture.main.querySelector = (selector) =>
         ({
-            '.sidebar-brand': fixture.brand,
             '.sidebar-channel-tree': fixture.members,
             '#buttons': fixture.media,
             '.chat-panel': fixture.chat,
         })[selector] || null;
 
-    let editMode = true;
-    let locked = true;
     let interactionActive = true;
     let focusRestored = false;
     fixture.input.isConnected = true;
@@ -326,19 +317,12 @@ test('runtime recovery exits edit mode, cancels interactions, and restores focus
         cancelLayoutInteractions: () => {
             interactionActive = false;
         },
-        setLayoutEditMode: (enabled) => {
-            editMode = enabled;
-        },
-        setLayoutLocked: (enabled) => {
-            locked = enabled;
-        },
-        syncLayoutEditModeUI() {},
+        syncWindowManagerUI() {},
         logger: { error() {}, log() {}, warn() {} },
     });
 
     const board = new FakeNode('div', 'page-layout-board');
     [
-        fixture.brand,
         fixture.members,
         fixture.media,
         fixture.chat,
@@ -349,12 +333,9 @@ test('runtime recovery exits edit mode, cancels interactions, and restores focus
     const result = runtime.restoreOriginalStaticLayout();
 
     assert.equal(result.ok, true);
-    assert.equal(editMode, false);
-    assert.equal(locked, false);
     assert.equal(interactionActive, false);
     assert.equal(focusRestored, true);
-    assert.equal(classes.has('is-layout-editing'), false);
-    assert.equal(classes.has('is-layout-locked'), false);
+    assert.equal(classes.has('is-window-interacting'), false);
     assert.deepEqual(fixture.main.childNodes, [
         fixture.sidebar,
         fixture.stage,
@@ -377,7 +358,6 @@ test('one failed node restore does not stop later recovery steps', () => {
 
     assert.equal(result.ok, false);
     assert.equal(result.errors.length, 1);
-    assert.equal(fixture.brand.parentNode, fixture.sidebar);
     assert.equal(fixture.members.parentNode, fixture.sidebar);
     assert.equal(fixture.chat.parentNode, fixture.main);
     assert.equal(fixture.videoGrid.parentNode, fixture.canvas);

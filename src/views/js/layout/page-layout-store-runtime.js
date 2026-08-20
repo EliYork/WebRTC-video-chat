@@ -160,12 +160,8 @@
                 updates.layout ||
                 previous?.layout ||
                 options.getCurrentTileLayout(tile);
-            const tileConfig = tile.classList.contains('is-free-move-enabled')
-                ? { freeMove: true }
-                : {};
             const mergedConfig = {
                 ...(previous?.config || {}),
-                ...tileConfig,
                 ...(updates.config || {}),
             };
             const item = createTileLayoutItem({

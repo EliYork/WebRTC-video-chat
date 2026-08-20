@@ -92,7 +92,6 @@
             ensureTileStructure,
             getCopyLink,
             getTileLayoutId,
-            layoutEditMode = false,
             type = tile?.dataset.layoutComponentType,
         } = {}
     ) => {
@@ -113,7 +112,6 @@
         tile.dataset.tileType = type;
         tile.dataset.peerLabel = state.title;
         tile.classList.add('layout-component-tile');
-        tile.classList.toggle('is-layout-editing', layoutEditMode);
         tile.classList.toggle(
             'chat-compact-mode',
             type === LAYOUT_ITEM_TYPES.CHAT && state.compactMode

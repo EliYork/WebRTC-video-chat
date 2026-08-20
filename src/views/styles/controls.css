@@ -21,40 +21,6 @@
     color: var(--text);
 }
 
-.media-dock-layout-handle {
-    display: none;
-    box-sizing: border-box;
-    width: calc(100% + 20px);
-    height: 26px;
-    min-height: 26px;
-    align-items: center;
-    justify-content: center;
-    gap: 5px;
-    margin: -8px -10px 0;
-    padding: 0 10px;
-    border-bottom: 1px solid rgba(216, 111, 154, 0.14);
-    border-radius: 7px 7px 3px 3px;
-    background-color: rgba(255, 248, 252, 0.44);
-    color: #9a7487;
-    cursor: grab;
-    font-size: 10px;
-    font-weight: 800;
-    letter-spacing: 0.04em;
-    opacity: 0.5;
-    pointer-events: auto;
-    user-select: none;
-    transition:
-        background-color 120ms ease,
-        color 120ms ease,
-        opacity 120ms ease;
-}
-
-.media-dock-layout-grip {
-    font-size: 13px;
-    letter-spacing: -0.18em;
-    line-height: 1;
-}
-
 .media-dock-header {
     display: grid;
     grid-template-columns: minmax(0, 1.12fr) minmax(0, 0.88fr);
@@ -83,78 +49,14 @@
     font-size: 11px;
 }
 
-.page-layout-board:not(.is-layout-editing) .page-tile-media-controls-panel {
-    display: block;
+.page-tile-media-controls-panel #buttons.media-dock {
+    height: 100%;
+    min-height: 0;
+    padding: 10px;
     border: 0;
+    border-radius: 0;
     background: transparent;
     box-shadow: none;
-    overflow: visible !important;
-    pointer-events: none;
-}
-
-.page-layout-board:not(.is-layout-editing)
-    .page-tile-media-controls-panel
-    .tile-header,
-.page-layout-board:not(.is-layout-editing)
-    .page-tile-media-controls-panel
-    .tile-footer,
-.page-layout-board:not(.is-layout-editing)
-    .page-tile-media-controls-panel
-    .tile-actions,
-.page-layout-board:not(.is-layout-editing)
-    .page-tile-media-controls-panel
-    .tile-resize-handle {
-    display: none;
-}
-
-.page-layout-board:not(.is-layout-editing)
-    .page-tile-media-controls-panel
-    .tile-body {
-    height: 100%;
-    justify-content: flex-end;
-    overflow: visible;
-    background: transparent;
-    pointer-events: none;
-}
-
-.page-layout-board:not(.is-layout-editing)
-    .page-tile-media-controls-panel
-    #buttons {
-    pointer-events: auto;
-}
-
-.page-layout-board.is-layout-editing
-    .page-tile-media-controls-panel
-    > .tile-header {
-    display: none;
-}
-
-.page-layout-board.is-layout-editing .page-tile-media-controls-panel,
-.page-layout-board.is-layout-editing .page-tile-media-controls-panel #buttons {
-    cursor: default;
-}
-
-.page-layout-board.is-layout-editing
-    .page-tile-media-controls-panel
-    #buttons
-    > .media-dock-layout-handle {
-    display: flex;
-}
-
-.page-layout-board.is-layout-editing
-    .page-tile-media-controls-panel
-    #buttons
-    > .media-dock-layout-handle:hover {
-    background-color: rgba(255, 240, 247, 0.78);
-    color: #7a5266;
-    opacity: 0.9;
-}
-
-.page-layout-board.is-layout-editing
-    .page-tile-media-controls-panel
-    #buttons
-    > .media-dock-layout-handle:active {
-    cursor: grabbing;
 }
 
 #buttons.media-dock.hidden {

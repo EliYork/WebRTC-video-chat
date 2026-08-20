@@ -98,7 +98,7 @@
     }
 
     .room-layout.mobile-in-room .room-sidebar,
-    #main.mobile-in-room .page-tile-sidebar-panel {
+    #main.mobile-in-room .page-tile-media-controls-panel {
         grid-row: 2;
         position: static;
         display: block;
@@ -110,13 +110,12 @@
         background: var(--panel-warm);
     }
 
-    .room-layout.mobile-in-room .sidebar-brand,
     .room-layout.mobile-in-room .sidebar-channel-tree {
         display: none;
     }
 
     .room-layout.mobile-in-room .local-user-card,
-    #main.mobile-in-room .page-tile-sidebar-panel .local-user-card {
+    #main.mobile-in-room .page-tile-media-controls-panel .local-user-card {
         max-height: none;
         padding: 8px 12px;
         margin: 0;
@@ -127,19 +126,19 @@
     }
 
     .room-layout.mobile-in-room .local-user-header,
-    #main.mobile-in-room .page-tile-sidebar-panel .local-user-header {
+    #main.mobile-in-room .page-tile-media-controls-panel .local-user-header {
         grid-template-columns: auto minmax(0, 1fr);
     }
 
     .room-layout.mobile-in-room .local-avatar,
-    #main.mobile-in-room .page-tile-sidebar-panel .local-avatar {
+    #main.mobile-in-room .page-tile-media-controls-panel .local-avatar {
         width: 34px;
         height: 34px;
         font-size: 18px;
     }
 
     .room-layout.mobile-in-room .local-meta-panel,
-    #main.mobile-in-room .page-tile-sidebar-panel .local-meta-panel {
+    #main.mobile-in-room .page-tile-media-controls-panel .local-meta-panel {
         display: none;
     }
 
@@ -233,7 +232,7 @@
         opacity: 0.38;
     }
 
-    .stage-layout-toolbar {
+    .desktop-window-toolbar {
         display: none;
     }
 

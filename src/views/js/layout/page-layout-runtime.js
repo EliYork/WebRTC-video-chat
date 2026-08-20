@@ -2,10 +2,9 @@
     'use strict';
 
     const PAGE_COMPONENT_LABELS = {
-        sidebarPanel: '侧边栏 Sidebar',
-        membersPanel: '房间 Room',
-        mediaControlsPanel: '语音 Dock',
-        chatPanel: '聊天 Chat',
+        membersPanel: '频道',
+        mediaControlsPanel: '媒体控制',
+        chatPanel: '聊天',
     };
 
     const createOriginalDomOwner = ({ root, nodes = [], logger } = {}) => {
@@ -106,14 +105,13 @@
         const corePageTypes = panelRegistry.length
             ? panelRegistry.map((panel) => panel.id)
             : [
-                  pageComponentTypes.SIDEBAR_PANEL,
+                  pageComponentTypes.MEMBERS_PANEL,
                   pageComponentTypes.CHAT_PANEL,
               ].filter(Boolean);
         let board = options.initialBoard;
         const originalDomOwner = createOriginalDomOwner({
             root: mainLayout,
             nodes: [
-                mainLayout?.querySelector('.sidebar-brand'),
                 mainLayout?.querySelector('.sidebar-channel-tree'),
                 mainLayout?.querySelector('#buttons'),
                 mainLayout?.querySelector('.chat-panel'),
@@ -220,12 +218,14 @@
                 return;
             }
 
-            let actions = header.querySelector('.panel-shell-actions');
+            const actionSlot =
+                header.querySelector('.tile-header-actions') || header;
+            let actions = actionSlot.querySelector('.panel-shell-actions');
 
             if (!actions) {
                 actions = documentRef.createElement('div');
                 actions.className = 'panel-shell-actions no-drag';
-                header.append(actions);
+                actionSlot.append(actions);
             }
 
             actions.replaceChildren();
@@ -407,10 +407,6 @@
         const validateDetachedPageLayoutBoard = (targetBoard) => {
             const tileCount =
                 targetBoard.querySelectorAll('.page-layout-tile').length;
-            const sidebar = getPageTileDiagnostics(
-                targetBoard,
-                pageComponentTypes.SIDEBAR_PANEL
-            );
             const members = getPageTileDiagnostics(
                 targetBoard,
                 pageComponentTypes.MEMBERS_PANEL
@@ -442,14 +438,6 @@
 
             if (tileCount < corePageTypes.length) {
                 failures.push(`expected ${corePageTypes.length} page tiles`);
-            }
-
-            if (
-                !sidebar.tile ||
-                !sidebar.text.includes('朋友语音房间') ||
-                !sidebar.tile.querySelector('.sidebar-brand')
-            ) {
-                failures.push('sidebarPanel is missing brand content');
             }
 
             if (
@@ -509,7 +497,6 @@
 
             const sidebarEl = mainLayout.querySelector('.room-sidebar');
             const chatPanelEl = mainLayout.querySelector('.chat-panel');
-            const sidebarBrandEl = sidebarEl?.querySelector('.sidebar-brand');
             const membersEl = sidebarEl?.querySelector('.sidebar-channel-tree');
             const roomInfoEl = sidebarEl?.querySelector('.local-user-card');
             const mediaControlsEl = roomInfoEl?.querySelector('#buttons');
@@ -534,7 +521,6 @@
             log('source nodes', {
                 sidebar: Boolean(sidebarEl),
                 sidebarChildren: sidebarEl?.children.length || 0,
-                sidebarHasBrand: Boolean(sidebarBrandEl),
                 sidebarHasTree: Boolean(membersEl),
                 sidebarHasUserCard: Boolean(roomInfoEl),
                 mediaControls: Boolean(mediaControlsEl),
@@ -546,7 +532,6 @@
             });
 
             const missingSelectors = [
-                ['.sidebar-brand', sidebarBrandEl],
                 ['.sidebar-channel-tree', membersEl],
                 ['.local-user-card', roomInfoEl],
                 ['#buttons', mediaControlsEl],
@@ -575,10 +560,6 @@
             roomPanelContent.append(membersEl);
 
             const entries = [
-                {
-                    type: pageComponentTypes.SIDEBAR_PANEL,
-                    node: sidebarBrandEl,
-                },
                 {
                     type: pageComponentTypes.MEMBERS_PANEL,
                     node: roomPanelContent,
@@ -662,8 +643,8 @@
                 }
             }
 
-            options.ensureLayoutEditModeToggle();
-            options.syncLayoutEditModeUI();
+            options.ensureWindowManagerToolbar();
+            options.syncWindowManagerUI();
 
             log(
                 'Board initialized with',
@@ -692,20 +673,12 @@
             attempt('cancel layout interactions', () =>
                 options.cancelLayoutInteractions?.()
             );
-            attempt('exit layout edit mode', () =>
-                options.setLayoutEditMode(false)
-            );
-            attempt('unlock layout', () => options.setLayoutLocked?.(false));
-
             const restored = originalDomOwner.restore();
             errors.push(...restored.errors);
             attempt('clear layout board state', () => setBoard(undefined));
             attempt('restore main layout classes', () => {
                 mainLayout.classList.add('room-layout');
-                mainLayout.classList.remove(
-                    'is-layout-editing',
-                    'is-layout-locked'
-                );
+                mainLayout.classList.remove('is-window-interacting');
             });
             attempt('restore focus', () => {
                 if (
@@ -715,8 +688,8 @@
                     activeElement.focus({ preventScroll: true });
                 }
             });
-            attempt('sync layout edit UI', () =>
-                options.syncLayoutEditModeUI()
+            attempt('sync window manager UI', () =>
+                options.syncWindowManagerUI()
             );
 
             if (errors.length > 0) {
@@ -801,7 +774,7 @@
                         ).length,
                         toolbar: Boolean(
                             documentRef.querySelector(
-                                '.layout-recovery-toolbar, .stage-layout-toolbar'
+                                '.layout-recovery-toolbar, .desktop-window-toolbar'
                             )
                         ),
                         panelRegistry: corePageTypes,

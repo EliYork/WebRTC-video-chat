@@ -20,7 +20,7 @@
     position: absolute;
     z-index: 14000;
     opacity: 0;
-    pointer-events: none;
+    pointer-events: auto;
     touch-action: none;
     transition:
         background-color 120ms ease,
@@ -28,20 +28,9 @@
         opacity 120ms ease;
 }
 
-.page-layout-board.is-layout-editing .video-tile:hover .tile-resize-handle,
-.page-layout-board.is-layout-editing
-    .video-tile.is-layout-selected
-    .tile-resize-handle,
-.page-layout-board.is-layout-editing
-    .video-tile.is-dragging
-    .tile-resize-handle,
-.page-layout-board.is-layout-editing
-    .video-tile.is-resizing
-    .tile-resize-handle {
-    opacity: 0.22;
-}
-
-.video-tile.is-free-move-enabled:hover .tile-resize-handle {
+.video-tile:hover .tile-resize-handle,
+.video-tile.is-dragging .tile-resize-handle,
+.video-tile.is-resizing .tile-resize-handle {
     opacity: 0.14;
 }
 

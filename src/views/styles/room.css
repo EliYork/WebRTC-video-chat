@@ -92,33 +92,6 @@
         var(--panel);
 }
 
-.sidebar-brand {
-    min-height: 118px;
-    padding: 18px 16px;
-    border: 1px solid rgba(255, 255, 255, 0.76);
-    border-radius: 8px;
-    background:
-        linear-gradient(
-            135deg,
-            rgba(255, 206, 224, 0.96),
-            rgba(238, 210, 255, 0.82)
-        ),
-        var(--panel-soft);
-    box-shadow: var(--shadow);
-}
-
-.sidebar-brand a {
-    color: #65384f;
-    font-size: 22px;
-    font-weight: 700;
-    text-decoration: none;
-}
-
-.sidebar-brand p {
-    margin: 6px 0 0;
-    color: var(--muted);
-}
-
 .sidebar-channel-tree {
     flex: 1;
     min-height: 0;
@@ -533,39 +506,26 @@
     background-size: 38px 38px;
 }
 
-.stage-layout-toolbar {
+.desktop-window-toolbar {
     position: fixed;
     top: 14px;
     right: 18px;
     z-index: 20000;
     display: flex;
-    align-items: flex-start;
+    align-items: center;
+    gap: 8px;
+    pointer-events: none;
+}
+
+.desktop-window-toolbar > * {
+    pointer-events: auto;
 }
 
 .page-layout-topbar {
-    width: 118px;
+    width: auto;
     min-height: 34px;
 }
 
-.layout-edit-primary-action {
-    position: relative;
-    z-index: 1;
-}
-
-.layout-edit-secondary-actions {
-    position: absolute;
-    top: 0;
-    right: 126px;
-    display: flex;
-    width: max-content;
-    max-width: calc(100vw - 170px);
-    align-items: flex-start;
-    justify-content: flex-end;
-    flex-wrap: nowrap;
-    gap: 8px;
-}
-
-.layout-edit-toggle,
 .layout-tool-button {
     display: inline-flex;
     flex: 0 0 auto;
@@ -583,14 +543,6 @@
     white-space: nowrap;
 }
 
-.layout-edit-primary-button {
-    flex: 0 0 118px;
-    justify-content: center;
-    width: 118px;
-}
-
-.layout-edit-toggle:hover,
-.layout-edit-toggle[aria-pressed='true'],
 .layout-tool-button:hover {
     border-color: rgba(216, 111, 154, 0.42);
     background-color: #fff2f7;
@@ -604,10 +556,11 @@
     align-self: center;
     padding: 6px 8px;
     border-radius: 999px;
-    background-color: rgba(255, 255, 255, 0.74);
+    background-color: rgba(255, 255, 255, 0.58);
     color: var(--muted);
-    font-size: 12px;
-    font-weight: 700;
+    font-size: 11px;
+    font-weight: 600;
+    opacity: 0.72;
     white-space: nowrap;
 }
 

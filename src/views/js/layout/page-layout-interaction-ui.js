@@ -1,4 +1,4 @@
-(function exposePageLayoutEditUI(global) {
+(function exposePageLayoutInteractionUI(global) {
     'use strict';
 
     let snapPreviewOverlay;
@@ -6,9 +6,6 @@
         board: undefined,
         tile: undefined,
     };
-
-    const clampNumber = (value, min, max) =>
-        Math.min(Math.max(min, value), max);
 
     const ensureSnapPreviewOverlay = (board) => {
         if (!board) {
@@ -54,66 +51,21 @@
         }
     };
 
-    const findLayoutComponentToolbar = (tile) => {
-        if (!tile?.id) {
-            return undefined;
-        }
-
-        return Array.from(
-            global.document.querySelectorAll('.layout-component-toolbar')
-        ).find((toolbar) => toolbar.dataset.targetTileId === tile.id);
-    };
-
-    const positionLayoutComponentToolbar = ({ tile, board } = {}) => {
-        const toolbar = findLayoutComponentToolbar(tile);
-        const targetBoard = board || tile?.parentElement;
-
-        if (!tile || !toolbar || !targetBoard) {
-            return;
-        }
-
-        const boardRect = targetBoard.getBoundingClientRect();
-        const tileRect = tile.getBoundingClientRect();
-        const toolbarWidth = toolbar.offsetWidth || 34;
-        const toolbarHeight = toolbar.offsetHeight || 96;
-        const gap = 8;
-        const centerX = tileRect.left - boardRect.left + tileRect.width / 2;
-        const showRight = centerX < boardRect.width / 2;
-        const rawLeft = showRight
-            ? tileRect.right - boardRect.left + gap
-            : tileRect.left - boardRect.left - toolbarWidth - gap;
-        const left = clampNumber(
-            Math.round(rawLeft),
-            4,
-            Math.max(4, Math.round(boardRect.width - toolbarWidth - 4))
-        );
-        const top = clampNumber(
-            Math.round(tileRect.top - boardRect.top),
-            4,
-            Math.max(4, Math.round(boardRect.height - toolbarHeight - 4))
-        );
-
-        toolbar.classList.toggle('is-left-side', !showRight);
-        toolbar.classList.toggle('is-right-side', showRight);
-        toolbar.style.left = `${left}px`;
-        toolbar.style.top = `${top}px`;
-    };
-
     const clearResizeHoverState = (target, hoverClasses = []) => {
         target?.classList?.remove(...hoverClasses);
         target?.style?.removeProperty('--layout-resize-cursor');
     };
 
-    const resetElementCursor = (element) => {
-        if (element) {
-            element.style.cursor = '';
-        }
-    };
-
     const resetResizeCursor = ({ board, hoverClasses = [] } = {}) => {
-        resetElementCursor(board);
-        resetElementCursor(resizeCursorState.board);
-        resetElementCursor(resizeCursorState.tile);
+        if (board) {
+            board.style.cursor = '';
+        }
+        if (resizeCursorState.board) {
+            resizeCursorState.board.style.cursor = '';
+        }
+        if (resizeCursorState.tile) {
+            resizeCursorState.tile.style.cursor = '';
+        }
 
         global.document.body.style.cursor = '';
         global.document.body.style.removeProperty('--layout-resize-cursor');
@@ -152,7 +104,7 @@
         }
 
         if (resizeCursorState.tile && resizeCursorState.tile !== hit.tile) {
-            resetElementCursor(resizeCursorState.tile);
+            resizeCursorState.tile.style.cursor = '';
         }
 
         resizeCursorState.tile = hit.tile;
@@ -176,10 +128,8 @@
         }
     };
 
-    global.PageLayoutEditUI = {
-        findLayoutComponentToolbar,
+    global.PageLayoutInteractionUI = {
         hideSnapPreview,
-        positionLayoutComponentToolbar,
         resetResizeCursor,
         setResizeCursor,
         showSnapPreview,

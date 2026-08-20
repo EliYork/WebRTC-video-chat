@@ -30,8 +30,8 @@ const readText = (path) => readFileSync(new URL(path, import.meta.url), 'utf8');
 const pageLayoutRuntime = readText(
     '../src/views/js/layout/page-layout-runtime.js'
 );
-const pageLayoutEditorRuntime = readText(
-    '../src/views/js/layout/page-layout-editor-runtime.js'
+const pageLayoutWindowManagerRuntime = readText(
+    '../src/views/js/layout/page-layout-window-manager-runtime.js'
 );
 const pageLayoutComponentRuntime = readText(
     '../src/views/js/layout/page-layout-component-runtime.js'
@@ -697,16 +697,12 @@ const MODULE_SCRIPTS = [
         ],
     },
     {
-        path: '/js/layout/page-layout-edit-ui.js',
-        sourcePath: '../src/views/js/layout/page-layout-edit-ui.js',
-        namespace: 'PageLayoutEditUI',
+        path: '/js/layout/page-layout-interaction-ui.js',
+        sourcePath: '../src/views/js/layout/page-layout-interaction-ui.js',
+        namespace: 'PageLayoutInteractionUI',
         mustLoadBeforeMain: true,
         dependsOnViewUtils: false,
         forbiddenKeywords: [
-            'function toggleLayoutEditMode',
-            'function setLayoutEditMode',
-            'function syncLayoutEditModeUI',
-            'function finalizeLayoutEditing',
             'function finishTileLayoutInteraction',
             'function finalizeLayoutItemDrag',
             'function snapTileLayoutToGridForTile',
@@ -715,86 +711,6 @@ const MODULE_SCRIPTS = [
             'saveLayout',
             'persist',
             'localStorage',
-        ],
-    },
-    {
-        path: '/js/layout/page-layout-component-actions-ui.js',
-        sourcePath:
-            '../src/views/js/layout/page-layout-component-actions-ui.js',
-        namespace: 'PageLayoutComponentActionsUI',
-        mustLoadBeforeMain: true,
-        dependsOnViewUtils: false,
-        forbiddenKeywords: [
-            'new Peer',
-            'Peer(',
-            'socket.emit',
-            'socket.on',
-            'navigator.mediaDevices',
-            'getUserMedia',
-            'getDisplayMedia',
-            'MediaStream',
-            'localStorage',
-            'sessionStorage',
-            'saveLayoutToStorage',
-            'clearSavedLayout',
-            'updateLayoutItemConfig',
-            'hideLayoutComponent(',
-            'toggleTileFreeMove(',
-            'startTileResize',
-            'detectTileResizeDirection',
-            'setPointerCapture',
-            'releasePointerCapture',
-        ],
-        requiredExports: [
-            [/findToolbar/, 'component action UI must expose toolbar lookup'],
-            [
-                /positionToolbar/,
-                'component action UI must expose toolbar positioning',
-            ],
-            [
-                /setActiveTile/,
-                'component action UI must expose selected tile rendering',
-            ],
-            [
-                /syncToolbarState/,
-                'component action UI must expose toolbar state sync',
-            ],
-            [
-                /ensureToolbar/,
-                'component action UI must expose toolbar creation',
-            ],
-            [
-                /layout-toolbar-button layout-toolbar-hide/,
-                'component action UI must preserve hide button classes',
-            ],
-            [
-                /setAttribute\('aria-label', '隐藏组件'\)/,
-                'component action UI must preserve hide aria label',
-            ],
-            [
-                /setAttribute\('aria-label', '自由移动'\)/,
-                'component action UI must preserve free move aria label',
-            ],
-            [
-                /textContent = '移'/,
-                'component action UI must preserve free move button text',
-            ],
-            [
-                /textContent = '\?'/,
-                'component action UI must preserve help button text',
-            ],
-            [
-                /is-layout-selected/,
-                'component action UI must preserve selected class sync',
-            ],
-            [
-                /is-visible/,
-                'component action UI must preserve toolbar visibility',
-            ],
-            [
-                /is-free-move-enabled/,
-                'component action UI must preserve free move class sync',
-            ],
         ],
     },
     {
@@ -1201,7 +1117,7 @@ const MODULE_SCRIPTS = [
             [/ensureToolbar/, 'layout toolbar UI must expose toolbar creation'],
             [
                 /renderToolbarState/,
-                'layout toolbar UI must expose edit-mode rendering',
+                'layout toolbar UI must expose persistent manager rendering',
             ],
             [
                 /showSaveStatus/,
@@ -1211,10 +1127,30 @@ const MODULE_SCRIPTS = [
                 /renderResetConfirmState/,
                 'layout toolbar UI must expose reset confirmation rendering',
             ],
-            [
-                /layoutLockToggle/,
-                'layout toolbar UI must expose the optional layout lock toggle',
-            ],
+        ],
+    },
+    {
+        path: '/js/layout/page-layout-window-manager-runtime.js',
+        sourcePath:
+            '../src/views/js/layout/page-layout-window-manager-runtime.js',
+        namespace: 'PageLayoutWindowManagerRuntime',
+        mustLoadBeforeMain: true,
+        dependsOnViewUtils: false,
+        forbiddenKeywords: [
+            'new Peer',
+            'socket.emit',
+            'navigator.mediaDevices',
+            'getUserMedia',
+            'getDisplayMedia',
+            'localStorage',
+            'startTileDrag',
+            'startTileResize',
+        ],
+        requiredExports: [
+            [/ensureToolbar/, 'window manager must expose its toolbar'],
+            [/renderWindowMenu/, 'window manager must render restore entries'],
+            [/toggleWindowMenu/, 'window manager must toggle restore entries'],
+            [/showSaveStatus/, 'window manager must expose save feedback'],
         ],
     },
     {
@@ -2276,8 +2212,8 @@ assertSourceDoesNotContain(script, 'Media Dock single owner', [
 ]);
 assertSourceContains(roomIndex, 'Media Dock DOM contract', [
     [
-        /id="buttons"[^>]*>\s*<div class="media-dock-layout-handle" data-drag-handle="true"/,
-        'Media Dock must keep one real drag handle as its first child',
+        /id="buttons"[^>]*>\s*<div class="media-dock-header">/,
+        'Media Dock content must start directly below the shared panel title bar',
     ],
     [
         /id="buttons"[\s\S]*?data-screen-share-resolution/,
@@ -2377,6 +2313,11 @@ assert.match(
     /<nav\b[^>]*id="channel-sidebar"[^>]*class="sidebar-channel-tree"[\s\S]*?data-channel-room[\s\S]*?data-channel-count[\s\S]*?data-members-for/,
     'Sidebar must keep one intact EJS-created channel navigation root'
 );
+assert.doesNotMatch(
+    roomIndex,
+    /sidebar-brand|朋友语音房间|今晚在哪个频道集合/,
+    'room DOM must not retain the non-functional channel welcome component'
+);
 assert.match(
     roomIndex,
     /<div\b[^>]*id="buttons"[^>]*class="[^"]*\bmedia-dock\b[^"]*"[\s\S]*?<div\b[^>]*class="local-user-header media-dock-user"[\s\S]*?id="localUserName"[\s\S]*?<div\b[^>]*class="media-dock-info"[\s\S]*?id="localVoiceChannelName"[\s\S]*?<div\b[^>]*class="media-dock-activity-row"[\s\S]*?id="noiseToggle"[\s\S]*?id="aiNoiseToggle"[\s\S]*?id="destroyPeer"[\s\S]*?<div\b[^>]*class="media-dock-actions"[\s\S]*?id="copyRoomLink"[\s\S]*?id="toggleAudio"[\s\S]*?id="toggleOutput"/,
@@ -2420,10 +2361,6 @@ assertSourceContains(script, 'page layout base contract', [
 ]);
 assertSourceContains(pageLayoutConfig, 'page layout config contract', [
     [
-        /SIDEBAR_PANEL:\s*'sidebarPanel'/,
-        'sidebarPanel must be a first-class page component',
-    ],
-    [
         /MEMBERS_PANEL:\s*'membersPanel'/,
         'membersPanel must be a first-class page component',
     ],
@@ -2440,12 +2377,16 @@ assertSourceContains(pageLayoutConfig, 'page layout config contract', [
         'panel registry must define shared shell layout capabilities',
     ],
     [
-        /MEMBERS_PANEL[\s\S]*?title:\s*'房间 Room'/,
-        'membersPanel must be presented as the room panel',
+        /MEMBERS_PANEL[\s\S]*?title:\s*'频道'[\s\S]*?defaultLayout:\s*\{\s*x:\s*1,\s*y:\s*1,\s*w:\s*7,\s*h:\s*10\s*\}/,
+        'the channel browser must use the channel title and a floating upper-left default',
     ],
     [
-        /SIDEBAR_PANEL[\s\S]*?defaultVisible:\s*false[\s\S]*?MEDIA_CONTROLS_PANEL[\s\S]*?title:\s*'语音 Dock'[\s\S]*?defaultLayout:\s*\{\s*x:\s*0,\s*y:\s*12,\s*w:\s*4,\s*h:\s*6\s*\}[\s\S]*?canDrag:\s*true[\s\S]*?canResize:\s*true/,
-        'sidebarPanel must stay hidden while mediaControlsPanel defaults to a draggable left-bottom 4x6 dock layout',
+        /MEDIA_CONTROLS_PANEL[\s\S]*?title:\s*'媒体控制'[\s\S]*?defaultLayout:\s*\{\s*x:\s*1,\s*y:\s*12,\s*w:\s*7,\s*h:\s*5\s*\}[\s\S]*?canDrag:\s*true[\s\S]*?canResize:\s*true/,
+        'mediaControlsPanel must default to a floating left-bottom layout',
+    ],
+    [
+        /CHAT_PANEL[\s\S]*?title:\s*'聊天'[\s\S]*?defaultLayout:\s*\{\s*x:\s*24,\s*y:\s*2,\s*w:\s*7,\s*h:\s*14\s*\}/,
+        'chatPanel must keep viewport margins and leave the center workspace open',
     ],
     [
         /PANEL_REGISTRY[\s\S]*?canHide[\s\S]*?canCollapse[\s\S]*?canPin/,
@@ -2477,9 +2418,14 @@ assertSourceDoesNotContain(
             /ROOM_INFO_PANEL|roomInfoPanel/,
             'PAGE_COMPONENT_TYPES must not restore standalone roomInfoPanel',
         ],
+        [
+            /SIDEBAR_PANEL|sidebarPanel/,
+            'PAGE_COMPONENT_TYPES must not retain the removed welcome panel',
+        ],
     ]
 );
 assertSourceDoesNotContain(pageLayoutConfig, 'page layout config contract', [
+    [/sidebarPanel/, 'PANEL_REGISTRY must not include the removed welcome panel'],
     [/stagePanel/, 'PANEL_REGISTRY must not include stagePanel'],
     [/舞台 Stage/, 'PANEL_REGISTRY must not expose the Stage panel label'],
     [
@@ -2501,7 +2447,7 @@ assert.doesNotMatch(
 assert.match(
     mediaControlsPanelConfigBody,
     /minWidth:\s*220[\s\S]*?minHeight:\s*140/,
-    'mediaControlsPanel minimum size must allow the 4x6 dock default'
+    'mediaControlsPanel minimum size must allow the compact dock default'
 );
 assertSourceContains(pageLayoutIds, 'page-layout-ids.js', [
     [
@@ -2564,7 +2510,7 @@ assertSourceContains(pageLayoutRuntime, 'page-layout-runtime.js', [
     },
     {
         pattern:
-            /attempt\('cancel layout interactions',[\s\S]*?attempt\('exit layout edit mode',[\s\S]*?originalDomOwner\.restore\(\)/,
+            /attempt\('cancel layout interactions',[\s\S]*?originalDomOwner\.restore\(\)/,
         message:
             'page layout recovery must cancel active interactions before restoring original nodes',
     },
@@ -2931,6 +2877,15 @@ const normalizedLegacyPanelItems = storageApi.normalizeLoadedLayoutItems(
                 h: 3,
             },
             {
+                id: 'page-sidebarPanel',
+                type: 'sidebarPanel',
+                visible: false,
+                x: 0,
+                y: 0,
+                w: 6,
+                h: 5,
+            },
+            {
                 id: 'page-membersPanel',
                 type: 'membersPanel',
                 visible: true,
@@ -2964,7 +2919,7 @@ const normalizedLegacyPanelItems = storageApi.normalizeLoadedLayoutItems(
 assert.deepEqual(
     Array.from(normalizedLegacyPanelItems, (item) => item.type),
     ['membersPanel'],
-    'saved stagePanel and standalone roomInfoPanel entries must be filtered before rendering'
+    'retired stage, room info, and welcome panel persistence entries must be filtered before rendering'
 );
 const migratedLegacyMediaDockItems = storageApi.normalizeLoadedLayoutItems(
     {
@@ -3018,10 +2973,10 @@ const migratedLegacyMediaDockItems = storageApi.normalizeLoadedLayoutItems(
             ) {
                 return {
                     ...item,
-                    x: 0,
+                    x: 1,
                     y: 12,
-                    w: 4,
-                    h: 6,
+                    w: 7,
+                    h: 5,
                     visible: true,
                 };
             }
@@ -3044,8 +2999,8 @@ assert.equal(
 );
 assert.deepEqual(
     { ...migratedMediaDockItem.grid },
-    { x: 0, y: 12, w: 4, h: 6 },
-    'legacy wide mediaControlsPanel grid must migrate to the left-bottom 4x6 dock default'
+    { x: 1, y: 12, w: 7, h: 5 },
+    'legacy wide mediaControlsPanel grid must migrate to the inset left-bottom dock default'
 );
 assert.equal(
     migratedMediaDockItem.visible,
@@ -3138,15 +3093,7 @@ assertSourceContains(script, 'page layout behavior contract', [
     ],
     [
         /REAL_DOM_PAGE_TYPES\.has\(type\)[\s\S]*?savedItem[\s\S]*?savedItem\?\.config[\s\S]*?config,/,
-        'real DOM page panels must restore saved config such as freeMove while rendering',
-    ],
-    [
-        /layout-component-toolbar/,
-        'layout controls must use an external floating component toolbar',
-    ],
-    [
-        /positionLayoutComponentToolbar/,
-        'component toolbar position must be recalculated from tile bounds',
+        'real DOM page panels must restore saved window config while rendering',
     ],
     [
         /const getPanelCollapsedHeight = \(\) => \{[\s\S]*?PAGE_GRID_ROWS[\s\S]*?\};[\s\S]*?const togglePanelCollapse = \(tile\) => \{[\s\S]*?expandedHeight[\s\S]*?getPanelCollapsedHeight\(\)[\s\S]*?savePanelItemState/,
@@ -3157,11 +3104,13 @@ assertSourceContains(script, 'page layout behavior contract', [
         'pin must save state without remeasuring panel coordinates',
     ],
     [
-        /const setLayoutLocked = \(locked\) => \{[\s\S]*?layoutLocked = Boolean\(locked\)[\s\S]*?syncLayoutEditModeUI\(\)/,
-        'layout lock must be optional session state wired through the layout UI',
+        /const canDragLayoutItem = \(item\) => \{[\s\S]*?Boolean\(item\)[\s\S]*?canDrag !== false/,
+        'window dragging must be available without a separate mode',
     ],
-    [/freeMove:\s*false/, 'layout item config must persist a freeMove flag'],
-    [/isTileFreeMoveEnabled/, 'freeMove must affect normal-mode tile movement'],
+    [
+        /const canResizeLayoutItem = \(item\) => \{[\s\S]*?Boolean\(item\)[\s\S]*?canResize !== false/,
+        'window resizing must be available without a separate mode',
+    ],
 ]);
 assertSourceContains(pageLayoutRecoveryUi, 'page-layout-recovery-ui.js', [
     [/bar\.hidden = true/, 'recovery toolbar must be hidden by default'],
@@ -3318,7 +3267,7 @@ assertSourceDoesNotContain(script, 'page layout behavior contract', [
 const togglePanelPinBody = getSourceBetween(
     script,
     /const togglePanelPin = \(tile\) => \{/,
-    /\nconst isTileFreeMoveEnabled = /,
+    /\nconst canDragLayoutItem = /,
     'panel pin toggle helper'
 );
 assert.doesNotMatch(
@@ -3328,68 +3277,14 @@ assert.doesNotMatch(
 );
 
 assert.match(
-    script,
-    /finalizeLayoutEditing/,
-    'clicking Done must finalize editing instead of only toggling edit mode'
+    pageLayoutWindowManagerRuntime,
+    /const syncWindowManagerUI = \(\) => \{[\s\S]*?toolbarUI\.renderToolbarState/,
+    'window manager must keep its restore UI permanently synchronized'
 );
 assert.match(
-    script,
-    /snapAllLayoutItemsToGrid/,
-    'finalize editing must snap all layout items to the grid'
-);
-const syncLayoutEditModeUiBody = getSourceBetween(
-    pageLayoutEditorRuntime,
-    /const syncEditModeUI = \(\) => \{/,
-    /\n\s*const setEditMode = /,
-    'layout edit mode UI sync helper'
-);
-const setLayoutEditModeBody = getSourceBetween(
-    pageLayoutEditorRuntime,
-    /const setEditMode = \(enabled\) => \{/,
-    /\n\s*const toggleEditMode = /,
-    'layout edit mode setter'
-);
-const toggleLayoutEditModeBody = getSourceBetween(
-    pageLayoutEditorRuntime,
-    /const toggleEditMode = \(\) => \{/,
-    /\n\s*const showSaveStatus = /,
-    'layout edit mode toggle'
-);
-const finalizeLayoutEditingBody = getSourceBetween(
-    script,
-    /const finalizeLayoutEditing = \(\) => \{/,
-    /\nconst getLayoutStorageKey = /,
-    'layout edit finalize helper'
-);
-assert.match(
-    syncLayoutEditModeUiBody,
-    /toolbarUI\.renderToolbarState\(\{[\s\S]*?editMode[\s\S]*?mainLayout[\s\S]*?pageLayoutBoard/,
-    'layout edit UI sync must delegate toolbar state rendering from layoutEditMode'
-);
-assert.match(
-    setLayoutEditModeBody,
-    /setEditModeState\(enabled\)[\s\S]*?options\.syncLayoutGridMetadata\(\)[\s\S]*?syncEditModeUI\(\)/,
-    'entering or leaving layout edit mode must update state, grid metadata, and UI together'
-);
-assert.match(
-    script,
-    /onExitEditMode:\s*\(\) => \{[\s\S]*?hideSnapPreview\(\)[\s\S]*?resetLayoutResizeCursor\(\)/,
-    'leaving layout edit mode must clear snap preview and resize cursor state'
-);
-assert.match(
-    toggleLayoutEditModeBody,
-    /if \(editMode\) \{[\s\S]*?options\.onFinalizeLayoutEditing\(\)[\s\S]*?return;/,
-    'clicking Done must use finalizeLayoutEditing instead of directly leaving edit mode'
-);
-assert.match(
-    toggleLayoutEditModeBody,
-    /setEditMode\(true\)/,
-    'clicking Edit Layout must enter layout edit mode through setLayoutEditMode(true)'
-);
-assert.match(
-    finalizeLayoutEditingBody,
-    /setLayoutEditMode\(false\)[\s\S]*?hideSnapPreview\(\)[\s\S]*?resetLayoutResizeCursor\(\)[\s\S]*?layoutSnapUtils\.snapAllLayoutItemsToGrid\([\s\S]*?saveLayoutToStorage\(/,
-    'finalizing layout edit mode must leave edit mode before snap/save cleanup so the UI responds immediately'
+    pageLayoutWindowManagerRuntime,
+    /buildWindowMenuItems[\s\S]*?is-layout-hidden[\s\S]*?statusText:[\s\S]*?'恢复'/,
+    'hidden windows must remain recoverable from the persistent window menu'
 );
 assert.match(
     script,
@@ -3413,18 +3308,18 @@ const showSnapPreviewBody = script.slice(
 assert.ok(showSnapPreviewBody, 'showSnapPreview body should be inspectable');
 assert.doesNotMatch(
     showSnapPreviewBody,
-    /layoutEditMode/,
-    'snap preview must also be available for normal-mode freeMove dragging'
+    /layoutEditMode|editMode/,
+    'snap preview must not depend on a transient editing mode'
 );
 assert.match(
     showSnapPreviewBody,
-    /layoutSnapUtils\.snapTileLayoutToGrid\([\s\S]*?layoutEditUI\.showSnapPreview/,
-    'snap preview must pass a snapped layout to the edit UI helper'
+    /layoutSnapUtils\.snapTileLayoutToGrid\([\s\S]*?layoutInteractionUI\.showSnapPreview/,
+    'snap preview must pass a snapped layout to the shared interaction helper'
 );
 assert.match(
     script,
     /hideSnapPreview/,
-    'snap preview must be hidden after interactions and when leaving edit mode'
+    'snap preview must be hidden after window interactions'
 );
 assert.match(
     script,
@@ -3433,13 +3328,13 @@ assert.match(
 );
 assert.match(
     script,
-    /const canDragLayoutItem = [\s\S]*?!layoutLocked[\s\S]*?layoutEditMode[\s\S]*?\|\|[\s\S]*?freeMove\s*===\s*true/,
-    'panels must be draggable by default unless locked, while freeMove=true still allows normal-mode tile dragging'
+    /const canDragLayoutItem = [\s\S]*?Boolean\(item\)[\s\S]*?canDrag !== false/,
+    'all registered desktop windows must be draggable by default'
 );
 assert.match(
     script,
-    /const canResizeLayoutItem = [\s\S]*?!layoutLocked[\s\S]*?layoutEditMode[\s\S]*?canResize/,
-    'layout lock must disable panel resize while edit mode still gates resizing'
+    /const canResizeLayoutItem = [\s\S]*?Boolean\(item\)[\s\S]*?canResize !== false/,
+    'all registered desktop windows must be resizable by default'
 );
 assert.match(
     script,
@@ -3448,7 +3343,7 @@ assert.match(
 );
 const ignoreDragTargetBody = script.slice(
     script.indexOf('const shouldIgnoreLayoutDragTarget = '),
-    script.indexOf('const findLayoutComponentToolbar = ')
+    script.indexOf('const isLayoutDragHandleTarget = ')
 );
 [
     'input',
@@ -3478,7 +3373,7 @@ assert.match(
 );
 const bindTileLayoutControlsBody = getSourceBetween(
     script,
-    /const bindTileLayoutControls = \(tile, header\) => \{/,
+    /const bindTileLayoutControls = \(tile\) => \{/,
     /\npageLayoutStoreRuntime = /,
     'tile layout listener binding'
 );
@@ -3518,17 +3413,17 @@ assert.match(
 assert.match(
     finalizeLayoutItemDragBody,
     /snapTileLayoutToGridForTile\(tile\)/,
-    'drag finish must snap the single tile before saving after normal or editing drag'
+    'drag finish must snap the single tile before saving'
 );
 assert.match(
     finishTileLayoutInteractionBody,
     /finalizeLayoutItemDrag\(tile\)/,
-    'normal and editing drag/resize finish must enter the shared single-tile snap path'
+    'drag and resize finish must enter the shared single-tile snap path'
 );
 assert.match(
     script,
     /const applySavedTileLayout = [\s\S]*?upsertTileLayoutItem[\s\S]*?config:\s*layoutItem\.config/,
-    'saved layout config such as freeMove must be restored when a tile is loaded'
+    'saved layout config must be restored when a tile is loaded'
 );
 assert.match(
     pageLayoutComponentRuntime,
@@ -3616,386 +3511,74 @@ assert.match(
 );
 
 const toolbarMatch = style.match(
-    /\.stage-layout-toolbar\s*\{(?<body>[\s\S]*?)\}/
+    /\.desktop-window-toolbar\s*\{(?<body>[\s\S]*?)\}/
 );
-const secondaryActionsMatch = style.match(
-    /\.layout-edit-secondary-actions\s*\{(?<body>[\s\S]*?)\}/
-);
-const toolButtonMatch = style.match(
-    /\.layout-edit-toggle,\s*\.layout-tool-button\s*\{(?<body>[\s\S]*?)\}/
-);
-const componentToolbarMatch = style.match(
-    /\.layout-component-toolbar\s*\{(?<body>[\s\S]*?)\}/
-);
-assert.ok(toolbarMatch, 'page-level layout toolbar style must exist');
-assert.ok(secondaryActionsMatch, 'secondary topbar actions style must exist');
-assert.ok(toolButtonMatch, 'layout action button style must exist');
-assert.ok(componentToolbarMatch, 'component floating toolbar style must exist');
-assert.match(
-    pageLayoutToolbarUi,
-    /page-layout-topbar/,
-    'topbar must use a stable page-layout-topbar container'
-);
-assert.match(
-    pageLayoutToolbarUi,
-    /layout-edit-primary-button/,
-    'edit/done toggle must have a fixed primary button class'
-);
-assert.match(
-    pageLayoutToolbarUi,
-    /layout-edit-secondary-actions/,
-    'secondary layout actions must not affect primary button coordinates'
-);
-assert.match(
-    pageLayoutToolbarUi,
-    /layoutLockToggle[\s\S]*?aria-pressed[\s\S]*?锁定布局/,
-    'toolbar must expose an optional layout lock toggle without making it the default mode'
-);
-assert.match(
-    pageLayoutToolbarUi,
-    /labelText:\s*'编辑'/,
-    'normal layout toolbar state must expose only the concise Edit entry'
-);
-assert.match(
-    pageLayoutToolbarUi,
-    /addComponentToggle\.hidden = true[\s\S]*?lockLayoutToggle\.hidden = true[\s\S]*?resetDefaultButton\.hidden = true[\s\S]*?saveStatus\.hidden = true/,
-    'toolbar must create secondary edit controls hidden in normal mode'
-);
-assert.match(
-    pageLayoutToolbarUi,
-    /setButtonLabel\(editModeToggle,\s*editMode \? '完成' : '编辑'\)/,
-    'edit toggle must switch between Edit and Done without keeping Edit Layout visible'
-);
-assert.match(
-    pageLayoutToolbarUi,
-    /toolbar\.dataset\.editing = String\(editMode\)[\s\S]*?toolbar\.classList\.toggle\('is-layout-editing', editMode\)/,
-    'toolbar render must synchronize data-editing and editing class state'
-);
-assert.match(
-    pageLayoutToolbarUi,
-    /addComponentToggle\.hidden = !editMode[\s\S]*?lockLayoutToggle\.hidden = !editMode[\s\S]*?resetDefaultButton\.hidden = !editMode/,
-    'components, lock, and reset controls must only appear while editing'
-);
-assert.match(
-    pageLayoutEditorRuntime,
-    /toolbar:\s*toolbarRefs\.toolbar/,
-    'editor runtime must pass the toolbar node into state rendering'
-);
-assert.match(
-    pageLayoutEditorRuntime,
-    /toggleComponentMenu[\s\S]*?if \(!toolbarRefs\.componentMenu\)[\s\S]*?renderComponentMenu/,
-    'components menu must remain available as the unified restore entry for hidden panels'
-);
-assert.match(
-    toolbarMatch.groups.body,
-    /position:\s*fixed/,
-    'page-level layout toolbar must be fixed to the viewport'
-);
-const topToolbarZ = Number(
-    toolbarMatch.groups.body.match(/z-index:\s*(\d+)/)?.[1]
-);
-const componentToolbarZ = Number(
-    componentToolbarMatch.groups.body.match(/z-index:\s*(\d+)/)?.[1]
-);
-assert.ok(
-    Number.isFinite(topToolbarZ) &&
-        Number.isFinite(componentToolbarZ) &&
-        topToolbarZ > componentToolbarZ,
-    'page-level layout toolbar z-index must be higher than component toolbar'
-);
-assert.match(
-    style,
-    /\.layout-edit-primary-button[\s\S]*?width:\s*(?:11|12|13|14)\dpx/,
-    'edit/done button must use a stable fixed width'
-);
-assert.match(
-    style,
-    /\.layout-edit-secondary-actions/,
-    'secondary actions must be styled separately from the fixed primary button'
-);
-assert.match(
-    style,
-    /\.layout-snap-preview/,
-    'style must define a visible snap preview overlay'
-);
-assert.match(
-    style,
-    /\.panel-shell-actions[\s\S]*?\.panel-action-button/,
-    'style must define unified panel action buttons'
-);
-assert.match(
-    style,
-    /\.panel-shell-actions[\s\S]*?position:\s*absolute[\s\S]*?top:\s*6px[\s\S]*?right:\s*10px/,
-    'panel shell actions must sit in the titlebar top-right corner'
-);
-assert.match(
-    style,
-    /\.panel-shell-actions[\s\S]*?opacity:\s*0[\s\S]*?pointer-events:\s*none/,
-    'panel shell actions must stay hidden until hover/focus/editing'
-);
-assert.match(
-    style,
-    /\.page-layout-tile:hover \.panel-shell-actions[\s\S]*?\.page-layout-board\.is-layout-editing \.panel-shell-actions[\s\S]*?opacity:\s*1[\s\S]*?pointer-events:\s*auto/,
-    'panel shell actions must show on hover, focus, selection, or layout editing'
-);
-assert.match(
-    style,
-    /\.page-layout-tile \.tile-avatar[\s\S]*?display:\s*none/,
-    'page panel headers must hide the leading avatar marker'
-);
-assert.match(
-    style,
-    /\.page-layout-tile\.is-panel-collapsed[\s\S]*?\.tile-body[\s\S]*?display:\s*none/,
-    'collapsed panels must hide content while preserving the shell header'
-);
-assert.match(
-    style,
-    /#buttons\.media-dock[\s\S]*?position:\s*relative[\s\S]*?width:\s*100%[\s\S]*?height:\s*auto[\s\S]*?min-height:\s*58px/,
-    'media dock must stay compact inside mediaControlsPanel instead of using viewport-fixed positioning or filling the full panel height'
-);
-const mediaDockStyleMatch = style.match(
-    /#buttons\.media-dock\s*\{(?<body>[\s\S]*?)\}/
-);
-assert.ok(mediaDockStyleMatch, 'media dock base style must exist');
-assert.doesNotMatch(
-    mediaDockStyleMatch.groups.body,
-    /position:\s*fixed|left:\s*max\(16px, env\(safe-area-inset-left\)\)|bottom:\s*max\(16px, env\(safe-area-inset-bottom\)\)/,
-    'normal mode media dock must not escape the page layout system with fixed left-bottom positioning'
-);
-const mediaDockHandleStyleMatch = style.match(
-    /\.media-dock-layout-handle\s*\{(?<body>[\s\S]*?)\}/
-);
-assert.ok(mediaDockHandleStyleMatch, 'media dock drag handle style must exist');
-assert.match(
-    mediaDockHandleStyleMatch.groups.body,
-    /display:\s*none/,
-    'media dock drag handle must stay hidden outside layout edit mode'
-);
-assert.match(
-    mediaDockHandleStyleMatch.groups.body,
-    /height:\s*26px[\s\S]*?min-height:\s*26px/,
-    'media dock drag handle must stay thin'
-);
-assert.match(
-    mediaDockHandleStyleMatch.groups.body,
-    /cursor:\s*grab[\s\S]*?pointer-events:\s*auto/,
-    'media dock drag handle must remain the explicit pointer target'
-);
-assert.match(
-    style,
-    /\.page-layout-board\.is-layout-editing[\s\S]*?\.page-tile-media-controls-panel[\s\S]*?> \.tile-header\s*\{[\s\S]*?display:\s*none/,
-    'layout edit mode must hide the generic media panel header'
-);
-assert.match(
-    style,
-    /\.page-layout-board\.is-layout-editing[\s\S]*?\.page-tile-media-controls-panel[\s\S]*?#buttons[\s\S]*?> \.media-dock-layout-handle\s*\{[\s\S]*?display:\s*flex/,
-    'layout edit mode must reveal the real Media Dock drag handle'
-);
-assert.match(
-    style,
-    /> \.media-dock-layout-handle:hover\s*\{[\s\S]*?opacity:\s*0\.9/,
-    'media dock drag handle must become more visible on hover'
-);
-assert.match(
-    style,
-    /\.page-layout-board:not\(\.is-layout-editing\)[\s\S]*?\.page-tile-media-controls-panel[\s\S]*?background:\s*transparent[\s\S]*?\.tile-header[\s\S]*?display:\s*none/,
-    'old mediaControlsPanel shell must be hidden outside layout editing'
-);
-assert.match(
-    style,
-    /\.page-layout-board:not\(\.is-layout-editing\) \.page-tile-media-controls-panel[\s\S]*?display:\s*block/,
-    'normal mode must not display-none the mediaControlsPanel that contains the dock'
-);
-const normalMediaPanelStyleMatch = style.match(
-    /\.page-layout-board:not\(\.is-layout-editing\) \.page-tile-media-controls-panel\s*\{(?<body>[\s\S]*?)\}/
-);
-assert.ok(
-    normalMediaPanelStyleMatch,
-    'normal mode mediaControlsPanel style must exist'
-);
-assert.doesNotMatch(
-    normalMediaPanelStyleMatch.groups.body,
-    /position:\s*static/,
-    'normal mode mediaControlsPanel must keep layout runtime positioning'
-);
-assert.match(
-    style,
-    /#buttons\.media-dock\.hidden[\s\S]*?display:\s*grid !important/,
-    'normal mode hidden state must not hide the real media dock body'
-);
-assert.doesNotMatch(
-    style,
-    /page-tile-stage-panel|\.page-layout-tile \.room-stage/,
-    'stage must stay as the direct workspace video layer, not a panel shell'
-);
-const boardMatch = style.match(/\.page-layout-board\s*\{(?<body>[\s\S]*?)\}/);
-const boardEditingMatch = style.match(
-    /\.page-layout-board\.is-layout-editing\s*\{(?<body>[\s\S]*?)\}/
-);
-const editingTileMatch = style.match(
-    /\.page-layout-board\.is-layout-editing\s+\.video-tile\s*\{(?<body>[\s\S]*?)\}/
-);
-const mainMatch = style.match(/#main\s*\{(?<body>[\s\S]*?)\}/);
-const getBackgroundSize = (body) =>
-    body.match(/background-size:\s*(?<value>[\s\S]*?);/)?.groups.value.trim();
-const getBackgroundPosition = (body) =>
-    body
-        .match(/background-position:\s*(?<value>[\s\S]*?);/)
-        ?.groups.value.trim();
 const pageTileHeaderMatch = style.match(
     /\.page-layout-tile \.tile-header\s*\{(?<body>[\s\S]*?)\}/
 );
-const pageTileFooterMatch = style.match(
-    /\.page-layout-tile \.tile-footer\s*\{(?<body>[\s\S]*?)\}/
+assert.ok(toolbarMatch, 'persistent window manager toolbar style must exist');
+assert.match(toolbarMatch.groups.body, /position:\s*fixed/);
+assert.match(toolbarMatch.groups.body, /pointer-events:\s*none/);
+assert.match(pageLayoutToolbarUi, /labelText:\s*'窗口'/);
+assert.match(pageLayoutToolbarUi, /aria-label', '窗口管理'/);
+assert.match(
+    pageLayoutToolbarUi,
+    /saveStatus\.hidden = true[\s\S]*?saveStatus\.hidden = false[\s\S]*?saveStatus\.hidden = true/,
+    'saved status must remain a brief desktop-level notification'
 );
-assert.ok(mainMatch, '#main base style must exist');
-assert.ok(boardMatch, 'page layout board base style must exist');
-assert.ok(boardEditingMatch, 'page layout board editing style must exist');
-assert.ok(editingTileMatch, 'editing tile style must exist');
+assert.match(
+    pageLayoutWindowManagerRuntime,
+    /toggleWindowMenu[\s\S]*?renderWindowMenu\(\)[\s\S]*?componentMenuUI\.toggleMenu/,
+    'one persistent window menu must own hidden-window recovery'
+);
+assert.match(style, /--window-titlebar-height:\s*34px/);
 assert.ok(pageTileHeaderMatch, 'page tile header base style must exist');
-assert.ok(pageTileFooterMatch, 'page tile footer base style must exist');
-assert.doesNotMatch(
-    mainMatch.groups.body,
-    /radial-gradient/,
-    '#main must not use a dot-board radial background'
-);
-assert.doesNotMatch(
-    mainMatch.groups.body,
-    /background-image:[\s\S]*linear-gradient\([^;]*1px/,
-    '#main must not carry a separate grid definition'
-);
-assert.doesNotMatch(
-    boardMatch.groups.body,
-    /radial-gradient/,
-    'normal-mode board must not use a dot-board radial background'
-);
-assert.doesNotMatch(
-    boardEditingMatch.groups.body,
-    /radial-gradient/,
-    'editing-mode board must not use a dot-board radial background'
-);
-assert.match(
-    boardMatch.groups.body,
-    /--layout-grid-line-opacity:\s*0\.0[0-9]+/,
-    'normal-mode board should define the soft grid opacity variable'
-);
-assert.match(
-    boardMatch.groups.body,
-    /--layout-grid-line-color:\s*rgba\(\s*216,\s*111,\s*154,\s*var\(--layout-grid-line-opacity\)\s*\)/,
-    'board grid line color should be derived from the shared opacity variable'
-);
-assert.match(
-    boardMatch.groups.body,
-    /--layout-grid-size-x:\s*calc\(100%\s*\/\s*var\(--layout-grid-columns,\s*32\)\)/,
-    'board grid width should reuse the page layout grid columns'
-);
-assert.match(
-    boardMatch.groups.body,
-    /--layout-grid-size-y:\s*calc\(100%\s*\/\s*var\(--layout-grid-rows,\s*18\)\)/,
-    'board grid height should reuse the page layout grid rows'
-);
-assert.match(
-    boardMatch.groups.body,
-    /--layout-tile-header-height:\s*calc\(\s*100vh\s*\/\s*var\(--layout-grid-rows,\s*18\)\s*\)/,
-    'page tile titlebars should use one page-layout grid row'
-);
-assert.match(
-    boardMatch.groups.body,
-    /linear-gradient\(var\(--layout-grid-line-color\) 1px, transparent 1px\)/,
-    'normal-mode board should use the shared linear grid background'
-);
-assert.match(
-    boardMatch.groups.body,
-    /border:\s*1px\s+solid\s+transparent/,
-    'normal-mode board should reserve border space to prevent edit-mode shifting'
-);
-assert.doesNotMatch(
-    boardEditingMatch.groups.body,
-    /border:\s*1px/,
-    'editing board must not add a new border width that shifts the layout'
-);
-assert.match(
-    boardEditingMatch.groups.body,
-    /border-color:/,
-    'editing board should enhance the pre-reserved border by color only'
-);
-assert.match(
-    boardEditingMatch.groups.body,
-    /--layout-grid-line-opacity:\s*0\.1[0-9]+/,
-    'editing mode should enhance the same grid by changing opacity only'
-);
-assert.match(
-    editingTileMatch.groups.body,
-    /box-shadow:[\s\S]*?\binset\s+0\s+0\s+0\s+2px/,
-    'editing tile highlight must use inset box-shadow so visual bounds do not exceed saved layout bounds'
-);
-assert.doesNotMatch(
-    editingTileMatch.groups.body,
-    /box-shadow:[\s\S]*?(?<!inset\s)0\s+0\s+0\s+2px/,
-    'editing tile highlight must not use an outer 0 0 0 2px box-shadow that exceeds the true layout boundary'
-);
-assert.doesNotMatch(
-    boardEditingMatch.groups.body,
-    /background-image:/,
-    'editing mode must not define a separate background image'
-);
-assert.doesNotMatch(
-    boardEditingMatch.groups.body,
-    /background-size:/,
-    'editing mode must not define a separate background size'
-);
-assert.doesNotMatch(
-    boardEditingMatch.groups.body,
-    /background-position:/,
-    'editing mode must not define a separate background position'
-);
-assert.match(
-    getBackgroundSize(boardMatch.groups.body) || '',
-    /var\(--layout-grid-size-x\)\s+var\(--layout-grid-size-y\)/,
-    'page board grid should use shared grid-size variables'
-);
-assert.match(
-    getBackgroundPosition(boardMatch.groups.body) || '',
-    /0\s+0/,
-    'page board grid should use a stable origin'
-);
-assert.match(
-    secondaryActionsMatch.groups.body,
-    /width:\s*max-content/,
-    'secondary topbar actions should size to their content instead of squeezing buttons'
-);
-assert.match(
-    secondaryActionsMatch.groups.body,
-    /flex-wrap:\s*nowrap/,
-    'secondary topbar actions must remain horizontal'
-);
-assert.match(
-    toolButtonMatch.groups.body,
-    /white-space:\s*nowrap/,
-    'layout action buttons must not wrap Chinese labels vertically'
-);
-assert.match(
-    toolButtonMatch.groups.body,
-    /flex:\s*0\s+0\s+auto/,
-    'layout action buttons must not shrink into vertical labels'
-);
-assert.doesNotMatch(
-    pageTileHeaderMatch.groups.body,
-    /display:\s*none/,
-    'normal-mode page tiles must keep title headers visible'
-);
 assert.match(
     pageTileHeaderMatch.groups.body,
-    /height:\s*var\(--layout-tile-header-height\)[\s\S]*?min-height:\s*var\(--layout-tile-header-height\)/,
-    'normal-mode page tile headers should stay exactly one layout grid row tall'
-);
-assert.match(
-    pageTileFooterMatch.groups.body,
-    /display:\s*none/,
-    'bottom footer labels must remain hidden'
+    /height:\s*var\(--window-titlebar-height\)[\s\S]*?min-height:\s*var\(--window-titlebar-height\)[\s\S]*?max-height:\s*var\(--window-titlebar-height\)/,
+    'every panel titlebar must use the fixed global titlebar token'
 );
 assert.match(
     style,
-    /--resize-hit-corner:\s*(?:1[6-9]|2[0-4])px/,
-    'corner resize hit area should be 16-24px'
+    /\.tile-header\s*\{[\s\S]*?height:\s*var\(--window-titlebar-height\)[\s\S]*?cursor:\s*grab/,
+    'video and panel windows must share the same titlebar height and cursor'
 );
+assert.match(videoTileStructureUi, /window-drag-handle/);
+assert.match(style, /\.video-tile:hover \.window-drag-handle[\s\S]*?opacity:/);
+assert.match(
+    style,
+    /\.video-tile \.tile-header:hover \.window-drag-handle[\s\S]*?opacity:/,
+    'drag hint must strengthen over the titlebar'
+);
+assert.match(
+    style,
+    /\.video-tile:hover \.tile-resize-handle,[\s\S]*?opacity:\s*0\.14/,
+    'shared edge and corner resize affordances must always be available'
+);
+assert.doesNotMatch(
+    `${script}\n${style}\n${pageLayoutToolbarUi}`,
+    /layoutEditMode|is-layout-editing|layout-edit-toggle|编辑模式|完成编辑/,
+    'desktop windows must not retain an edit-mode gate'
+);
+assert.doesNotMatch(roomIndex, /media-dock-layout-handle/);
+assert.match(
+    videoTileStructureUi,
+    /header\.setAttribute\('data-drag-handle', 'true'\)/,
+    'the shared titlebar must be the only drag handle'
+);
+assert.match(
+    script,
+    /tile\.addEventListener\(\s*'pointerdown'[\s\S]*?isLayoutDragHandleTarget\(event, tile\)[\s\S]*?startTileDrag/,
+    'content pointerdown may focus a window but must only drag from its titlebar'
+);
+assert.match(
+    script,
+    /const bringTileLayoutToFront = \(tile\) => \{[\s\S]*?getWindowStackBandTiles[\s\S]*?stack\.push\(tile\)[\s\S]*?baseZIndex \+ index/,
+    'focus stacking must compact into bounded normal and pinned bands'
+);
+assert.match(
+    style,
+    /@media \(max-width:\s*768px\)[\s\S]*?\.tile-resize-handle[\s\S]*?display:\s*none/,
+    'mobile layout must keep resize disabled'
+);
+assert.match(style, /--resize-hit-corner:\s*(?:1[6-9]|2[0-4])px/);

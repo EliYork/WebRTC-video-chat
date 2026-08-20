@@ -3,10 +3,6 @@
     background-color: #fffafd;
 }
 
-#main.is-layout-editing {
-    overflow: hidden;
-}
-
 .page-layout-board {
     --layout-grid-line-opacity: 0.045;
     --layout-grid-line-color: rgba(
@@ -17,7 +13,6 @@
     );
     --layout-grid-size-x: calc(100% / var(--layout-grid-columns, 32));
     --layout-grid-size-y: calc(100% / var(--layout-grid-rows, 18));
-    --layout-tile-header-height: calc(100vh / var(--layout-grid-rows, 18));
     position: relative;
     width: 100%;
     height: 100vh;
@@ -48,12 +43,6 @@
         auto;
 }
 
-.page-layout-board.is-layout-editing {
-    --layout-grid-line-opacity: 0.105;
-    border-color: rgba(216, 111, 154, 0.34);
-    border-style: dashed;
-}
-
 .page-layout-tile {
     position: absolute;
     display: flex;
@@ -79,12 +68,17 @@
     display: grid;
     flex: 0 0 auto;
     grid-template-columns: minmax(0, 1fr) auto;
-    height: var(--layout-tile-header-height);
-    min-height: var(--layout-tile-header-height);
-    padding: 6px 10px;
+    height: var(--window-titlebar-height);
+    min-height: var(--window-titlebar-height);
+    max-height: var(--window-titlebar-height);
+    padding: 0 var(--window-titlebar-padding-inline);
     border-bottom-color: rgba(216, 111, 154, 0.14);
     background-color: rgba(255, 252, 254, 0.86);
-    cursor: default;
+    cursor: grab;
+}
+
+.page-layout-tile.is-dragging .tile-header {
+    cursor: grabbing;
 }
 
 .page-layout-tile .tile-avatar {
@@ -92,9 +86,6 @@
 }
 
 .panel-shell-actions {
-    position: absolute;
-    top: 6px;
-    right: 10px;
     display: inline-flex;
     align-items: center;
     gap: 4px;
@@ -105,8 +96,7 @@
 
 .page-layout-tile:hover .panel-shell-actions,
 .page-layout-tile:focus-within .panel-shell-actions,
-.page-layout-tile.is-layout-selected .panel-shell-actions,
-.page-layout-board.is-layout-editing .panel-shell-actions {
+.page-layout-tile.is-layout-selected .panel-shell-actions {
     opacity: 1;
     pointer-events: auto;
 }
@@ -134,17 +124,13 @@
 }
 
 .page-layout-tile.is-panel-collapsed {
-    min-height: var(--layout-tile-header-height) !important;
+    min-height: var(--window-titlebar-height) !important;
 }
 
 .page-layout-tile.is-panel-collapsed .tile-body,
 .page-layout-tile.is-panel-collapsed .tile-footer,
 .page-layout-tile.is-panel-collapsed .tile-overlay {
     display: none;
-}
-
-.page-layout-board.is-layout-locked .page-layout-tile .tile-header {
-    cursor: default;
 }
 
 .page-layout-tile .tile-body {
@@ -161,37 +147,6 @@
     flex: 0 0 auto;
 }
 
-.page-layout-board.is-layout-editing .video-tile {
-    border-color: rgba(216, 111, 154, 0.55);
-    box-shadow:
-        inset 0 0 0 2px rgba(216, 111, 154, 0.1),
-        var(--shadow);
-    cursor: move;
-}
-
-.page-layout-board.is-layout-editing .tile-body,
-.page-layout-board.is-layout-editing .tile-footer,
-.page-layout-board.is-layout-editing .tile-overlay {
-    pointer-events: none;
-}
-
-.page-layout-board.is-layout-editing .tile-actions {
-    pointer-events: auto;
-}
-
-.page-layout-board.is-layout-editing
-    .tile-actions
-    > :not(.layout-component-remove):not(.layout-component-settings) {
-    pointer-events: none;
-}
-
-.page-layout-board.is-layout-editing .tile-header {
-    border-bottom-color: rgba(216, 111, 154, 0.2);
-    background-color: rgba(255, 248, 252, 0.94);
-    cursor: grab;
-}
-
-.page-tile-sidebar-panel .tile-body,
 .page-tile-members-panel .tile-body,
 .page-tile-media-controls-panel .tile-body,
 .page-tile-chat-panel .tile-body,
@@ -200,7 +155,6 @@
     background-color: transparent;
 }
 
-.page-layout-tile .sidebar-brand,
 .page-layout-tile .sidebar-channel-tree,
 .page-layout-tile .local-user-card,
 .page-layout-tile .room-panel-content,
@@ -211,16 +165,11 @@
     min-height: 0;
 }
 
-.page-layout-tile .sidebar-brand,
 .page-layout-tile .sidebar-channel-tree,
 .page-layout-tile .local-user-card,
 .page-layout-tile .room-panel-content {
     margin: 0;
     box-sizing: border-box;
-}
-
-.page-layout-tile .sidebar-brand {
-    min-height: 0;
 }
 
 .page-layout-tile .chat-panel {
@@ -247,7 +196,7 @@
     overflow: auto;
 }
 
-.page-layout-board.is-layout-editing .page-tile-media-controls-panel #buttons {
+.page-tile-media-controls-panel #buttons {
     position: static;
     box-sizing: border-box;
     width: 100%;
@@ -256,9 +205,7 @@
     align-content: end;
 }
 
-.page-layout-board.is-layout-editing
-    .page-tile-media-controls-panel
-    #buttons.hidden {
+.page-tile-media-controls-panel #buttons.hidden {
     display: grid !important;
     opacity: 0.72;
 }

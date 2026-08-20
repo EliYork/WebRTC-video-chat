@@ -13,9 +13,14 @@
         if (!header) {
             header = global.document.createElement('div');
             header.className = 'tile-header';
-            header.setAttribute('data-drag-handle', 'true');
             tile.prepend(header);
         }
+
+        // Every tile uses the same visible title bar as its drag handle.
+        // Set these attributes for existing headers too, so restored or
+        // server-rendered tiles receive the same behavior as new tiles.
+        header.setAttribute('data-drag-handle', 'true');
+        header.removeAttribute('title');
 
         const ensureHeaderChild = (selector, className) => {
             let child = header.querySelector(selector);
@@ -48,6 +53,15 @@
             actions = global.document.createElement('div');
             actions.className = 'tile-header-actions';
             controls.append(actions);
+        }
+
+        let dragHandle = controls.querySelector('.window-drag-handle');
+        if (!dragHandle) {
+            dragHandle = global.document.createElement('span');
+            dragHandle.className = 'window-drag-handle';
+            dragHandle.setAttribute('aria-hidden', 'true');
+            dragHandle.title = '拖动窗口';
+            controls.append(dragHandle);
         }
 
         return header;
