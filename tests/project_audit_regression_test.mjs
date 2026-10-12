@@ -171,6 +171,14 @@ test('real server supports both WebSocket protocols and survives malformed PeerJ
             if (!ready) await new Promise((done) => setTimeout(done, 50));
         }
         assert.ok(ready, 'isolated app must start');
+        await Promise.all(['/room/lobby', '/audio-worklet/rnnoise-processor.js'].map(async (path) => {
+            const response = await fetch(`http://127.0.0.1:${port}${path}`);
+            assert.equal(response.status, 200);
+            const policy = response.headers.get('content-security-policy');
+            const scriptPolicy = policy.split(';').find((rule) => rule.startsWith('script-src '));
+            assert.ok(scriptPolicy.includes("'wasm-unsafe-eval'"), 'RNNoise WASM compilation allowed');
+            assert.equal(scriptPolicy.includes("'unsafe-eval'"), false, 'JavaScript eval remains blocked');
+        }));
         const socket = await opened(`ws://127.0.0.1:${port}/socket.io/?EIO=4&transport=websocket`, (msg) => msg.startsWith('0'));
         assert.ok(JSON.parse(socket.message.slice(1)).sid);
         const connected = once(socket.client, 'message');

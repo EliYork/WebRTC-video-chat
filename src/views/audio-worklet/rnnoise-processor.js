@@ -34,7 +34,7 @@ var et=128,fe=class extends AudioWorkletProcessor {
             },{bufferSize:et,maxChannels:e.processorOptions.maxChannels});
             if(this.destroyed) this.destroy();
             else this.port.postMessage({type:'ready',speechGate:true,speechGateEnabled:this.speechGateEnabled});
-        }).catch(() => this.port.postMessage({type:'error'}));
+        }).catch(error => this.port.postMessage({type:'error',detail:String(error).slice(0,240)}));
     }
     process(inputs,outputs) {
         if(this.destroyed) return false;

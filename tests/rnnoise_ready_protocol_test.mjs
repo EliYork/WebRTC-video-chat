@@ -75,6 +75,7 @@ test('bundled RNNoise sends ready only after WASM initialization and reports fai
     failed.finish();
     await flush();
     assert.equal(failed.messages[0].type, 'error');
+    assert.equal(failed.messages[0].detail, 'Error: wasm failed');
 });
 
 test('destroy before initialization releases the late RNNoise state and ends processing', async () => {

@@ -44,7 +44,17 @@
             parts.push('原采集设置恢复失败，请检查实际状态');
         if (state.sourceLive === false) parts.push('麦克风采集已停止');
         if (snapshot.audioSettingsPending) parts.push('切换中，保留当前音频');
-        if (snapshot.audioSettingsError) parts.push('切换失败，已恢复原设置');
+        if (snapshot.audioSettingsError) {
+            const failure = state.lastSwitchFailure;
+            const reasons = {
+                'rnnoise-csp-blocked': '浏览器安全策略阻止降噪模型加载',
+                'processor-unavailable': '降噪处理器初始化失败',
+                'capture-failed': '麦克风采集失败，请检查设备和权限',
+            };
+            parts.push(failure && reasons[failure.code]
+                ? `切换${MODE_LABELS[failure.mode] || '降噪模式'}失败：${reasons[failure.code]}；已保留原音频`
+                : '切换失败，已保留原音频');
+        }
         if (snapshot.microphoneGain > 100)
             parts.push('增益超过 100%，大声讲话可能失真');
         return parts.join('；');

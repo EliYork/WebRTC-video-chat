@@ -1047,6 +1047,12 @@ test('noise modes render requested and actual AEC/NS separately and rapid select
     stub.emit({ requestedNoiseMode: 'browser', audioSettingsPending: false, audioSettingsError: 'switch-failed' });
     assert.equal(fixture.refs.noiseModeSelect.value, 'browser');
     assert.match(fixture.refs.processingStatus.textContent, /切换失败/);
+    stub.emit({ audioProcessing: {
+        mode: 'browser', actual: { noiseSuppression: true },
+        lastSwitchFailure: { mode: 'rnnoise', code: 'rnnoise-csp-blocked' },
+    } });
+    assert.match(fixture.refs.processingStatus.textContent, /切换RNNoise失败：浏览器安全策略/);
+    assert.match(fixture.refs.processingStatus.textContent, /已保留原音频/);
     assert.doesNotMatch(fixture.root.textContent, /重进房间/);
     runtime.destroy();
 });

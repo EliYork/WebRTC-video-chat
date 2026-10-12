@@ -49,6 +49,7 @@
         const modules = new WeakMap();
         let library;
         let active;
+        let lastSwitchFailure = null;
         let stageRevision = 0;
         let staging = Promise.resolve();
 
@@ -58,12 +59,20 @@
         ) => {
             mode = normalizeMode(mode);
             const requested = constraintsFor(mode);
+            const supportedConstraints = mediaDevices.getSupportedConstraints?.() || {};
+            // Mandatory processing flags make Chromium acquire a compatible
+            // source instead of reusing an old source with opposite APM flags.
+            const captureConstraints = { ...requested };
+            for (const key of ['noiseSuppression', 'autoGainControl']) {
+                if (supportedConstraints[key] === true)
+                    captureConstraints[key] = { exact: requested[key] };
+            }
             const device =
                 deviceId !== 'default' ? { deviceId: { exact: deviceId } } : {};
             let rawStream;
             try {
                 rawStream = await mediaDevices.getUserMedia({
-                    audio: { ...requested, ...device },
+                    audio: { ...captureConstraints, ...device },
                 });
             } catch (error) {
                 // Retry only a format/constraint failure. Never hide permission,
@@ -78,8 +87,8 @@
                 rawStream = await mediaDevices.getUserMedia({
                     audio: {
                         echoCancellation: true,
-                        noiseSuppression: requested.noiseSuppression,
-                        autoGainControl: requested.autoGainControl,
+                        noiseSuppression: captureConstraints.noiseSuppression,
+                        autoGainControl: captureConstraints.autoGainControl,
                         ...device,
                     },
                 });
@@ -175,7 +184,11 @@
                     node.port.onmessage = ({ data }) => {
                         if (data?.type === 'ready') resolve(data);
                         if (data?.type === 'error')
-                            reject(new Error('rnnoise-init-failed'));
+                            reject(new Error(
+                                /content security|unsafe-eval/i.test(String(data.detail || ''))
+                                    ? 'rnnoise-csp-blocked'
+                                    : 'rnnoise-init-failed'
+                            ));
                     };
                     node.onprocessorerror = () =>
                         reject(new Error('rnnoise-processor-error'));
@@ -397,6 +410,16 @@
                         }
                         return stream;
                     } catch (error) {
+                        if (revision === stageRevision && error?.name !== 'AbortError') {
+                            lastSwitchFailure = {
+                                mode: normalizeMode(request.mode),
+                                code: error?.message === 'rnnoise-csp-blocked'
+                                    ? 'rnnoise-csp-blocked'
+                                    : error?.audioProcessingFailure
+                                      ? 'processor-unavailable'
+                                      : 'capture-failed',
+                            };
+                        }
                         // Captures of one hardware source may share browser APM
                         // settings. Restore the old branch before processing the
                         // next queued request, including RNNoise startup failures.
@@ -453,6 +476,7 @@
             } else if (previous && previous !== candidate)
                 dispose(previous.stream);
             active = candidate;
+            lastSwitchFailure = null;
             candidate.rawTrack = candidate.rawStream.getAudioTracks()[0];
             candidate.endedListener = () => {
                 if (active === candidate) onSourceEnded?.(candidate.stream);
@@ -482,6 +506,7 @@
                 aecFallback: info.aecFallback,
                 fallbackReason: info.fallbackReason,
                 restoreError: info.restoreError,
+                lastSwitchFailure,
                 sourceLive:
                     (info.rawStream || stream)?.getAudioTracks()[0]
                         ?.readyState === 'live',

@@ -50,6 +50,8 @@ const fixture = (options = {}) => {
         mediaDevices: {
             getSupportedConstraints: () => ({
                 echoCancellation: options.supported !== false,
+                noiseSuppression: options.processingFlagsSupported === true,
+                autoGainControl: options.processingFlagsSupported === true,
             }),
             async getUserMedia({ audio }) {
                 constraints.push(structuredClone(audio));
@@ -63,6 +65,8 @@ const fixture = (options = {}) => {
                 );
                 const settings = {
                     ...audio,
+                    noiseSuppression: audio.noiseSuppression?.exact ?? audio.noiseSuppression,
+                    autoGainControl: audio.autoGainControl?.exact ?? audio.autoGainControl,
                     deviceId: audio.deviceId?.exact || 'resolved-default',
                     sampleRate: 48000,
                 };
@@ -152,6 +156,7 @@ const fixture = (options = {}) => {
                             this.port.onmessage?.({
                                 data: {
                                     type: failProcessor ? 'error' : 'ready',
+                                    detail: options.processorDetail,
                                     speechGate: options.noSpeechGate !== true,
                                     speechGateEnabled: true,
                                 },
@@ -239,6 +244,21 @@ for (const options of [
     });
 }
 
+test('supported processing flags require compatible captures on both sides of a live mode switch', async () => {
+    const f = fixture({ processingFlagsSupported: true });
+    const stream = await f.start('rnnoise');
+    assert.equal(f.constraints[0].noiseSuppression.exact, false);
+    assert.equal(f.constraints[0].autoGainControl.exact, false);
+    assert.equal(await f.start('browser'), stream);
+    assert.equal(f.constraints[1].noiseSuppression.exact, true);
+    assert.equal(f.constraints[1].autoGainControl.exact, true);
+    assert.equal(f.runtime.diagnostics(stream).mode, 'browser');
+    assert.equal(await f.start('rnnoise'), stream);
+    assert.equal(f.constraints[2].noiseSuppression.exact, false);
+    assert.equal(f.runtime.diagnostics(stream).actual.noiseSuppression, false);
+    f.runtime.dispose(stream);
+});
+
 test('RNNoise uses a single mono processor without browser NS or fixed boost; mode and device switches keep the output track', async () => {
     const f = fixture();
     const stream = await f.start('browser', 'a');
@@ -276,6 +296,24 @@ test('RNNoise init failure keeps the old pipeline, restores old capture constrai
     assert.equal(f.captures[1].track.readyState, 'ended');
     assert.equal(f.processors[0].destroyed, true);
     assert.equal(f.contexts[0].state, 'running');
+    f.runtime.dispose(stream);
+});
+
+test('CSP initialization failure identifies the failed target, preserves mute, and clears on retry', async () => {
+    const f = fixture({ processorDetail: 'CompileError: Content Security policy blocks WebAssembly' });
+    const stream = await f.start();
+    stream.getAudioTracks()[0].enabled = false;
+    f.failProcessor(true);
+    await assert.rejects(f.runtime.stage({ mode: 'rnnoise' }), /rnnoise-csp-blocked/);
+    const state = f.runtime.diagnostics(stream);
+    assert.equal(state.lastSwitchFailure.mode, 'rnnoise');
+    assert.equal(state.lastSwitchFailure.code, 'rnnoise-csp-blocked');
+    assert.equal(state.mode, 'browser');
+    assert.equal(stream.getAudioTracks()[0].enabled, false);
+    f.failProcessor(false);
+    assert.equal(await f.start('rnnoise'), stream);
+    assert.equal(f.runtime.diagnostics(stream).lastSwitchFailure, null);
+    assert.equal(stream.getAudioTracks()[0].enabled, false);
     f.runtime.dispose(stream);
 });
 

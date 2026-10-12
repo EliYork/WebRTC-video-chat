@@ -99,6 +99,8 @@ app.use((req, res, next) =>
                 defaultSrc: ["'self'"],
                 scriptSrc: [
                     "'self'",
+                    // RNNoise compiles WASM inside its AudioWorklet; JS eval stays blocked.
+                    "'wasm-unsafe-eval'",
                     `'nonce-${res.locals.cspNonce}'`,
                     'https://unpkg.com',
                     'https://kit.fontawesome.com',
