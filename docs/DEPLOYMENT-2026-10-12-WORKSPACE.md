@@ -2,7 +2,20 @@
 
 本次按用户授权，将工作区全部待提交的源码、测试、文档、发布脚本及必要前端资源提交、推送并部署。旧 ZIP、真实配置和运行数据未提交 Git。版本号保持 1.0.5。
 
-## 最新更新：键盘残留抑制
+## 最新更新：语音中切回 RNNoise 失败修复
+
+- 根因一：浏览器 CSP 阻止 RNNoise 的 WebAssembly 编译；HTML 与 Worklet 响应现在放行 `wasm-unsafe-eval`，继续禁止 JavaScript `unsafe-eval`。之前的离线 WASM/模拟管线检查未覆盖这一层。
+- 根因二：Edge 在普通布尔请求下可能复用旧采集源，导致浏览器模式实际 NS 仍关闭。对浏览器明确报告支持的 NS/AGC 使用严格请求，模式切换时获取符合要求的采集源；失败保留原管线。诊断增加失败目标和安全映射原因。
+- 源码提交：`ced301f4b3c050956a75295fa16a80c80aa5c905`，已推送并部署。
+- 运行包：`release/webrtc-video-chat-1.0.5-20261012-192243-375.zip`，120 个运行文件；SHA256：`2B2A1CFDA8C1EAC746F159CBEC532F8685DE521D1A2CAC1099D612FB5D99A7D5`。旧包保留。
+- `npm test` 297 项通过；源码、专项浏览器脚本及涉及的音频/UI 测试 lint、Worklet 语法和差异检查通过。既有全仓 lint 问题未夹带修复。
+- 本地与公网真实 Edge 155、假麦克风、真实 WASM/CSP 检查均通过：8 次运行时往返、6 次进入语音后的设置控件往返、连续快速选择、同一输出轨道与静音保持、实际 NS 与模式一致、门控确认。普通 nonce 脚本的异步 JS eval 被浏览器 CSP 拒绝。没有关闭 CSP、替换业务模块或使用物理麦克风；公网检查使用独立测试房间，结束后离开并关闭浏览器。
+- 本地证据：`%TEMP%/webrtc-noise-switch-oYOY1o/result.json`；公网证据：`%TEMP%/webrtc-noise-switch-ui7P1h/result.json`。回归入口：`scripts/verify-noise-mode-switch-app.mjs`。
+- 部署验证：旧源码/依赖逐项备份，staging HTTP/CSP 与真实 worker/router 检查通过；120 个部署文件与 ZIP 哈希一致。生产本机与公网 HTML/Worklet CSP 均正确，HTTP、实际加入语音的信令及 SFU UDP/TCP 44444 正常。真实配置、聊天记录和其他服务 PID 保持不变。
+- 当前回执与回滚：`/www/backup/voice-deploy/mode-switch-20261012-192243`；回滚命令：`python3 /www/backup/voice-deploy/mode-switch-20261012-192243/rollback.py`。回滚脚本已检查语法，未为测试执行生产回滚。
+- 加载新版需要刷新并重新加入一次；此后的正常模式切换无需退出语音或重开共享。仍需用户试听真实键盘、人声与外放回声，自动行为检查不代表降噪听感通过。
+
+## 上次更新：键盘残留抑制
 
 - 用户反馈仍有键盘声后，增加使用已有 RNNoise 人声概率的可关闭平滑门控；没有新增模型、前视缓冲或媒体传输策略。仅作用于 RNNoise，设置中默认开启，允许关闭对比。
 - 源码提交：`c8ce91f019ac7f3418f01a27358298a2ad9615a1`，已推送并部署。
