@@ -12,7 +12,7 @@ const available = [
 const load = (overrides = {}) => {
     const window = { setTimeout, clearTimeout, setInterval, clearInterval,
         RTCRtpSender: { getCapabilities: () => ({ codecs: available }) }, ...overrides };
-    vm.runInNewContext(source, { window });
+    vm.runInNewContext(source, { window, Date: overrides.Date || Date });
     return window.VoiceScreenCodecs;
 };
 const track = () => ({ kind: 'video', readyState: 'live', getSettings: () => ({ width: 1920, height: 1080 }) });
@@ -118,7 +118,7 @@ function probeFixture({ stall = false, encodeRate = 60, scale = false } = {}) {
             ['input', { id: 'input', type: 'media-source', frames }], ['codec', { id: 'codec', mimeType: 'video/H264' }],
         ]); }
     }
-    const api = load({ RTCPeerConnection: Pc, document: { createElement: () => canvas },
+    const api = load({ RTCPeerConnection: Pc, document: { createElement: () => canvas }, Date: { now: () => now },
         setTimeout: (callback, ms) => timer(callback, ms, false), setInterval: (callback, ms) => timer(callback, ms, true),
         clearTimeout: (id) => timers.delete(id), clearInterval: (id) => timers.delete(id) });
     const advance = async (ms) => {
@@ -170,4 +170,34 @@ test('hung negotiation times out; cancellation closes peers immediately and cann
     assert.equal(cancelled.timers.size, 0);
     assert.equal(cancelled.stops(), 1);
     assert.ok(cancelled.peers.every((pc) => pc.closed));
+});
+test('recent full measured trials are reused only for matching dimensions/FPS and expire after 30 seconds', async () => {
+    const f = probeFixture({ encodeRate: 50 });
+    const first = f.api.prepare(track(), { frameRate: 60 });
+    await f.advance(3000);
+    assert.equal((await first).probe.reason, 'encoder-slow');
+    const resources = f.peers.length;
+    assert.equal((await f.api.prepare(track(), { frameRate: 60 })).probe.cacheHit, true);
+    assert.equal(f.peers.length, resources);
+    const changed = f.api.prepare(track(), { frameRate: 30 });
+    await f.advance(3000);
+    assert.equal((await changed).probe.cacheHit, undefined);
+    assert.equal(f.peers.length, resources + 2);
+    await f.advance(31000);
+    const expired = f.api.prepare(track(), { frameRate: 60 });
+    await f.advance(3000);
+    assert.equal((await expired).probe.cacheHit, undefined);
+    assert.equal(f.peers.length, resources + 4);
+    assert.equal(f.timers.size, 0);
+});
+test('timeouts never populate the measured trial cache', async () => {
+    const f = probeFixture({ stall: true });
+    const first = f.api.prepare(track());
+    await f.advance(6600);
+    assert.equal((await first).probe.reason, 'timeout');
+    const second = f.api.prepare(track());
+    await f.advance(6600);
+    assert.equal((await second).probe.cacheHit, undefined);
+    assert.equal(f.peers.length, 4);
+    assert.equal(f.timers.size, 0);
 });

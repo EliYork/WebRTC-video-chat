@@ -24,7 +24,7 @@
         {
             id: PAGE_COMPONENT_TYPES.MEDIA_CONTROLS_PANEL,
             title: '语音与共享',
-            defaultLayout: { x: 1, y: 13, w: 8, h: 4 },
+            defaultLayout: { x: 1, y: 12, w: 8, h: 5 },
             minWidth: 220,
             minHeight: 140,
             canDrag: true,

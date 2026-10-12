@@ -77,6 +77,10 @@ const fixture = () => {
                 consumer.resume = async () => {
                     consumer.paused = false;
                 };
+                consumer.keyframes = 0;
+                consumer.requestKeyFrame = async () => { consumer.keyframes++; };
+                transport.consumers ||= [];
+                transport.consumers.push(consumer);
                 consumer.getStats = async () => [{ type: 'outbound-rtp', fractionLost: transport.loss || 0 }];
                 return consumer;
             };
@@ -168,6 +172,21 @@ test('global budget admits four 5.5Mbps viewers, rejects fifth, and returns rele
     assert.equal(budget.reserve('fifth'), false);
     budget.release('room-0');
     assert.equal(budget.reserve('fifth'), true);
+});
+test('visible SFU handoff requests one keyframe; duplicate ready does not request again', async (t) => {
+    const f = fixture();
+    t.after(f.service.close);
+    const publisher = f.socket('publisher');
+    const id = await f.publish(publisher);
+    const viewer = f.socket('viewer');
+    await f.subscribe(viewer, id);
+    await f.request(viewer, 'resume', { publicationId: id });
+    const video = f.created[1].consumers[0];
+    assert.equal(video.keyframes, 0);
+    await f.request(viewer, 'ready', { publicationId: id });
+    assert.equal(video.keyframes, 1);
+    await f.request(viewer, 'ready', { publicationId: id });
+    assert.equal(video.keyframes, 1);
 });
 
 test('weak receiver capacity and RTCP loss never lower the active source quality ceiling', async (t) => {

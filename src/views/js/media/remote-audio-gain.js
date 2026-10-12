@@ -1,0 +1,109 @@
+(function exposeRemoteAudioGain(global) {
+    'use strict';
+    // Keep native RTC playout at <=100%. Allocate Web Audio only for amplification.
+    const createRuntime = ({
+        createContext = () => new global.AudioContext({ latencyHint: 'interactive' }),
+        MediaStreamCtor = global.MediaStream,
+        onFailure,
+    } = {}) => {
+        const branches = new Map();
+        let context;
+        const retireContext = () => {
+            if (branches.size || !context) return;
+            const retired = context;
+            context = undefined;
+            try { void Promise.resolve(retired.close()).catch(() => {}); } catch { /* already closed */ }
+        };
+        const release = (element) => {
+            const branch = branches.get(element);
+            if (!branch) return;
+            branch.sources.forEach((source) => { try { source.disconnect(); } catch { /* already disconnected */ } });
+            try { branch.gain.disconnect(); } catch { /* already disconnected */ }
+            branches.delete(element);
+            retireContext();
+        };
+        const native = (element, volume, muted) => {
+            element.volume = Math.min(1, volume);
+            element.muted = Boolean(muted);
+        };
+        const activateOutput = (element) => {
+            const branch = branches.get(element);
+            if (!branch) return;
+            const sinkId = element.dataset?.outputSinkId;
+            const matched = (!sinkId || sinkId === 'default')
+                ? !context.sinkId || context.sinkId === 'default'
+                : context.sinkId === sinkId;
+            const volume = matched ? branch.volume : 0;
+            if (branch.gain.gain.setTargetAtTime)
+                branch.gain.gain.setTargetAtTime(volume, context.currentTime, 0.005);
+            else branch.gain.gain.value = volume;
+        };
+        const setVolume = (element, { volume = 1, muted = false } = {}) => {
+            if (!element) return false;
+            volume = Number.isFinite(Number(volume)) ? Math.max(0, Math.min(2, Number(volume))) : 1;
+            const tracks = (element.srcObject?.getAudioTracks?.() || []).filter((track) => track.readyState === 'live');
+            if (volume <= 1 || !tracks.length || muted) {
+                release(element);
+                native(element, volume, muted);
+                return true;
+            }
+            const signature = tracks.map((track) => track.id).join('|');
+            let branch = branches.get(element);
+            if (branch && branch.signature !== signature) {
+                release(element);
+                branch = undefined;
+            }
+            try {
+                context ||= createContext();
+                if (!branch) {
+                    branch = { sources: [], gain: context.createGain(), signature };
+                    branch.gain.gain.value = 0;
+                    branches.set(element, branch);
+                    for (const track of tracks) {
+                        const source = context.createMediaStreamSource(new MediaStreamCtor([track]));
+                        branch.sources.push(source);
+                        source.connect(branch.gain);
+                    }
+                    branch.gain.connect(context.destination);
+                }
+                branch.volume = volume;
+                activateOutput(element);
+                // Prevent the native element from duplicating the amplified audio.
+                native(element, 1, true);
+                if (context.state !== 'running') {
+                    void Promise.resolve(context.resume()).catch((error) => {
+                        if (branches.get(element) !== branch) return;
+                        release(element);
+                        native(element, 1, false);
+                        onFailure?.(error);
+                    });
+                }
+                return true;
+            } catch (error) {
+                release(element);
+                retireContext();
+                native(element, 1, false);
+                onFailure?.(error);
+                return false;
+            }
+        };
+        return {
+            setVolume,
+            release,
+            getBranchToken: (element) => branches.get(element),
+            fallback(element, token) {
+                const branch = branches.get(element);
+                if (!branch || branch !== token) return;
+                const volume = branch.volume;
+                release(element);
+                native(element, volume, false);
+                onFailure?.(new Error('amplification-output-unsupported'));
+            },
+            getOutputTarget: (element) => branches.has(element) ? context : null,
+            activateOutput,
+            getSnapshot: () => ({ amplifiedPlayers: branches.size, contextState: context?.state || null }),
+            destroy: () => [...branches.keys()].forEach(release),
+        };
+    };
+    global.VoiceRemoteAudioGain = { createRuntime };
+})(window);

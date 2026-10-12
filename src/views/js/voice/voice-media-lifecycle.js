@@ -1,5 +1,6 @@
 (function exposeVoiceMediaLifecycle(global) {
     'use strict';
+    const mediaClearListeners = new Set();
 
     const SCREEN_SHARE_DEFAULTS = Object.freeze({
         frameRate: 60,
@@ -141,6 +142,7 @@
         }
 
         mediaElement.onloadedmetadata = null;
+        mediaClearListeners.forEach((listener) => listener(mediaElement));
         try {
             mediaElement.pause?.();
         } catch (error) {
@@ -297,6 +299,10 @@
     };
 
     global.VoiceMediaLifecycle = {
+        onMediaClear: (listener) => {
+            mediaClearListeners.add(listener);
+            return () => mediaClearListeners.delete(listener);
+        },
         SCREEN_SHARE_DEFAULTS,
         SCREEN_SHARE_FRAME_RATES,
         SCREEN_SHARE_RESOLUTION_PRESETS,

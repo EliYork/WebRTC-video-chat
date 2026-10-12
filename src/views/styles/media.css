@@ -150,6 +150,14 @@
     background-color: rgba(255, 255, 255, 0.96);
     box-shadow: 0 12px 28px rgba(169, 94, 125, 0.18);
     color: #57354a;
+    max-height: calc(100dvh - 16px);
+    overflow-y: auto;
+}
+
+.peer-volume-section + .peer-volume-section {
+    border-top: 1px solid var(--line);
+    margin-top: 10px;
+    padding-top: 10px;
 }
 
 .peer-volume-title {
@@ -373,4 +381,16 @@
         padding: 3px 6px;
         font-size: 9px;
     }
+}
+.voice-log-dialog {
+    width: min(90vw, 900px);
+    max-height: 85vh;
+}
+.voice-log-dialog textarea {
+    display: block;
+    width: 100%;
+    height: 60vh;
+    box-sizing: border-box;
+    margin-bottom: 12px;
+    font: 12px monospace;
 }

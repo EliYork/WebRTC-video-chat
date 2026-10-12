@@ -52,7 +52,7 @@ export const validateSocketPacket = (packet, next) => {
         }
         valid &&=
             acknowledge === undefined || typeof acknowledge === 'function';
-    } else if (event === 'voice:snapshot') {
+    } else if (event === 'voice:snapshot' || event === 'voice:diagnostics:collect') {
         valid = payload === undefined || typeof payload === 'function';
     }
     if (!valid) {

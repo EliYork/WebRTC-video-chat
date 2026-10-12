@@ -162,6 +162,15 @@
                             键盘抑制（RNNoise）
                         </label>
                         <p class="media-device-status" data-audio-processing-status role="status" aria-live="polite"></p>
+                        <details>
+                            <summary>通话诊断与日志</summary>
+                            <p class="media-device-status">非语音门控主要压低不讲话时的残留；讲话时的键盘声仍由 RNNoise 处理。本机保留最近 5 次日志，不录音。</p>
+                            <div class="media-audio-options">
+                                <button type="button" data-copy-call-diagnostics>复制双方诊断与本次日志</button>
+                                <button type="button" data-show-call-logs>查看最近通话日志</button>
+                                <button type="button" data-clear-call-logs>清除历史日志</button>
+                            </div>
+                        </details>
                     </section>
                     <section class="media-device-popover" data-control-panel="camera" data-device-popover="camera" popover="manual" role="dialog" aria-label="摄像头设备">
                         <div class="media-device-popover-header">
@@ -271,6 +280,7 @@
     <script src="/js/media/peer-volume-ui.js"></script>
     <script src="/js/shared/copy-link-ui.js"></script>
     <script src="/js/media/output-volume-state.js"></script>
+    <script src="/js/media/remote-audio-gain.js"></script>
     <script src="/js/media/output-volume-ui.js"></script>
     <script src="/js/media/media-controls-ui.js"></script>
     <script src="/js/media/media-dock-adapter.js"></script>
@@ -325,6 +335,7 @@
     <script src="/js/voice/voice-status-view.js"></script>
     <script src="/js/voice/voice-media-quality-view.js"></script>
     <script src="/js/voice/voice-share-diagnostics.js"></script>
+    <script src="/js/voice/voice-call-diagnostics.js"></script>
     <script src="/js/voice/voice-media-quality-runtime.js"></script>
     <script type="module" src="/script.js"></script> <!-- So we defined the static files of the server so we can use it here-->
 </body>

@@ -7,7 +7,7 @@
     const clampVolume = (value, fallback = 1) => {
         const numeric = Number(value);
         return Number.isFinite(numeric)
-            ? Math.min(1, Math.max(0, numeric))
+            ? Math.min(2, Math.max(0, numeric))
             : fallback;
     };
 

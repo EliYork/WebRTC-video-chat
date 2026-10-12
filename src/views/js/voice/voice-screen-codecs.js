@@ -7,7 +7,7 @@
             mimeType: 'video/H264',
             autoPriority: 1,
             fallbacks: ['vp8'],
-            probe: (target, options) => probeH264(target, options),
+            probe: (target, options) => measuredH264(target, options),
             matches: (codec) => /^video\/h264$/i.test(codec.mimeType || '') &&
                 (codec.parameters?.['packetization-mode'] === 1 ||
                     /(?:^|;)\s*packetization-mode=1(?:;|$)/i.test(codec.sdpFmtpLine || '')),
@@ -15,6 +15,21 @@
         vp8: { mimeType: 'video/VP8', fallbacks: [], matches: (codec) => /^video\/vp8$/i.test(codec.mimeType || '') },
     });
     const decisions = new WeakMap();
+    const probeCache = new Map();
+    const measuredH264 = async (target, options) => {
+        const key = `${target.width}x${target.height}@${target.frameRate}`;
+        const cached = probeCache.get(key);
+        const age = cached ? Date.now() - cached.time : Infinity;
+        if (age >= 0 && age < 30000 && !options?.signal?.aborted)
+            return { ...cached.result, windows: cached.result.windows.map((row) => ({ ...row })), cacheHit: true, ageMs: age };
+        const result = await probeH264(target, options);
+        if (!options?.signal?.aborted && result.windows?.length === 2 &&
+            result.windows.every((row) => Number.isFinite(row.captureFps) && Number.isFinite(row.encodeFps))) {
+            if (probeCache.size >= 8) probeCache.delete(probeCache.keys().next().value);
+            probeCache.set(key, { time: Date.now(), result });
+        }
+        return result;
+    };
     const normalizeMode = (mode) => Object.hasOwn(codecs, mode) ? mode : 'auto';
     const candidates = (primary) => Object.hasOwn(codecs, primary) ? [primary, ...codecs[primary].fallbacks] : ['vp8'];
     const findCodec = (available, primary) => candidates(primary)
@@ -167,6 +182,7 @@
     });
     /* eslint-disable no-await-in-loop -- Codec trials must retire before the next candidate allocates an encoder. */
     const prepare = async (track, options = {}, { signal, probe } = {}) => {
+        const startedAt = Date.now();
         const mode = normalizeMode(options.codecMode);
         const target = targetFor(track, options);
         let result = { passed: false, reason: 'manual-vp8', windows: [] };
@@ -183,7 +199,7 @@
                 break;
             }
         }
-        const decision = { mode, primary, target, probe: result,
+        const decision = { mode, primary, target, probe: result, preparationMs: Date.now() - startedAt,
             reason: mode !== 'auto' && primary === mode && codecs[mode].probe ? 'manual-preference' : result.reason };
         if (!signal?.aborted && track.readyState !== 'ended') decisions.set(track, decision);
         return decision;

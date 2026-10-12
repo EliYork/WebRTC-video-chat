@@ -76,7 +76,7 @@ test('presentation callback is sampled separately and cancelled when panel is re
     api.sync(input);
     await flush();
     const snapshot = JSON.parse(tile.children[0].children[3].textContent);
-    assert.equal(snapshot.诊断格式, 3);
+    assert.equal(snapshot.诊断格式, 4);
     assert.equal(snapshot.播放画面.提交合成器帧率, null);
     api.remove(tile);
     assert.equal(cancelled, 1);
@@ -266,4 +266,23 @@ test('failed stats stay visible and late reads cannot update a removed panel', a
     await flush();
     assert.match(replacement.children[3].textContent, /统计读取失败/);
     assert.doesNotMatch(replacement.children[3].textContent, /private IP/);
+});
+test('call log samples a collapsed share and keeps compositor callbacks alive until removal', async () => {
+    const { api } = load();
+    const tile = new Element();
+    let callback, cancelled = 0, scheduled = 0;
+    const video = {
+        requestVideoFrameCallback(fn) { callback = fn; scheduled++; return scheduled; },
+        cancelVideoFrameCallback() { cancelled++; },
+    };
+    const source = { tile, video, isScreenSharing: true, localAudioProcessing: { state: { speechGateEnabled: true, speechGateSupported: true } }, pc: { getStats: async () => new Map() } };
+    const snapshot = await api.sync(source, { force: true });
+    assert.equal(tile.children[0].open, false);
+    assert.equal(snapshot.本机音频.非语音门控启用, true);
+    callback(0, { presentedFrames: 10 });
+    assert.equal(scheduled, 2);
+    tile.children[0].listeners.toggle();
+    assert.equal(cancelled, 0);
+    api.remove(tile);
+    assert.equal(cancelled, 1);
 });

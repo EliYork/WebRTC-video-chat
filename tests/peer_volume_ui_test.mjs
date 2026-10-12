@@ -205,3 +205,35 @@ test('screen-share copy, no-audio state, and repeated init/open stay single-owne
     assert.equal(document.listenerCount('keydown'), 0);
     assert.equal(document.querySelector('.peer-volume-popover'), null);
 });
+test('fullscreen menu contains independent voice and shared controls up to 200%', () => {
+    const document = new DocumentFake();
+    const window = { document, innerHeight: 900, innerWidth: 1400 };
+    vm.runInNewContext(viewUtilsSource, { window });
+    vm.runInNewContext(volumeUiSource, { window });
+    const ui = window.VoiceRemoteVolumeUI;
+    const fullscreen = new ElementFake();
+    document.body.append(fullscreen);
+    document.fullscreenElement = fullscreen;
+    const values = [];
+    const popover = ui.openPopover({
+        event: { clientX: 20, clientY: 20 },
+        controls: [
+            { titleText: '语音音量', currentVolume: 200, onVolumeInput: (value) => values.push(['voice', value]) },
+            { titleText: '共享音量', currentVolume: 50, onVolumeInput: (value) => values.push(['screen', value]) },
+        ],
+    });
+    assert.equal(popover.parentElement, fullscreen);
+    const sections = popover.childNodes.filter((node) => node.querySelector('input'));
+    const voice = sections[0].querySelector('input');
+    const screen = sections[1].querySelector('input');
+    assert.equal(String(voice.max), '200');
+    voice.value = '180';
+    voice.dispatchEvent({ type: 'input' });
+    screen.value = '40';
+    screen.dispatchEvent({ type: 'input' });
+    assert.deepEqual(values, [['voice', 180], ['screen', 40]]);
+    ui.init();
+    document.dispatchEvent({ type: 'fullscreenchange' });
+    assert.equal(popover.parentElement, null);
+    ui.destroy();
+});

@@ -51,7 +51,7 @@ test('default widgets align, reserve the media workspace and do not overlap', ()
     assert.equal(channels.w, controls.w);
     assert.equal(channels.y, chat.y);
     assert.equal(controls.y + controls.h, chat.y + chat.h);
-    assert.equal(controls.h, 4);
+    assert.equal(controls.h, 5);
     assert.ok(chat.x - channels.x - channels.w >= 12);
     for (const panel of panels) {
         const rect = panel.defaultLayout;

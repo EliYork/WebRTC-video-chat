@@ -222,3 +222,37 @@ test('SFU unsupported H264 retries VP8 once; a VP8-only router and manual VP8 us
         assert.equal(f.video.readyState, 'live');
     }
 });
+test('bandwidth admission fallback is logged, repeated publication waits for cooldown, and leave clears history', async () => {
+    const api = load();
+    const handlers = new Map();
+    const events = [];
+    let consumes = 0;
+    const socket = {
+        connected: true,
+        on: (name, handler) => handlers.set(name, handler), off() {},
+        emit(_, payload, ack) {
+            if (payload.action === 'consume') { consumes++; ack({ ok: false, reason: 'server-bandwidth-limit' }); return; }
+            const result = { config: { enabled: true }, routerRtpCapabilities: {}, publications: [] };
+            ack({ ok: true, ...result });
+        },
+    };
+    class Device {
+        async load() {}
+        createRecvTransport() { return { on() {}, close() {} }; }
+    }
+    const runtime = api.createRuntime({ config: { enabled: true }, Device, onRouteEvent: (event) => events.push(event) });
+    runtime.attachSocket(socket);
+    runtime.setSession({ roomId: 'game', peerId: 'viewer', voiceSessionGeneration: 1 });
+    const flush = async () => { for (let i = 0; i < 60; i++) await Promise.resolve(); };
+    await flush();
+    const publication = { id: 'private-publication', peerId: 'source', roomId: 'game', voiceSessionGeneration: 1 };
+    handlers.get('sfu:publication')(publication);
+    await flush();
+    handlers.get('sfu:publication')(publication);
+    await flush();
+    assert.equal(consumes, 1);
+    assert.ok(events.some((event) => event.reason === 'server-bandwidth-limit'));
+    assert.doesNotMatch(JSON.stringify(runtime.snapshot()), /private-publication|source/);
+    runtime.leave();
+    assert.equal(runtime.snapshot().routeHistory.length, 0);
+});

@@ -59,12 +59,17 @@ const fixture = (options = {}) => {
                     throw Object.assign(new Error('capture failed'), {
                         name: failCapture,
                     });
+                if (audio.echoCancellation?.exact === 'all' && (options.rejectAll || options.noAll))
+                    throw Object.assign(new Error('all is unavailable on acquisition'), {
+                        name: 'OverconstrainedError', constraint: 'echoCancellation',
+                    });
                 const track = new StrictTrack(
                     'audio',
                     `raw-${captures.length}`
                 );
                 const settings = {
                     ...audio,
+                    echoCancellation: options.ignoreAll ? true : audio.echoCancellation?.exact ?? audio.echoCancellation,
                     noiseSuppression: audio.noiseSuppression?.exact ?? audio.noiseSuppression,
                     autoGainControl: audio.autoGainControl?.exact ?? audio.autoGainControl,
                     deviceId: audio.deviceId?.exact || 'resolved-default',
@@ -218,7 +223,8 @@ test('AEC all is requested exactly after capability detection and read back from
     assert.equal(state.aecFallback, null);
     assert.equal(state.allSupported, true);
     assert.equal(state.actual.noiseSuppression, true);
-    assert.equal(f.captures[0].applied[0].echoCancellation.exact, 'all');
+    assert.equal(f.constraints[0].echoCancellation.exact, 'all');
+    assert.equal(state.aecAcquisition, 'initial-all');
     f.runtime.dispose(stream);
 });
 
@@ -237,9 +243,7 @@ for (const options of [
         assert.ok(state.aecFallback);
         assert.equal(state.actual.noiseSuppression, false);
         assert.equal(state.actual.autoGainControl, false);
-        if (options.noAll || options.supported === false)
-            assert.equal(f.captures[0].applied.length, 0);
-        else assert.equal(f.captures[0].applied.at(-1).echoCancellation, true);
+        assert.equal(f.captures[0].applied.at(-1).echoCancellation, true);
         f.runtime.dispose(stream);
     });
 }

@@ -1,8 +1,10 @@
 import '/js/shared/morph-icon-ui.js';
+import { sanitizeVoiceDiagnostic } from '/js/shared/voice-diagnostic-schema.js';
 
 /* eslint-disable no-console */
 console.info('[page-layout] script boot v2 ' + new Date().toISOString());
 let socket;
+let callDiagnostics;
 
 const { byId } = window.VoiceViewUtils;
 
@@ -145,7 +147,10 @@ let sidebarRuntime;
 let mediaDockAdapter;
 let mediaDockRuntime;
 
-const notifyMediaDock = () => mediaDockAdapter?.notify();
+const notifyMediaDock = () => {
+    callDiagnostics?.observe();
+    mediaDockAdapter?.notify();
+};
 
 const getLayoutPreference = (key) =>
     pageLayoutStoreRuntime?.getLayoutPreference(key);
@@ -195,6 +200,16 @@ let localVoiceSessionGeneration = 0;
 let screenShareRequestPending = false;
 const localMediaTrackStopper = voiceMediaLifecycle.createTrackStopper();
 const voiceMediaDebug = voiceCallProtocol.createMediaDebugLog();
+const recordMediaDebug = voiceMediaDebug.record.bind(voiceMediaDebug);
+voiceMediaDebug.record = (event) => {
+    recordMediaDebug(event);
+    callDiagnostics?.record(event.event || 'media', {
+        state: event.state,
+        mode: event.mode,
+        部件: event.type,
+        reason: /^[a-z0-9-]{1,80}$/i.test(event.reason || '') ? event.reason : null,
+    });
+};
 const voiceStatusView = voiceStatusViewApi.createStatusView({
     connectionElement: undefined,
     container: undefined,
@@ -342,12 +357,17 @@ const voicePeerRegistry = voicePeerRegistryApi.createRegistry({
 });
 screenSfuRuntime = window.VoiceScreenSfuRuntime.createRuntime({
     config: window.voiceScreenSfuConfig || {},
+    onRouteEvent: (event) => callDiagnostics?.record('共享路径事件', event),
     onRoutes: () => {
         updateScreenP2pBudget();
         if (currentPeer) refreshVoiceCallsForLocalMedia(currentPeer);
         notifyMediaDock();
     },
     onRemoteStream: ({ peerId, stream, publicationId, trackRoles }) => {
+        callDiagnostics?.record('观看路径切换', {
+            参与者序号: voicePeerRegistry.getPeerIds().indexOf(peerId) + 1,
+            路径: stream ? 'SFU' : 'P2P（等待画面确认）',
+        });
         if (stream) remoteScreenSfuSources.set(peerId, { stream, publicationId, trackRoles });
         else if (remoteScreenSfuSources.get(peerId)?.publicationId === publicationId) remoteScreenSfuSources.delete(peerId);
         if (voiceMediaTargets.has(peerId)) renderRemoteMedia(peerId, voicePeerRegistry.getQualitySource(peerId)?.stream);
@@ -359,13 +379,18 @@ screenSfuRuntime = window.VoiceScreenSfuRuntime.createRuntime({
     },
     onWarning: (message, error) => console.warn('[screen-route]', message, error?.message || ''),
 });
-voiceMediaQualityRuntime = voiceMediaQualityRuntimeApi.createRuntime({
-    debug: (event) => voiceMediaDebug.record(event),
-    getQualitySource: (peerId) => {
+const getDiagnosticQualitySource = (peerId) => {
         if (peerId === 'local-video') {
             const tile = document.getElementById('local-video');
             return {
                 isLocal: true,
+                localAudioProcessing: {
+                    requestedMode: audioSettingsController.snapshot().requested.mode,
+                    state: audioProcessingRuntime.diagnostics(myVideoStream),
+                    microphoneGain: noiseSettingsUI.getMicGain(),
+                },
+                routeStatus: screenSfuRuntime.snapshot(),
+                outputGain: remoteAudioGain.getSnapshot(),
                 shareOptions: currentScreenShareSession?.shareOptions,
                 codecDecision: currentScreenShareSession?.codecDecision,
                 serverHealth: screenSfuRuntime.getSendHealth(),
@@ -388,6 +413,13 @@ voiceMediaQualityRuntime = voiceMediaQualityRuntimeApi.createRuntime({
             snapshot?.stream;
         return {
             ...snapshot,
+            localAudioProcessing: {
+                requestedMode: audioSettingsController.snapshot().requested.mode,
+                state: audioProcessingRuntime.diagnostics(myVideoStream),
+                microphoneGain: noiseSettingsUI.getMicGain(),
+            },
+            routeStatus: screenSfuRuntime.snapshot(),
+            outputGain: remoteAudioGain.getSnapshot(),
             ...(serverSource ? { pc: serverSource.pc } : {}),
             serverHealth: serverSource?.serverHealth,
             screenRoute: serverSource ? '服务器转发' : 'P2P',
@@ -395,7 +427,10 @@ voiceMediaQualityRuntime = voiceMediaQualityRuntimeApi.createRuntime({
             stream: playbackStream,
             video: tile?.querySelector('video'),
         };
-    },
+};
+voiceMediaQualityRuntime = voiceMediaQualityRuntimeApi.createRuntime({
+    debug: (event) => voiceMediaDebug.record(event),
+    getQualitySource: getDiagnosticQualitySource,
     view: voiceMediaQualityView,
 });
 window.exportVoiceMediaDebug = () => voiceMediaDebug.export();
@@ -428,7 +463,16 @@ const audioSettingsController = window.VoiceAudioSettingsController.createContro
         voiceDeviceRuntime?.setSelected('mic', deviceId);
     },
     onCommitted: ({ mode }) => noiseSettingsUI.setNoiseMode(mode),
-    onChange: () => notifyMediaDock(),
+    onChange: (snapshot) => {
+        callDiagnostics?.record('音频设置切换', {
+            请求模式: snapshot.requested.mode,
+            实际模式: snapshot.committed.mode,
+            设置切换中: snapshot.pending,
+            切换结果: snapshot.error,
+            输入设备: snapshot.requested.deviceId === 'default' ? '默认' : '自选',
+        });
+        notifyMediaDock();
+    },
     rollback: () => audioProcessingRuntime.diagnostics(myVideoStream)?.sourceLive === false ? { deviceId: 'default' } : {},
     apply: async (request) => {
         if (mediaOperationController.getSnapshot('microphone').promise) {
@@ -684,6 +728,14 @@ const getPeerVolume = (peerId) => outputVolumeState.getPeerVolume(peerId);
 const setPeerVolume = (peerId, volume) =>
     outputVolumeState.setPeerVolume(peerId, volume);
 
+const remoteAudioGain = window.VoiceRemoteAudioGain.createRuntime({
+    onFailure: (error) => {
+        voiceStatusView.setMediaError('output', 'unknown', '音量放大不可用，已恢复普通播放');
+        console.warn('Could not amplify remote audio.', error);
+    },
+});
+voiceMediaLifecycle.onMediaClear(remoteAudioGain.release);
+
 const canSelectAudioOutput = () =>
     typeof HTMLMediaElement !== 'undefined' &&
     typeof HTMLMediaElement.prototype.setSinkId === 'function';
@@ -696,19 +748,42 @@ const applyOutputDevice = async (mediaElement, isRemote) => {
     const sinkId = selectedOutputDeviceId || 'default';
     const revision = outputSelectionRevision;
 
-    if (mediaElement.dataset.outputSinkId === sinkId) {
+    const gainOutput = remoteAudioGain.getOutputTarget(mediaElement);
+    const gainToken = remoteAudioGain.getBranchToken(mediaElement);
+    if (mediaElement.dataset.outputSinkId === sinkId &&
+        (!gainOutput || gainOutput.sinkId === (sinkId === 'default' ? '' : sinkId))) {
+        remoteAudioGain.activateOutput(mediaElement);
         return true;
     }
 
-    const result = await voiceDeviceRuntimeApi.switchOutputDevice({
+    let result = await voiceDeviceRuntimeApi.switchOutputDevice({
         deviceId: sinkId,
         mediaElement,
         supported: canSelectAudioOutput(),
     });
+    if (revision !== outputSelectionRevision || sinkId !== selectedOutputDeviceId) return result.ok;
+    if (gainToken !== remoteAudioGain.getBranchToken(mediaElement)) return applyOutputDevice(mediaElement, isRemote);
+    if (result.ok && gainOutput && sinkId !== 'default' && typeof gainOutput.setSinkId !== 'function') {
+        remoteAudioGain.fallback(mediaElement, gainToken);
+        return true;
+    }
+    if (result.ok && gainOutput &&
+        (typeof gainOutput.setSinkId === 'function' || sinkId !== 'default')) {
+        result = await voiceDeviceRuntimeApi.switchOutputDevice({
+            deviceId: sinkId,
+            mediaElement: gainOutput,
+            supported: typeof gainOutput.setSinkId === 'function',
+        });
+        if (revision !== outputSelectionRevision || sinkId !== selectedOutputDeviceId) return result.ok;
+        if (!result.ok && gainToken === remoteAudioGain.getBranchToken(mediaElement)) {
+            remoteAudioGain.fallback(mediaElement, gainToken);
+        }
+    }
     if (revision !== outputSelectionRevision || sinkId !== selectedOutputDeviceId) {
         return result.ok;
     }
     if (result.ok) {
+        remoteAudioGain.activateOutput(mediaElement);
         notifyMediaDock();
         return true;
     }
@@ -744,19 +819,17 @@ const applyOutputSettings = (mediaElement, isRemote) => {
     }
 
     if (isRemote && outputMuted) {
-        mediaElement.volume = outputVolumeState.getEffectiveOutputVolume(
+        remoteAudioGain.setVolume(mediaElement, { volume: outputVolumeState.getEffectiveOutputVolume(
             0,
             getPeerVolume(mediaElement.closest('.video-tile')?.dataset.peerId)
-        );
-        mediaElement.muted = true;
+        ), muted: true });
     } else {
         const peerId = mediaElement.closest('.video-tile')?.dataset.peerId;
         const peerVolume = isRemote ? getPeerVolume(peerId) : 1;
-        mediaElement.volume = outputVolumeState.getEffectiveOutputVolume(
+        remoteAudioGain.setVolume(mediaElement, { volume: outputVolumeState.getEffectiveOutputVolume(
             outputVolume,
             peerVolume
-        );
-        mediaElement.muted = !isRemote;
+        ), muted: !isRemote });
     }
 
     return applyOutputDevice(mediaElement, isRemote);
@@ -769,11 +842,10 @@ const applyScreenShareOutputSettings = (
     if (!mediaElement) {
         return;
     }
-    mediaElement.volume = outputVolumeState.getEffectiveOutputVolume(
+    remoteAudioGain.setVolume(mediaElement, { volume: outputVolumeState.getEffectiveOutputVolume(
         outputVolume,
         volume
-    );
-    mediaElement.muted = outputMuted || Boolean(muted);
+    ), muted: outputMuted || Boolean(muted) });
     return applyOutputDevice(mediaElement, true);
 };
 
@@ -849,6 +921,7 @@ const selectCameraDevice = async (deviceId = 'default') => {
 };
 
 const selectOutputDevice = async (deviceId = 'default') => {
+    callDiagnostics?.record('输出设备切换请求', { 输出设备: deviceId === 'default' ? '默认' : '自选' });
     outputSelectionRevision += 1;
     voiceStatusView.clearMediaError('output');
     selectedOutputDeviceId = deviceId;
@@ -887,6 +960,8 @@ const pageVoiceTeardown = voiceMediaLifecycle.createPageTeardown({
         mediaDockAdapter?.destroy();
         remoteVolumeUI.destroy();
         screenShareVolumeController.destroy();
+        callDiagnostics?.destroy();
+        remoteAudioGain.destroy();
         screenSfuRuntime.leave();
         localScreenSharePreviewController.destroy();
         fullscreenControls.destroy();
@@ -1150,6 +1225,7 @@ function adoptVoiceSessionGeneration(
 }
 
 const bindVoiceSocketHandlers = (activeSocket) => {
+    callDiagnostics?.attachSocket(activeSocket);
     activeSocket.off('voice:call-targets', handleSocketVoiceCallTargets);
     activeSocket.off('voice:peer-joined', handleSocketVoicePeerJoined);
     activeSocket.off('removeUserVideo', handleSocketRemoveUserVideo);
@@ -2116,6 +2192,13 @@ const migrateLoadedLayoutItem = ({
     payloadVersion,
     type,
 } = {}) => {
+    if (type === PAGE_COMPONENT_TYPES.MEDIA_CONTROLS_PANEL &&
+        itemId === MEDIA_DOCK_LAYOUT_ITEM_ID &&
+        Number(item.x) === 1 && Number(item.y) === 13 &&
+        Number(item.w) === 8 && Number(item.h) === 4 &&
+        item.config?.collapsed !== true) {
+        return { ...item, y: 12, h: 5 };
+    }
     if (
         Number(payloadVersion) >= PAGE_STORAGE_VERSION ||
         type !== PAGE_COMPONENT_TYPES.MEDIA_CONTROLS_PANEL ||
@@ -3316,13 +3399,20 @@ const showPeerVolumePopover = (event, tile) => {
     const isScreenShare =
         tile.dataset.tileType === 'screen-share' || screenSharers.has(peerId);
 
-    if (isScreenShare) {
-        const snapshot = screenShareVolumeController.getSnapshot(peerId);
-        remoteVolumeUI.openPopover({
+    const snapshot = screenShareVolumeController.getSnapshot(peerId);
+    const controls = [{
+        currentVolume: Math.round(getPeerVolume(peerId) * 100),
+        titleText: '语音音量',
+        onVolumeInput: (nextVolume) => {
+            setPeerVolume(peerId, nextVolume / 100);
+            void applyOutputSettingsToRemoteMedia();
+        },
+    }];
+    if (isScreenShare || snapshot.hasAudio) {
+        controls.push({
             currentVolume: Math.round(snapshot.volume * 100),
             disabled: !snapshot.hasAudio,
             emptyText: '无共享音频',
-            event,
             iconClass: 'fas fa-desktop',
             muted: snapshot.muted,
             muteLabel: '共享静音',
@@ -3338,19 +3428,8 @@ const showPeerVolumePopover = (event, tile) => {
                 ),
             titleText: '屏幕共享音量',
         });
-        return;
     }
-
-    const currentVolume = Math.round(getPeerVolume(peerId) * 100);
-
-    remoteVolumeUI.openPopover({
-        event,
-        currentVolume,
-        onVolumeInput: (nextVolume) => {
-            setPeerVolume(peerId, nextVolume / 100);
-            applyOutputSettingsToRemoteMedia();
-        },
-    });
+    remoteVolumeUI.openPopover({ event, controls });
 };
 
 const updateVideoTileStatus = (tile) => {
@@ -4819,6 +4898,7 @@ const createPeerInstance = (roomToJoin, { recreate = false } = {}) => {
 };
 
 const leaveVoiceSession = (reason = 'user-leave') => {
+    callDiagnostics?.end(reason);
     screenSfuRuntime.leave();
     const nextRoomId = pendingVoiceRoomId;
     pendingVoiceRoomId = undefined;
@@ -4889,6 +4969,7 @@ const joinVoiceChannel = (roomId) => {
     if (!sessionEpoch || (currentPeer && !currentPeer.destroyed)) {
         return false;
     }
+    callDiagnostics?.start();
     selectedVoiceRoomId = roomId;
     setAudioButtonNoMic();
     setCameraButtonState(false);
@@ -4934,6 +5015,86 @@ window.addEventListener('popstate', () => {
     }
 });
 
+callDiagnostics = window.VoiceCallDiagnostics.createRuntime({
+    sanitize: sanitizeVoiceDiagnostic,
+    getState: () => {
+        const session = voiceSessionRuntime.getSnapshot();
+        const settings = audioSettingsController.snapshot();
+        const processing = audioProcessingRuntime.diagnostics(myVideoStream);
+        const track = myVideoStream?.getAudioTracks()[0];
+        const actual = track?.getSettings?.() || {};
+        return {
+            会话: { state: session.state, generation: session.serverGeneration },
+            本机音频: {
+                请求模式: settings.requested.mode,
+                实际模式: processing?.mode || null,
+                设置切换中: settings.pending,
+                切换结果: settings.error,
+                处理链: processing?.mode === 'rnnoise' ? '浏览器AEC → RNNoise → 可选非语音门控 → 输入增益' :
+                    processing?.actual?.noiseSuppression ? '浏览器AEC / NS / AGC → 输入增益' : '浏览器AEC → 输入增益',
+                请求AEC: 'all（不支持时普通AEC）',
+                请求浏览器降噪: settings.requested.mode === 'browser',
+                请求自动增益: settings.requested.mode === 'browser',
+                浏览器降噪: processing?.actual?.noiseSuppression ?? null,
+                AEC: processing?.actual?.echoCancellation ?? null,
+                AEC采集方式: processing?.aecAcquisition || null,
+                AEC回退: processing?.aecFallback || null,
+                自动增益: processing?.actual?.autoGainControl ?? null,
+                非语音门控启用: Boolean(processing?.speechGateEnabled && processing?.speechGateSupported),
+                处理器回退: processing?.fallbackReason || null,
+                最近切换失败: processing?.lastSwitchFailure || null,
+                麦克风存活: processing?.sourceLive ?? false,
+                静音: !track?.enabled,
+                轨道静音: track?.muted ?? null,
+                麦克风增益_百分比: noiseSettingsUI.getMicGain(),
+                采集格式: { 采样率: actual.sampleRate || null, 声道数: actual.channelCount || null },
+                输入设备: selectedInputDeviceId === 'default' ? '默认' : '自选',
+                输出设备: selectedOutputDeviceId === 'default' ? '默认' : '自选',
+                输出静音: outputMuted,
+                输出增益_百分比: Math.round(outputVolume * 100),
+                放大播放: remoteAudioGain.getSnapshot(),
+            },
+            共享路径变化: screenSfuRuntime.snapshot(),
+            输出播放: voicePeerRegistry.getPeerIds().map((peerId, index) => {
+                const screen = screenShareVolumeController.getSnapshot(peerId);
+                return { 序号: index + 1, 语音音量_百分比: Math.round(getPeerVolume(peerId) * 100),
+                    有效音量_百分比: outputMuted ? 0 : Math.round(getPeerVolume(peerId) * outputVolume * 100),
+                    共享音量_百分比: Math.round((screen?.volume ?? 1) * 100), 共享静音: screen?.muted ?? false };
+            }),
+        };
+    },
+    getSources: () => ['local-video', ...screenSharers].map(getDiagnosticQualitySource).filter((source) => source?.isScreenSharing && source.tile),
+    getConnections: () => [screenSfuRuntime.getSendConnection(), ...voicePeerRegistry.getPeerIds().flatMap((peerId, index) => {
+        const peer = voicePeerRegistry.getSnapshot(peerId);
+        return [
+            { pc: peer?.incomingCall?.peerConnection || peer?.incomingCall?._pc, ordinal: index + 1, purpose: '接收语音和P2P媒体' },
+            { pc: peer?.outgoingCall?.peerConnection || peer?.outgoingCall?._pc, ordinal: index + 1, purpose: '发送语音和P2P媒体' },
+            { pc: screenSfuRuntime.getRemoteSource(peerId)?.pc, ordinal: index + 1, purpose: '接收SFU共享' },
+        ].filter((entry) => entry.pc);
+    })],
+    getAudioRole: (pc, report, reports) => {
+        if (pc.screenRoute === 'SFU') return '共享音频';
+        const source = reports.find((row) => row.id === report.mediaSourceId);
+        const trackId = report.trackIdentifier || source?.trackIdentifier;
+        if (!trackId) return null;
+        if (report.type === 'outbound-rtp') {
+            if (myVideoStream?.getAudioTracks().some((track) => track.id === trackId)) return '麦克风';
+            if (currentScreenStream?.getAudioTracks().some((track) => track.id === trackId)) return '共享音频';
+        } else {
+            const peerId = voicePeerRegistry.getPeerIds().find((id) => voicePeerRegistry.getQualitySource(id)?.pc === pc);
+            const role = remoteP2pTrackRoles.get(peerId)?.find((row) => row.trackId === trackId)?.role;
+            return role === 'screen-share-audio' ? '共享音频' : role ? '麦克风' : null;
+        }
+        return null;
+    },
+});
+window.VoiceCallDiagnostics.copyCombined = (button) => callDiagnostics.copyCombined(button);
+mediaDockRoot.querySelector('[data-copy-call-diagnostics]')?.addEventListener('click', (event) => callDiagnostics.copyCombined(event.currentTarget));
+mediaDockRoot.querySelector('[data-show-call-logs]')?.addEventListener('click', () => callDiagnostics.showLogs());
+mediaDockRoot.querySelector('[data-clear-call-logs]')?.addEventListener('click', (event) => {
+    callDiagnostics.clearLogs();
+    event.currentTarget.textContent = '已清除历史，当前通话继续记录';
+});
 remoteVolumeUI.init();
 
 fullscreenControls.bindFullscreenChange();

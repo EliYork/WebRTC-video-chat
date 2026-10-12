@@ -69,29 +69,34 @@
             }
             const device =
                 deviceId !== 'default' ? { deviceId: { exact: deviceId } } : {};
-            let rawStream;
-            try {
-                rawStream = await mediaDevices.getUserMedia({
-                    audio: { ...captureConstraints, ...device },
-                });
-            } catch (error) {
-                // Retry only a format/constraint failure. Never hide permission,
-                // missing-device or busy-device errors, or select another mic.
-                if (
-                    ![
-                        'OverconstrainedError',
-                        'ConstraintNotSatisfiedError',
-                    ].includes(error?.name)
-                )
-                    throw error;
-                rawStream = await mediaDevices.getUserMedia({
-                    audio: {
-                        echoCancellation: true,
+            const constraintFailure = (error) => ['OverconstrainedError', 'ConstraintNotSatisfiedError'].includes(error?.name);
+            const acquire = async (echoCancellation) => {
+                try {
+                    return await mediaDevices.getUserMedia({ audio: { ...captureConstraints, echoCancellation, ...device } });
+                } catch (error) {
+                    // Relax only the format. Keep device, processing and AEC requirements.
+                    if (!constraintFailure(error) || error.constraint === 'echoCancellation') throw error;
+                    return mediaDevices.getUserMedia({ audio: {
+                        echoCancellation,
                         noiseSuppression: captureConstraints.noiseSuppression,
                         autoGainControl: captureConstraints.autoGainControl,
                         ...device,
-                    },
-                });
+                    } });
+                }
+            };
+            let rawStream;
+            let aecFallback = supportedConstraints.echoCancellation === false ? 'unsupported' : null;
+            try {
+                // Request the AEC mode while acquiring the source. Some Chromium
+                // sources cannot change AEC type later through applyConstraints.
+                rawStream = await acquire(aecFallback ? true : { exact: 'all' });
+            } catch (error) {
+                // Retry only a format/constraint failure. Never hide permission,
+                // missing-device or busy-device errors, or select another mic.
+                if (aecFallback || (!constraintFailure(error) && error?.name !== 'TypeError')) throw error;
+                if (!isCurrent()) throw Object.assign(new Error('superseded-audio-capture'), { name: 'AbortError' });
+                aecFallback = error?.name || 'all-failed';
+                rawStream = await acquire(true);
             }
             const track = rawStream.getAudioTracks()[0];
             try {
@@ -101,32 +106,14 @@
                     });
                 if (!track || track.readyState === 'ended')
                     throw new Error('microphone-track-unavailable');
-                const supported =
-                    mediaDevices.getSupportedConstraints?.().echoCancellation;
                 const capabilities = track.getCapabilities?.().echoCancellation;
                 const allSupported = Array.isArray(capabilities)
                     ? capabilities.includes('all')
                     : null;
-                let aecFallback = 'unsupported';
-                if (
-                    supported !== false &&
-                    allSupported !== false &&
-                    track.applyConstraints
-                ) {
-                    try {
-                        // exact prevents silently interpreting an unknown string as true.
-                        await track.applyConstraints({
-                            ...requested,
-                            echoCancellation: { exact: 'all' },
-                        });
-                        aecFallback =
-                            readSettings(track).echoCancellation === 'all'
-                                ? null
-                                : 'not-reported-as-all';
-                    } catch (error) {
-                        aecFallback = error?.name || 'all-failed';
-                    }
-                    if (aecFallback) await track.applyConstraints(requested);
+                if (readSettings(track).echoCancellation !== 'all') {
+                    aecFallback ||= allSupported === false ? 'unsupported' : 'not-reported-as-all';
+                    // Also undo legacy engines silently coercing the string to true.
+                    await track.applyConstraints?.(requested);
                 }
                 if (
                     mode !== 'browser' &&
@@ -153,6 +140,7 @@
                     actual: readSettings(track),
                     allSupported,
                     aecFallback,
+                    aecAcquisition: aecFallback ? 'ordinary-fallback' : 'initial-all',
                 });
                 return rawStream;
             } catch (error) {
@@ -504,6 +492,7 @@
                 speechGateRequested: pipeline?.speechGateRequested,
                 allSupported: info.allSupported,
                 aecFallback: info.aecFallback,
+                aecAcquisition: info.aecAcquisition,
                 fallbackReason: info.fallbackReason,
                 restoreError: info.restoreError,
                 lastSwitchFailure,

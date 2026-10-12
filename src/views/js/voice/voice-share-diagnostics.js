@@ -189,7 +189,7 @@
         state.panel.remove();
         panels.delete(tile);
     };
-    const sync = (source) => {
+    const sync = (source, { force = false } = {}) => {
         const tile = source?.tile;
         if (!tile || !source.isScreenSharing) return;
         let state = panels.get(tile);
@@ -209,6 +209,11 @@
             output.textContent =
                 '展开后等待两个采样周期，复现模糊或卡顿再复制。';
             panel.append(summary, note, copy, output);
+            const combined = global.document.createElement('button');
+            combined.type = 'button';
+            combined.textContent = '复制双方诊断与本次日志';
+            combined.addEventListener('click', () => global.VoiceCallDiagnostics?.copyCombined(combined));
+            panel.append(combined);
             panel.addEventListener('dblclick', (event) =>
                 event.stopPropagation()
             );
@@ -222,7 +227,7 @@
             };
             panels.set(tile, state);
             panel.addEventListener('toggle', () => {
-                if (!panel.open) {
+                if (!panel.open && !state.autoSampling) {
                     state.video?.cancelVideoFrameCallback?.(
                         state.frameCallback
                     );
@@ -242,7 +247,8 @@
                 }
             });
         }
-        if (!state.panel.open || state.busy) return;
+        if ((!force && !state.panel.open) || state.busy) return state.pending;
+        if (force) state.autoSampling = true;
         state.busy = true;
         if (state.video !== source.video) {
             state.video?.cancelVideoFrameCallback?.(state.frameCallback);
@@ -254,7 +260,7 @@
                 if (
                     state.disposed ||
                     state.video !== video ||
-                    !state.panel.open
+                    (!state.panel.open && !state.autoSampling)
                 )
                     return;
                 state.presentedFrames = metadata.presentedFrames;
@@ -286,13 +292,31 @@
         const connections = source.isLocal
             ? source.outgoingConnections || []
             : [source.pc];
+        const audio = source.localAudioProcessing;
+        const processing = audio?.state;
         const snapshot = {
             版本: '1.0.5',
-            诊断格式: 3,
+            诊断格式: 4,
             角色: source.isLocal ? '共享者' : '观看者',
             ...(source.isLocal ? {} : { 观看路径: source.screenRoute || 'P2P' }),
             采样时间: new Date().toISOString(),
             SFU服务器统计: source.serverHealth || null,
+            本机音频: {
+                请求模式: audio?.requestedMode || null,
+                实际模式: processing?.mode || null,
+                麦克风增益_百分比: number(audio?.microphoneGain),
+                浏览器降噪: processing?.actual?.noiseSuppression ?? null,
+                AEC: processing?.actual?.echoCancellation ?? null,
+                AEC采集方式: processing?.aecAcquisition || null,
+                AEC回退: processing?.aecFallback || null,
+                自动增益: processing?.actual?.autoGainControl ?? null,
+                非语音门控启用: Boolean(processing?.speechGateSupported && processing?.speechGateEnabled),
+                处理器回退: processing?.fallbackReason || null,
+                最近切换失败: processing?.lastSwitchFailure || null,
+                麦克风存活: processing?.sourceLive ?? null,
+                放大播放: source.outputGain || null,
+            },
+            共享路径变化: source.routeStatus || null,
             ...(source.isLocal
                 ? {
                       采集轨道设置: {
@@ -328,7 +352,7 @@
                     .then(resolve, reject)
                     .finally(() => global.clearTimeout(timer));
             });
-        void Promise.all(
+        state.pending = Promise.all(
             connections.map(async (pc, index) => {
                 if (!pc?.getStats)
                     return { 序号: index + 1, 状态: '统计暂不可用' };
@@ -364,6 +388,8 @@
                     return {
                         序号: index + 1,
                         路径: pc.screenRoute === 'SFU' ? 'SFU' : 'P2P',
+                        连接状态: pc.connectionState || null,
+                        ICE状态: pc.iceConnectionState || null,
                         发送参数核对: source.isLocal ? global.VoiceScreenSendPolicy?.getReadback(pc) || [] : [],
                         状态: streams.length ? '已采样' : '等待视频统计',
                         视频流: streams,
@@ -385,11 +411,14 @@
                         null,
                         2
                     );
+                    state.snapshot = snapshot;
                 }
+                return snapshot;
             })
             .finally(() => {
                 state.busy = false;
             });
+        return state.pending;
     };
     global.VoiceShareDiagnostics = { summarize, sync, remove };
 })(window);

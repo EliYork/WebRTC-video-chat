@@ -737,6 +737,14 @@ export const createScreenSfuService = ({
                 )
             )
                 throw fail('consumer-not-resumed');
+            if (!subscription.ready) {
+                // The first decoded frame may precede binding the visible player.
+                // Ask once for a fresh keyframe at the playback handover.
+                await Promise.all([...subscription.consumers.values()]
+                    .filter((consumer) => consumer.kind === 'video')
+                    .map((consumer) => consumer.requestKeyFrame?.()));
+                assertCurrent(client);
+            }
             subscription.ready = true;
             clearTimeout(subscription.expiry);
             notifyRoutes(publication);

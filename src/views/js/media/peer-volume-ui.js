@@ -5,15 +5,17 @@
     const popoverSelector = '.peer-volume-popover';
     let rootDocument = global.document;
     let documentBinding;
+    let activePopover;
 
     const getPopover = () => rootDocument.querySelector(popoverSelector);
 
     const closePopover = () => {
-        getPopover()?.remove();
+        (activePopover || getPopover())?.remove();
+        activePopover = null;
     };
 
     const clampVolumePercent = (volume) =>
-        Math.max(0, Math.min(100, Math.round(Number(volume))));
+        Number.isFinite(Number(volume)) ? Math.max(0, Math.min(200, Math.round(Number(volume)))) : 100;
 
     const syncVolumeLabel = (range, valueLabel, volumePercent) => {
         const clampedVolume = clampVolumePercent(volumePercent);
@@ -65,7 +67,8 @@
         icon.className = iconClass;
         range.type = 'range';
         range.min = '0';
-        range.max = '100';
+        range.max = '200';
+        range.setAttribute('aria-label', requestedTitle);
         range.step = '5';
         range.disabled = disabled;
         value.className = 'peer-volume-value';
@@ -128,6 +131,7 @@
         onMutedChange,
         onVolumeInput,
         titleText,
+        controls,
     } = {}) => {
         if (!event) {
             return null;
@@ -135,7 +139,7 @@
 
         closePopover();
 
-        const popover = createPopover({
+        const popover = controls?.length ? rootDocument.createElement('div') : createPopover({
             currentVolume,
             disabled,
             emptyText,
@@ -146,8 +150,18 @@
             onVolumeInput,
             titleText,
         });
-
-        rootDocument.body.append(popover);
+        if (controls?.length) {
+            popover.className = 'peer-volume-popover';
+            controls.forEach((control) => {
+                const section = createPopover(control);
+                section.className = 'peer-volume-section';
+                popover.append(section);
+            });
+        }
+        // Fullscreen hides everything outside its top-layer subtree.
+        const fullscreen = rootDocument.fullscreenElement || rootDocument.webkitFullscreenElement;
+        (fullscreen || rootDocument.querySelector('.is-web-fullscreen') || rootDocument.body).append(popover);
+        activePopover = popover;
         positionPopover(popover, event);
 
         return popover;
@@ -176,6 +190,8 @@
             destroy: () => {
                 root.removeEventListener('click', handleDocumentClick);
                 root.removeEventListener('keydown', handleDocumentKeydown);
+                root.removeEventListener('fullscreenchange', closePopover);
+                root.removeEventListener('webkitfullscreenchange', closePopover);
                 closePopover();
                 if (documentBinding === binding) {
                     documentBinding = undefined;
@@ -186,6 +202,8 @@
 
         root.addEventListener('click', handleDocumentClick);
         root.addEventListener('keydown', handleDocumentKeydown);
+        root.addEventListener('fullscreenchange', closePopover);
+        root.addEventListener('webkitfullscreenchange', closePopover);
         documentBinding = binding;
         return binding;
     };

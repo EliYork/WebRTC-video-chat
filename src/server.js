@@ -28,6 +28,7 @@ import {
     switchViewChatRoom,
 } from './utils/ViewChatRoomLifecycle.js';
 import { createVoiceCallSignaling } from './utils/VoiceCallSignaling.js';
+import { createVoiceDiagnosticsRelay } from './utils/VoiceDiagnosticsRelay.js';
 import { readScreenSfuConfig } from './utils/ScreenSfuBudget.js';
 import { createScreenSfuService } from './utils/ScreenSfuService.js';
 import {
@@ -162,6 +163,10 @@ const voiceCallSignaling = createVoiceCallSignaling({
     resolveRoomId: (roomId) => getChannel(roomId)?.slug,
 });
 const screenSfuConfig = readScreenSfuConfig();
+const voiceDiagnostics = createVoiceDiagnosticsRelay({
+    io,
+    getVoiceOwner: (socket) => voiceCallSignaling.getVoiceOwner(socket),
+});
 const screenSfu = createScreenSfuService({
     config: screenSfuConfig,
     getVoiceOwner: (socket) => voiceCallSignaling.getVoiceOwner(socket),
@@ -681,6 +686,10 @@ io.on('connection', (socket) => {
                 acknowledge({ ok: false, reason: 'voice-snapshot-failed' });
             }
         }
+    });
+    socket.on('voice:diagnostics:collect', (acknowledge) => {
+        if (typeof acknowledge !== 'function') return;
+        void voiceDiagnostics.collect(socket).then(acknowledge);
     });
     socket.on('chat:join', (payload) => {
         void handleChatJoin(payload || {}, socket).catch((error) => {

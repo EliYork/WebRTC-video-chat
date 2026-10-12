@@ -11,6 +11,7 @@
         MediaStreamCtor = global.MediaStream,
         onRoutes,
         onRemoteStream,
+        onRouteEvent,
         onState,
         onWarning,
         waitForMedia,
@@ -79,7 +80,15 @@
         let routeBudget;
         let sendServerHealth;
         let state = 'p2p';
+        const routeHistory = [];
+        const recordRoute = (event, reason) => {
+            const allowedReasons = ['server-bandwidth-limit', 'server-bandwidth-priority', 'server-resource-limit', 'publisher-stopped', 'producer-closed', 'transport-closed', 'subscription-timeout', 'sfu-video-not-arriving', 'sfu-timeout', 'unsupported-codec'];
+            routeHistory.push({ time: Date.now(), event, reason: reason ? allowedReasons.includes(reason) ? reason : 'other' : null, serverViewers: routes.size });
+            onRouteEvent?.({ ...routeHistory[routeHistory.length - 1] });
+            if (routeHistory.length > 12) routeHistory.shift();
+        };
         const changeState = (next) => {
+            if (state !== next) recordRoute(next);
             state = next;
             onState?.(next);
         };
@@ -122,6 +131,7 @@
                 return;
             routeBudget = nextBudget;
             routes = nextRoutes;
+            recordRoute('sender-routes-changed');
             onRoutes?.([...routes]);
         };
         const dropSubscription = (id) => {
@@ -216,6 +226,7 @@
         };
         const fallback = (error, token = epoch) => {
             if (token !== epoch) return;
+            recordRoute('fallback', error?.message);
             // Ask the server to release reservations before starting a new session.
             if (current(token)) void request('reset').catch(() => {});
             clearLocal();
@@ -363,6 +374,7 @@
                             entry.consumers.map((consumer) => consumer.track)
                         );
                         entry.attached = true;
+                        recordRoute('subscription-ready');
                         entry.stream = stream;
                         entry.transport = transport;
                         onRemoteStream?.({
@@ -384,6 +396,9 @@
                         monitorSubscription(publication, entry, token);
                     } catch (error) {
                         if (current(token)) {
+                            recordRoute('subscribe-failed', error?.message);
+                            if (['server-bandwidth-limit', 'server-resource-limit'].includes(error?.message))
+                                receiverCooldowns.set(publication.id, Date.now() + 120000);
                             await releaseSubscription(publication.id, token);
                             onWarning?.('该共享使用直连观看', error);
                         }
@@ -608,8 +623,12 @@
                 }
             },
             'sfu:closed': (payload) => {
-                if (guardEvent(payload))
+                if (guardEvent(payload)) {
+                    recordRoute('subscription-closed', payload.reason);
+                    if (payload.reason === 'server-bandwidth-priority')
+                        receiverCooldowns.set(payload.publicationId, Date.now() + 120000);
                     dropSubscription(payload.publicationId);
+                }
             },
             'sfu:health': (payload) => {
                 if (!guardEvent(payload)) return;
@@ -671,6 +690,7 @@
                 clearLocal();
                 session = undefined;
                 receiverCooldowns.clear();
+                routeHistory.length = 0;
             },
             usesServer: (peerId) => routes.has(peerId),
             forgetPeer(peerId) {
@@ -701,6 +721,7 @@
                 state,
                 serverViewers: routes.size,
                 hasUplink: Boolean(publicationId),
+                routeHistory: routeHistory.map((row) => ({ ...row })),
             }),
         };
     };

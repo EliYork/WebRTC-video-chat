@@ -368,11 +368,11 @@ const MODULE_SCRIPTS = [
                 'output volume state must preserve peer volume storage key',
             ],
             [
-                /Math\.min\(\s*1,\s*Math\.max\(0,\s*numericVolume\)\s*\)/,
-                'output volume state must preserve 0-1 volume clamping',
+                /Math\.min\(\s*maximum,\s*Math\.max\(0,\s*numericVolume\)\s*\)/,
+                'output volume state must clamp peer gain to its maximum',
             ],
             [
-                /clampVolume\(outputVolume,\s*1\)\s*\*\s*clampVolume\(peerVolume,\s*1\)/,
+                /clampVolume\(outputVolume,\s*1,\s*1\)\s*\*\s*clampVolume\(peerVolume,\s*1\)/,
                 'output volume state must preserve outputVolume * peerVolume effective volume',
             ],
         ],
@@ -2463,7 +2463,7 @@ assertSourceContains(pageLayoutConfig, 'page layout config contract', [
         'the channel browser must use the channel title and a floating upper-left default',
     ],
     [
-        /MEDIA_CONTROLS_PANEL[\s\S]*?title:\s*'语音与共享'[\s\S]*?defaultLayout:\s*\{\s*x:\s*1,\s*y:\s*13,\s*w:\s*8,\s*h:\s*4\s*\}[\s\S]*?canDrag:\s*true[\s\S]*?canResize:\s*true/,
+        /MEDIA_CONTROLS_PANEL[\s\S]*?title:\s*'语音与共享'[\s\S]*?defaultLayout:\s*\{\s*x:\s*1,\s*y:\s*12,\s*w:\s*8,\s*h:\s*5\s*\}[\s\S]*?canDrag:\s*true[\s\S]*?canResize:\s*true/,
         'mediaControlsPanel must default to a floating left-bottom layout',
     ],
     [
