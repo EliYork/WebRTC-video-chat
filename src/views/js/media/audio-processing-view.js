@@ -34,10 +34,10 @@
         if (state.aecFallback) parts.push('系统 AEC 未确认，使用普通 AEC 请求');
         if (state.fallbackReason) parts.push('处理器不可用，已回退');
         if (state.mode === 'rnnoise') {
-            if (state.speechGateSupported === false) parts.push('键盘抑制不可用，请刷新加载新版处理器');
+            if (state.speechGateSupported === false) parts.push('非语音门控不可用，请刷新加载新版处理器');
             else if (state.speechGateSupported === true) {
-                parts.push(`键盘抑制${flag(state.speechGateEnabled)}`);
-                if (state.speechGateRequested !== state.speechGateEnabled) parts.push('键盘抑制切换中');
+                parts.push(`非语音门控${flag(state.speechGateEnabled)}（讲话时的键盘声由 RNNoise 处理）`);
+                if (state.speechGateRequested !== state.speechGateEnabled) parts.push('非语音门控切换中');
             }
         }
         if (state.restoreError)
@@ -56,7 +56,7 @@
                 : '切换失败，已保留原音频');
         }
         if (snapshot.microphoneGain > 100)
-            parts.push('增益超过 100%，大声讲话可能失真');
+            parts.push('增益超过 100%，残留键盘声也会放大，大声讲话可能失真');
         return parts.join('；');
     };
     global.VoiceAudioProcessingView = { MODE_LABELS, describe };

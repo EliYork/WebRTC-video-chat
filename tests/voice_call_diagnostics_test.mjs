@@ -63,6 +63,21 @@ test('audio interval diagnostics keep zeros, concealment and jitter separate fro
     assert.equal(window.VoiceCallDiagnostics.audioSummary([], row).码率_Mbps, null);
 });
 
+test('capture exclusion and actual playout topology survive sanitizing; quiet residual energy remains measurable', () => {
+    const report = sanitizeVoiceDiagnostic({
+        共享音频采集: { 捕获来源: 'monitor', 实际排除通话声音: null, 排除通话声音支持: true, 音频轨道数: 1, deviceId: 'secret' },
+        输出播放: [{ 语音播放: { 原生静音: true, WebAudio放大: true, 重复播放风险: false, trackId: 'secret' } }],
+    });
+    assert.equal(report.共享音频采集.实际排除通话声音, null);
+    assert.equal(report.输出播放[0].语音播放.重复播放风险, false);
+    assert.doesNotMatch(JSON.stringify(report), /secret/);
+    const { window } = fixture();
+    const result = window.VoiceCallDiagnostics.audioSummary([], {
+        type: 'inbound-rtp', timestamp: 2000, totalSamplesDuration: 2, totalAudioEnergy: 0.000002,
+    }, { timestamp: 1000, source: { totalSamplesDuration: 1, totalAudioEnergy: 0.000001 } });
+    assert.equal(result.能量均方根, 0.001);
+});
+
 test('collection ignores stale replies and reports unavailable storage without failing call', async () => {
     let finish;
     const pc = { getStats: () => new Promise((resolve) => { finish = resolve; }) };

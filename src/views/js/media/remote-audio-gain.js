@@ -102,6 +102,13 @@
             getOutputTarget: (element) => branches.has(element) ? context : null,
             activateOutput,
             getSnapshot: () => ({ amplifiedPlayers: branches.size, contextState: context?.state || null }),
+            describePlayer: (element) => ({
+                播放器存在: Boolean(element),
+                音频轨道数: (element?.srcObject?.getAudioTracks?.() || []).filter((track) => track.readyState === 'live').length,
+                原生静音: element?.muted ?? null,
+                WebAudio放大: branches.has(element),
+                重复播放风险: branches.has(element) && element?.muted === false,
+            }),
             destroy: () => [...branches.keys()].forEach(release),
         };
     };

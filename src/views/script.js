@@ -391,6 +391,7 @@ const getDiagnosticQualitySource = (peerId) => {
                 },
                 routeStatus: screenSfuRuntime.snapshot(),
                 outputGain: remoteAudioGain.getSnapshot(),
+                captureAudio: voiceMediaLifecycle.describeScreenAudio(currentScreenStream, navigator.mediaDevices?.getSupportedConstraints?.()),
                 shareOptions: currentScreenShareSession?.shareOptions,
                 codecDecision: currentScreenShareSession?.codecDecision,
                 serverHealth: screenSfuRuntime.getSendHealth(),
@@ -4210,6 +4211,7 @@ const startScreenShare = async (peer, options = {}) => {
         async () => {
             const result = await voiceMediaLifecycle.requestScreenCapture({
                 getDisplayMedia: requestDisplayMedia,
+                supportedConstraints: navigator.mediaDevices?.getSupportedConstraints?.(),
                 options,
             });
             if (result.ok) {
@@ -5055,9 +5057,14 @@ callDiagnostics = window.VoiceCallDiagnostics.createRuntime({
                 放大播放: remoteAudioGain.getSnapshot(),
             },
             共享路径变化: screenSfuRuntime.snapshot(),
+            共享音频采集: voiceMediaLifecycle.describeScreenAudio(currentScreenStream, navigator.mediaDevices?.getSupportedConstraints?.()),
             输出播放: voicePeerRegistry.getPeerIds().map((peerId, index) => {
                 const screen = screenShareVolumeController.getSnapshot(peerId);
+                const tile = document.getElementById(peerId);
+                const primary = tile?.querySelector('video, audio:not(.screen-share-audio)');
                 return { 序号: index + 1, 语音音量_百分比: Math.round(getPeerVolume(peerId) * 100),
+                    语音播放: remoteAudioGain.describePlayer(primary),
+                    共享播放: remoteAudioGain.describePlayer(screen?.element),
                     有效音量_百分比: outputMuted ? 0 : Math.round(getPeerVolume(peerId) * outputVolume * 100),
                     共享音量_百分比: Math.round((screen?.volume ?? 1) * 100), 共享静音: screen?.muted ?? false };
             }),

@@ -24,7 +24,7 @@
             '区间丢包率_%': delta('packetsReceived') !== null && delta('packetsLost') !== null && delta('packetsReceived') + delta('packetsLost') > 0 ? finite(delta('packetsLost') * 100 / (delta('packetsReceived') + delta('packetsLost'))) : null,
             抖动_ms: finite((sending ? remote?.jitter : report.jitter) * 1000),
             音量: finite(source?.audioLevel),
-            能量均方根: duration > 0 && energy >= 0 ? finite(Math.sqrt(energy / duration)) : null,
+            能量均方根: duration > 0 && energy >= 0 ? Math.round(Math.sqrt(energy / duration) * 1000000) / 1000000 : null,
             每样本缓冲平均等待_ms: avg('jitterBufferDelay', 'jitterBufferEmittedCount', 1000),
             每样本目标缓冲等待_ms: avg('jitterBufferTargetDelay', 'jitterBufferEmittedCount', 1000),
             '隐藏样本比例_%': count > 0 && delta('concealedSamples') !== null ? finite(delta('concealedSamples') * 100 / count) : null,

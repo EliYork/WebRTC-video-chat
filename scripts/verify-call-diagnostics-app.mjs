@@ -67,6 +67,17 @@ try {
     assert.ok(combined.本机.当前状态.连接.some((pc) => pc.音频流?.length > 0));
     assert.doesNotMatch(JSON.stringify(combined), /deviceId|peerId|trackIdentifier|candidate-pair|192\.168\./);
     assert.equal(combined.对端[0].数据.当前状态.本机音频.放大播放.amplifiedPlayers, 1);
+    const player = combined.对端[0].数据.当前状态.输出播放[0].语音播放;
+    assert.equal(player.WebAudio放大, true);
+    assert.equal(player.原生静音, true);
+    assert.equal(player.重复播放风险, false);
+    assert.equal(player.音频轨道数, 1);
+    const support = await pages[0].evaluate(() => {
+        const supported = navigator.mediaDevices.getSupportedConstraints();
+        return { supported: supported.restrictOwnAudio === true,
+            audio: window.VoiceMediaLifecycle.buildScreenCaptureConstraints({}, supported).audio };
+    });
+    assert.deepEqual(support.audio, support.supported ? { restrictOwnAudio: true } : true);
     // Measure real browser gain output with a synthetic tone and AnalyserNodes.
     const gain = await pages[1].evaluate(async () => {
         const sourceContext = new AudioContext();

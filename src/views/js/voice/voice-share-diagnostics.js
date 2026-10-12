@@ -317,6 +317,7 @@
                 放大播放: source.outputGain || null,
             },
             共享路径变化: source.routeStatus || null,
+            ...(source.isLocal ? { 共享音频采集: source.captureAudio || global.VoiceMediaLifecycle?.describeScreenAudio(source.stream) || null } : {}),
             ...(source.isLocal
                 ? {
                       采集轨道设置: {

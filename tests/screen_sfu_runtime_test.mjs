@@ -3,6 +3,7 @@ import test from 'node:test';
 import vm from 'node:vm';
 import { readFileSync } from 'node:fs';
 import { StrictStream, StrictTrack } from './helpers/strict_media_peer.mjs';
+/* eslint-disable no-await-in-loop -- Sequential lifecycle operations and microtask draining. */
 
 const load = (overrides = {}) => {
     const window = {
@@ -255,4 +256,20 @@ test('bandwidth admission fallback is logged, repeated publication waits for coo
     assert.doesNotMatch(JSON.stringify(runtime.snapshot()), /private-publication|source/);
     runtime.leave();
     assert.equal(runtime.snapshot().routeHistory.length, 0);
+});
+
+test('SFU budget updates apply without logging fictional path switches; close reason remains specific', async (t) => {
+    const f = await publishFixture();
+    t.after(() => f.runtime.leave());
+    const event = { publicationId: 'pub', roomId: 'game', voiceSessionGeneration: 1, peerIds: ['viewer'] };
+    f.handlers['sfu:routes']({ ...event, uplinkBitrate: 1000000 });
+    const before = JSON.stringify(f.runtime.snapshot().routeHistory);
+    f.handlers['sfu:routes']({ ...event, uplinkBitrate: 2000000 });
+    assert.equal(JSON.stringify(f.runtime.snapshot().routeHistory), before);
+    f.handlers['sfu:routes']({ ...event, peerIds: [], uplinkBitrate: 3000000 });
+    assert.equal(f.runtime.snapshot().routeHistory.at(-1).serverViewers, 0);
+    f.handlers['sfu:closed']({ ...event, reason: 'closed' });
+    assert.equal(f.runtime.snapshot().routeHistory.at(-1).reason, 'closed');
+    f.handlers['sfu:closed']({ ...event, reason: 'private error with host address' });
+    assert.equal(f.runtime.snapshot().routeHistory.at(-1).reason, 'other');
 });

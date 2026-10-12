@@ -1068,14 +1068,14 @@ test('keyboard suppression shows actual processor acknowledgement and preserves 
     runtime.init();
     assert.equal(fixture.refs.speechGateToggle.checked, true);
     assert.equal(fixture.refs.speechGateToggle.disabled, false);
-    assert.match(fixture.refs.processingStatus.textContent, /键盘抑制开/);
+    assert.match(fixture.refs.processingStatus.textContent, /非语音门控开/);
     stub.results.set('setRnnoiseSpeechGate', false);
     fixture.refs.speechGateToggle.checked = false;
     fixture.refs.speechGateToggle.dispatchEvent(new FakeEvent('change'));
     assert.equal(stub.calls.get('setRnnoiseSpeechGate')[0][0], false);
     assert.equal(fixture.refs.speechGateToggle.checked, true);
     stub.emit({ rnnoiseSpeechGateEnabled: false, audioProcessing: { mode: 'rnnoise', actual: {}, speechGateSupported: true, speechGateEnabled: false, speechGateRequested: false } });
-    assert.match(fixture.refs.processingStatus.textContent, /键盘抑制关/);
+    assert.match(fixture.refs.processingStatus.textContent, /非语音门控关/);
     stub.emit({ requestedNoiseMode: 'browser' });
     assert.equal(fixture.refs.speechGateToggle.disabled, true);
     runtime.destroy();

@@ -42,6 +42,7 @@ function fixture() {
         emitScreenShareState() {}, setLocalVideoStream() {}, getActiveStream: () => captured,
         sendVideoTrackToPeers() {}, updateScreenP2pBudget() {}, restoreCameraAfterScreenShare() {},
     });
+    context.navigator = { mediaDevices: { getSupportedConstraints: () => ({ restrictOwnAudio: true }) } };
     vm.runInContext(`
         let screenShareRequestPending = false, sharingNow = false;
         let currentScreenStream, currentScreenShareSession, activeVideoTrack, screenCodecAbort;

@@ -19,6 +19,22 @@
         'original',
     ]);
 
+    const describeScreenAudio = (stream, supportedConstraints = {}) => {
+        const tracks = stream?.getAudioTracks?.() || [];
+        const settings = tracks.map((track) => track.getSettings?.() || {});
+        const applied = tracks.length && settings.every((value) => value.restrictOwnAudio === true);
+        const surface = stream?.getVideoTracks?.()[0]?.getSettings?.().displaySurface;
+        return {
+            捕获来源: ['monitor', 'window', 'browser'].includes(surface) ? surface : null,
+            音频轨道数: tracks.length,
+            排除通话声音支持: supportedConstraints.restrictOwnAudio === true,
+            请求排除通话声音: Boolean(stream && supportedConstraints.restrictOwnAudio === true),
+            实际排除通话声音: tracks.length ? (applied ? true : settings.every((value) => value.restrictOwnAudio === false) ? false : null) : null,
+            共享音频状态: !tracks.length ? '未共享声音' : tracks.some((track) => track.readyState !== 'live') ? '音频轨道已结束' :
+                applied ? '浏览器已确认排除本通话页面声音；仍需试听' : '未确认排除通话声音；共享系统声音可能回传观看者语音，优先共享独立标签页或窗口声音',
+        };
+    };
+
     const normalizeScreenShareOptions = (options = {}) => {
         const requestedFrameRate = Number(options.frameRate);
         const requestedResolution = options.resolutionPreset;
@@ -37,17 +53,24 @@
         };
     };
 
-    const buildScreenCaptureConstraints = (options = {}) => {
+    const buildScreenCaptureConstraints = (options = {}, supportedConstraints = {}) => {
         const { frameRate, resolutionPreset } =
             normalizeScreenShareOptions(options);
         const frameRateConstraint = {
             ideal: frameRate,
             max: frameRate,
         };
+        // Best effort only: unsupported browsers ignore picker hints. Never
+        // disable game audio or local playback to hide a conference echo.
+        const audioOptions = {
+            audio: supportedConstraints.restrictOwnAudio === true ? { restrictOwnAudio: true } : true,
+            selfBrowserSurface: 'exclude',
+            windowAudio: 'window',
+        };
 
         if (resolutionPreset === 'original') {
             return {
-                audio: true,
+                ...audioOptions,
                 video: {
                     frameRate: frameRateConstraint,
                 },
@@ -56,7 +79,7 @@
 
         if (resolutionPreset === 'auto') {
             return {
-                audio: true,
+                ...audioOptions,
                 video: {
                     frameRate: frameRateConstraint,
                     height: { ideal: 1080 },
@@ -69,7 +92,7 @@
             SCREEN_SHARE_RESOLUTIONS[resolutionPreset] ||
             SCREEN_SHARE_RESOLUTIONS[SCREEN_SHARE_DEFAULTS.resolutionPreset];
         return {
-            audio: true,
+            ...audioOptions,
             video: {
                 frameRate: frameRateConstraint,
                 height: {
@@ -201,6 +224,7 @@
     const requestScreenCapture = async ({
         constraints,
         getDisplayMedia,
+        supportedConstraints,
         onPendingChange,
         onWarning,
         options,
@@ -212,7 +236,7 @@
         onPendingChange?.(true);
         try {
             const stream = await getDisplayMedia(
-                constraints || buildScreenCaptureConstraints(options)
+                constraints || buildScreenCaptureConstraints(options, supportedConstraints)
             );
             stream?.getVideoTracks?.().forEach((track) =>
                 global.VoiceScreenSendPolicy?.register(track, normalizeScreenShareOptions(options))
@@ -308,6 +332,7 @@
         SCREEN_SHARE_RESOLUTION_PRESETS,
         attachAndPlayMedia,
         buildScreenCaptureConstraints,
+        describeScreenAudio,
         clearMediaElement,
         createMediaSnapshot,
         createPageTeardown,

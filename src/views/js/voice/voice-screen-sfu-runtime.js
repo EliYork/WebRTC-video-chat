@@ -82,7 +82,7 @@
         let state = 'p2p';
         const routeHistory = [];
         const recordRoute = (event, reason) => {
-            const allowedReasons = ['server-bandwidth-limit', 'server-bandwidth-priority', 'server-resource-limit', 'publisher-stopped', 'producer-closed', 'transport-closed', 'subscription-timeout', 'sfu-video-not-arriving', 'sfu-timeout', 'unsupported-codec'];
+            const allowedReasons = ['server-bandwidth-limit', 'server-bandwidth-priority', 'server-resource-limit', 'publisher-stopped', 'producer-closed', 'transport-closed', 'subscription-timeout', 'sfu-video-not-arriving', 'sfu-timeout', 'unsupported-codec', 'closed', 'session-left', 'transport-failed', 'sfu-transport-failed', 'receiver-video-stalled', 'receiver-stats-timeout', 'receiver-ready-failed', 'receiver-unsubscribed'];
             routeHistory.push({ time: Date.now(), event, reason: reason ? allowedReasons.includes(reason) ? reason : 'other' : null, serverViewers: routes.size });
             onRouteEvent?.({ ...routeHistory[routeHistory.length - 1] });
             if (routeHistory.length > 12) routeHistory.shift();
@@ -123,6 +123,7 @@
         const updateRoutes = (next) => {
             const nextRoutes = new Set(next);
             const nextBudget = Math.round(uplinkBitrate / 500000);
+            const membersChanged = nextRoutes.size !== routes.size || [...nextRoutes].some((peerId) => !routes.has(peerId));
             if (
                 nextBudget === routeBudget &&
                 nextRoutes.size === routes.size &&
@@ -131,7 +132,8 @@
                 return;
             routeBudget = nextBudget;
             routes = nextRoutes;
-            recordRoute('sender-routes-changed');
+            // Budget changes still update senders, but are not path switches.
+            if (membersChanged) recordRoute('sender-routes-changed');
             onRoutes?.([...routes]);
         };
         const dropSubscription = (id) => {
@@ -172,7 +174,7 @@
                     if (entry.slowSamples >= 3) {
                         entry.slowSamples = 0;
                         receiverCooldowns.set(publication.id, Date.now() + 120000);
-                        if (await releaseSubscription(publication.id, token))
+                        if (await releaseSubscription(publication.id, token, 'receiver-video-stalled'))
                             onWarning?.('服务器画面持续卡顿，已切换直连');
                         return;
                     }
@@ -181,7 +183,7 @@
                         entry.statsFailures = (entry.statsFailures || 0) + 1;
                         if (entry.statsFailures >= 3) {
                             receiverCooldowns.set(publication.id, Date.now() + 120000);
-                            if (await releaseSubscription(publication.id, token))
+                            if (await releaseSubscription(publication.id, token, 'receiver-stats-timeout'))
                                 onWarning?.('服务器共享统计无响应，已切换直连', error);
                             return;
                         }
@@ -234,7 +236,8 @@
             onWarning?.('服务器共享暂不可用，已回到直连', error);
             retryLater();
         };
-        const releaseSubscription = async (id, token = epoch) => {
+        const releaseSubscription = async (id, token = epoch, reason = 'receiver-unsubscribed') => {
+            recordRoute('receiver-release', reason);
             dropSubscription(id);
             try {
                 await request('unsubscribe', { publicationId: id }, token);
@@ -399,7 +402,7 @@
                             recordRoute('subscribe-failed', error?.message);
                             if (['server-bandwidth-limit', 'server-resource-limit'].includes(error?.message))
                                 receiverCooldowns.set(publication.id, Date.now() + 120000);
-                            await releaseSubscription(publication.id, token);
+                            await releaseSubscription(publication.id, token, 'receiver-ready-failed');
                             onWarning?.('该共享使用直连观看', error);
                         }
                     }
