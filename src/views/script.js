@@ -410,6 +410,8 @@ let noiseRawStream = null;
 let noiseMode = 'raw';
 const audioProcessingRuntime = window.VoiceAudioProcessing.createRuntime({
     getGain: () => noiseSettingsUI.getMicGain(),
+    getSpeechGateEnabled: () => noiseSettingsUI.getRnnoiseSpeechGateEnabled(),
+    onProcessingStatus: () => notifyMediaDock(),
     supportsRnnoise: isAiExperimentSupported,
     stopStream: (stream) => localMediaTrackStopper.stopStream(stream),
     onSourceEnded: (stream) => {
@@ -643,6 +645,7 @@ const getMediaDockSnapshot = () => {
         ),
         microphoneError: mediaErrors.microphone,
         microphoneGain: noiseSettingsUI.getMicGain(),
+        rnnoiseSpeechGateEnabled: noiseSettingsUI.getRnnoiseSpeechGateEnabled(),
         microphonePending: Boolean(microphoneOperation.promise),
         microphonePermissionState:
             micPermissionDenied ||
@@ -5109,6 +5112,14 @@ mediaDockAdapter = mediaDockAdapterApi.createMediaDockAdapter({
         startScreenShare: (options) => startScreenShare(currentPeer, options),
         stopScreenShare: () => stopScreenShare(currentPeer),
         selectNoiseMode: (mode) => audioSettingsController.select({ mode: window.VoiceAudioProcessing.normalizeMode(mode) }),
+        setRnnoiseSpeechGate: (enabled) => {
+            const previous = noiseSettingsUI.getRnnoiseSpeechGateEnabled();
+            noiseSettingsUI.setRnnoiseSpeechGateEnabled(enabled);
+            const ok = audioProcessingRuntime.setSpeechGate(enabled);
+            if (!ok) noiseSettingsUI.setRnnoiseSpeechGateEnabled(previous);
+            notifyMediaDock();
+            return ok;
+        },
         toggleAiNoiseSuppression: () => audioSettingsController.select({
             mode: audioSettingsController.snapshot().requested.mode === 'rnnoise' ? 'browser' : 'rnnoise',
         }),

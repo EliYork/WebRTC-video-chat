@@ -47,6 +47,7 @@
         noiseStatus: '#noiseStatusText',
         noiseToggle: '#noiseToggle',
         noiseModeSelect: '[data-audio-noise-mode]',
+        speechGateToggle: '[data-rnnoise-speech-gate]',
         processingStatus: '[data-audio-processing-status]',
         outputButton: '#toggleOutput',
         outputDeviceStatus: '#outputDeviceStatus',
@@ -316,6 +317,13 @@
         };
         const renderNoise = (snapshot) => {
             const modeSelect = refs.noiseModeSelect;
+            if (refs.speechGateToggle) {
+                refs.speechGateToggle.checked = snapshot.rnnoiseSpeechGateEnabled !== false;
+                refs.speechGateToggle.disabled = snapshot.requestedNoiseMode !== 'rnnoise' ||
+                    Boolean(snapshot.audioSettingsPending) ||
+                    typeof adapter.setRnnoiseSpeechGate !== 'function' ||
+                    (snapshot.audioProcessing?.mode === 'rnnoise' && snapshot.audioProcessing.speechGateSupported === false);
+            }
             if (modeSelect) {
                 modeSelect.value = snapshot.requestedNoiseMode || 'browser';
                 const rnnoiseOption = modeSelect.querySelector('[value="rnnoise"]');
@@ -899,6 +907,10 @@
             listen(refs.noiseModeSelect, 'change', (event) => {
                 // The controller handles rapid selections across mode and mic.
                 void adapter.selectNoiseMode?.(event.target.value);
+            });
+            listen(refs.speechGateToggle, 'change', (event) => {
+                void adapter.setRnnoiseSpeechGate?.(event.target.checked);
+                render(adapter.getSnapshot());
             });
             listen(refs.noiseToggle, 'click', handleNoiseClick);
             listen(refs.noiseToggle, 'keydown', handleKeyboardActivation);

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import vm from 'node:vm';
+import { createSpeechGate } from '../src/views/audio-worklet/rnnoise-speech-gate.js';
 
 const worklet = readFileSync(
     new URL('../src/views/audio-worklet/rnnoise-processor.js', import.meta.url),
@@ -18,6 +19,7 @@ const fixture = (reject = false) => {
         destroyed = 0;
     const messages = [];
     const context = {
+        createSpeechGate,
         Se: 'rnnoise',
         q: {
             loadBinary: () =>
@@ -84,4 +86,19 @@ test('destroy before initialization releases the late RNNoise state and ends pro
     assert.equal(f.messages.length, 0);
     assert.equal(f.destroyed, 1);
     assert.equal(f.processor.process([], []), false);
+});
+
+test('speech-gate ready capability and live toggle acknowledgement are explicit', async () => {
+    const f = fixture();
+    f.finish();
+    await flush();
+    assert.equal(f.messages[0].speechGate, true);
+    assert.equal(f.messages[0].speechGateEnabled, true);
+    f.processor.destroyMessage({ data: { type: 'speech-gate', enabled: false, revision: 2 } });
+    assert.equal(f.messages.at(-1).enabled, false);
+    assert.equal(f.messages.at(-1).revision, 2);
+    f.processor.destroyMessage({ data: 'destroy' });
+    const count = f.messages.length;
+    f.processor.destroyMessage({ data: { type: 'speech-gate', enabled: true, revision: 3 } });
+    assert.equal(f.messages.length, count);
 });

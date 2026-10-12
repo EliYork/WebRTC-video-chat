@@ -35,12 +35,14 @@
         createContext = () => new global.AudioContext({ sampleRate: 48000 }),
         createGain = (context, gain) => new global.GainNode(context, { gain }),
         getGain = () => 100,
+        getSpeechGateEnabled = () => true,
         supportsRnnoise = () => typeof global.AudioWorkletNode === 'function',
         loadLibrary = () => import('/vendor/web-noise-suppressor.js'),
         stopStream = (stream) =>
             stream?.getTracks().forEach((track) => track.stop()),
         onSourceEnded,
         onProcessorFailure,
+        onProcessingStatus,
     } = {}) => {
         const pipelines = new WeakMap();
         const captures = new WeakMap();
@@ -171,7 +173,7 @@
             bounded(
                 new Promise((resolve, reject) => {
                     node.port.onmessage = ({ data }) => {
-                        if (data?.type === 'ready') resolve();
+                        if (data?.type === 'ready') resolve(data);
                         if (data?.type === 'error')
                             reject(new Error('rnnoise-init-failed'));
                     };
@@ -192,6 +194,19 @@
                 /* already detached */
             }
         };
+        const configureSpeechGate = (pipeline, enabled) => {
+            if (!pipeline?.processor || pipeline.mode === 'off') return true;
+            if (!pipeline.speechGateSupported) return false;
+            const revision = (pipeline.speechGateRevision || 0) + 1;
+            try {
+                pipeline.processor.port.postMessage({ type: 'speech-gate', enabled: Boolean(enabled), revision });
+                pipeline.speechGateRequested = Boolean(enabled);
+                pipeline.speechGateRevision = revision;
+                return true;
+            } catch {
+                return false;
+            }
+        };
         const releaseBranch = (pipeline, { preserveRaw = false } = {}) => {
             pipeline.rawTrack?.removeEventListener?.(
                 'ended',
@@ -199,6 +214,7 @@
             );
             if (pipeline.processor) {
                 pipeline.processor.onprocessorerror = null;
+                pipeline.processor.port.onmessage = null;
                 try {
                     pipeline.processor.destroy?.();
                 } catch {
@@ -289,7 +305,17 @@
                     });
                     pipeline.processor.channelCount = 1;
                     pipeline.processor.channelCountMode = 'explicit';
-                    await waitForProcessor(pipeline.processor);
+                    const ready = await waitForProcessor(pipeline.processor);
+                    pipeline.speechGateSupported = ready.speechGate === true;
+                    pipeline.speechGateEnabled = pipeline.speechGateSupported ? ready.speechGateEnabled === true : false;
+                    pipeline.processor.port.onmessage = ({ data }) => {
+                        if (data?.type !== 'speech-gate-state' || data.revision !== pipeline.speechGateRevision) return;
+                        pipeline.speechGateEnabled = data.enabled === true;
+                        if (active === pipeline) onProcessingStatus?.();
+                    };
+                    if (pipeline.speechGateSupported && !configureSpeechGate(pipeline, getSpeechGateEnabled())) {
+                        throw new Error('rnnoise-speech-gate-config-failed');
+                    }
                     pipeline.processor.onprocessorerror = () => {
                         pipeline.processorFailed = true;
                         if (active === pipeline) onProcessorFailure?.(pipeline);
@@ -404,6 +430,9 @@
                 throw new Error('audio-branch-noise-settings-changed');
             }
             const previous = active;
+            if (candidate.speechGateSupported && !configureSpeechGate(candidate, getSpeechGateEnabled())) {
+                throw new Error('rnnoise-speech-gate-config-failed');
+            }
             candidate.gain.gain.value = Math.max(0, getGain() / 100);
             if (
                 previous &&
@@ -446,6 +475,9 @@
                         stream?.getAudioTracks()[0]
                 ),
                 mode: pipeline?.mode || 'raw',
+                speechGateSupported: pipeline?.speechGateSupported || false,
+                speechGateEnabled: Boolean(pipeline?.processor && pipeline.speechGateEnabled),
+                speechGateRequested: pipeline?.speechGateRequested,
                 allSupported: info.allSupported,
                 aecFallback: info.aecFallback,
                 fallbackReason: info.fallbackReason,
@@ -487,6 +519,7 @@
                 disconnect(pipeline.source);
                 disconnect(pipeline.processor);
                 pipeline.processor.onprocessorerror = null;
+                pipeline.processor.port.onmessage = null;
                 pipeline.processor.destroy?.();
                 pipeline.processor = null;
                 pipeline.source.connect(pipeline.gain);
@@ -497,6 +530,7 @@
             setGain: (percent) => {
                 if (active) active.gain.gain.value = Math.max(0, percent / 100);
             },
+            setSpeechGate: (enabled) => configureSpeechGate(active, enabled),
         };
     };
     global.VoiceAudioProcessing = {

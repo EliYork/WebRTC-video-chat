@@ -358,6 +358,7 @@ const createFixture = () => {
             id: 'aiNoiseStatusText',
         }),
         noiseModeSelect: createElement(document, 'select', { data: { 'audio-noise-mode': '' } }),
+        speechGateToggle: createElement(document, 'input', { data: { 'rnnoise-speech-gate': '' } }),
         processingStatus: createElement(document, 'p', { data: { 'audio-processing-status': '' } }),
         sessionButton: createButton(document, 'destroyPeer'),
         statusMessages: createElement(document, 'div', {
@@ -470,6 +471,7 @@ const createFixture = () => {
         refs.micGainSlider,
         refs.micGainValue,
         refs.noiseModeSelect,
+        refs.speechGateToggle,
         refs.processingStatus,
     ]);
     const cameraPopover = createPopover('camera', [
@@ -662,6 +664,7 @@ const createAdapterStub = (initialState = {}) => {
         selectOutput: (...args) => record('selectOutput', ...args),
         setMicrophoneGain: (...args) => record('setMicrophoneGain', ...args),
         selectNoiseMode: (...args) => record('selectNoiseMode', ...args),
+        setRnnoiseSpeechGate: (...args) => record('setRnnoiseSpeechGate', ...args),
         setOutputMuted: (...args) => record('setOutputMuted', ...args),
         setOutputVolume: (...args) => record('setOutputVolume', ...args),
         startScreenShare: (...args) => record('startScreenShare', ...args),
@@ -1045,5 +1048,29 @@ test('noise modes render requested and actual AEC/NS separately and rapid select
     assert.equal(fixture.refs.noiseModeSelect.value, 'browser');
     assert.match(fixture.refs.processingStatus.textContent, /切换失败/);
     assert.doesNotMatch(fixture.root.textContent, /重进房间/);
+    runtime.destroy();
+});
+
+test('keyboard suppression shows actual processor acknowledgement and preserves a failed toggle preference', () => {
+    const fixture = createFixture();
+    const { runtimeApi } = loadApis(fixture);
+    const stub = createAdapterStub({
+        requestedNoiseMode: 'rnnoise', rnnoiseSpeechGateEnabled: true,
+        audioProcessing: { mode: 'rnnoise', actual: {}, speechGateSupported: true, speechGateEnabled: true, speechGateRequested: true },
+    });
+    const runtime = runtimeApi.createMediaDockRuntime({ root: fixture.root, adapter: stub.adapter });
+    runtime.init();
+    assert.equal(fixture.refs.speechGateToggle.checked, true);
+    assert.equal(fixture.refs.speechGateToggle.disabled, false);
+    assert.match(fixture.refs.processingStatus.textContent, /键盘抑制开/);
+    stub.results.set('setRnnoiseSpeechGate', false);
+    fixture.refs.speechGateToggle.checked = false;
+    fixture.refs.speechGateToggle.dispatchEvent(new FakeEvent('change'));
+    assert.equal(stub.calls.get('setRnnoiseSpeechGate')[0][0], false);
+    assert.equal(fixture.refs.speechGateToggle.checked, true);
+    stub.emit({ rnnoiseSpeechGateEnabled: false, audioProcessing: { mode: 'rnnoise', actual: {}, speechGateSupported: true, speechGateEnabled: false, speechGateRequested: false } });
+    assert.match(fixture.refs.processingStatus.textContent, /键盘抑制关/);
+    stub.emit({ requestedNoiseMode: 'browser' });
+    assert.equal(fixture.refs.speechGateToggle.disabled, true);
     runtime.destroy();
 });

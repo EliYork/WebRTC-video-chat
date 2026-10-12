@@ -22,6 +22,7 @@
         'recoverAudio',
         'setMicrophoneGain',
         'selectNoiseMode',
+        'setRnnoiseSpeechGate',
         'toggleAiNoiseSuppression',
         'toggleNoiseSuppression',
     ]);

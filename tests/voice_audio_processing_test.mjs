@@ -14,6 +14,7 @@ const fixture = (options = {}) => {
         failProcessor = false,
         captureGate,
         gain = 100,
+        speechGate = true,
         loads = 0;
     const node = () => ({
         links: [],
@@ -44,6 +45,7 @@ const fixture = (options = {}) => {
     const runtime = window.VoiceAudioProcessing.createRuntime({
         stopStream,
         getGain: () => gain,
+        getSpeechGateEnabled: () => speechGate,
         supportsRnnoise: () => true,
         mediaDevices: {
             getSupportedConstraints: () => ({
@@ -139,12 +141,19 @@ const fixture = (options = {}) => {
                     constructor(_, config) {
                         Object.assign(this, node());
                         this.config = config;
-                        this.port = { start() {} };
+                        this.port = {
+                            start() {},
+                            postMessage: (message) => queueMicrotask(() => this.port.onmessage?.({
+                                data: { type: 'speech-gate-state', enabled: message.enabled, revision: message.revision },
+                            })),
+                        };
                         processors.push(this);
                         queueMicrotask(() =>
                             this.port.onmessage?.({
                                 data: {
                                     type: failProcessor ? 'error' : 'ready',
+                                    speechGate: options.noSpeechGate !== true,
+                                    speechGateEnabled: true,
                                 },
                             })
                         );
@@ -171,6 +180,10 @@ const fixture = (options = {}) => {
         setGain: (value) => {
             gain = value;
             runtime.setGain(value);
+        },
+        setSpeechGate: (value) => {
+            speechGate = value;
+            return runtime.setSpeechGate(value);
         },
         failCapture: (name) => {
             failCapture = name;
@@ -443,5 +456,51 @@ test('a cancelled late permission result cannot configure or dispose the newly j
     assert.equal(f.captures[0].track.readyState, 'ended');
     assert.equal(f.captures[1].track.readyState, 'live');
     assert.equal(f.contexts[0].state, 'running');
+    f.runtime.dispose(stream);
+});
+
+test('VAD keyboard suppression toggles on the existing processor and survives device changes/mute', async () => {
+    const f = fixture();
+    const stream = await f.start('rnnoise');
+    stream.getAudioTracks()[0].enabled = false;
+    await flush();
+    assert.equal(f.runtime.diagnostics(stream).speechGateEnabled, true);
+    assert.equal(f.setSpeechGate(false), true);
+    assert.equal(f.setSpeechGate(true), true);
+    assert.equal(f.setSpeechGate(false), true);
+    await flush();
+    assert.equal(f.runtime.diagnostics(stream).speechGateEnabled, false);
+    assert.equal(f.processors.length, 1);
+    assert.equal(await f.start('rnnoise', 'b'), stream);
+    await flush();
+    assert.equal(f.runtime.diagnostics(stream).speechGateEnabled, false);
+    assert.equal(stream.getAudioTracks()[0].enabled, false);
+    f.runtime.bypassFailedProcessor(stream);
+    assert.equal(f.runtime.diagnostics(stream).speechGateEnabled, false);
+    assert.equal(f.runtime.diagnostics(stream).mode, 'off');
+    f.runtime.dispose(stream);
+});
+
+test('an old worklet cannot be reported as keyboard suppression active', async () => {
+    const f = fixture({ noSpeechGate: true });
+    const stream = await f.start('rnnoise');
+    assert.equal(f.runtime.diagnostics(stream).speechGateSupported, false);
+    assert.equal(f.setSpeechGate(true), false);
+    f.runtime.dispose(stream);
+});
+
+test('the latest gate preference wins when a prepared device branch is adopted; a failed message keeps the active setting', async () => {
+    const f = fixture();
+    const stream = await f.start('rnnoise');
+    const candidate = await f.runtime.stage({ mode: 'rnnoise', deviceId: 'b' });
+    f.setSpeechGate(false);
+    assert.equal(f.runtime.adopt(candidate), stream);
+    await flush();
+    assert.equal(f.runtime.diagnostics(stream).speechGateEnabled, false);
+    const processor = f.runtime.pipelines.get(stream).processor;
+    processor.port.postMessage = () => { throw new Error('port-closed'); };
+    assert.equal(f.runtime.setSpeechGate(true), false);
+    assert.equal(f.runtime.diagnostics(stream).speechGateEnabled, false);
+    assert.equal(f.runtime.diagnostics(stream).speechGateRequested, false);
     f.runtime.dispose(stream);
 });

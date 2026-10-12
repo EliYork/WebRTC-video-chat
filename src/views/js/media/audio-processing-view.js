@@ -33,6 +33,13 @@
         ];
         if (state.aecFallback) parts.push('系统 AEC 未确认，使用普通 AEC 请求');
         if (state.fallbackReason) parts.push('处理器不可用，已回退');
+        if (state.mode === 'rnnoise') {
+            if (state.speechGateSupported === false) parts.push('键盘抑制不可用，请刷新加载新版处理器');
+            else if (state.speechGateSupported === true) {
+                parts.push(`键盘抑制${flag(state.speechGateEnabled)}`);
+                if (state.speechGateRequested !== state.speechGateEnabled) parts.push('键盘抑制切换中');
+            }
+        }
         if (state.restoreError)
             parts.push('原采集设置恢复失败，请检查实际状态');
         if (state.sourceLive === false) parts.push('麦克风采集已停止');

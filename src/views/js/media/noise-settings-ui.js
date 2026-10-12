@@ -7,6 +7,7 @@
     const NOISE_SUPPRESSION_KEY = 'webrtc-noise-suppression';
     const AI_NOISE_EXPERIMENT_KEY = 'webrtc-ai-noise-experiment';
     const NOISE_MODE_KEY = 'webrtc-noise-mode';
+    const RNNOISE_SPEECH_GATE_KEY = 'webrtc-rnnoise-speech-gate';
     const MIC_GAIN_KEY = 'webrtc-mic-gain';
     const DEFAULT_MIC_GAIN = 100;
     const MIN_MIC_GAIN = 0;
@@ -26,6 +27,8 @@
         return true;
     };
     const getNoiseSuppressionEnabled = () => getNoiseMode() === 'browser';
+    const getRnnoiseSpeechGateEnabled = () => safeStorageGet(RNNOISE_SPEECH_GATE_KEY) !== 'false';
+    const setRnnoiseSpeechGateEnabled = (enabled) => safeStorageSet(RNNOISE_SPEECH_GATE_KEY, String(Boolean(enabled)));
 
     const setNoiseSuppressionEnabled = (enabled) => {
         setNoiseMode(enabled ? 'browser' : 'off');
@@ -264,6 +267,8 @@
     global.VoiceNoiseSettingsUI = {
         getNoiseMode,
         setNoiseMode,
+        getRnnoiseSpeechGateEnabled,
+        setRnnoiseSpeechGateEnabled,
         getAiExperimentEnabled,
         getAudioConstraints,
         getMicGain,
