@@ -107,6 +107,11 @@ try {
         if (index) assert.ok(row.muted, 'switch preserves mute');
         if (row.requested === 'rnnoise') {
             assert.ok(row.diagnostics.speechGateSupported && row.diagnostics.speechGateEnabled);
+            assert.ok(['rnnoise-v2-2025.1.5', 'rnnoise-legacy-2022'].includes(row.diagnostics.engine));
+            if (row.diagnostics.engine === 'rnnoise-v2-2025.1.5') {
+                assert.equal(row.diagnostics.engineFallback, null);
+                assert.ok(row.diagnostics.probeP95Ms <= 1.8);
+            } else assert.ok(row.diagnostics.engineFallback, 'legacy fallback must be disclosed');
         }
     }
     assert.deepEqual(report.rapid.map((row) => row.status), ['rejected', 'rejected', 'fulfilled']);

@@ -304,6 +304,9 @@
             本机音频: {
                 请求模式: audio?.requestedMode || null,
                 实际模式: processing?.mode || null,
+                降噪模型: processing?.engine || null,
+                模型回退: processing?.engineFallback || null,
+                模型预检p95_ms: processing?.probeP95Ms ?? null,
                 麦克风增益_百分比: number(audio?.microphoneGain),
                 浏览器降噪: processing?.actual?.noiseSuppression ?? null,
                 AEC: processing?.actual?.echoCancellation ?? null,

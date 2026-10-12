@@ -3,17 +3,20 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import vm from 'node:vm';
 import { createSpeechGate } from '../src/views/audio-worklet/rnnoise-speech-gate.js';
+import { loadRnnoiseV2 } from '../src/views/audio-worklet/rnnoise-v2-wasm.js';
 
-test('real bundled WASM feeds VAD into the gate without changing quantum/frame scheduling', async () => {
+for (const engine of ['rnnoise-legacy-2022', 'rnnoise-v2-2025.1.5']) {
+test(`real ${engine} WASM feeds VAD into the gate without changing quantum/frame scheduling`, async () => {
     const url = new URL(
         '../src/views/audio-worklet/rnnoise-processor.js',
         import.meta.url
     );
     const source = readFileSync(url, 'utf8')
         .replace(/^import .*rnnoise-speech-gate.js';\r?\n/, '')
+        .replace(/^import .*rnnoise-v2-wasm.js';\r?\n/m, '')
         .replaceAll('import.meta.url', JSON.stringify(url.href));
     const binary = readFileSync(
-        new URL('../src/views/wasm/rnnoise.wasm', import.meta.url)
+        new URL(engine === 'rnnoise-v2-2025.1.5' ? '../src/views/wasm/rnnoise-v2-2025.1.5.wasm' : '../src/views/wasm/rnnoise.wasm', import.meta.url)
     );
     let Processor;
     const probabilities = [];
@@ -32,6 +35,7 @@ test('real bundled WASM feeds VAD into the gate without changing quantum/frame s
         setTimeout,
         clearTimeout,
         console,
+        loadRnnoiseV2,
         createSpeechGate: (config) => {
             const gate = createSpeechGate(config);
             return {
@@ -62,6 +66,7 @@ test('real bundled WASM feeds VAD into the gate without changing quantum/frame s
     const create = async (enabled) => {
         const node = new Processor({
             processorOptions: {
+                engine,
                 wasmBinary: binary.buffer.slice(
                     binary.byteOffset,
                     binary.byteOffset + binary.byteLength
@@ -86,7 +91,7 @@ test('real bundled WASM feeds VAD into the gate without changing quantum/frame s
     };
     const [plain, gated] = await Promise.all([create(false), create(true)]);
     let plainEnergy = 0,
-        gatedEnergy = 0;
+        gatedEnergy = 0, inputEnergy = 0;
     try {
         for (let quantum = 0; quantum < 500; quantum += 1) {
             const input = new Float32Array(128);
@@ -105,10 +110,17 @@ test('real bundled WASM feeds VAD into the gate without changing quantum/frame s
                 assert.ok(Number.isFinite(a[i]) && Number.isFinite(b[i]));
                 plainEnergy += a[i] ** 2;
                 gatedEnergy += b[i] ** 2;
+                inputEnergy += input[i] ** 2;
             }
         }
         assert.ok(plainEnergy > 0);
-        assert.ok(gatedEnergy < plainEnergy * 0.5);
+        if (engine === 'rnnoise-legacy-2022') assert.ok(gatedEnergy < plainEnergy * 0.5);
+        else {
+            // The new model already removes these impulses to the noise floor;
+            // asking the gate for another 50% reduction is not a quality gate.
+            assert.ok(gatedEnergy <= plainEnergy);
+            assert.ok(gatedEnergy < inputEnergy * 0.001);
+        }
         assert.ok(probabilities.length > 100);
         assert.ok(
             probabilities.every((p) => Number.isFinite(p) && p >= 0 && p <= 1)
@@ -119,3 +131,4 @@ test('real bundled WASM feeds VAD into the gate without changing quantum/frame s
     }
     assert.equal(gated.process([], []), false);
 });
+}

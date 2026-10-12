@@ -37,7 +37,7 @@
         getGain = () => 100,
         getSpeechGateEnabled = () => true,
         supportsRnnoise = () => typeof global.AudioWorkletNode === 'function',
-        loadLibrary = () => import('/vendor/web-noise-suppressor.js'),
+        loadLibrary = () => import('/js/voice/rnnoise-engine.js'),
         stopStream = (stream) =>
             stream?.getTracks().forEach((track) => track.stop()),
         onSourceEnded,
@@ -307,6 +307,9 @@
                     pipeline.processor.channelCount = 1;
                     pipeline.processor.channelCountMode = 'explicit';
                     const ready = await waitForProcessor(pipeline.processor);
+                    pipeline.engine = ready.engine || 'rnnoise-legacy-2022';
+                    pipeline.engineFallback = ready.engineFallback || null;
+                    pipeline.probeP95Ms = ready.probeP95Ms ?? null;
                     pipeline.speechGateSupported = ready.speechGate === true;
                     pipeline.speechGateEnabled = pipeline.speechGateSupported ? ready.speechGateEnabled === true : false;
                     pipeline.processor.port.onmessage = ({ data }) => {
@@ -488,6 +491,9 @@
                 ),
                 mode: pipeline?.mode || 'raw',
                 speechGateSupported: pipeline?.speechGateSupported || false,
+                engine: pipeline?.engine || null,
+                engineFallback: pipeline?.engineFallback || null,
+                probeP95Ms: pipeline?.probeP95Ms ?? null,
                 speechGateEnabled: Boolean(pipeline?.processor && pipeline.speechGateEnabled),
                 speechGateRequested: pipeline?.speechGateRequested,
                 allSupported: info.allSupported,

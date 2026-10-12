@@ -5030,6 +5030,9 @@ callDiagnostics = window.VoiceCallDiagnostics.createRuntime({
             本机音频: {
                 请求模式: settings.requested.mode,
                 实际模式: processing?.mode || null,
+                降噪模型: processing?.engine || null,
+                模型回退: processing?.engineFallback || null,
+                模型预检p95_ms: processing?.probeP95Ms ?? null,
                 设置切换中: settings.pending,
                 切换结果: settings.error,
                 处理链: processing?.mode === 'rnnoise' ? '浏览器AEC → RNNoise → 可选非语音门控 → 输入增益' :

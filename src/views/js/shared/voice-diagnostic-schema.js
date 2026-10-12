@@ -5,6 +5,8 @@ for (const key of `mode code codecMode startBitrate frameRate resolutionPreset p
 
 for (const key of `共享音频采集 捕获来源 音频轨道数 排除通话声音支持 请求排除通话声音 实际排除通话声音 共享音频状态 语音播放 共享播放 播放器存在 原生静音 WebAudio放大 重复播放风险`.split(' ')) keys.add(key);
 
+for (const key of `降噪模型 模型回退 模型预检p95_ms`.split(' ')) keys.add(key);
+
 export function sanitizeVoiceDiagnostic(value) {
     let budget = 16000;
     const visit = (item, depth) => {

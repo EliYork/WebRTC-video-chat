@@ -34,6 +34,8 @@
         if (state.aecFallback) parts.push('系统 AEC 未确认，使用普通 AEC 请求');
         if (state.fallbackReason) parts.push('处理器不可用，已回退');
         if (state.mode === 'rnnoise') {
+            parts.push(state.engine === 'rnnoise-v2-2025.1.5' ? 'RNNoise 新模型（v0.2 系）' : 'RNNoise 旧模型');
+            if (state.engineFallback) parts.push(state.engineFallback === 'model-too-slow' ? '新模型耗时偏高，回退旧模型' : '新模型加载失败，回退旧模型');
             if (state.speechGateSupported === false) parts.push('非语音门控不可用，请刷新加载新版处理器');
             else if (state.speechGateSupported === true) {
                 parts.push(`非语音门控${flag(state.speechGateEnabled)}（讲话时的键盘声由 RNNoise 处理）`);
