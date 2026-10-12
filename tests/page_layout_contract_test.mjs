@@ -2309,7 +2309,7 @@ assertSourceContains(roomIndex, 'Media Dock DOM contract', [
         /value="1080p" selected/,
         'Media Dock must default screen sharing to 1080p',
     ],
-    [/value="30" selected/, 'Media Dock must default screen sharing to 30 fps'],
+    [/value="60" selected/, 'Media Dock must default game sharing to 60 fps'],
     [
         /value="auto"[\s\S]*?value="720p"[\s\S]*?value="1080p"[\s\S]*?value="1440p"[\s\S]*?value="original"/,
         'Media Dock must expose automatic, fixed, and original resolution targets',
@@ -2402,7 +2402,7 @@ assert.doesNotMatch(
 );
 assert.match(
     roomIndex,
-    /<div\b[^>]*id="buttons"[^>]*class="[^"]*\bmedia-dock\b[^"]*"[\s\S]*?<div\b[^>]*class="local-user-header media-dock-user"[\s\S]*?id="localUserName"[\s\S]*?<div\b[^>]*class="media-dock-info"[\s\S]*?id="localVoiceChannelName"[\s\S]*?<div\b[^>]*class="media-dock-activity-row"[\s\S]*?id="noiseToggle"[\s\S]*?id="aiNoiseToggle"[\s\S]*?id="destroyPeer"[\s\S]*?<div\b[^>]*class="media-dock-actions"[\s\S]*?id="copyRoomLink"[\s\S]*?id="toggleAudio"[\s\S]*?id="toggleOutput"/,
+    /<div\b[^>]*id="buttons"[^>]*class="[^"]*\bmedia-dock\b[^"]*"[\s\S]*?<div\b[^>]*class="local-user-header media-dock-user"[\s\S]*?id="localUserName"[\s\S]*?<div\b[^>]*class="media-dock-info"[\s\S]*?id="localVoiceChannelName"[\s\S]*?<div\b[^>]*class="media-dock-activity-row"[\s\S]*?id="copyRoomLink"[\s\S]*?id="destroyPeer"[\s\S]*?<div\b[^>]*class="media-dock-actions"[\s\S]*?id="toggleAudio"[\s\S]*?id="toggleOutput"[\s\S]*?id="noiseToggle"[\s\S]*?id="aiNoiseToggle"/,
     'media dock must own local identity, voice details, noise, AI, hangup, copy link, mic, and output controls in one DOM source'
 );
 assert.doesNotMatch(
@@ -2459,15 +2459,15 @@ assertSourceContains(pageLayoutConfig, 'page layout config contract', [
         'panel registry must define shared shell layout capabilities',
     ],
     [
-        /MEMBERS_PANEL[\s\S]*?title:\s*'频道'[\s\S]*?defaultLayout:\s*\{\s*x:\s*1,\s*y:\s*1,\s*w:\s*7,\s*h:\s*10\s*\}/,
+        /MEMBERS_PANEL[\s\S]*?title:\s*'频道'[\s\S]*?defaultLayout:\s*\{\s*x:\s*1,\s*y:\s*2,\s*w:\s*8,\s*h:\s*7\s*\}/,
         'the channel browser must use the channel title and a floating upper-left default',
     ],
     [
-        /MEDIA_CONTROLS_PANEL[\s\S]*?title:\s*'媒体控制'[\s\S]*?defaultLayout:\s*\{\s*x:\s*1,\s*y:\s*12,\s*w:\s*7,\s*h:\s*5\s*\}[\s\S]*?canDrag:\s*true[\s\S]*?canResize:\s*true/,
+        /MEDIA_CONTROLS_PANEL[\s\S]*?title:\s*'语音与共享'[\s\S]*?defaultLayout:\s*\{\s*x:\s*1,\s*y:\s*13,\s*w:\s*8,\s*h:\s*4\s*\}[\s\S]*?canDrag:\s*true[\s\S]*?canResize:\s*true/,
         'mediaControlsPanel must default to a floating left-bottom layout',
     ],
     [
-        /CHAT_PANEL[\s\S]*?title:\s*'聊天'[\s\S]*?defaultLayout:\s*\{\s*x:\s*24,\s*y:\s*2,\s*w:\s*7,\s*h:\s*14\s*\}/,
+        /CHAT_PANEL[\s\S]*?title:\s*'聊天'[\s\S]*?defaultLayout:\s*\{\s*x:\s*23,\s*y:\s*2,\s*w:\s*8,\s*h:\s*15\s*\}/,
         'chatPanel must keep viewport margins and leave the center workspace open',
     ],
     [
@@ -2643,8 +2643,8 @@ assert.match(
 
 assertSourceContains(script, 'script.js', [
     {
-        pattern: /const requestAudioStream = async/,
-        message: 'requestAudioStream must stay in script.js',
+        pattern: /const requestRawAudioStream = [\s\S]*?audioProcessingRuntime\.capture\(request\)/,
+        message: 'microphone capture orchestration must delegate to the audio component',
     },
     {
         pattern: /const createAudioPipeline = async/,
@@ -2711,8 +2711,8 @@ assertSourceContains(script, 'remote live-media presentation', [
         'audio-only replacement must clear the old decoder before rendering the placeholder',
     ],
     [
-        /detachRemoteStream: \(\{ peerId, tile \}\) => \{[\s\S]*?addVideoStream\(document\.createElement\('video'\), null, peerId\);/,
-        'detached remote media must immediately render the no-video state on the owned tile',
+        /detachRemoteStream: \(\{ peerId, tile \}\) => \{[\s\S]*?renderRemoteMedia\(peerId, null\);/,
+        'detached P2P media must update the owned tile while preserving an active SFU screen',
     ],
     [
         /mediaElementVideoTracks\.get\(mediaElement\) !== liveVideoTrack[\s\S]*?forceRebind,/,
@@ -2733,7 +2733,7 @@ assertSourceContains(script, 'screen-share volume separation contract', [
         'outgoing call metadata must distinguish microphone and screen audio tracks',
     ],
     [
-        /attachRemoteStream: \(\{ generation, metadata, peerId, stream \}\)[\s\S]*?trackRoles:/,
+        /attachRemoteStream: \(\{ generation, metadata, peerId, stream \}\)[\s\S]*?remoteP2pTrackRoles\.set\(peerId, metadata\?\.\[voiceCallProtocol\.MEDIA_TRACK_ROLES_METADATA\]/,
         'remote presentation must receive the owned call generation and track roles',
     ],
     [
@@ -3255,7 +3255,7 @@ assertSourceContains(
             'quality UI must stay before the fullscreen action',
         ],
         [
-            /`接收 \$\{normalizedText\}`/,
+            /prefix = '接收'[\s\S]*?`\$\{prefix\} \$\{normalizedText\}`/,
             'remote quality must be labeled as received',
         ],
         [

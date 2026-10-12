@@ -7,7 +7,8 @@
         output: 'audiooutput',
     });
 
-    const switchOutputDevice = async ({
+    const outputSwitches = new WeakMap();
+    const performOutputSwitch = async ({
         deviceId = 'default',
         mediaElement,
         supported = true,
@@ -19,8 +20,13 @@
         ) {
             return { ok: true, unsupported: true };
         }
+        const nativeSinkId = deviceId === 'default' ? '' : deviceId;
         try {
-            await mediaElement.setSinkId(deviceId);
+            // Newly created players already use the default sink. Reopening
+            // that sink during stream replacement can abort on some drivers.
+            if (mediaElement.sinkId !== nativeSinkId) {
+                await mediaElement.setSinkId(nativeSinkId);
+            }
             if (mediaElement.dataset) {
                 mediaElement.dataset.outputSinkId = deviceId;
             }
@@ -31,10 +37,14 @@
                     ? 'operation-aborted'
                     : error?.name === 'NotFoundError'
                       ? 'device-not-found'
-                      : 'unknown';
+                      : error?.name === 'NotAllowedError'
+                        ? 'permission-denied'
+                        : 'unknown';
             let fallbackApplied = false;
             try {
-                await mediaElement.setSinkId('default');
+                if (mediaElement.sinkId !== '') {
+                    await mediaElement.setSinkId('');
+                }
                 if (mediaElement.dataset) {
                     mediaElement.dataset.outputSinkId = 'default';
                 }
@@ -49,6 +59,24 @@
                 ok: false,
             };
         }
+    };
+
+    const switchOutputDevice = (options = {}) => {
+        const { mediaElement, deviceId = 'default' } = options;
+        if (!mediaElement) return performOutputSwitch(options);
+        const previous = outputSwitches.get(mediaElement);
+        if (previous?.deviceId === deviceId) return previous.promise;
+        const promise = (previous?.promise || Promise.resolve())
+            .catch(() => {})
+            .then(() => performOutputSwitch(options));
+        const entry = { deviceId, promise };
+        outputSwitches.set(mediaElement, entry);
+        void promise.finally(() => {
+            if (outputSwitches.get(mediaElement) === entry) {
+                outputSwitches.delete(mediaElement);
+            }
+        });
+        return promise;
     };
 
     const createDeviceRuntime = ({

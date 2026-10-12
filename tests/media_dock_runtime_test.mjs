@@ -357,6 +357,8 @@ const createFixture = () => {
         aiNoiseStatus: createElement(document, 'strong', {
             id: 'aiNoiseStatusText',
         }),
+        noiseModeSelect: createElement(document, 'select', { data: { 'audio-noise-mode': '' } }),
+        processingStatus: createElement(document, 'p', { data: { 'audio-processing-status': '' } }),
         sessionButton: createButton(document, 'destroyPeer'),
         statusMessages: createElement(document, 'div', {
             className: 'hidden',
@@ -411,9 +413,13 @@ const createFixture = () => {
             data: { 'screen-share-frame-rate': '' },
             value: '30',
         }),
+        codecSelect: createElement(document, 'select', { data: { 'screen-share-codec': '' }, value: 'auto' }),
+        startBitrateSelect: createElement(document, 'select', { data: { 'screen-share-start-bitrate': '' }, value: 'browser' }),
         screenSettingsStatus: createElement(document, 'span', {
             data: { 'screen-share-settings-status': '' },
         }),
+        screenStartButton: createElement(document, 'button', { data: { 'screen-share-start': '' } }),
+        screenCancelButton: createElement(document, 'button', { data: { 'screen-share-cancel': '' } }),
     };
     refs.aiNoiseToggle.dataset.notSupportedLabel = 'N/A';
 
@@ -451,6 +457,10 @@ const createFixture = () => {
         const popover = createElement(document, 'section', {
             data: { 'device-popover': type },
         });
+        // This fixture models a browser with native top-layer support.
+        popover.showPopover = () => {};
+        popover.hidePopover = () => {};
+        if (type === 'screen') popover.showModal = () => {};
         popover.append(...children);
         return popover;
     };
@@ -459,6 +469,8 @@ const createFixture = () => {
         refs.micList,
         refs.micGainSlider,
         refs.micGainValue,
+        refs.noiseModeSelect,
+        refs.processingStatus,
     ]);
     const cameraPopover = createPopover('camera', [
         refs.cameraDeviceStatus,
@@ -475,6 +487,10 @@ const createFixture = () => {
         refs.screenSettingsStatus,
         refs.resolutionSelect,
         refs.frameRateSelect,
+        refs.codecSelect,
+        refs.startBitrateSelect,
+        refs.screenStartButton,
+        refs.screenCancelButton,
     ]);
     root.append(
         header,
@@ -489,6 +505,105 @@ const createFixture = () => {
     document.body.append(root);
     return { document, refs, root, window };
 };
+
+test('device popover stays within viewport and follows scrolling without moving its DOM', () => {
+    const fixture = createFixture();
+    const { runtimeApi } = loadApis(fixture);
+    const stub = createAdapterStub();
+    fixture.window.innerWidth = 390;
+    fixture.window.innerHeight = 844;
+    const toggle = fixture.root.querySelector('[data-control-menu="mic"]');
+    const popover = fixture.root.querySelector(
+        '[data-device-popover="mic"]'
+    );
+    let anchorTop = 20;
+    fixture.root.querySelector(
+        '[data-device-control="mic"]'
+    ).getBoundingClientRect = () => ({
+        left: 360,
+        top: anchorTop,
+        bottom: anchorTop + 32,
+    });
+    popover.getBoundingClientRect = () => ({ width: 300, height: 180 });
+    const parent = popover.parentNode;
+    const runtime = runtimeApi.createMediaDockRuntime({
+        root: fixture.root,
+        adapter: stub.adapter,
+    });
+    runtime.init();
+    fixture.root.dispatchEvent(new FakeEvent('click', { target: toggle }));
+    assert.equal(popover.style.left, '82px');
+    assert.equal(popover.style.top, '60px');
+    anchorTop = 800;
+    fixture.window.dispatchEvent(new FakeEvent('scroll'));
+    assert.equal(popover.style.top, '612px');
+    assert.equal(popover.parentNode, parent);
+    assert.equal(fixture.window.listenerCount('scroll'), 1);
+    runtime.destroy();
+    assert.equal(fixture.window.listenerCount('scroll'), 0);
+});
+
+test('mouse hover opens settings, crossing to popover cancels close, touch does not hover', () => {
+    const fixture = createFixture();
+    const { runtimeApi } = loadApis(fixture);
+    const stub = createAdapterStub();
+    const timers = new Map();
+    let sequence = 0;
+    fixture.window.setTimeout = (callback) => {
+        timers.set(++sequence, callback);
+        return sequence;
+    };
+    fixture.window.clearTimeout = (id) => timers.delete(id);
+    const runtime = runtimeApi.createMediaDockRuntime({
+        root: fixture.root,
+        adapter: stub.adapter,
+    });
+    runtime.init();
+    const control = fixture.root.querySelector('[data-device-control="mic"]');
+    const popover = fixture.root.querySelector('[data-device-popover="mic"]');
+    control.dispatchEvent(
+        new FakeEvent('pointerenter', { pointerType: 'touch' })
+    );
+    assert.equal(popover.classList.contains('is-open'), false);
+    control.dispatchEvent(
+        new FakeEvent('pointerenter', { pointerType: 'mouse' })
+    );
+    assert.equal(popover.classList.contains('is-open'), true);
+    control.dispatchEvent(
+        new FakeEvent('pointerleave', { pointerType: 'mouse' })
+    );
+    assert.equal(timers.size, 1);
+    popover.dispatchEvent(
+        new FakeEvent('pointerenter', { pointerType: 'mouse' })
+    );
+    assert.equal(timers.size, 0);
+    assert.equal(popover.classList.contains('is-open'), true);
+    popover.dispatchEvent(
+        new FakeEvent('pointerleave', { pointerType: 'mouse' })
+    );
+    [...timers.values()][0]();
+    assert.equal(popover.classList.contains('is-open'), false);
+    runtime.destroy();
+    assert.equal(control.listenerCount('pointerenter'), 0);
+    assert.equal(timers.size, 0);
+});
+
+test('first click on a hover-opened settings arrow keeps it open; second closes', () => {
+    const fixture = createFixture();
+    const { runtimeApi } = loadApis(fixture);
+    const stub = createAdapterStub();
+    const runtime = runtimeApi.createMediaDockRuntime({ root: fixture.root, adapter: stub.adapter });
+    runtime.init();
+    const control = fixture.root.querySelector('[data-device-control="mic"]');
+    const popover = fixture.root.querySelector('[data-device-popover="mic"]');
+    const menu = fixture.root.querySelector('[data-control-menu="mic"]');
+    control.dispatchEvent(new FakeEvent('pointerenter', { pointerType: 'mouse' }));
+    fixture.root.dispatchEvent(new FakeEvent('click', { target: menu }));
+    assert.equal(popover.classList.contains('is-open'), true);
+    fixture.root.dispatchEvent(new FakeEvent('click', { target: menu }));
+    assert.equal(popover.classList.contains('is-open'), false);
+    runtime.destroy();
+});
 
 const defaultState = () => ({
     actualVoiceJoined: true,
@@ -546,6 +661,7 @@ const createAdapterStub = (initialState = {}) => {
         selectMicrophone: (...args) => record('selectMicrophone', ...args),
         selectOutput: (...args) => record('selectOutput', ...args),
         setMicrophoneGain: (...args) => record('setMicrophoneGain', ...args),
+        selectNoiseMode: (...args) => record('selectNoiseMode', ...args),
         setOutputMuted: (...args) => record('setOutputMuted', ...args),
         setOutputVolume: (...args) => record('setOutputVolume', ...args),
         startScreenShare: (...args) => record('startScreenShare', ...args),
@@ -576,6 +692,7 @@ const createAdapterStub = (initialState = {}) => {
 };
 
 const loadApis = (fixture) => {
+    vm.runInNewContext(readSource('../src/views/js/media/audio-processing-view.js'), { window: fixture.window });
     vm.runInNewContext(
         readSource('../src/views/js/media/media-dock-adapter.js'),
         { window: fixture.window }
@@ -749,10 +866,14 @@ test('screen options persist, rapid clicks start once, cancellation recovers, an
     fixture.refs.screenButton.click();
     fixture.refs.screenButton.click();
 
+    assert.equal((stub.calls.get('startScreenShare') || []).length, 0, 'opening settings must not start capture');
+    fixture.refs.screenStartButton.click();
+    fixture.refs.screenStartButton.click();
+
     assert.equal(stub.calls.get('startScreenShare').length, 1);
     assert.deepEqual(
         JSON.parse(JSON.stringify(stub.calls.get('startScreenShare')[0])),
-        [{ frameRate: 60, resolutionPreset: '1440p' }]
+        [{ frameRate: 60, resolutionPreset: '1440p', mode: 'game', codecMode: 'auto', startBitrate: 'browser' }]
     );
     assert.equal(fixture.refs.resolutionSelect.disabled, true);
     assert.equal(fixture.refs.frameRateSelect.disabled, true);
@@ -809,6 +930,32 @@ test('layout moves and recovery preserve root identity, selections and listener 
     await flush();
     assert.deepEqual(stub.calls.get('selectOutput'), [['out-a']]);
     assert.equal(fixture.refs.screenButton.listenerCount('click'), 1);
+});
+
+test('advanced codec and startup choices pass through once, lock during sharing and survive stop', async () => {
+    const fixture = createFixture();
+    const { runtimeApi } = loadApis(fixture);
+    const stub = createAdapterStub();
+    const runtime = runtimeApi.createMediaDockRuntime({ root: fixture.root, adapter: stub.adapter });
+    runtime.init();
+    fixture.refs.codecSelect.value = 'h264';
+    fixture.refs.codecSelect.dispatchEvent(new FakeEvent('change'));
+    fixture.refs.startBitrateSelect.value = '1500';
+    fixture.refs.startBitrateSelect.dispatchEvent(new FakeEvent('change'));
+    fixture.refs.screenStartButton.click();
+    await flush();
+    const options = stub.calls.get('startScreenShare')[0][0];
+    assert.equal(options.codecMode, 'h264');
+    assert.equal(options.startBitrate, '1500');
+    stub.emit({ screenShareEnabled: true });
+    assert.equal(fixture.refs.codecSelect.disabled, true);
+    assert.equal(fixture.refs.startBitrateSelect.disabled, true);
+    stub.emit({ screenShareEnabled: false });
+    assert.equal(fixture.refs.codecSelect.disabled, false);
+    assert.equal(runtime.getSnapshot().screenShareCodecMode, 'h264');
+    assert.equal(runtime.getSnapshot().screenShareStartBitrate, '1500');
+    runtime.destroy();
+    assert.equal(fixture.refs.codecSelect.listenerCount('change'), 0);
 });
 
 test('destroy removes DOM listeners and runtime subscription; recreate does not accumulate', () => {
@@ -868,4 +1015,35 @@ test('component source cannot own media capture, layout reconstruction, Peer or 
     ].forEach((keyword) => {
         assert.equal(combined.includes(keyword), false, keyword);
     });
+});
+
+
+test('noise modes render requested and actual AEC/NS separately and rapid selections reach the adapter', async () => {
+    const fixture = createFixture();
+    const { runtimeApi } = loadApis(fixture);
+    const stub = createAdapterStub({
+        requestedNoiseMode: 'rnnoise',
+        aiNoiseEnabled: true,
+        noiseSuppressionEnabled: false,
+        audioSettingsPending: true,
+        audioProcessing: { mode: 'browser', actual: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, aecFallback: 'unsupported' },
+    });
+    const runtime = runtimeApi.createMediaDockRuntime({ root: fixture.root, adapter: stub.adapter });
+    runtime.init();
+    assert.equal(fixture.refs.noiseModeSelect.value, 'rnnoise');
+    assert.match(fixture.refs.processingStatus.textContent, /请求：RNNoise/);
+    assert.match(fixture.refs.processingStatus.textContent, /实际：浏览器内置/);
+    assert.match(fixture.refs.processingStatus.textContent, /系统 AEC 未确认/);
+    assert.match(fixture.refs.processingStatus.textContent, /切换中/);
+    for (const value of ['off', 'browser', 'rnnoise']) {
+        fixture.refs.noiseModeSelect.value = value;
+        fixture.refs.noiseModeSelect.dispatchEvent(new FakeEvent('change'));
+    }
+    await flush();
+    assert.deepEqual(stub.calls.get('selectNoiseMode').map((args) => args[0]), ['off', 'browser', 'rnnoise']);
+    stub.emit({ requestedNoiseMode: 'browser', audioSettingsPending: false, audioSettingsError: 'switch-failed' });
+    assert.equal(fixture.refs.noiseModeSelect.value, 'browser');
+    assert.match(fixture.refs.processingStatus.textContent, /切换失败/);
+    assert.doesNotMatch(fixture.root.textContent, /重进房间/);
+    runtime.destroy();
 });

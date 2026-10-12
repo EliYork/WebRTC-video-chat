@@ -511,7 +511,7 @@ test('output sink switching supports fallback, AbortError and unsupported browse
     assert.equal(failed.ok, false);
     assert.equal(failed.errorType, 'operation-aborted');
     assert.equal(failed.fallbackApplied, true);
-    assert.deepEqual(calls, ['missing-speaker', 'default']);
+    assert.deepEqual(calls, ['missing-speaker', '']);
     assert.equal(mediaElement.dataset.outputSinkId, 'default');
 
     calls.length = 0;
@@ -523,13 +523,19 @@ test('output sink switching supports fallback, AbortError and unsupported browse
     assert.deepEqual(calls, ['speaker-b']);
     assert.equal(mediaElement.dataset.outputSinkId, 'speaker-b');
 
+    calls.length = 0;
+    const defaultOutput = await deviceApi.switchOutputDevice({ mediaElement });
+    assert.equal(defaultOutput.ok, true);
+    assert.deepEqual(calls, ['']);
+    assert.equal(mediaElement.dataset.outputSinkId, 'default');
+
     const unsupported = await deviceApi.switchOutputDevice({
         deviceId: 'speaker-c',
         mediaElement,
         supported: false,
     });
     assert.equal(unsupported.unsupported, true);
-    assert.deepEqual(calls, ['speaker-b']);
+    assert.deepEqual(calls, ['']);
 });
 
 test('devicechange is debounced, preserves present selections and falls back missing devices', async () => {

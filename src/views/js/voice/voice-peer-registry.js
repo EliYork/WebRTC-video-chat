@@ -24,6 +24,7 @@
         onDebug,
         onPeerCleanup,
         onRemoteMediaState,
+        onOutgoingConnected,
         onWarning,
         removeRemoteTile,
     } = {}) => {
@@ -173,17 +174,34 @@
             notifyState(entry, reason);
         };
 
-        const bindRemoteStream = (entry, stream, generation, metadata) => {
+        const bindRemoteStream = (entry, stream, generation, metadata, incomingStream) => {
             const isCurrent = () =>
                 entries.get(entry.peerId) === entry &&
                 entry.remoteStream === stream &&
                 entry.incoming.current?.generation === generation;
 
             addStreamListener(entry, stream, 'inactive', () => {
-                if (isCurrent()) {
+                if (isCurrent() && getLiveTracks(stream).length === 0) {
                     clearRemoteMedia(entry, 'stream-inactive');
                 }
             });
+
+            // replaceTrack and parked SFU slots may mutate the same remote
+            // stream. PeerJS does not always emit a new stream object for it.
+            let refreshQueued = false;
+            const refreshTracks = () => {
+                if (refreshQueued) return;
+                refreshQueued = true;
+                void Promise.resolve().then(() => {
+                    refreshQueued = false;
+                    if (isCurrent()) {
+                        registerRemoteStream(entry, entry.incoming.current, incomingStream);
+                    }
+                });
+            };
+            ['addtrack', 'removetrack'].forEach((event) =>
+                addStreamListener(entry, incomingStream, event, refreshTracks)
+            );
 
             stream?.getTracks?.().forEach((track) => {
                 addStreamListener(entry, track, 'ended', () => {
@@ -227,11 +245,14 @@
         };
 
         const registerRemoteStream = (entry, record, incomingStream) => {
+            const signature = getLiveTracks(incomingStream)
+                .map((track) => `${track.kind}:${track.id}`).join('|');
             if (
                 !incomingStream ||
                 !isOwnedRecord(entry, 'incoming', record) ||
                 (entry.incoming.current === record &&
-                    entry.lastIncomingStream === incomingStream)
+                    entry.lastIncomingStream === incomingStream &&
+                    record.trackSignature === signature)
             ) {
                 return false;
             }
@@ -249,12 +270,14 @@
                 detachStreamListeners(entry);
                 entry.remoteStream = nextStream;
                 entry.lastIncomingStream = incomingStream;
+                record.trackSignature = signature;
                 record.state = 'active';
                 bindRemoteStream(
                     entry,
                     nextStream,
                     record.generation,
-                    record.call?.metadata
+                    record.call?.metadata,
+                    incomingStream
                 );
                 entry.tile =
                     attachRemoteStream?.({
@@ -384,6 +407,8 @@
                             peerConnection.iceConnectionState === 'completed')
                     ) {
                         promoteOutgoing(entry, record, 'connected');
+                        void global.VoiceScreenSendPolicy?.apply(peerConnection, warn);
+                        onOutgoingConnected?.({ peerId: entry.peerId });
                     }
                 };
 
@@ -458,7 +483,15 @@
                     [MEDIA_GENERATION_METADATA]: normalizedGeneration,
                     [MEDIA_KINDS_METADATA]: tracks.map(({ kind }) => kind),
                 };
-                call = peer.call(peerId, stream, { ...options, metadata });
+                const screenDecision = global.VoiceScreenCodecs?.getDecision(tracks.find((track) => track.kind === 'video'));
+                const callOptions = { ...options, metadata };
+                if (screenDecision) {
+                    metadata.screenVideoCodec = screenDecision.primary;
+                    callOptions.sdpTransform = (sdp) => global.VoiceScreenCodecs.transformOffer(
+                        options.sdpTransform ? options.sdpTransform(sdp) : sdp, screenDecision.primary
+                    );
+                }
+                call = peer.call(peerId, stream, callOptions);
             } catch (error) {
                 warn(`Could not call peer ${peerId}.`, error);
                 return undefined;
@@ -473,6 +506,7 @@
 
             const record = {
                 call,
+                screenCodec: global.VoiceScreenCodecs?.getDecision(tracks.find((track) => track.kind === 'video'))?.primary,
                 generation: normalizedGeneration,
                 state: 'pending',
             };
@@ -482,6 +516,7 @@
             entry.outgoing.pending = null;
             entry.lastOutgoingGeneration = normalizedGeneration;
             bindCall(entry, 'outgoing', record);
+            void global.VoiceScreenSendPolicy?.apply(call.peerConnection || call._pc, warn);
             retireRecord(entry, previousPending);
             retireRecord(entry, previousCurrent);
 
@@ -506,8 +541,15 @@
             const peerConnection =
                 record?.call?.peerConnection || record?.call?._pc;
             const senders = peerConnection?.getSenders?.() || [];
+            const nextVideoTrack = getLiveTracks(stream).find((track) => track.kind === 'video');
+            const nextCodec = global.VoiceScreenCodecs?.getDecision(nextVideoTrack)?.primary;
+            if (record && nextVideoTrack && record.screenCodec !== nextCodec) {
+                // Camera/screen and codec transitions need a fresh offer; a
+                // replaceTrack alone cannot change the negotiated codec list.
+                return { ok: false, reason: 'renegotiation-required' };
+            }
             if (
-                sessionDisconnected ||
+                (sessionDisconnected && !['connected', 'completed'].includes(peerConnection?.connectionState) && !['connected', 'completed'].includes(peerConnection?.iceConnectionState)) ||
                 !record ||
                 !isGeneration(normalizedGeneration) ||
                 normalizedGeneration <= entry.lastOutgoingGeneration ||
@@ -545,15 +587,24 @@
                 return { ok: false, reason: 'renegotiation-required' };
             }
 
-            await Promise.all(
-                Array.from(senderSlotsByKind).flatMap(([kind, slots]) => {
-                    const tracks = nextTracksByKind.get(kind) || [];
-                    return slots.map((sender, index) =>
-                        sender.replaceTrack(tracks[index] || null)
-                    );
-                })
-            );
+            try {
+                await Promise.all(
+                    Array.from(senderSlotsByKind).flatMap(([kind, slots]) => {
+                        const tracks = nextTracksByKind.get(kind) || [];
+                        return slots.map((sender, index) =>
+                            sender.replaceTrack(tracks[index] || null)
+                        );
+                    })
+                );
+            } catch (error) {
+                warn(`Could not replace media tracks for ${peerId}.`, error);
+                return { ok: false, reason: 'replacement-failed' };
+            }
+            if (entry.outgoing.current !== record) {
+                return { ok: false, reason: 'replacement-stale' };
+            }
             record.generation = normalizedGeneration;
+            await global.VoiceScreenSendPolicy?.apply(peerConnection, warn);
             entry.lastOutgoingGeneration = normalizedGeneration;
             debug({
                 direction: 'outgoing',
@@ -600,7 +651,13 @@
 
             try {
                 bindCall(entry, 'incoming', record);
-                call.answer();
+                const codec = call.metadata?.screenVideoCodec;
+                if (global.VoiceScreenCodecs && Object.hasOwn(global.VoiceScreenCodecs.codecs, codec)) {
+                    const existing = call.options?.sdpTransform;
+                    call.answer(undefined, { sdpTransform: (sdp) => global.VoiceScreenCodecs.transformOffer(
+                        existing ? existing(sdp) : sdp, codec
+                    ) });
+                } else call.answer();
             } catch (error) {
                 unbindCall(entry, record);
                 entry.incoming.current = previousCurrent;

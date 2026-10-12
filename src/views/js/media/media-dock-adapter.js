@@ -19,7 +19,9 @@
     const OPTIONAL_ACTIONS = Object.freeze([
         'copyRoomLink',
         'refreshDevices',
+        'recoverAudio',
         'setMicrophoneGain',
+        'selectNoiseMode',
         'toggleAiNoiseSuppression',
         'toggleNoiseSuppression',
     ]);

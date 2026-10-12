@@ -31,28 +31,6 @@
         overflow: hidden;
     }
 
-    #main.mobile-in-room .page-layout-board {
-        display: grid;
-        grid-template-rows: 1fr auto minmax(0, 1fr) auto;
-        height: 100dvh;
-    }
-
-    #main.mobile-in-room .page-layout-board .page-layout-tile {
-        position: static !important;
-        min-width: 0;
-        min-height: 0;
-        border: 0;
-        border-radius: 0;
-        box-shadow: none;
-    }
-
-    #main.mobile-in-room .page-layout-board .tile-header,
-    #main.mobile-in-room .page-layout-board .tile-footer,
-    #main.mobile-in-room .page-layout-board .tile-resize-handle,
-    #main.mobile-in-room .page-layout-board .tile-actions {
-        display: none !important;
-    }
-
     .room-layout {
         display: block;
         height: 100dvh;
@@ -153,9 +131,8 @@
         align-items: center;
     }
 
-    #main.mobile-in-room .media-dock-activity-row,
     #main.mobile-in-room .media-dock-actions {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-columns: 28px repeat(4, minmax(0, 1fr));
     }
 
     #main.mobile-in-room #buttons .copy-room-link.media-dock-pill,
@@ -179,12 +156,12 @@
     }
 
     #main.mobile-in-room .control-button-wrap {
-        grid-template-columns: minmax(0, 1fr) 18px;
+        grid-template-columns: minmax(0, 1fr) 12px;
     }
 
     #main.mobile-in-room #buttons button {
-        height: 34px;
-        min-height: 34px;
+        height: 28px;
+        min-height: 28px;
     }
 
     .mobile-back-button,
@@ -331,5 +308,96 @@
 
     .cursor-overlay {
         display: none;
+    }
+}
+
+/* The component board owns mobile layout too; the legacy room rules above
+   only describe the fallback DOM. Override inline desktop geometry here,
+   without overwriting the user's saved desktop positions. */
+@media (max-width: 768px) {
+    #main:has(> .page-layout-board) {
+        display: block;
+        height: 100dvh;
+        min-height: 0;
+    }
+
+    #main > .page-layout-board {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        height: 100dvh;
+        min-height: 0;
+        padding: 60px 12px max(16px, env(safe-area-inset-bottom));
+        overflow-y: auto;
+        overflow-x: hidden;
+    }
+
+    #main .page-layout-board > .page-layout-tile {
+        position: relative;
+        flex: 0 0 auto;
+        grid-row: auto;
+        /* Replace geometry written inline by dragging, only on small screens. */
+        left: auto !important;
+        top: auto !important;
+        width: 100% !important;
+        height: auto !important;
+        min-width: 0 !important;
+        min-height: 0 !important;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 0;
+    }
+
+    #main .page-layout-board .page-tile-chat-panel .chat-panel {
+        display: flex;
+        height: 380px;
+        border-top: 0;
+    }
+
+    #main .page-layout-board .page-tile-members-panel .sidebar-channel-tree {
+        max-height: 320px;
+        overflow-y: auto;
+    }
+
+    #main .page-layout-board .page-tile-media-controls-panel {
+        display: flex;
+    }
+
+    #main .page-layout-board .is-layout-hidden {
+        display: none;
+    }
+
+    #main .page-layout-board .panel-shell-actions {
+        opacity: 1;
+    }
+
+    #main
+        .page-layout-board
+        > .page-layout-tile:has(.media-device-popover.is-open) {
+        z-index: 15000 !important;
+    }
+
+    #main .page-layout-board > #video-grid {
+        position: relative;
+        inset: auto;
+        flex: 0 0 auto;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        height: auto;
+        min-height: 0;
+    }
+
+    #main .page-layout-board > #video-grid:empty {
+        display: none;
+    }
+
+    #main
+        .page-layout-board
+        > #video-grid
+        > .video-tile:not(.is-layout-hidden) {
+        display: grid;
+        width: 100% !important;
+        height: 240px !important;
     }
 }

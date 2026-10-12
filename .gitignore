@@ -8,3 +8,6 @@ cert
 # Agent tooling artifacts
 .reasonix/
 reasonix.toml
+
+# Local release archives
+release/*.zip

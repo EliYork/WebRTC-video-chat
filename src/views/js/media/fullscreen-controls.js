@@ -11,6 +11,22 @@
     const tileEntries = new Map();
     const fullscreenSnapshots = new Map();
     let fullscreenChangeBinding;
+    let webFullscreenTile;
+    const syncWebButton = (entry) => {
+        const active = webFullscreenTile === entry.tile;
+        const label = active ? '退出网页内全屏' : '网页内全屏';
+        entry.webButton.title = label;
+        entry.webButton.setAttribute('aria-label', label);
+        entry.webButton.setAttribute('aria-pressed', String(active));
+        entry.webButton.textContent = active ? '▣' : '□';
+    };
+    const exitWebFullscreen = () => {
+        const tile = webFullscreenTile;
+        webFullscreenTile = undefined;
+        tile?.classList.remove('is-web-fullscreen');
+        const entry = tileEntries.get(tile);
+        if (entry) syncWebButton(entry);
+    };
 
     const getFullscreenElement = () =>
         global.document.fullscreenElement ||
@@ -144,6 +160,7 @@
         }
 
         try {
+            exitWebFullscreen();
             if (getFullscreenElement() === tile) {
                 await exitFullscreen();
             } else {
@@ -192,6 +209,22 @@
 
         if (!entry) {
             entry = { button, onError, onUnavailable, tile };
+            entry.webButton = global.document.createElement('button');
+            entry.webButton.className = 'web-fullscreen-btn window-action-button no-drag';
+            entry.webButton.type = 'button';
+            entry.toggleWeb = (event) => {
+                event?.preventDefault?.();
+                event?.stopPropagation?.();
+                if (getFullscreenElement()) return;
+                const wasActive = webFullscreenTile === tile;
+                exitWebFullscreen();
+                if (!wasActive) {
+                    webFullscreenTile = tile;
+                    tile.classList.add('is-web-fullscreen');
+                }
+                syncWebButton(entry);
+            };
+            entry.webButton.addEventListener('click', entry.toggleWeb);
             entry.toggle = (event) => {
                 event?.preventDefault?.();
                 event?.stopPropagation?.();
@@ -202,7 +235,7 @@
                 });
             };
             entry.handleDoubleClick = (event) => {
-                if (event.target?.closest?.('.fullscreen-btn')) {
+                if (event.target?.closest?.('.no-drag')) {
                     return;
                 }
                 void entry.toggle(event);
@@ -220,10 +253,14 @@
             }
         }
 
+        if (entry.webButton.parentElement !== targetActions) {
+            targetActions.append(entry.webButton);
+        }
         if (button.parentElement !== targetActions) {
             targetActions.append(button);
         }
 
+        syncWebButton(entry);
         syncButtonState(button, tile);
         return button;
     };
@@ -232,6 +269,9 @@
         const entry = tileEntries.get(tile);
 
         if (entry) {
+            if (webFullscreenTile === tile) exitWebFullscreen();
+            entry.webButton.removeEventListener('click', entry.toggleWeb);
+            if (removeButton) entry.webButton.remove();
             entry.button.removeEventListener('click', entry.toggle);
             tile.removeEventListener('dblclick', entry.handleDoubleClick);
             if (removeButton) {
@@ -250,6 +290,7 @@
         Boolean(
             tile &&
                 (getFullscreenElement() === tile ||
+                    webFullscreenTile === tile ||
                     fullscreenSnapshots.has(tile) ||
                     tile.classList?.contains('is-fullscreen'))
         );
@@ -261,9 +302,14 @@
 
         fullscreenChangeBinding?.destroy();
         const handleFullscreenChange = () => syncFullscreenState();
+        const handleEscape = (event) => {
+            if (event.key === 'Escape') exitWebFullscreen();
+        };
+        root.addEventListener('keydown', handleEscape);
         const binding = {
             root,
             destroy: () => {
+                root.removeEventListener('keydown', handleEscape);
                 root.removeEventListener(
                     'fullscreenchange',
                     handleFullscreenChange

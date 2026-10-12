@@ -44,11 +44,22 @@ export default class Logger {
     constructor(env) {
         this.env = env;
         this.logFilePath = logFilePath;
+        this.writeFailed = false;
     }
 
     #_log(type, msg) {
         const line = `${this.#_getTimestamp()} ${type}  ${msg}`;
-        fs.appendFileSync(this.logFilePath, line + '\n', { encoding: 'utf8' });
+        try {
+            fs.appendFileSync(this.logFilePath, line + '\n', { encoding: 'utf8' });
+            this.writeFailed = false;
+        } catch (error) {
+            if (!this.writeFailed) {
+                // Disk-full/permission errors must not crash signaling handlers.
+                console.error(`[log] file write failed (${error.code || 'unknown'}); logging to stderr`);
+            }
+            this.writeFailed = true;
+            console.error(line);
+        }
         if (this.env !== 'production') {
             // eslint-disable-next-line no-console
             console.log(line);

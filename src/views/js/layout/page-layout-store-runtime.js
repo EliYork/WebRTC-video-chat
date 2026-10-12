@@ -95,23 +95,33 @@
             });
 
         const saveLayoutToStorage = (message = '已保存') => {
-            if (layoutStorageHydrating) {
+            if (layoutStorageHydrating || options.shouldPersist?.() === false) {
                 return;
             }
 
-            options.layoutStorage.saveLayoutToStorage({
+            const saved = options.layoutStorage.saveLayoutToStorage({
                 storageKey: options.getLayoutStorageKey(),
                 payload: buildLayoutStoragePayload(),
             });
+            if (saved === false) {
+                options.showLayoutSaveStatus('浏览器存储不可用，布局仅在本次页面生效');
+                return false;
+            }
             refreshSaved();
             options.showLayoutSaveStatus(message);
+            return true;
         };
 
         const clearSavedLayout = () => {
-            options.layoutStorage.clearSavedLayout({
+            const cleared = options.layoutStorage.clearSavedLayout({
                 storageKey: options.getLayoutStorageKey(),
             });
+            if (cleared === false) {
+                options.showLayoutSaveStatus('浏览器存储不可用，无法清除已保存布局');
+                return false;
+            }
             refreshSaved();
+            return true;
         };
 
         const createTileLayoutItem = ({

@@ -31,13 +31,15 @@
         return overlay;
     };
 
-    const render = (tile, text) => {
+    const render = (tile, text, prefix = '接收') => {
         const overlay = ensureOverlay(tile);
         if (!overlay) {
             return undefined;
         }
         const normalizedText = String(text || '').trim();
-        overlay.textContent = normalizedText ? `接收 ${normalizedText}` : '';
+        overlay.textContent = normalizedText
+            ? `${prefix} ${normalizedText}`
+            : '';
         overlay.classList.toggle('hidden', !normalizedText);
         overlay.setAttribute('aria-hidden', String(!normalizedText));
         return overlay;

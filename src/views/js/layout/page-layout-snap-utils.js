@@ -4,8 +4,14 @@
     const clampNumber = (value, min, max) =>
         Math.min(Math.max(min, value), max);
 
-    const getTileBounds = ({ board, minTileWidth, minTileHeight } = {}) => {
-        const boardRect = board?.getBoundingClientRect?.() || {};
+    const getTileBounds = ({
+        board,
+        boundsOverride,
+        minTileWidth,
+        minTileHeight,
+    } = {}) => {
+        const boardRect =
+            boundsOverride || board?.getBoundingClientRect?.() || {};
         const fallbackWidth =
             boardRect.width || board?.parentElement?.offsetWidth;
         const fallbackHeight =

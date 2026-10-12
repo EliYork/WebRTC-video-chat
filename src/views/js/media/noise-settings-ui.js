@@ -6,29 +6,42 @@
 
     const NOISE_SUPPRESSION_KEY = 'webrtc-noise-suppression';
     const AI_NOISE_EXPERIMENT_KEY = 'webrtc-ai-noise-experiment';
+    const NOISE_MODE_KEY = 'webrtc-noise-mode';
     const MIC_GAIN_KEY = 'webrtc-mic-gain';
     const DEFAULT_MIC_GAIN = 100;
     const MIN_MIC_GAIN = 0;
     const MAX_MIC_GAIN = 150;
 
-    const getNoiseSuppressionEnabled = () =>
-        safeStorageGet(NOISE_SUPPRESSION_KEY) !== 'false';
+    const getNoiseMode = () => {
+        const saved = safeStorageGet(NOISE_MODE_KEY);
+        if (['off', 'browser', 'rnnoise'].includes(saved)) return saved;
+        return safeStorageGet(AI_NOISE_EXPERIMENT_KEY) === 'true' ? 'rnnoise' :
+            safeStorageGet(NOISE_SUPPRESSION_KEY) === 'false' ? 'off' : 'browser';
+    };
+    const setNoiseMode = (mode) => {
+        if (!['off', 'browser', 'rnnoise'].includes(mode)) return false;
+        safeStorageSet(NOISE_MODE_KEY, mode);
+        safeStorageSet(NOISE_SUPPRESSION_KEY, mode === 'browser');
+        safeStorageSet(AI_NOISE_EXPERIMENT_KEY, mode === 'rnnoise');
+        return true;
+    };
+    const getNoiseSuppressionEnabled = () => getNoiseMode() === 'browser';
 
     const setNoiseSuppressionEnabled = (enabled) => {
-        safeStorageSet(NOISE_SUPPRESSION_KEY, enabled);
+        setNoiseMode(enabled ? 'browser' : 'off');
     };
 
     const getAiExperimentEnabled = () =>
-        safeStorageGet(AI_NOISE_EXPERIMENT_KEY) === 'true';
+        getNoiseMode() === 'rnnoise';
 
     const setAiExperimentEnabled = (enabled) => {
-        safeStorageSet(AI_NOISE_EXPERIMENT_KEY, enabled);
+        setNoiseMode(enabled ? 'rnnoise' : 'browser');
     };
 
     const getAudioConstraints = () => ({
         echoCancellation: true,
         noiseSuppression: getNoiseSuppressionEnabled(),
-        autoGainControl: !getAiExperimentEnabled(),
+        autoGainControl: getNoiseMode() === 'browser',
         channelCount: 1,
     });
 
@@ -36,8 +49,12 @@
         Math.max(MIN_MIC_GAIN, Math.min(MAX_MIC_GAIN, Math.round(percent)));
 
     const getMicGain = () => {
-        const val = Number(safeStorageGet(MIC_GAIN_KEY));
-        return !Number.isNaN(val) && val >= MIN_MIC_GAIN && val <= MAX_MIC_GAIN
+        const saved = safeStorageGet(MIC_GAIN_KEY);
+        if (saved == null || String(saved).trim() === '') {
+            return DEFAULT_MIC_GAIN;
+        }
+        const val = Number(saved);
+        return Number.isFinite(val) && val >= MIN_MIC_GAIN && val <= MAX_MIC_GAIN
             ? val
             : DEFAULT_MIC_GAIN;
     };
@@ -137,7 +154,7 @@
             restartNoticePanel.append(notice);
         }
 
-        notice.textContent = '重进房间后生效';
+        notice.textContent = '设置已保存';
         notice.classList.add('is-visible');
         global.clearTimeout(timerState.restartNoticeTimer);
         timerState.restartNoticeTimer = global.setTimeout(() => {
@@ -186,6 +203,7 @@
         refs = {},
         isAiExperimentSupported = () => false,
         getNoiseMode = () => 'raw',
+        onModeChange,
         onMicGainChange,
     } = {}) => {
         const resolvedRefs = getRefs(refs);
@@ -205,25 +223,29 @@
         ensureDefaultMicGain();
         sync();
 
-        resolvedRefs.noiseToggle?.addEventListener('click', () => {
-            setNoiseSuppressionEnabled(!getNoiseSuppressionEnabled());
-            updateNoiseToggleUI(resolvedRefs);
-            showRestartEffectNotice(resolvedRefs, timerState);
+        resolvedRefs.noiseToggle?.addEventListener('click', async () => {
+            const mode = getNoiseSuppressionEnabled() ? 'off' : 'browser';
+            if (onModeChange) await onModeChange(mode);
+            else setNoiseMode(mode);
+            sync();
+            if (!onModeChange) showRestartEffectNotice(resolvedRefs, timerState);
         });
         addKeyboardClickProxy(resolvedRefs.noiseToggle);
 
-        resolvedRefs.aiNoiseToggle?.addEventListener('click', () => {
+        resolvedRefs.aiNoiseToggle?.addEventListener('click', async () => {
             if (!isAiExperimentSupported()) {
                 return;
             }
 
-            setAiExperimentEnabled(!getAiExperimentEnabled());
+            const mode = getAiExperimentEnabled() ? 'browser' : 'rnnoise';
+            if (onModeChange) await onModeChange(mode);
+            else setNoiseMode(mode);
             updateAiExperimentToggleUI({
                 refs: resolvedRefs,
                 supported: true,
                 noiseMode: getNoiseMode(),
             });
-            showRestartEffectNotice(resolvedRefs, timerState);
+            if (!onModeChange) showRestartEffectNotice(resolvedRefs, timerState);
         });
         addKeyboardClickProxy(resolvedRefs.aiNoiseToggle);
 
@@ -240,6 +262,8 @@
     };
 
     global.VoiceNoiseSettingsUI = {
+        getNoiseMode,
+        setNoiseMode,
         getAiExperimentEnabled,
         getAudioConstraints,
         getMicGain,

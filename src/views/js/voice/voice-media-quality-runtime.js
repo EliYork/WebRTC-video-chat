@@ -135,6 +135,19 @@
         view,
     } = {}) => {
         const states = new Map();
+        const renderPlaybackSample = (state, source) => {
+            const video = source.video;
+            const frames = video?.getVideoPlaybackQuality?.().totalVideoFrames;
+            const timestamp = global.performance?.now?.() ?? Date.now();
+            const previous = state.playbackBaseline;
+            let fps;
+            if (Number.isFinite(frames) && previous && timestamp > previous.timestamp && frames >= previous.frames) {
+                fps = Math.round((frames - previous.frames) * 1000 / (timestamp - previous.timestamp));
+            }
+            state.playbackBaseline = Number.isFinite(frames) ? { frames, timestamp } : null;
+            const resolution = formatResolution(video?.videoWidth, video?.videoHeight);
+            view?.render?.(state.tile, [resolution, fps === undefined ? '帧率待采样' : `${fps}fps`].filter(Boolean).join(' · '));
+        };
         const logOnce = (state, event) => {
             if (!state.logged.has(event.event)) {
                 state.logged.add(event.event);
@@ -146,6 +159,7 @@
             if (!state) return;
             if (state.timer) global.clearTimeout(state.timer);
             state.generation += 1;
+            global.VoiceShareDiagnostics?.remove(state.tile);
             view?.hide?.(state.tile);
             if (remove) view?.remove?.(state.tile);
             states.delete(peerId);
@@ -163,27 +177,53 @@
             if (!state || state.generation !== generation) return;
             const source = getQualitySource?.(peerId);
             const track = getLiveVideoTrack(source?.stream);
+            if (source?.isScreenSharing && track &&
+                (source.stream !== state.stream || track !== state.track || source.pc !== state.pc)) {
+                syncPeer(peerId);
+                return;
+            }
             if (
                 !source?.isScreenSharing ||
                 !track ||
                 source.stream !== state.stream ||
-                source.video?.srcObject !== source.stream ||
+                (!source.isLocal &&
+                    source.video?.srcObject !== source.stream) ||
                 isClosedPc(source.pc)
             ) {
                 stop(peerId, 'source-invalid');
                 return;
             }
+            if (source.isLocal) {
+                global.VoiceShareDiagnostics?.sync(source);
+                const options = source.shareOptions || {};
+                const resolution =
+                    { auto: '自动', original: '原始分辨率' }[
+                        options.resolutionPreset
+                    ] || options.resolutionPreset;
+                const fps = roundPositive(options.frameRate);
+                const label = [
+                    resolution,
+                    fps ? `${fps}fps` : '',
+                ]
+                    .filter(Boolean)
+                    .join(' · ');
+                view?.render?.(state.tile, label, '共享设置');
+                schedule(peerId, state);
+                return;
+            }
             if (typeof source.pc?.getStats !== 'function') {
-                view?.hide?.(state.tile);
+                global.VoiceShareDiagnostics?.sync(source);
+                renderPlaybackSample(state, source);
                 logOnce(state, { event: 'stats-unavailable' });
                 schedule(peerId, state);
                 return;
             }
             try {
+                global.VoiceShareDiagnostics?.sync(source);
                 const stats = await source.pc.getStats(track);
                 if (
-                    !states.has(peerId) ||
-                    states.get(peerId).generation !== generation
+                    states.get(peerId) !== state ||
+                    state.generation !== generation
                 ) {
                     debug?.({ event: 'stale-sample-ignored' });
                     return;
@@ -196,17 +236,18 @@
                     view?.render?.(state.tile, label);
                     logOnce(state, { event: 'first-valid-quality-sample' });
                 } else {
-                    view?.hide?.(state.tile);
+                    renderPlaybackSample(state, source);
                 }
             } catch (error) {
-                view?.hide?.(state.tile);
+                if (states.get(peerId) !== state) return;
+                renderPlaybackSample(state, source);
                 logOnce(state, {
                     errorType: error?.name || 'Error',
                     event: 'getStats-failed',
                 });
             }
             const next = states.get(peerId);
-            if (next?.generation === generation) schedule(peerId, next);
+            if (next === state && next.generation === generation) schedule(peerId, next);
         };
         const syncPeer = (peerId) => {
             const source = getQualitySource?.(peerId);
@@ -217,8 +258,7 @@
                 !track ||
                 !source.tile ||
                 !source.video ||
-                source.video.srcObject !== source.stream ||
-                !source.pc ||
+                (!source.isLocal && source.video.srcObject !== source.stream) ||
                 isClosedPc(source.pc)
             ) {
                 stop(peerId, 'not-screen-live');
@@ -228,10 +268,14 @@
             const key = `${source.generation || 0}:${track}:${source.pc}`;
             if (
                 current?.key === key &&
+                current.track === track &&
+                current.pc === source.pc &&
                 current.tile === source.tile &&
                 current.stream === source.stream
-            )
+            ) {
+                global.VoiceShareDiagnostics?.sync(source);
                 return;
+            }
             stop(peerId, current ? 'source-replaced' : 'source-starting');
             const state = {
                 baseline: null,
@@ -240,10 +284,14 @@
                 key,
                 logged: new Set(),
                 stream: source.stream,
+                track,
+                pc: source.pc,
                 tile: source.tile,
                 timer: null,
             };
             states.set(peerId, state);
+            global.VoiceShareDiagnostics?.sync(source);
+            if (!source.isLocal) view?.render?.(state.tile, '画质待采样');
             debug?.({
                 event: current
                     ? 'quality-source-replaced'

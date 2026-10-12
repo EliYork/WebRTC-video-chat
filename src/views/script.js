@@ -92,19 +92,6 @@ const {
     getLayoutComponentId,
     renderLayoutComponentTile: renderLayoutComponentTileContent,
 } = layoutComponents;
-const getAudioConstraints = () => {
-    const constraints = noiseSettingsUI.getAudioConstraints();
-
-    if (selectedInputDeviceId && selectedInputDeviceId !== 'default') {
-        return {
-            ...constraints,
-            deviceId: { exact: selectedInputDeviceId },
-        };
-    }
-
-    return constraints;
-};
-
 const getCameraConstraints = () =>
     selectedCameraDeviceId && selectedCameraDeviceId !== 'default'
         ? { deviceId: { exact: selectedCameraDeviceId } }
@@ -172,7 +159,6 @@ const isAiExperimentSupported = () =>
     typeof AudioWorkletNode !== 'undefined' &&
     !isMobileLayout();
 
-const getAiExperimentEnabled = () => noiseSettingsUI.getAiExperimentEnabled();
 let myVideoStream;
 let activeStream;
 let cameraStream;
@@ -191,6 +177,7 @@ let outputVolume = 1;
 let selectedInputDeviceId = 'default';
 let selectedCameraDeviceId = 'default';
 let selectedOutputDeviceId = 'default';
+let outputSelectionRevision = 0;
 let mediaDevicesCache = {
     camera: [],
     mic: [],
@@ -202,6 +189,7 @@ const screenSharers = new Set();
 const peersWithCallHandler = new WeakSet();
 const presenceMembersByPeerId = new Map();
 const mediaElementVideoTracks = new WeakMap();
+const mediaElementAudioTracks = new WeakMap();
 let localVoiceMediaGeneration = 0;
 let localVoiceSessionGeneration = 0;
 let screenShareRequestPending = false;
@@ -228,7 +216,10 @@ const mediaOperationController =
     voiceMediaOperationApi.createMediaOperationController({
         getEpoch: () => voiceSessionRuntime.getSnapshot().epoch,
         onDebug: (event) => voiceMediaDebug.record(event),
-        stopStream: (stream) => localMediaTrackStopper.stopStream(stream),
+        stopStream: (stream) => {
+            disposeAudioPipeline(stream);
+            localMediaTrackStopper.stopStream(stream);
+        },
     });
 const localTrackEndedController =
     voiceMediaOperationApi.createTrackEndedController({
@@ -240,6 +231,22 @@ const localTrackEndedController =
         stopTrack: (track) => localMediaTrackStopper.stopTrack(track),
     });
 let voiceMediaQualityRuntime;
+let screenSfuRuntime;
+const remoteScreenSfuSources = new Map();
+const remoteP2pTrackRoles = new Map();
+const renderRemoteMedia = (peerId, baseStream, generation) => {
+    const source = remoteScreenSfuSources.get(peerId);
+    const merged = window.VoiceScreenSfuRuntime.mergeScreenMedia({
+        baseStream,
+        baseTrackRoles: remoteP2pTrackRoles.get(peerId) || [],
+        screenStream: source?.stream,
+        screenTrackRoles: source?.trackRoles || [],
+    });
+    return addVideoStream(document.createElement('video'), merged.stream, peerId, {
+        generation: generation ?? voicePeerRegistry.getQualitySource(peerId)?.generation ?? 0,
+        trackRoles: merged.trackRoles,
+    });
+};
 const screenShareVolumeController =
     screenShareVolumeControllerApi.createController({
         MediaStreamCtor: MediaStream,
@@ -288,12 +295,10 @@ const localScreenSharePreviewController =
             fullscreenControls.getFullscreenElement() === tile,
     });
 const voicePeerRegistry = voicePeerRegistryApi.createRegistry({
-    attachRemoteStream: ({ generation, metadata, peerId, stream }) =>
-        addVideoStream(document.createElement('video'), stream, peerId, {
-            generation,
-            trackRoles:
-                metadata?.[voiceCallProtocol.MEDIA_TRACK_ROLES_METADATA] || [],
-        }),
+    attachRemoteStream: ({ generation, metadata, peerId, stream }) => {
+        remoteP2pTrackRoles.set(peerId, metadata?.[voiceCallProtocol.MEDIA_TRACK_ROLES_METADATA] || []);
+        return renderRemoteMedia(peerId, stream, generation);
+    },
     createRemoteStream: ({
         currentStream,
         incomingStream,
@@ -306,7 +311,8 @@ const voicePeerRegistry = voicePeerRegistryApi.createRegistry({
         }),
     detachRemoteStream: ({ peerId, tile }) => {
         if (tile && document.getElementById(peerId) === tile) {
-            addVideoStream(document.createElement('video'), null, peerId);
+            remoteP2pTrackRoles.delete(peerId);
+            renderRemoteMedia(peerId, null);
             return;
         }
 
@@ -318,6 +324,9 @@ const voicePeerRegistry = voicePeerRegistryApi.createRegistry({
     },
     onDebug: (event) => voiceMediaDebug.record(event),
     onPeerCleanup: ({ peerId }) => {
+        screenSfuRuntime?.forgetPeer(peerId);
+        remoteScreenSfuSources.delete(peerId);
+        remoteP2pTrackRoles.delete(peerId);
         screenShareVolumeController.cleanup(peerId);
         voiceMediaQualityRuntime?.stop(peerId, 'peer-cleanup', {
             remove: true,
@@ -325,19 +334,63 @@ const voicePeerRegistry = voicePeerRegistryApi.createRegistry({
     },
     onRemoteMediaState: ({ peerId }) =>
         voiceMediaQualityRuntime?.syncPeer(peerId),
+    onOutgoingConnected: ({ peerId }) => {
+        if (screenSfuRuntime?.usesServer(peerId)) refreshVoiceCallsForLocalMedia(currentPeer);
+    },
     onWarning: (message, error) => console.warn(message, error || ''),
     removeRemoteTile: ({ peerId, tile }) => removeRemoteTile(peerId, tile),
+});
+screenSfuRuntime = window.VoiceScreenSfuRuntime.createRuntime({
+    config: window.voiceScreenSfuConfig || {},
+    onRoutes: () => {
+        updateScreenP2pBudget();
+        if (currentPeer) refreshVoiceCallsForLocalMedia(currentPeer);
+        notifyMediaDock();
+    },
+    onRemoteStream: ({ peerId, stream, publicationId, trackRoles }) => {
+        if (stream) remoteScreenSfuSources.set(peerId, { stream, publicationId, trackRoles });
+        else if (remoteScreenSfuSources.get(peerId)?.publicationId === publicationId) remoteScreenSfuSources.delete(peerId);
+        if (voiceMediaTargets.has(peerId)) renderRemoteMedia(peerId, voicePeerRegistry.getQualitySource(peerId)?.stream);
+    },
+    onState: () => {
+        updateScreenP2pBudget();
+        if (currentPeer) refreshVoiceCallsForLocalMedia(currentPeer);
+        notifyMediaDock();
+    },
+    onWarning: (message, error) => console.warn('[screen-route]', message, error?.message || ''),
 });
 voiceMediaQualityRuntime = voiceMediaQualityRuntimeApi.createRuntime({
     debug: (event) => voiceMediaDebug.record(event),
     getQualitySource: (peerId) => {
+        if (peerId === 'local-video') {
+            const tile = document.getElementById('local-video');
+            return {
+                isLocal: true,
+                shareOptions: currentScreenShareSession?.shareOptions,
+                codecDecision: currentScreenShareSession?.codecDecision,
+                serverHealth: screenSfuRuntime.getSendHealth(),
+                outgoingConnections: [screenSfuRuntime.getSendConnection(), ...voicePeerRegistry.getPeerIds().map((id) => {
+                    const call = voicePeerRegistry.getSnapshot(id)?.outgoingCall;
+                    return call?.peerConnection || call?._pc;
+                })].filter(Boolean),
+                previewHidden: tile?.classList.contains('is-local-preview-hidden'),
+                isScreenSharing: Boolean(currentScreenStream),
+                stream: currentScreenStream,
+                tile,
+                video: tile?.querySelector('video'),
+            };
+        }
         const snapshot = voicePeerRegistry.getQualitySource(peerId);
+        const serverSource = screenSfuRuntime.getRemoteSource(peerId);
         const tile = snapshot?.tile || document.getElementById(peerId);
         const playbackStream =
             screenShareVolumeController.getPrimaryStream(peerId) ||
             snapshot?.stream;
         return {
             ...snapshot,
+            ...(serverSource ? { pc: serverSource.pc } : {}),
+            serverHealth: serverSource?.serverHealth,
+            screenRoute: serverSource ? '服务器转发' : 'P2P',
             isScreenSharing: screenSharers.has(peerId),
             stream: playbackStream,
             video: tile?.querySelector('video'),
@@ -351,13 +404,43 @@ let pageLayoutWindowManagerRuntime;
 let pageLayoutComponentRuntime;
 const layoutResizeBoundBoards = new WeakSet();
 const activeLayoutInteractionCancels = new Set();
-let noiseAudioContext = null;
-let noiseProcessorNode = null;
 // eslint-disable-next-line no-unused-vars
 let noiseProcessorActive = false;
 let noiseRawStream = null;
 let noiseMode = 'raw';
-let noiseGainNode = null;
+const audioProcessingRuntime = window.VoiceAudioProcessing.createRuntime({
+    getGain: () => noiseSettingsUI.getMicGain(),
+    supportsRnnoise: isAiExperimentSupported,
+    stopStream: (stream) => localMediaTrackStopper.stopStream(stream),
+    onSourceEnded: (stream) => {
+        const track = stream.getAudioTracks()[0];
+        void handleUnexpectedLocalTrackEnded('microphone', track, voiceSessionRuntime.getSnapshot().epoch);
+    },
+    onProcessorFailure: (pipeline) => recoverProcessingFailure({ ...pipeline, stream: myVideoStream }),
+});
+const audioPipelines = audioProcessingRuntime.pipelines;
+const audioSettingsController = window.VoiceAudioSettingsController.createController({
+    initial: { mode: noiseSettingsUI.getNoiseMode(), deviceId: selectedInputDeviceId },
+    onRequested: ({ deviceId }) => {
+        selectedInputDeviceId = deviceId;
+        voiceDeviceRuntime?.setSelected('mic', deviceId);
+    },
+    onCommitted: ({ mode }) => noiseSettingsUI.setNoiseMode(mode),
+    onChange: () => notifyMediaDock(),
+    rollback: () => audioProcessingRuntime.diagnostics(myVideoStream)?.sourceLive === false ? { deviceId: 'default' } : {},
+    apply: async (request) => {
+        if (mediaOperationController.getSnapshot('microphone').promise) {
+            mediaOperationController.invalidate('microphone', { state: 'switching' });
+        }
+        const hasCapture = myVideoStream?.getAudioTracks().some((track) => track.readyState === 'live');
+        if ((hasCapture || mediaOperationController.getSnapshot('microphone').desired) && currentPeer && !currentPeer.destroyed) {
+            return restartLocalMicrophone(currentPeer, { preserveOldTrack: true, request });
+        }
+        return true;
+    },
+});
+let activeAudioPipelineStream = null;
+let cameraSelectionRevision = 0;
 let micPermissionDenied = false;
 
 // eslint-disable-next-line no-undef
@@ -532,7 +615,7 @@ const getMediaDockSnapshot = () => {
 
     return {
         actualVoiceJoined,
-        aiNoiseEnabled: noiseSettingsUI.getAiExperimentEnabled(),
+        aiNoiseEnabled: audioSettingsController.snapshot().requested.mode === 'rnnoise',
         aiNoiseSupported: isAiExperimentSupported(),
         availableCameras: mediaDevicesCache.camera,
         availableMicrophones: mediaDevicesCache.mic,
@@ -555,7 +638,8 @@ const getMediaDockSnapshot = () => {
         mediaControlsAvailable: actualVoiceJoined,
         mediaErrors,
         microphoneEnabled: Boolean(
-            microphoneTrack?.readyState === 'live' && microphoneTrack.enabled
+            microphoneTrack?.readyState === 'live' && microphoneTrack.enabled &&
+            audioProcessingRuntime.diagnostics(myVideoStream)?.sourceLive !== false
         ),
         microphoneError: mediaErrors.microphone,
         microphoneGain: noiseSettingsUI.getMicGain(),
@@ -568,7 +652,11 @@ const getMediaDockSnapshot = () => {
                   ? 'granted'
                   : 'prompt',
         noiseMode,
-        noiseSuppressionEnabled: noiseSettingsUI.getNoiseSuppressionEnabled(),
+        noiseSuppressionEnabled: audioSettingsController.snapshot().requested.mode === 'browser',
+        requestedNoiseMode: audioSettingsController.snapshot().requested.mode,
+        audioSettingsPending: audioSettingsController.snapshot().pending,
+        audioSettingsError: audioSettingsController.snapshot().error,
+        audioProcessing: audioProcessingRuntime.diagnostics(myVideoStream),
         outputMuted,
         outputSelectionUnsupported: !canSelectAudioOutput(),
         outputVolume,
@@ -576,6 +664,7 @@ const getMediaDockSnapshot = () => {
         screenShareError: mediaErrors.screen,
         screenSharePending:
             screenShareRequestPending || Boolean(screenOperation.promise),
+        screenShareRoute: screenSfuRuntime?.snapshot(),
         selectedCameraId: selectedCameraDeviceId,
         selectedMicrophoneId: selectedInputDeviceId,
         selectedOutputId: selectedOutputDeviceId,
@@ -602,6 +691,7 @@ const applyOutputDevice = async (mediaElement, isRemote) => {
     }
 
     const sinkId = selectedOutputDeviceId || 'default';
+    const revision = outputSelectionRevision;
 
     if (mediaElement.dataset.outputSinkId === sinkId) {
         return true;
@@ -612,8 +702,10 @@ const applyOutputDevice = async (mediaElement, isRemote) => {
         mediaElement,
         supported: canSelectAudioOutput(),
     });
+    if (revision !== outputSelectionRevision || sinkId !== selectedOutputDeviceId) {
+        return result.ok;
+    }
     if (result.ok) {
-        voiceStatusView.clearMediaError('output');
         notifyMediaDock();
         return true;
     }
@@ -621,9 +713,14 @@ const applyOutputDevice = async (mediaElement, isRemote) => {
         errorType: result.errorType,
         event: 'device-output-fallback',
     });
-    selectedOutputDeviceId = 'default';
-    voiceDeviceRuntime?.setSelected('output', 'default');
-    voiceStatusView.setMediaError('output', result.errorType);
+    if (result.fallbackApplied) {
+        selectedOutputDeviceId = 'default';
+        voiceDeviceRuntime?.setSelected('output', 'default');
+    }
+    const label = voiceStatusViewApi.ERROR_LABELS.output[result.errorType] ||
+        voiceStatusViewApi.ERROR_LABELS.output.unknown;
+    voiceStatusView.setMediaError('output', result.errorType,
+        `${label}，${result.fallbackApplied ? '已回退默认设备' : '默认设备也不可用，请点击恢复声音'}`);
     notifyMediaDock();
     console.warn(
         'Could not switch output device; falling back to default.',
@@ -631,6 +728,9 @@ const applyOutputDevice = async (mediaElement, isRemote) => {
     );
     if (!result.fallbackApplied) {
         console.warn('Could not restore the default output device.');
+    } else if (sinkId !== 'default') {
+        // Move every player to the fallback, including separate game audio.
+        void applyOutputSettingsToRemoteMedia();
     }
     return false;
 };
@@ -715,34 +815,10 @@ const voiceDeviceRuntime = voiceDeviceRuntimeApi.createDeviceRuntime({
 
 const refreshMediaDeviceLists = () => voiceDeviceRuntime.refresh();
 
-const selectInputDevice = async (deviceId = 'default') => {
-    const previousDeviceId = selectedInputDeviceId;
-    selectedInputDeviceId = deviceId;
-    voiceDeviceRuntime.setSelected('mic', deviceId);
-    notifyMediaDock();
-
-    if (
-        mediaOperationController.getSnapshot().desired.microphone &&
-        currentPeer &&
-        !currentPeer.destroyed
-    ) {
-        if (mediaOperationController.getSnapshot('microphone').promise) {
-            mediaOperationController.invalidate('microphone', {
-                state: 'switching',
-            });
-        }
-        const switched = await restartLocalMicrophone(currentPeer, {
-            preserveOldTrack: true,
-        });
-        if (!switched) {
-            selectedInputDeviceId = previousDeviceId;
-            voiceDeviceRuntime.setSelected('mic', previousDeviceId);
-            notifyMediaDock();
-        }
-    }
-};
+const selectInputDevice = (deviceId = 'default') => audioSettingsController.select({ deviceId });
 
 const selectCameraDevice = async (deviceId = 'default') => {
+    const revision = ++cameraSelectionRevision;
     const previousDeviceId = selectedCameraDeviceId;
     selectedCameraDeviceId = deviceId;
     voiceDeviceRuntime.setSelected('camera', deviceId);
@@ -761,7 +837,7 @@ const selectCameraDevice = async (deviceId = 'default') => {
         const switched = await startCamera(currentPeer, {
             preserveOldTrack: true,
         });
-        if (!switched) {
+        if (!switched && revision === cameraSelectionRevision) {
             selectedCameraDeviceId = previousDeviceId;
             voiceDeviceRuntime.setSelected('camera', previousDeviceId);
             notifyMediaDock();
@@ -770,6 +846,8 @@ const selectCameraDevice = async (deviceId = 'default') => {
 };
 
 const selectOutputDevice = async (deviceId = 'default') => {
+    outputSelectionRevision += 1;
+    voiceStatusView.clearMediaError('output');
     selectedOutputDeviceId = deviceId;
     voiceDeviceRuntime.setSelected('output', deviceId);
     notifyMediaDock();
@@ -799,12 +877,14 @@ const resetLocalVoiceState = () => {
 
 const pageVoiceTeardown = voiceMediaLifecycle.createPageTeardown({
     beforeStopMedia: () => {
+        audioRecoveryRuntime.dispose();
         chatPanelRuntime?.destroy();
         sidebarRuntime?.destroy();
         mediaDockRuntime?.destroy();
         mediaDockAdapter?.destroy();
         remoteVolumeUI.destroy();
         screenShareVolumeController.destroy();
+        screenSfuRuntime.leave();
         localScreenSharePreviewController.destroy();
         fullscreenControls.destroy();
         navigator.mediaDevices?.removeEventListener?.(
@@ -892,6 +972,8 @@ const publishLocalMediaToPeer = (
     if (!voiceMediaTargets.has(peerId)) {
         return undefined;
     }
+    // Keep negotiated screen sender slots available for fallback even when
+    // signaling goes offline. The connected callback parks them with replaceTrack.
 
     return voicePeerRegistry.callPeer({
         generation,
@@ -968,6 +1050,8 @@ const reconcileVoiceTargets = (
             });
         }
     });
+    updateScreenP2pBudget();
+    screenSfuRuntime.setSession({ roomId: joinedVoiceRoomId, peerId: localPeerId, voiceSessionGeneration: localVoiceSessionGeneration });
     voiceMediaDebug.record({
         epoch,
         event: 'target-reconciliation',
@@ -1148,6 +1232,10 @@ const reconcilePresenceState = ({
 
     if (currentVoiceSnapshot) {
         syncPresenceTilesForJoinedRoom(channels);
+        // A late join learns sharing state from presence, not screen:share.
+        voicePeerRegistry.getPeerIds().forEach((peerId) =>
+            voiceMediaQualityRuntime?.syncPeer(peerId)
+        );
         voiceMediaDebug.record({
             epoch: session.epoch,
             event: 'presence-reconciled',
@@ -1346,6 +1434,7 @@ const ensureSocket = () => {
         reconnectionDelay: 500,
         reconnectionDelayMax: 8000,
     });
+    screenSfuRuntime.attachSocket(socket);
 
     socket.on('cursor:move', renderRemoteCursor);
     socket.on('cursor:leave', markRemoteCursorIdle);
@@ -1634,149 +1723,32 @@ const enablePageCursorSharing = () => {
     });
 };
 
-const requestRawAudioStream = async ({ allowBasicFallback = true } = {}) => {
-    let rawStream;
+const requestRawAudioStream = (request = audioSettingsController.snapshot().requested) =>
+    audioProcessingRuntime.capture(request);
 
-    try {
-        rawStream = await navigator.mediaDevices.getUserMedia({
-            audio: getAudioConstraints(),
-        });
-    } catch (error) {
-        if (!allowBasicFallback) {
-            throw error;
-        }
-        console.warn(
-            'Could not start microphone with enhanced constraints; retrying with basic audio.',
-            error
-        );
-        rawStream = await navigator.mediaDevices.getUserMedia({
-            audio: true,
-        });
-    }
+const createAudioPipeline = async (rawStream, request = audioSettingsController.snapshot().requested) =>
+    rawStream ? audioProcessingRuntime.prepare(rawStream, request) : audioProcessingRuntime.stage(request);
 
-    return rawStream;
-};
-
-const requestAudioStream = async ({ rawOnly = false, ...options } = {}) => {
-    const rawStream = await requestRawAudioStream(options);
-    if (rawOnly) {
-        return rawStream;
-    }
-    try {
-        return await createAudioPipeline(rawStream);
-    } catch (error) {
-        console.warn('[audio] Pipeline init failed, using raw.', error);
-        return rawStream;
-    }
-};
-
-const createAudioPipeline = async (rawStream) => {
-    const ctx = new AudioContext({ sampleRate: 48000 });
-    let rnnoiseNode;
-    try {
-        const source = ctx.createMediaStreamSource(rawStream);
-        const dest = ctx.createMediaStreamDestination();
-        let lastOutNode = source;
-
-        if (getAiExperimentEnabled() && isAiExperimentSupported()) {
-            try {
-                const wns = await import('/vendor/web-noise-suppressor.js');
-                const wasmBinary = await wns.loadRnnoise({
-                    url: '/wasm/rnnoise.wasm',
-                    simdUrl: '/wasm/rnnoise_simd.wasm',
-                });
-                await ctx.audioWorklet.addModule(
-                    '/audio-worklet/rnnoise-processor.js'
-                );
-                rnnoiseNode = new wns.RnnoiseWorkletNode(ctx, {
-                    wasmBinary,
-                    maxChannels: 2,
-                });
-                source.connect(rnnoiseNode);
-                lastOutNode = rnnoiseNode;
-                const boost = new GainNode(ctx, { gain: 1.35 });
-                rnnoiseNode.connect(boost);
-                lastOutNode = boost;
-                noiseMode = 'rnnoise';
-                console.log(
-                    '[audio-experiment] web-noise-suppressor Rnnoise active'
-                );
-            } catch (error) {
-                try {
-                    rnnoiseNode?.destroy?.();
-                    rnnoiseNode?.disconnect?.();
-                } catch {
-                    /* noop */
-                }
-                rnnoiseNode = undefined;
-                console.warn(
-                    '[audio-experiment] web-noise-suppressor init failed, gain only.',
-                    error
-                );
-                noiseMode = 'passthrough';
-            }
-        }
-
-        const micGainPercent = noiseSettingsUI.getMicGain();
-        const micGainNode = new GainNode(ctx, {
-            gain: Math.max(0.001, micGainPercent / 100),
-        });
-        lastOutNode.connect(micGainNode);
-        micGainNode.connect(dest);
-
-        noiseAudioContext = ctx;
-        noiseGainNode = micGainNode;
-        noiseProcessorNode = rnnoiseNode || null;
-        noiseRawStream = rawStream;
-        noiseProcessorActive = true;
-        return dest.stream;
-    } catch (error) {
-        try {
-            rnnoiseNode?.destroy?.();
-            rnnoiseNode?.disconnect?.();
-        } catch {
-            /* noop */
-        }
-        try {
-            await ctx.close();
-        } catch {
-            /* noop */
-        }
-        throw error;
-    }
-};
+const disposeAudioPipeline = (stream, options) => audioProcessingRuntime.dispose(stream, options);
 
 const destroyProcessedAudioStream = () => {
-    if (noiseProcessorNode) {
-        try {
-            if (typeof noiseProcessorNode.destroy === 'function') {
-                noiseProcessorNode.destroy();
-            }
-
-            noiseProcessorNode.disconnect();
-        } catch {
-            /* noop */
-        }
-        noiseProcessorNode = null;
-    }
-
-    if (noiseAudioContext) {
-        try {
-            noiseAudioContext.close();
-        } catch {
-            /* noop */
-        }
-        noiseAudioContext = null;
-    }
-
-    if (noiseRawStream) {
-        localMediaTrackStopper.stopStream(noiseRawStream);
-        noiseRawStream = null;
-    }
-
+    audioSettingsController.cancel();
+    audioProcessingRuntime.cancelPending();
+    disposeAudioPipeline(activeAudioPipelineStream);
+    activeAudioPipelineStream = null;
+    noiseRawStream = null;
     noiseProcessorActive = false;
     noiseMode = 'raw';
-    noiseGainNode = null;
+};
+
+const adoptAudioPipeline = (stream) => {
+    stream = audioProcessingRuntime.adopt(stream);
+    const pipeline = audioPipelines.get(stream);
+    activeAudioPipelineStream = pipeline ? stream : null;
+    noiseRawStream = pipeline?.rawStream || null;
+    noiseProcessorActive = Boolean(pipeline);
+    noiseMode = pipeline?.mode || 'raw';
+    return stream;
 };
 
 const getFullscreenElement = () => fullscreenControls.getFullscreenElement();
@@ -1908,7 +1880,7 @@ const getTileLayoutItemId = (tile) =>
     tile.dataset.layoutItemId || tile.dataset.layoutId || getTileLayoutId(tile);
 
 const isPanelTilePinned = (tile) => {
-    if (!tile?.dataset?.pageLayoutType) {
+    if (!tile) {
         return false;
     }
 
@@ -1993,7 +1965,7 @@ const getPanelCollapsedHeight = () => {
         window.innerHeight ||
         PANEL_COLLAPSED_HEIGHT;
 
-    return Math.max(32, Math.round(boardHeight / PAGE_GRID_ROWS));
+    return boardHeight / PAGE_GRID_ROWS;
 };
 
 const getTileMinimumSize = (tile) => {
@@ -2011,7 +1983,11 @@ const getTileMinimumSize = (tile) => {
 };
 
 const bringTileLayoutToFront = (tile) => {
-    if (!tile || fullscreenControls.isTileLayoutWriteBlocked(tile)) {
+    if (
+        !tile ||
+        isMobileLayout() ||
+        fullscreenControls.isTileLayoutWriteBlocked(tile)
+    ) {
         return;
     }
 
@@ -2051,10 +2027,19 @@ const getLayoutSnapContext = (tile) => {
 
     return {
         board: getLayoutBoardForTile(tile),
+        // Mobile is a flowing view of the same widgets, not a smaller desktop.
+        // Keep grid normalization independent of its narrow, scrolling bounds.
+        boundsOverride: isMobileLayout()
+            ? { width: 1280, height: 720 }
+            : undefined,
         columns: PAGE_GRID_COLUMNS,
         rows: PAGE_GRID_ROWS,
         minGridW: LAYOUT_MIN_GRID_W,
-        minGridH: LAYOUT_MIN_GRID_H,
+        minGridH:
+            tile?.classList?.contains('is-panel-collapsed') ||
+            tile?.dataset?.panelCollapsing === 'true'
+                ? 1
+                : LAYOUT_MIN_GRID_H,
         minTileWidth: minimumSize.width,
         minTileHeight: minimumSize.height,
         normalizeZIndex: normalizeTileLayoutZIndex,
@@ -2347,9 +2332,6 @@ const applyTileLayoutItemToElement = (
 const syncTileLayoutItemFromElement = (tile, updates = {}) =>
     pageLayoutStoreRuntime?.syncTileLayoutItemFromElement(tile, updates);
 
-const persistTileLayoutItem = (tile) =>
-    pageLayoutStoreRuntime?.persistTileLayoutItem(tile);
-
 const setTileLayoutItemVisibility = (
     itemId,
     visible,
@@ -2388,6 +2370,9 @@ const applyTileLayout = (tile, layout, { syncItem = true } = {}) => {
     tile.style.top = `${next.y}px`;
     tile.style.width = `${next.width}px`;
     tile.style.height = `${next.height}px`;
+    if (getPanelConfig(tile.dataset.pageLayoutType)) {
+        tile.style.minHeight = `${getTileMinimumSize(tile).height}px`;
+    }
     applyTileLayoutZIndex(tile, next.zIndex);
 
     if (syncItem) {
@@ -2399,6 +2384,15 @@ const applyTileLayout = (tile, layout, { syncItem = true } = {}) => {
 };
 
 const getCurrentTileLayout = (tile) => {
+    if (isMobileLayout() && tile.classList.contains('is-positioned')) {
+        return {
+            x: parseFloat(tile.style.left) || 0,
+            y: parseFloat(tile.style.top) || 0,
+            width: parseFloat(tile.style.width) || PAGE_TILE_MIN_WIDTH,
+            height: parseFloat(tile.style.height) || PAGE_TILE_MIN_HEIGHT,
+            zIndex: getTileLayoutZIndex(tile),
+        };
+    }
     const board = getLayoutBoardForTile(tile);
     const tileRect = tile.getBoundingClientRect();
     const boardRect = board.getBoundingClientRect();
@@ -2410,10 +2404,6 @@ const getCurrentTileLayout = (tile) => {
         height: tileRect.height,
         zIndex: getTileLayoutZIndex(tile),
     });
-};
-
-const persistCurrentTileLayout = (tile) => {
-    persistTileLayoutItem(tile);
 };
 
 const snapTileLayoutToGridForTile = (tile) => {
@@ -2468,7 +2458,6 @@ const clampPositionedTileLayouts = () => {
             !fullscreenControls.isTileLayoutWriteBlocked(tile)
         ) {
             applyTileLayout(tile, getCurrentTileLayout(tile));
-            persistCurrentTileLayout(tile);
         }
     });
 };
@@ -2711,7 +2700,7 @@ const getPanelConfigForTile = (tile) =>
 const savePanelItemState = (tile, { config, layout, message } = {}) => {
     const item = getLayoutItemForTile(tile);
 
-    if (!tile || !item || !isRegisteredPanelItem(item)) {
+    if (!tile || !item) {
         return null;
     }
 
@@ -2769,7 +2758,7 @@ const togglePanelPin = (tile) => {
     const panelConfig = getPanelConfigForTile(tile);
     const item = getLayoutItemForTile(tile);
 
-    if (!panelConfig || panelConfig.canPin === false || !item) {
+    if (panelConfig?.canPin === false || !item || fullscreenControls.isTileLayoutWriteBlocked(tile)) {
         return;
     }
 
@@ -2806,7 +2795,7 @@ const canResizeLayoutItem = (item) => {
 };
 
 const shouldIgnoreLayoutDragTarget = (target) =>
-    Boolean(
+    !target?.closest?.('.window-drag-handle') && Boolean(
         target?.closest?.(
             [
                 'input',
@@ -2850,6 +2839,9 @@ const ensureTileStructure = (tile) => {
     });
 
     bindTileLayoutControls(tile);
+    if (!tile.dataset.pageLayoutType && !tile.querySelector('.panel-shell-actions')) {
+        pageLayoutRuntime?.ensurePanelShellActions(tile);
+    }
     bindLayoutResizeBoardControls();
 
     return structure;
@@ -2966,6 +2958,7 @@ const isTilePointerDisabled = (event) =>
 
 const startTileDrag = (event, tile) => {
     if (
+        fullscreenControls.isTileLayoutWriteBlocked(tile) ||
         isTilePointerDisabled(event) ||
         !isLayoutDragHandleTarget(event, tile) ||
         !canDragLayoutItem(getLayoutItemForTile(tile))
@@ -3049,6 +3042,7 @@ const resolveTileResizeLayout = (
 };
 
 const startTileResize = (event, tile, direction = 'se') => {
+    if (fullscreenControls.isTileLayoutWriteBlocked(tile)) return;
     if (
         isMobileLayout() ||
         getFullscreenElement() ||
@@ -3130,7 +3124,7 @@ const bindTileLayoutControls = (tile) => {
             (event) => {
                 const shouldIgnoreTarget = shouldIgnoreLayoutDragTarget(
                     event.target
-                );
+                ) && !event.target?.closest?.('.window-drag-handle');
                 const resizeDirection = shouldIgnoreTarget
                     ? null
                     : detectTileResizeDirection(event, tile);
@@ -3173,6 +3167,7 @@ const bindTileLayoutControls = (tile) => {
 };
 
 pageLayoutStoreRuntime = layoutStoreRuntime.createRuntime({
+    shouldPersist: () => !isMobileLayout(),
     document,
     logger: console,
     layoutStorage,
@@ -3634,6 +3629,7 @@ const addVideoStream = (
                     console.warn(message, error || ''),
             });
             mediaElementVideoTracks.delete(mediaElement);
+            mediaElementAudioTracks.delete(mediaElement);
         }
         if (videoId) {
             screenShareVolumeController.unbind(videoId);
@@ -3681,10 +3677,16 @@ const addVideoStream = (
         screenShareVolumeController.unbind(videoId);
     }
 
+    const audioSignature = voiceMediaLifecycle.getLiveTracks(playbackStream, 'audio')
+        .map((track) => track.id).join('|');
+    const audioChanged = mediaElement.srcObject === playbackStream &&
+        mediaElementAudioTracks.has(mediaElement) &&
+        mediaElementAudioTracks.get(mediaElement) !== audioSignature;
     const forceRebind = Boolean(
-        hasVideo &&
+        (hasVideo &&
             mediaElement.srcObject === playbackStream &&
-            mediaElementVideoTracks.get(mediaElement) !== liveVideoTrack
+            mediaElementVideoTracks.get(mediaElement) !== liveVideoTrack) ||
+        audioChanged
     );
     if (!videoId && localPreviewSession) {
         localScreenSharePreviewController.bindSource({
@@ -3706,6 +3708,7 @@ const addVideoStream = (
             stream: playbackStream,
         });
     }
+    mediaElementAudioTracks.set(mediaElement, audioSignature);
     if (hasVideo) {
         mediaElementVideoTracks.set(mediaElement, liveVideoTrack);
     } else {
@@ -3713,9 +3716,7 @@ const addVideoStream = (
     }
     applyOutputSettings(mediaElement, Boolean(videoId));
     updateVideoTileStatus(tile);
-    if (videoId) {
-        voiceMediaQualityRuntime?.syncPeer(videoId);
-    }
+    voiceMediaQualityRuntime?.syncPeer(videoId || 'local-video');
     updateFullscreenButtonStates();
     console.info('[tile] add/update', {
         peerId: tile.dataset.peerId,
@@ -3776,6 +3777,7 @@ const bindPeerCallHandler = (peer) => {
 var sharingNow = false;
 let currentScreenStream;
 let currentScreenShareSession;
+let screenCodecAbort;
 
 const getActiveStream = () => {
     activeStream = voiceMediaLifecycle.createMediaSnapshot({
@@ -3786,6 +3788,20 @@ const getActiveStream = () => {
         videoTrack: activeVideoTrack,
     });
     return activeStream;
+};
+const getPeerMediaStream = (peerId, stream) => {
+    if (!sharingNow || !screenSfuRuntime.usesServer(peerId)) return stream;
+    const screenTracks = new Set(currentScreenStream?.getTracks() || []);
+    return new MediaStream((stream?.getTracks() || []).filter((track) => !screenTracks.has(track)));
+};
+const updateScreenP2pBudget = () => {
+    const track = currentScreenStream?.getVideoTracks?.()[0];
+    if (!track) return;
+    const directViewers = [...voiceMediaTargets].filter((id) => !screenSfuRuntime?.usesServer(id)).length;
+    const total = window.voiceScreenSfuConfig?.p2pBudget || 24000000;
+    const serverUplink = screenSfuRuntime?.getUplinkBitrate() || 0;
+    const maxBitrate = directViewers <= 2 && !serverUplink ? 27000000 : Math.max(1000000, Math.floor((total - serverUplink) / Math.max(1, directViewers)));
+    window.VoiceScreenSendPolicy.register(track, { ...currentScreenShareSession?.shareOptions, maxBitrate });
 };
 
 const setLocalVideoStream = (stream) => {
@@ -3860,7 +3876,7 @@ const scheduleLocalMediaUpdate = (peer) => {
                 const replaced = await voicePeerRegistry.replaceOutgoingTracks({
                     generation,
                     peerId,
-                    stream,
+                    stream: getPeerMediaStream(peerId, stream),
                 });
                 if (!replaced.ok) {
                     publishLocalMediaToPeer(peer, peerId, stream, {
@@ -3964,13 +3980,10 @@ const startCamera = async (
     );
     notifyMediaDock();
     const result = await pendingCamera;
-    setMediaOperationError('camera', result);
-    if (
-        result.ok &&
-        mediaOperationController.getSnapshot('camera').token !== result.token
-    ) {
-        return true;
+    if (result.cancelled || mediaOperationController.getSnapshot('camera').token !== result.token) {
+        return false;
     }
+    setMediaOperationError('camera', result);
     if (!result.ok) {
         if (preserveOldTrack && previousTrack?.readyState === 'live') {
             cameraStream = previousStream;
@@ -3999,7 +4012,7 @@ const startCamera = async (
     bindLocalTrackEnded('camera', nextTrack);
     voiceDeviceRuntime.setSelected(
         'camera',
-        nextTrack.getSettings?.().deviceId || selectedCameraDeviceId
+        selectedCameraDeviceId
     );
     localTrackEndedController.releaseRecovery('camera', epoch);
     setCameraButtonState(true);
@@ -4051,6 +4064,10 @@ const unbindScreenTrackEnded = (session = currentScreenShareSession) => {
 };
 
 const stopCurrentScreenStream = () => {
+    screenCodecAbort?.abort();
+    screenCodecAbort = undefined;
+    screenSfuRuntime?.stopPublishing();
+    voiceMediaQualityRuntime?.stop('local-video', 'screen-stopped');
     const screenStream = currentScreenStream;
     const screenShareSession = currentScreenShareSession;
     if (screenStream) {
@@ -4070,6 +4087,7 @@ const stopCurrentScreenStream = () => {
 };
 
 const restoreCameraAfterScreenShare = (peer) => {
+    screenSfuRuntime.stopPublishing();
     const cameraTrack = cameraStream?.getVideoTracks()[0];
     const nextVideoTrack =
         cameraTrack?.readyState === 'live' ? cameraTrack : undefined;
@@ -4102,6 +4120,9 @@ const startScreenShare = async (peer, options = {}) => {
 
     mediaOperationController.setDesired('screen', true);
     setScreenShareRequestPending(true);
+    const codecAbort = new AbortController();
+    screenCodecAbort = codecAbort;
+    let codecDecision;
     const capture = await mediaOperationController.run(
         'screen',
         async () => {
@@ -4110,6 +4131,25 @@ const startScreenShare = async (peer, options = {}) => {
                 options,
             });
             if (result.ok) {
+                const track = result.stream.getVideoTracks()[0];
+                const cancelled = () => codecAbort.abort();
+                track?.addEventListener('ended', cancelled, { once: true });
+                try {
+                    if (track) codecDecision = await window.VoiceScreenCodecs.prepare(
+                        track, voiceMediaLifecycle.normalizeScreenShareOptions(options), { signal: codecAbort.signal }
+                    );
+                } catch (error) {
+                    localMediaTrackStopper.stopStream(result.stream);
+                    throw error;
+                } finally {
+                    track?.removeEventListener('ended', cancelled);
+                }
+                if (codecAbort.signal.aborted || track?.readyState === 'ended') {
+                    localMediaTrackStopper.stopStream(result.stream);
+                    const error = new Error('screen-codec-cancelled');
+                    error.name = 'AbortError';
+                    throw error;
+                }
                 return result.stream;
             }
 
@@ -4126,10 +4166,17 @@ const startScreenShare = async (peer, options = {}) => {
             surviveEpochChange: true,
         }
     );
+    if (screenCodecAbort === codecAbort) screenCodecAbort = undefined;
     setScreenShareRequestPending(false);
     if (!capture.ok) {
         mediaOperationController.setDesired('screen', false);
         setMediaOperationError('screen', capture);
+        return false;
+    }
+
+    if (mediaOperationController.getSnapshot('screen').token !== capture.token ||
+        !mediaOperationController.getSnapshot('screen').desired) {
+        localMediaTrackStopper.stopStream(capture.value);
         return false;
     }
 
@@ -4149,6 +4196,8 @@ const startScreenShare = async (peer, options = {}) => {
     setMediaOperationError('screen', capture);
     currentScreenStream = shareScreen;
     const screenShareSession = {
+        codecDecision,
+        shareOptions: voiceMediaLifecycle.normalizeScreenShareOptions(options),
         previewGeneration: 0,
         stream: shareScreen,
         track,
@@ -4192,6 +4241,8 @@ const startScreenShare = async (peer, options = {}) => {
     }
 
     emitScreenShareState(true, screenShareSession.voiceSessionGeneration);
+    updateScreenP2pBudget();
+    void screenSfuRuntime.publish(shareScreen, screenShareSession.shareOptions);
     emitLocalPresenceUpdate();
     updateLocalUserCard();
     return true;
@@ -4249,20 +4300,33 @@ const toggleAudio = (myVideoStream) => {
 
 const restartLocalMicrophone = async (
     peer,
-    { preserveOldTrack = false, recovery = false } = {}
+    { preserveOldTrack = false, recovery = false, request = audioSettingsController.snapshot().requested } = {}
 ) => {
     const previousAudioTrack = myVideoStream?.getAudioTracks()[0];
-    const wasMuted = Boolean(previousAudioTrack && !previousAudioTrack.enabled);
     const previousStream = myVideoStream;
     const epoch = voiceSessionRuntime.getSnapshot().epoch;
     const pendingMicrophone = mediaOperationController.run(
         'microphone',
-        () =>
-            requestAudioStream({
-                allowBasicFallback:
-                    !preserveOldTrack && selectedInputDeviceId === 'default',
-                rawOnly: true,
-            }),
+        async () => {
+            try {
+                return await createAudioPipeline(undefined, request);
+            } catch (error) {
+                // A failed live switch must keep its old branch and settings.
+                if (!error.audioProcessingFailure || error?.name === 'AbortError' ||
+                    (preserveOldTrack && previousAudioTrack?.readyState === 'live')) throw error;
+                console.warn('[audio] Processing unavailable, falling back to browser audio.', error);
+                const fallback = { ...request, mode: 'browser' };
+                try {
+                    const stream = await createAudioPipeline(undefined, fallback);
+                    audioPipelines.get(stream).fallbackReason = error?.message || 'processing-failed';
+                    return stream;
+                } catch (fallbackError) {
+                    if (!fallbackError.audioProcessingFailure || fallbackError?.name === 'AbortError') throw fallbackError;
+                    // prepare owns and stops failed captures; capture a fresh live fallback.
+                    return requestRawAudioStream(fallback);
+                }
+            }
+        },
         {
             epoch,
             state: preserveOldTrack ? 'switching' : 'requesting',
@@ -4271,14 +4335,11 @@ const restartLocalMicrophone = async (
     );
     notifyMediaDock();
     const rawResult = await pendingMicrophone;
-    setMediaOperationError('microphone', rawResult);
-    if (
-        rawResult.ok &&
-        mediaOperationController.getSnapshot('microphone').token !==
-            rawResult.token
-    ) {
-        return true;
+    if (rawResult.cancelled || mediaOperationController.getSnapshot('microphone').token !== rawResult.token) {
+        // Concurrent requests may share the controller's one pending result.
+        return rawResult.ok && rawResult.value === myVideoStream;
     }
+    setMediaOperationError('microphone', rawResult);
     if (!rawResult.ok) {
         micPermissionDenied = rawResult.errorType === 'permission-denied';
         if (preserveOldTrack && previousAudioTrack?.readyState === 'live') {
@@ -4293,32 +4354,33 @@ const restartLocalMicrophone = async (
         return false;
     }
 
-    if (previousAudioTrack) {
-        unbindLocalTrackEnded('microphone', previousAudioTrack);
-    }
-    destroyProcessedAudioStream();
-    localMediaTrackStopper.stopStream(previousStream);
-    let stream = rawResult.value;
+    let stream;
     try {
-        stream = await createAudioPipeline(rawResult.value);
+        stream = adoptAudioPipeline(rawResult.value);
     } catch (error) {
-        console.warn('[audio] Pipeline init failed, using raw.', error);
-    }
-    if (
-        mediaOperationController.getSnapshot('microphone').token !==
-        rawResult.token
-    ) {
-        localMediaTrackStopper.stopStream(stream);
-        localMediaTrackStopper.stopStream(rawResult.value);
+        disposeAudioPipeline(rawResult.value);
+        await audioProcessingRuntime.restoreCurrent();
+        if (mediaOperationController.getSnapshot('microphone').token !== rawResult.token) return false;
+        mediaOperationController.setActive('microphone', previousStream);
+        setMediaOperationError('microphone', { ok: false, error, errorType: 'unknown' });
+        notifyMediaDock();
         return false;
     }
     const nextAudioTrack = stream.getAudioTracks()[0];
+    if (previousAudioTrack) {
+        unbindLocalTrackEnded('microphone', previousAudioTrack);
+    }
+    if (previousStream !== stream) {
+        disposeAudioPipeline(previousStream);
+        localMediaTrackStopper.stopStream(previousStream);
+    }
+    audioSettingsController.adopt(request);
     if (nextAudioTrack) {
-        nextAudioTrack.enabled = recovery ? true : !wasMuted;
+        nextAudioTrack.enabled = mediaOperationController.getSnapshot('microphone').desired;
         bindLocalTrackEnded('microphone', nextAudioTrack);
         voiceDeviceRuntime.setSelected(
             'mic',
-            nextAudioTrack.getSettings?.().deviceId || selectedInputDeviceId
+            selectedInputDeviceId
         );
     }
 
@@ -4327,8 +4389,10 @@ const restartLocalMicrophone = async (
     localTrackEndedController.releaseRecovery('microphone', epoch);
     micPermissionDenied = false;
     setAudioButtonState(Boolean(nextAudioTrack?.enabled));
-    setLocalVideoStream(getActiveStream());
-    sendAudioTrackToPeers(peer, nextAudioTrack);
+    if (previousStream !== stream) {
+        setLocalVideoStream(getActiveStream());
+        sendAudioTrackToPeers(peer, nextAudioTrack);
+    }
     emitLocalPresenceUpdate();
     updateLocalUserCard();
     voiceMediaDebug.record({
@@ -4344,6 +4408,83 @@ const resetAutoTileLayoutHeights = () => {
             tile.style.height = '';
         }
     });
+};
+
+const recoverProcessingFailure = ({ context, stream, rawStream }) => {
+        if (stream !== myVideoStream || audioPipelines.get(stream)?.context !== context ||
+            mediaOperationController.getSnapshot('microphone').promise) return;
+        if (audioProcessingRuntime.bypassFailedProcessor(stream)) {
+            adoptAudioPipeline(stream);
+            notifyMediaDock();
+            return;
+        }
+        const oldTrack = stream.getAudioTracks()[0];
+        const rawTrack = voiceMediaLifecycle.getLiveTracks(rawStream, 'audio')[0];
+        if (!rawTrack) return;
+        unbindLocalTrackEnded('microphone', oldTrack);
+        rawTrack.enabled = mediaOperationController.getSnapshot('microphone').desired;
+        myVideoStream = rawStream;
+        disposeAudioPipeline(stream, { preserveRaw: true });
+        adoptAudioPipeline(rawStream);
+        bindLocalTrackEnded('microphone', rawTrack);
+        mediaOperationController.setActive('microphone', rawStream);
+        setLocalVideoStream(getActiveStream());
+        sendAudioTrackToPeers(currentPeer);
+        emitLocalPresenceUpdate();
+        updateLocalUserCard();
+        voiceMediaDebug.record({ event: 'microphone-processing-recovered', mode: 'raw' });
+};
+
+const audioRecoveryRuntime = window.VoiceAudioRecovery.createRuntime({
+    getMediaElements: () => Array.from(document.querySelectorAll(
+        '.video-tile:not(#local-video) video, .video-tile:not(#local-video) audio'
+    )),
+    getProcessingState: () => {
+        const pipeline = audioPipelines.get(activeAudioPipelineStream);
+        return pipeline ? { ...pipeline, stream: activeAudioPipelineStream } : undefined;
+    },
+    getPeerStates: () => {
+        if (!joinedVoiceRoomId || !currentPeer || currentPeer.destroyed || currentPeer.disconnected || !socket?.connected) return [];
+        const hasMedia = [myVideoStream, cameraStream, currentScreenStream]
+            .some((stream) => voiceMediaLifecycle.getLiveTracks(stream).length > 0);
+        return Array.from(voiceMediaTargets, (peerId) => {
+            const call = voicePeerRegistry.getSnapshot(peerId)?.outgoingCall;
+            return { peerId, hasMedia, connection: call?.peerConnection || call?._pc };
+        });
+    },
+    onPlaybackBlocked: (blocked) => {
+        voiceStatusView.setMediaError('playback', blocked ? 'permission-denied' : undefined,
+            '浏览器暂停了声音播放，请点击恢复声音');
+        notifyMediaDock();
+    },
+    onProcessingFailure: (state) => recoverProcessingFailure(state),
+    onPeerRecovery: (peerId) => {
+        if (!voiceMediaTargets.has(peerId) || !socket?.connected || !currentPeer || currentPeer.destroyed || currentPeer.disconnected) return;
+        // Rebuild only this send direction. Keep capture, room membership and
+        // the other participant's reverse microphone connection intact.
+        localVoiceMediaGeneration += 1;
+        publishLocalMediaToPeer(currentPeer, peerId, getActiveStream(), {
+            generation: localVoiceMediaGeneration,
+        });
+        voiceMediaDebug.record({ event: 'audio-peer-recovery', peerId });
+    },
+    onPeerFailure: (failed) => {
+        voiceStatusView.setMediaError('audio-connection', failed ? 'unknown' : undefined,
+            '语音连接暂未恢复，请点击恢复声音重试');
+        notifyMediaDock();
+    },
+});
+
+const recoverAudio = () => {
+    // Call play()/resume() inside the click, before asynchronous sink changes.
+    audioRecoveryRuntime.recover({ userGesture: true });
+    outputSelectionRevision += 1;
+    voiceStatusView.clearMediaError('output');
+    document.querySelectorAll('.video-tile video, .video-tile audio').forEach((element) => {
+        delete element.dataset.outputSinkId;
+    });
+    void applyOutputSettingsToRemoteMedia();
+    notifyMediaDock();
 };
 
 const initiateAudio = async (peer) => {
@@ -4382,7 +4523,7 @@ async function handleUnexpectedLocalTrackEnded(type, track, epoch) {
         return false;
     }
     if (
-        !desired[type] ||
+        (type !== 'microphone' && !desired[type]) ||
         !localTrackEndedController.claimRecovery(type, epoch)
     ) {
         return false;
@@ -4393,16 +4534,19 @@ async function handleUnexpectedLocalTrackEnded(type, track, epoch) {
             localTrackEndedController.releaseRecovery('microphone', epoch);
             return false;
         }
-        selectedInputDeviceId = 'default';
-        voiceDeviceRuntime.setSelected('mic', 'default');
-        setAudioButtonNoMic();
-        const recovered = await restartLocalMicrophone(currentPeer, {
-            recovery: true,
-        });
+        const recovered = await selectInputDevice('default');
         if (!recovered) {
-            myVideoStream = undefined;
-            setLocalVideoStream(getActiveStream());
-            refreshVoiceCallsForLocalMedia(currentPeer);
+            // A later successful branch can retain this same output track.
+            // Only release genuinely dead capture after all newer work ends.
+            if (!mediaOperationController.getSnapshot('microphone').promise &&
+                myVideoStream?.getAudioTracks()[0] === track &&
+                audioProcessingRuntime.diagnostics(myVideoStream)?.sourceLive === false) {
+                destroyProcessedAudioStream();
+                localMediaTrackStopper.stopStream(myVideoStream);
+                myVideoStream = undefined;
+                setLocalVideoStream(getActiveStream());
+                refreshVoiceCallsForLocalMedia(currentPeer);
+            }
             localTrackEndedController.releaseRecovery('microphone', epoch);
         }
         return recovered;
@@ -4445,21 +4589,7 @@ async function handleMissingMediaDevice(type) {
         await applyOutputSettingsToRemoteMedia();
         return true;
     }
-    if (type === 'mic') {
-        selectedInputDeviceId = 'default';
-        notifyMediaDock();
-        if (
-            mediaOperationController.getSnapshot().desired.microphone &&
-            currentPeer &&
-            !currentPeer.destroyed
-        ) {
-            return restartLocalMicrophone(currentPeer, {
-                preserveOldTrack: true,
-                recovery: true,
-            });
-        }
-        return false;
-    }
+    if (type === 'mic') return selectInputDevice('default');
     if (type === 'camera') {
         selectedCameraDeviceId = 'default';
         notifyMediaDock();
@@ -4579,10 +4709,12 @@ const createPeerInstance = (roomToJoin, { recreate = false } = {}) => {
         path: '/peerjs',
         port: peerPort,
         secure: isSecurePeerConnection,
-        iceServers: [
-            // eslint-disable-next-line no-undef
-            ...iceServers,
-        ],
+        config: {
+            iceServers: [
+                // eslint-disable-next-line no-undef
+                ...iceServers,
+            ],
+        },
     });
     currentPeer = peer;
     peerLifecycleMetadata.set(peer, { recreate, roomId: roomToJoin });
@@ -4684,6 +4816,7 @@ const createPeerInstance = (roomToJoin, { recreate = false } = {}) => {
 };
 
 const leaveVoiceSession = (reason = 'user-leave') => {
+    screenSfuRuntime.leave();
     const nextRoomId = pendingVoiceRoomId;
     pendingVoiceRoomId = undefined;
     voiceSessionRuntime.leave({ reason });
@@ -4822,6 +4955,9 @@ window.addEventListener('resize', () => {
     syncLayoutGridMetadata();
     updateMobileRoomState();
     updateMobileTileView();
+    if (!isMobileLayout()) {
+        initializeLayoutFromStorage();
+    }
     clampPositionedTileLayouts();
 });
 
@@ -4946,6 +5082,7 @@ mediaDockAdapter = mediaDockAdapterApi.createMediaDockAdapter({
         joinVoice: () => joinVoiceChannel(selectedVoiceRoomId || viewingRoomId),
         leaveVoice: () => leaveVoiceSession('media-dock-leave'),
         refreshDevices: () => refreshMediaDeviceLists(),
+        recoverAudio,
         selectCamera: selectCameraDevice,
         selectMicrophone: selectInputDevice,
         selectOutput: selectOutputDevice,
@@ -4953,9 +5090,7 @@ mediaDockAdapter = mediaDockAdapterApi.createMediaDockAdapter({
             const nextGain = noiseSettingsUI.setMicGain(micGainPercent, {
                 syncUI: false,
                 onMicGainChange: (value) => {
-                    if (noiseGainNode) {
-                        noiseGainNode.gain.value = Math.max(0.001, value / 100);
-                    }
+                    audioProcessingRuntime.setGain(value);
                 },
             });
             notifyMediaDock();
@@ -4973,32 +5108,15 @@ mediaDockAdapter = mediaDockAdapterApi.createMediaDockAdapter({
         },
         startScreenShare: (options) => startScreenShare(currentPeer, options),
         stopScreenShare: () => stopScreenShare(currentPeer),
-        toggleAiNoiseSuppression: async () => {
-            noiseSettingsUI.setAiExperimentEnabled(
-                !noiseSettingsUI.getAiExperimentEnabled()
-            );
-            notifyMediaDock();
-            if (myVideoStream && currentPeer && !currentPeer.destroyed) {
-                await restartLocalMicrophone(currentPeer, {
-                    preserveOldTrack: true,
-                });
-            }
-            return true;
-        },
+        selectNoiseMode: (mode) => audioSettingsController.select({ mode: window.VoiceAudioProcessing.normalizeMode(mode) }),
+        toggleAiNoiseSuppression: () => audioSettingsController.select({
+            mode: audioSettingsController.snapshot().requested.mode === 'rnnoise' ? 'browser' : 'rnnoise',
+        }),
         toggleCamera: () => toggleCamera(currentPeer),
         toggleMicrophone: () => handleMicClick(currentPeer),
-        toggleNoiseSuppression: async () => {
-            noiseSettingsUI.setNoiseSuppressionEnabled(
-                !noiseSettingsUI.getNoiseSuppressionEnabled()
-            );
-            notifyMediaDock();
-            if (myVideoStream && currentPeer && !currentPeer.destroyed) {
-                await restartLocalMicrophone(currentPeer, {
-                    preserveOldTrack: true,
-                });
-            }
-            return true;
-        },
+        toggleNoiseSuppression: () => audioSettingsController.select({
+            mode: audioSettingsController.snapshot().requested.mode === 'browser' ? 'off' : 'browser',
+        }),
     },
     getSnapshot: getMediaDockSnapshot,
 });
@@ -5007,6 +5125,7 @@ mediaDockRuntime = mediaDockRuntimeApi.createMediaDockRuntime({
     adapter: mediaDockAdapter,
 });
 mediaDockRuntime.init();
+audioRecoveryRuntime.start();
 navigator.mediaDevices?.addEventListener?.(
     'devicechange',
     voiceDeviceRuntime.handleDeviceChange
@@ -5015,3 +5134,4 @@ void refreshMediaDeviceLists();
 
 syncRoomCompositionState();
 enablePageCursorSharing();
+window.VoiceRoomBoot?.finish(pageLayoutBoard ? 'ready' : 'fallback');

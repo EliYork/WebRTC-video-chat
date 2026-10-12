@@ -869,11 +869,41 @@ test('Socket adapter preserves protocol, tags history, reports connection state,
     assert.equal(histories[1].roomId, 'game');
     assert.equal(messages[0].id, 'one');
 
-    await transport.sendMessage({
+    let acknowledge;
+    socket.timeout = (milliseconds) => {
+        assert.equal(milliseconds, 8000);
+        return {
+            emit(name, payload, callback) {
+                socket.emit(name, payload);
+                acknowledge = callback;
+            },
+        };
+    };
+    const sending = transport.sendMessage({
         content: 'hello',
         roomId: 'lobby',
         senderName: 'Eli',
     });
+    let completed = false;
+    sending.then(() => {
+        completed = true;
+    });
+    await Promise.resolve();
+    assert.equal(completed, false);
+    acknowledge(null, { ok: true, messageId: 'confirmed' });
+    await sending;
+    const rejected = transport.sendMessage({
+        content: 'limited',
+        roomId: 'game',
+    });
+    acknowledge(null, { ok: false, error: 'rate limited' });
+    await assert.rejects(rejected, /rate limited/);
+    const timedOut = transport.sendMessage({
+        content: 'timeout',
+        roomId: 'game',
+    });
+    acknowledge(new Error('timeout'));
+    await assert.rejects(timedOut, /服务端确认/);
     assert.equal(socket.emitted.at(-1).name, 'chat:send');
     socket.io.receive('reconnect_attempt', 1);
     socket.io.receive('reconnect_failed');

@@ -3,7 +3,7 @@
 
     const PAGE_COMPONENT_LABELS = {
         membersPanel: '频道',
-        mediaControlsPanel: '媒体控制',
+        mediaControlsPanel: '语音与共享',
         chatPanel: '聊天',
     };
 
@@ -226,7 +226,8 @@
         };
 
         const ensurePanelShellActions = (tile, type) => {
-            const panelConfig = options.getPanelConfig?.(type);
+            const panelConfig = options.getPanelConfig?.(type) ||
+                (!tile?.dataset?.pageLayoutType ? { canPin: true, canCollapse: false, canHide: false } : null);
             const header = tile?.querySelector('.tile-header');
 
             if (!panelConfig || !header) {
@@ -905,6 +906,7 @@
             restoreOriginalStaticLayout,
             syncLayoutGridMetadata,
             syncPanelActions,
+            ensurePanelShellActions,
             validateDetachedPageLayoutBoard,
             validatePageLayout,
         };

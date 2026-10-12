@@ -93,6 +93,8 @@
             });
             dragHandle.append(icon);
         }
+        dragHandle.setAttribute('data-drag-handle', 'true');
+        dragHandle.title = '拖动窗口';
         controls.insertBefore(dragHandle, actions);
 
         return header;

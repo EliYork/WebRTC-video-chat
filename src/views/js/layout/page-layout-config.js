@@ -12,7 +12,7 @@
         {
             id: PAGE_COMPONENT_TYPES.MEMBERS_PANEL,
             title: '频道',
-            defaultLayout: { x: 1, y: 1, w: 7, h: 10 },
+            defaultLayout: { x: 1, y: 2, w: 8, h: 7 },
             minWidth: 260,
             minHeight: 220,
             canDrag: true,
@@ -23,8 +23,8 @@
         },
         {
             id: PAGE_COMPONENT_TYPES.MEDIA_CONTROLS_PANEL,
-            title: '媒体控制',
-            defaultLayout: { x: 1, y: 12, w: 7, h: 5 },
+            title: '语音与共享',
+            defaultLayout: { x: 1, y: 13, w: 8, h: 4 },
             minWidth: 220,
             minHeight: 140,
             canDrag: true,
@@ -36,7 +36,7 @@
         {
             id: PAGE_COMPONENT_TYPES.CHAT_PANEL,
             title: '聊天',
-            defaultLayout: { x: 24, y: 2, w: 7, h: 14 },
+            defaultLayout: { x: 23, y: 2, w: 8, h: 15 },
             minWidth: 280,
             minHeight: 240,
             canDrag: true,
@@ -129,7 +129,8 @@
         const defaults =
             COMPONENT_CONFIG_DEFAULTS[type] ||
             PANEL_COMPONENT_CONFIG_DEFAULTS[type];
-        return defaults ? { ...defaults } : {};
+        const media = [LAYOUT_ITEM_TYPES.LOCAL_PEER, LAYOUT_ITEM_TYPES.REMOTE_PEER, LAYOUT_ITEM_TYPES.SCREEN_SHARE].includes(type);
+        return media ? { ...defaults, pinned: false } : defaults ? { ...defaults } : {};
     };
 
     const normalizeComponentConfig = (type, config = {}) => {

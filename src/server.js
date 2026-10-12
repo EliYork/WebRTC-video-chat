@@ -11,6 +11,7 @@ import { createServer as createServerHttps } from 'https';
 
 import { Server as SocketServer } from 'socket.io';
 import { ExpressPeerServer } from 'peer';
+import { createPeerWebSocketServer } from './utils/PeerWebSocketServer.js';
 
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
@@ -19,6 +20,7 @@ import Logger from './utils/Log.js';
 
 import { iceServers as iceServersList } from './utils/iceServers.js';
 import { createChatRateLimiter } from './utils/ChatRateLimit.js';
+import { validateSocketPacket } from './utils/SocketPacketValidation.js';
 import { createChatHistoryStore } from './utils/ChatHistoryStore.js';
 import {
     emitViewCursorRemove,
@@ -26,6 +28,8 @@ import {
     switchViewChatRoom,
 } from './utils/ViewChatRoomLifecycle.js';
 import { createVoiceCallSignaling } from './utils/VoiceCallSignaling.js';
+import { readScreenSfuConfig } from './utils/ScreenSfuBudget.js';
+import { createScreenSfuService } from './utils/ScreenSfuService.js';
 import {
     bindSocketDisconnectLifecycle,
     removeOwnedPresenceMember,
@@ -74,10 +78,15 @@ const io = new SocketServer(httpServer);
 const peerServer = ExpressPeerServer(httpServer, {
     path: '/',
     proxied: true,
-    iceServers: [...iceServersList],
+    createWebSocketServer: createPeerWebSocketServer,
 });
 
 const Log = new Logger(process.env.ENV);
+// Release ZIPs exclude runtime logs; initialize the directory before SFU startup logging.
+fs.mkdirSync(dirname(Log.logFilePath), { recursive: true });
+// PeerJS forwards malformed client messages as error events. Keep a bad
+// signaling packet from becoming an unhandled process-wide exception.
+peerServer.on('error', (error) => Log.warn(`[peerjs] ${error?.message || error}`));
 
 app.use((req, res, next) => {
     res.locals.cspNonce = randomUUID().replaceAll('-', '');
@@ -150,6 +159,14 @@ const voiceCallSignaling = createVoiceCallSignaling({
     onScreenShareChange: (event) => syncPresenceScreenSharing(event),
     resolveRoomId: (roomId) => getChannel(roomId)?.slug,
 });
+const screenSfuConfig = readScreenSfuConfig();
+const screenSfu = createScreenSfuService({
+    config: screenSfuConfig,
+    getVoiceOwner: (socket) => voiceCallSignaling.getVoiceOwner(socket),
+    logger: Log,
+});
+if (screenSfuConfig.enabled) void screenSfu.start().catch(() => {});
+else Log.info('[sfu] not configured; screen sharing uses P2P');
 const CHAT_HISTORY_LIMIT = 50;
 const CHAT_MESSAGE_MAX_LENGTH = 500;
 const onlineMembersByRoom = new Map();
@@ -303,6 +320,7 @@ app.get('/room/:channel', (req, res) => {
         channelName: channel.name,
         roomBootstrap: JSON.stringify({
             iceServers: iceServersList,
+            screenSfu: { enabled: screenSfuConfig.enabled, videoBitrate: screenSfuConfig.videoBitrate, initialViewerBitrate: screenSfuConfig.initialViewerBitrate, p2pBudget: 24000000 },
             roomId: channel.slug,
         }).replace(
             /[<>&\u2028\u2029]/g,
@@ -331,9 +349,11 @@ app.use((_, res) => res.status(404).send('404 Not Found'));
  * not here, to avoid duplicate registrations.
  */
 const handleVoiceJoin = async (payload, socket) => {
+    const previousOwner = voiceCallSignaling.getVoiceOwner(socket);
     const result = await voiceCallSignaling.join(payload, socket);
 
     if (result.ok) {
+        if (previousOwner && (previousOwner.peerId !== socket.data.voicePeerId || previousOwner.voiceSessionGeneration !== result.voiceSessionGeneration)) screenSfu.cleanupSocket(socket);
         Log.info(
             `[joinVoice] socket=${socket.id} peerId=${socket.data.voicePeerId} roomId=${socket.data.voiceRoomId}`
         );
@@ -348,10 +368,13 @@ const handleVoiceJoin = async (payload, socket) => {
  * Handles the disconnection of a user.
  * Reads voiceRoomId / voicePeerId from socket.data to avoid stale closured values.
  */
-const handleDisconnectingVoice = (socket) =>
-    voiceCallSignaling.leave(socket, { reason: 'socket-disconnecting' });
+const handleDisconnectingVoice = (socket) => {
+    screenSfu.cleanupSocket(socket);
+    return voiceCallSignaling.leave(socket, { reason: 'socket-disconnecting' });
+};
 
 const handleVoicePeerLeft = (socket) => {
+    screenSfu.cleanupSocket(socket);
     void voiceCallSignaling.leave(socket, { reason: 'voicePeerLeft' });
 };
 
@@ -475,7 +498,9 @@ const handleChatJoin = async ({ roomId } = {}, socket) => {
     }
 
     const channel = getChannel(transition.roomId);
-    socket.emit('chat:history', getChatHistory(channel.slug));
+    socket.emit('chat:history', getChatHistory(channel.slug), {
+        roomId: channel.slug,
+    });
     emitPresenceToSocket(socket);
 };
 
@@ -484,17 +509,17 @@ const handleChatSend = ({ roomId, senderName, content } = {}, socket) => {
     const channel = getChannel(ownedRoom?.roomId);
 
     if (!channel) {
-        return;
+        return { ok: false, error: '频道尚未连接，请稍后重试。' };
     }
 
     const normalizedContent = normalizeChatContent(content);
 
     if (!normalizedContent) {
-        return;
+        return { ok: false, error: '消息不能为空。' };
     }
 
     if (!chatRateLimiter.allow(socket.id)) {
-        return;
+        return { ok: false, error: '发送过于频繁，请稍后重试。' };
     }
 
     const message = {
@@ -507,6 +532,7 @@ const handleChatSend = ({ roomId, senderName, content } = {}, socket) => {
 
     saveChatMessage(message);
     io.to(ownedRoom.socketRoom).emit('chat:message', message);
+    return { ok: true, messageId: message.id };
 };
 
 const handleCursorMove = ({ roomId, x, y, senderName } = {}, socket) => {
@@ -585,6 +611,7 @@ const clearDisconnectedSocketOwners = (socket) => {
  * - Handles the owned voice signaling join event.
  */
 io.on('connection', (socket) => {
+    socket.use(validateSocketPacket);
     Log.info(`User with socket.id ${socket.id} has connected.`);
 
     bindSocketDisconnectLifecycle(socket, {
@@ -626,14 +653,42 @@ io.on('connection', (socket) => {
     });
 
     socket.on('voice:join', async (payload, acknowledge) => {
-        const result = await handleVoiceJoin(payload, socket);
-        acknowledge?.(result);
+        try {
+            const result = await handleVoiceJoin(payload, socket);
+            if (typeof acknowledge === 'function') acknowledge(result);
+        } catch (error) {
+            Log.warn(`[voice:join] socket=${socket.id} error=${error.message}`);
+            if (typeof acknowledge === 'function') {
+                acknowledge({ ok: false, reason: 'voice-join-failed' });
+            }
+        }
+    });
+    socket.on('sfu:request', (payload, acknowledge) => {
+        if (typeof acknowledge !== 'function') return;
+        void screenSfu.request(socket, payload).then(acknowledge);
     });
     socket.on('voice:snapshot', async (acknowledge) => {
-        acknowledge?.(await voiceCallSignaling.getSnapshot(socket));
+        try {
+            const snapshot = await voiceCallSignaling.getSnapshot(socket);
+            if (typeof acknowledge === 'function') acknowledge(snapshot);
+        } catch (error) {
+            Log.warn(
+                `[voice:snapshot] socket=${socket.id} error=${error.message}`
+            );
+            if (typeof acknowledge === 'function') {
+                acknowledge({ ok: false, reason: 'voice-snapshot-failed' });
+            }
+        }
     });
-    socket.on('chat:join', (payload) => handleChatJoin(payload, socket));
-    socket.on('chat:send', (payload) => handleChatSend(payload, socket));
+    socket.on('chat:join', (payload) => {
+        void handleChatJoin(payload || {}, socket).catch((error) => {
+            Log.warn(`[chat:join] socket=${socket.id} error=${error.message}`);
+        });
+    });
+    socket.on('chat:send', (payload, acknowledge) => {
+        const result = handleChatSend(payload || {}, socket);
+        if (typeof acknowledge === 'function') acknowledge(result);
+    });
     socket.on('presence:joinVoice', (payload) =>
         handlePresenceJoinVoice(payload, socket)
     );
@@ -644,9 +699,10 @@ io.on('connection', (socket) => {
     socket.on('voicePeerLeft', () => handleVoicePeerLeft(socket));
     socket.on('cursor:move', (payload) => handleCursorMove(payload, socket));
     socket.on('cursor:leave', (payload) => handleCursorLeave(payload, socket));
-    socket.on('screen:share', (payload) =>
-        voiceCallSignaling.updateScreenShare(payload, socket)
-    );
+    socket.on('screen:share', (payload) => {
+        const result = voiceCallSignaling.updateScreenShare(payload, socket);
+        if (result.ok && payload.sharing === false) screenSfu.stopScreen(socket);
+    });
 });
 
 httpServer.listen(PORT, () =>

@@ -2,7 +2,8 @@
     'use strict';
 
     const SCREEN_SHARE_DEFAULTS = Object.freeze({
-        frameRate: 30,
+        frameRate: 60,
+        mode: 'game',
         resolutionPreset: '1080p',
     });
     const SCREEN_SHARE_FRAME_RATES = Object.freeze([15, 30, 60]);
@@ -21,9 +22,12 @@
         const requestedFrameRate = Number(options.frameRate);
         const requestedResolution = options.resolutionPreset;
         return {
+            mode: options.mode === 'detail' ? 'detail' : 'game',
+            codecMode: ['h264', 'vp8'].includes(options.codecMode) ? options.codecMode : 'auto',
+            startBitrate: ['1500', '5500'].includes(String(options.startBitrate)) ? String(options.startBitrate) : 'browser',
             frameRate: SCREEN_SHARE_FRAME_RATES.includes(requestedFrameRate)
                 ? requestedFrameRate
-                : SCREEN_SHARE_DEFAULTS.frameRate,
+                : options.mode === 'detail' ? 30 : SCREEN_SHARE_DEFAULTS.frameRate,
             resolutionPreset: SCREEN_SHARE_RESOLUTION_PRESETS.includes(
                 requestedResolution
             )
@@ -182,9 +186,11 @@
             clearMediaElement({ mediaElement, onWarning });
         }
 
-        mediaElement.srcObject = stream || null;
+        const nextStream = stream || null;
+        const changed = mediaElement.srcObject !== nextStream;
+        if (changed) mediaElement.srcObject = nextStream;
         mediaElement.onloadedmetadata = play;
-        if (mediaElement.readyState >= 1) {
+        if (mediaElement.readyState >= 1 && (changed || forceRebind || mediaElement.paused !== false)) {
             play();
         }
         return true;
@@ -205,6 +211,9 @@
         try {
             const stream = await getDisplayMedia(
                 constraints || buildScreenCaptureConstraints(options)
+            );
+            stream?.getVideoTracks?.().forEach((track) =>
+                global.VoiceScreenSendPolicy?.register(track, normalizeScreenShareOptions(options))
             );
             return stream
                 ? { ok: true, stream }

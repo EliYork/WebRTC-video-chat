@@ -197,6 +197,24 @@ const event = (type, target) => ({
     stopPropagation() {},
 });
 
+test('web fullscreen stays inside page, blocks layout writes and restores on Escape', async () => {
+    const { api, document, headerActions, originalStyle, tile } = createFixture();
+    api.bindFullscreenChange();
+    api.attachTileButton({ tile, actions: headerActions });
+    const button = tile.querySelector('.web-fullscreen-btn');
+    await button.dispatchEvent(event('click', button));
+    assert.equal(tile.classList.contains('is-web-fullscreen'), true);
+    assert.equal(Boolean(document.fullscreenElement), false);
+    assert.equal(api.isTileLayoutWriteBlocked(tile), true);
+    assert.equal(button.getAttribute('aria-label'), '退出网页内全屏');
+    await document.dispatchEvent({ type: 'keydown', key: 'Escape' });
+    assert.equal(tile.classList.contains('is-web-fullscreen'), false);
+    assert.equal(tile.getAttribute('style'), originalStyle);
+    assert.equal(api.isTileLayoutWriteBlocked(tile), false);
+    api.destroy();
+    assert.equal(document.listenerCount('keydown'), 0);
+});
+
 test('button, double click, and Esc share fullscreenchange restoration without duplicate listeners', async () => {
     const fixture = createFixture();
     const { api, document, headerActions, originalStyle, tile, video } =

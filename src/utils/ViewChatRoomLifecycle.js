@@ -23,12 +23,17 @@ export const emitViewCursorRemove = (
     return true;
 };
 
-export const switchViewChatRoom = async (
+const performViewChatRoomSwitch = async (
     socket,
     nextRoomId,
     { isAllowedRoomId = () => true } = {}
 ) => {
-    if (!socket || !nextRoomId || !isAllowedRoomId(nextRoomId)) {
+    if (
+        !socket ||
+        socket.disconnected === true ||
+        !nextRoomId ||
+        !isAllowedRoomId(nextRoomId)
+    ) {
         return { changed: false, roomId: undefined, valid: false };
     }
 
@@ -54,6 +59,11 @@ export const switchViewChatRoom = async (
         await socket.join(nextSocketRoom);
     }
 
+    if (socket.disconnected === true) {
+        await socket.leave(nextSocketRoom);
+        return { changed: false, roomId: undefined, valid: false };
+    }
+
     socket.data.viewRoomId = nextRoomId;
     socket.data.chatRoomId = nextRoomId;
 
@@ -65,6 +75,24 @@ export const switchViewChatRoom = async (
         roomId: nextRoomId,
         valid: true,
     };
+};
+
+// Async adapters can yield during leave/join. Serialize each socket's changes
+// so a later request sees the preceding owner, never an obsolete snapshot.
+const roomTransitions = new WeakMap();
+export const switchViewChatRoom = (socket, nextRoomId, options) => {
+    if (!socket) return Promise.resolve({ changed: false, valid: false });
+    const pending = roomTransitions.get(socket) || Promise.resolve();
+    const transition = pending
+        .catch(() => {})
+        .then(() => performViewChatRoomSwitch(socket, nextRoomId, options));
+    roomTransitions.set(socket, transition);
+    const cleanup = () => {
+        if (roomTransitions.get(socket) === transition)
+            roomTransitions.delete(socket);
+    };
+    transition.then(cleanup, cleanup);
+    return transition;
 };
 
 export const resolveOwnedViewChatRoom = (socket, requestedRoomId, ownerKey) => {

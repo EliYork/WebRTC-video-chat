@@ -30,9 +30,10 @@
             unknown: '麦克风不可用',
         },
         output: {
-            'operation-aborted': '输出设备切换失败，已回退默认设备',
-            'device-not-found': '输出设备失效，已回退默认设备',
-            unknown: '输出设备切换失败，已回退默认设备',
+            'operation-aborted': '输出设备切换失败',
+            'device-not-found': '输出设备失效',
+            'permission-denied': '浏览器未允许使用所选输出设备',
+            unknown: '输出设备切换失败',
         },
         screen: {
             'insecure-context': '当前页面无法启动屏幕共享',
@@ -57,6 +58,16 @@
                 item.className = 'voice-status-message';
                 item.dataset.voiceStatusKind = type;
                 item.textContent = message;
+                const dismiss = global.document.createElement('button');
+                dismiss.type = 'button';
+                dismiss.className = 'voice-status-dismiss no-drag';
+                dismiss.textContent = '×';
+                dismiss.setAttribute('aria-label', '关闭此提示');
+                dismiss.addEventListener('click', () => {
+                    mediaErrors.delete(type);
+                    renderErrors();
+                });
+                item.append(dismiss);
                 container.append(item);
             });
             container.classList.toggle(

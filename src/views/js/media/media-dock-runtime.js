@@ -11,7 +11,8 @@
     const FRAME_RATES = Object.freeze([15, 30, 60]);
     const DEFAULT_SCREEN_SHARE_OPTIONS = Object.freeze({
         resolutionPreset: '1080p',
-        frameRate: 30,
+        frameRate: 60,
+        mode: 'game',
     });
     const CONNECTION_LABELS = Object.freeze({
         degraded: '连接中断，正在重试',
@@ -45,6 +46,8 @@
         micList: '[data-device-list="mic"]',
         noiseStatus: '#noiseStatusText',
         noiseToggle: '#noiseToggle',
+        noiseModeSelect: '[data-audio-noise-mode]',
+        processingStatus: '[data-audio-processing-status]',
         outputButton: '#toggleOutput',
         outputDeviceStatus: '#outputDeviceStatus',
         outputList: '[data-device-list="output"]',
@@ -53,6 +56,8 @@
         resolutionSelect: '[data-screen-share-resolution]',
         screenButton: '#shareScreen',
         screenSettingsStatus: '[data-screen-share-settings-status]',
+        screenStartButton: '[data-screen-share-start]',
+        screenCancelButton: '[data-screen-share-cancel]',
         screenStatus: '#screenStatusText',
         sessionButton: '#destroyPeer',
         statusMessages: '#voiceStatusMessages',
@@ -133,14 +138,27 @@
         let unsubscribe;
         let lastSnapshot = {};
         let openPopoverType;
+        let popoverOpenedByHover = false;
+        let popovers = [];
+        let fallbackPopup;
+        let fallbackPlaceholder;
+        let fallbackBackdrop;
+        let previousFocus;
+        let hoverCloseTimer;
+        const cancelHoverClose = () => {
+            global.clearTimeout(hoverCloseTimer);
+            hoverCloseTimer = undefined;
+        };
         let copyRestoreTimer;
-        let restartNoticeTimer;
-        let restartNotice;
         let resolutionPreset = normalizeResolutionPreset(
             initialScreenShareOptions.resolutionPreset
         );
         let frameRate = normalizeFrameRate(initialScreenShareOptions.frameRate);
+        let shareMode = initialScreenShareOptions.mode === 'detail' ? 'detail' : 'game';
+        let codecMode = ['h264', 'vp8'].includes(initialScreenShareOptions.codecMode) ? initialScreenShareOptions.codecMode : 'auto';
+        let startBitrate = ['1500', '5500'].includes(String(initialScreenShareOptions.startBitrate)) ? String(initialScreenShareOptions.startBitrate) : 'browser';
         const pendingActions = new Set();
+        const intentRevisions = new Map();
         const listenerCleanups = [];
 
         const resolveRefs = () => {
@@ -174,6 +192,9 @@
             ...lastSnapshot,
             screenShareFrameRate: frameRate,
             screenShareResolutionPreset: resolutionPreset,
+            screenShareMode: shareMode,
+            screenShareCodecMode: codecMode,
+            screenShareStartBitrate: startBitrate,
         });
         const getCurrentAdapterSnapshot = () => {
             lastSnapshot = adapter.getSnapshot() || {};
@@ -287,13 +308,21 @@
                               : 'fas fa-volume-up';
                 }
             }
-            setText(label, muted ? '已静音' : '听筒');
+            setText(label, muted ? '已静音' : '声音');
             refs.outputSlider.value = String(volume);
             refs.outputSlider.title = `${percent}%`;
             refs.outputSlider.setAttribute('aria-valuetext', `${percent}%`);
             setText(refs.outputValue, `${percent}%`);
         };
         const renderNoise = (snapshot) => {
+            const modeSelect = refs.noiseModeSelect;
+            if (modeSelect) {
+                modeSelect.value = snapshot.requestedNoiseMode || 'browser';
+                const rnnoiseOption = modeSelect.querySelector('[value="rnnoise"]');
+                if (rnnoiseOption) rnnoiseOption.disabled = !snapshot.aiNoiseSupported;
+            }
+            const diagnostic = refs.processingStatus;
+            if (diagnostic) setText(diagnostic, global.VoiceAudioProcessingView.describe(snapshot));
             const noiseEnabled = snapshot.noiseSuppressionEnabled !== false;
             const aiSupported = Boolean(snapshot.aiNoiseSupported);
             const aiEnabled = Boolean(snapshot.aiNoiseEnabled);
@@ -312,7 +341,9 @@
                     ? refs.aiNoiseToggle.dataset.notSupportedLabel || 'N/A'
                     : !aiEnabled
                       ? '关'
-                      : snapshot.noiseMode === 'rnnoise'
+                      : snapshot.audioProcessing?.fallbackReason
+                        ? '回退'
+                        : snapshot.noiseMode === 'rnnoise'
                         ? 'RNNoise'
                         : snapshot.noiseMode === 'passthrough'
                           ? '直通'
@@ -353,6 +384,14 @@
                 item.className = 'voice-status-message';
                 item.dataset.voiceStatusKind = kind;
                 item.textContent = message;
+                if (['output', 'playback', 'audio-connection'].includes(kind)) {
+                    const recover = global.document.createElement('button');
+                    recover.type = 'button';
+                    recover.className = 'voice-status-recover no-drag';
+                    recover.textContent = '恢复声音';
+                    recover.dataset.audioRecovery = 'true';
+                    item.append(recover);
+                }
                 refs.statusMessages.append(item);
             });
             refs.statusMessages.classList.toggle(
@@ -380,6 +419,7 @@
                 String(pendingActions.has('session'))
             );
             setButtonLabel(refs.sessionButton, label);
+            setText(refs.sessionButton.querySelector('[data-session-label]'), joined ? '离开语音' : joining ? '取消加入' : '加入语音');
             if (icon) {
                 icon.className =
                     action === 'join' ? 'fas fa-phone' : 'fas fa-phone-slash';
@@ -468,13 +508,26 @@
             });
             setText(
                 refs.screenButton.querySelector('span'),
-                sharing ? '停止' : '共享'
+                sharing ? '停止共享' : '共享'
             );
+            refs.screenStartButton.disabled = !mediaAvailable || sharing || screenPending;
+            setText(refs.screenStartButton, screenPending ? '正在请求…' : '开始共享');
             refs.screenStatus.classList.toggle('hidden', !sharing);
             refs.resolutionSelect.value = resolutionPreset;
             refs.frameRateSelect.value = String(frameRate);
             refs.resolutionSelect.disabled = screenSelectDisabled;
             refs.frameRateSelect.disabled = screenSelectDisabled;
+            const modeSelect = root.querySelector('[data-screen-share-mode]');
+            if (modeSelect) {
+                modeSelect.value = shareMode;
+                modeSelect.disabled = screenSelectDisabled;
+            }
+            const route = lastSnapshot.screenShareRoute;
+            for (const [selector, value] of [['[data-screen-share-codec]', codecMode], ['[data-screen-share-start-bitrate]', startBitrate]]) {
+                const select = root.querySelector(selector);
+                if (select) { select.value = value; select.disabled = screenSelectDisabled; }
+            }
+            setText(refs.screenStatus, sharing ? (route?.hasUplink ? `共享中 · 服务器转发 ${route.serverViewers} 人` : '共享中 · 直连') : '');
             setText(
                 refs.screenSettingsStatus,
                 sharing
@@ -516,10 +569,12 @@
             return true;
         };
 
-        const runIntent = async (key, action) => {
-            if (!isActive() || pendingActions.has(key)) {
+        const runIntent = async (key, action, supersede = false) => {
+            if (!isActive() || (!supersede && pendingActions.has(key))) {
                 return false;
             }
+            const revision = (intentRevisions.get(key) || 0) + 1;
+            intentRevisions.set(key, revision);
             pendingActions.add(key);
             render(lastSnapshot);
             try {
@@ -528,9 +583,9 @@
                 logger?.warn?.(`Media Dock ${key} action failed.`, error);
                 return false;
             } finally {
-                pendingActions.delete(key);
-                if (isActive()) {
-                    render(getCurrentAdapterSnapshot());
+                if (intentRevisions.get(key) === revision) {
+                    pendingActions.delete(key);
+                    if (isActive()) render(getCurrentAdapterSnapshot());
                 }
             }
         };
@@ -555,14 +610,25 @@
             if (snapshot.screenSharePending) {
                 return;
             }
-            void runIntent('screen', () =>
-                snapshot.screenShareEnabled
-                    ? adapter.stopScreenShare()
-                    : adapter.startScreenShare({
+            if (snapshot.screenShareEnabled) {
+                void runIntent('screen', () => adapter.stopScreenShare());
+            } else openPopover('screen');
+        };
+        const handleScreenStart = () => {
+            const snapshot = getCurrentAdapterSnapshot();
+            if (!snapshot.mediaControlsAvailable || snapshot.screenSharePending || snapshot.screenShareEnabled) return;
+            // Call capture directly from this click to preserve browser user activation.
+            void runIntent('screen', () => {
+                const started = adapter.startScreenShare({
                           frameRate,
                           resolutionPreset,
-                      })
-            );
+                          mode: shareMode,
+                          codecMode,
+                          startBitrate,
+                      });
+                closePopovers();
+                return started;
+            });
         };
         const handleOutputClick = () => {
             const snapshot = getCurrentAdapterSnapshot();
@@ -578,25 +644,8 @@
             const gain = clamp(refs.micGainSlider.value, 0, 150, 100);
             adapter.setMicrophoneGain?.(gain);
         };
-        const showRestartNotice = () => {
-            if (!restartNotice) {
-                restartNotice = global.document.createElement('span');
-                restartNotice.className = 'restart-effect-notice';
-                root.querySelector('.media-dock-activity-row')?.append(
-                    restartNotice
-                );
-            }
-            restartNotice.textContent = '重进房间后生效';
-            restartNotice.classList.add('is-visible');
-            global.clearTimeout(restartNoticeTimer);
-            restartNoticeTimer = global.setTimeout(
-                () => restartNotice?.classList.remove('is-visible'),
-                2600
-            );
-        };
         const handleNoiseClick = () => {
             void runIntent('noise', () => adapter.toggleNoiseSuppression?.());
-            showRestartNotice();
         };
         const handleAiNoiseClick = () => {
             if (!getCurrentAdapterSnapshot().aiNoiseSupported) {
@@ -605,7 +654,6 @@
             void runIntent('ai-noise', () =>
                 adapter.toggleAiNoiseSuppression?.()
             );
-            showRestartNotice();
         };
         const handleKeyboardActivation = (event) => {
             if (event.key !== 'Enter' && event.key !== ' ') {
@@ -647,37 +695,63 @@
             });
         };
         const closePopovers = () => {
+            cancelHoverClose();
             root.querySelectorAll('[data-device-control]').forEach((control) =>
                 control.classList.remove('is-open')
             );
-            root.querySelectorAll('[data-device-popover]').forEach((popover) =>
-                popover.classList.remove('is-open')
-            );
+            popovers.forEach((popover) => {
+                if (popover.open && typeof popover.close === 'function') popover.close();
+                if (typeof popover.hidePopover === 'function' && popover.matches?.(':popover-open')) popover.hidePopover();
+                popover.classList.remove('is-open');
+            });
+            if (fallbackPopup) {
+                fallbackPlaceholder?.replaceWith(fallbackPopup);
+                fallbackPopup.classList.remove('media-popover-fallback');
+                fallbackBackdrop?.remove();
+                fallbackPopup = fallbackPlaceholder = fallbackBackdrop = undefined;
+            }
             root.querySelectorAll('[data-control-menu]').forEach((toggle) =>
                 toggle.setAttribute('aria-expanded', 'false')
             );
             openPopoverType = undefined;
+            popoverOpenedByHover = false;
+            previousFocus?.focus?.();
+            previousFocus = undefined;
         };
         const positionPopover = (type) => {
-            const popover = root.querySelector(
-                `[data-device-popover="${type}"]`
-            );
+            const popover = popovers.find((element) => element.dataset.devicePopover === type);
             if (!popover?.getBoundingClientRect) {
                 return;
             }
-            popover.style.setProperty('--popover-shift-x', '0px');
-            const rect = popover.getBoundingClientRect();
+            if (type === 'screen') return;
             const margin = 8;
-            let shift = 0;
-            if (rect.right > global.innerWidth - margin) {
-                shift = global.innerWidth - margin - rect.right;
-            }
-            if (rect.left + shift < margin) {
-                shift += margin - (rect.left + shift);
-            }
-            popover.style.setProperty('--popover-shift-x', `${shift}px`);
+            const control = root.querySelector(
+                `[data-device-control="${type}"]`
+            );
+            const anchor = control?.getBoundingClientRect?.();
+            if (!anchor) return;
+            popover.style.maxHeight = `${Math.max(80, global.innerHeight - margin * 2)}px`;
+            const rect = popover.getBoundingClientRect();
+            const left = Math.max(
+                margin,
+                Math.min(anchor.left, global.innerWidth - rect.width - margin)
+            );
+            const above = anchor.top - rect.height - margin;
+            const top =
+                above >= margin
+                    ? above
+                    : Math.max(
+                          margin,
+                          Math.min(
+                              anchor.bottom + margin,
+                              global.innerHeight - rect.height - margin
+                          )
+                      );
+            popover.style.left = `${left}px`;
+            popover.style.top = `${top}px`;
+            popover.style.right = 'auto';
         };
-        const openPopover = (type) => {
+        const openPopover = (type, fromHover = false) => {
             closePopovers();
             const control = root.querySelector(
                 `[data-device-control="${type}"]`
@@ -691,8 +765,30 @@
             }
             control.classList.add('is-open');
             popover.classList.add('is-open');
+            previousFocus = global.document.activeElement;
+            const showNative = type === 'screen' ? popover.showModal : popover.showPopover;
+            if (typeof showNative === 'function') showNative.call(popover);
+            else {
+                // Older embedded browsers need a body-level overlay to escape
+                // the draggable window's containing block and stacking context.
+                fallbackPopup = popover;
+                fallbackPlaceholder = global.document.createComment('media-popup');
+                popover.replaceWith(fallbackPlaceholder);
+                popover.classList.add('media-popover-fallback');
+                if (type === 'screen') {
+                    fallbackBackdrop = global.document.createElement('div');
+                    fallbackBackdrop.className = 'media-modal-fallback-backdrop';
+                    fallbackBackdrop.addEventListener('click', (event) => {
+                        event.preventDefault(); event.stopPropagation(); closePopovers();
+                    });
+                    global.document.body.append(fallbackBackdrop);
+                }
+                global.document.body.append(popover);
+                if (type === 'screen') popover.querySelector('select, button')?.focus();
+            }
             toggle.setAttribute('aria-expanded', 'true');
             openPopoverType = type;
+            popoverOpenedByHover = fromHover;
             if (DEVICE_TYPES.includes(type)) {
                 adapter.refreshDevices?.(type);
             }
@@ -706,7 +802,10 @@
                 event.stopPropagation();
                 const type = menuToggle.dataset.controlMenu;
                 if (openPopoverType === type) {
-                    closePopovers();
+                    if (popoverOpenedByHover) {
+                        popoverOpenedByHover = false;
+                        cancelHoverClose();
+                    } else closePopovers();
                 } else {
                     openPopover(type);
                 }
@@ -716,7 +815,7 @@
             const deviceOption = event.target.closest?.(
                 '[data-device-type][data-device-id]'
             );
-            if (!deviceOption || !root.contains(deviceOption)) {
+            if (!deviceOption || (!root.contains(deviceOption) && !fallbackPopup?.contains(deviceOption))) {
                 return;
             }
             const type = deviceOption.dataset.deviceType;
@@ -727,14 +826,22 @@
                     : type === 'camera'
                       ? adapter.selectCamera
                       : adapter.selectOutput;
-            void runIntent(`device-${type}`, () => action(deviceId));
+            void runIntent(`device-${type}`, () => action(deviceId), true);
         };
         const handleDocumentClick = (event) => {
-            if (openPopoverType && !root.contains(event.target)) {
+            if (openPopoverType && !root.contains(event.target) && !fallbackPopup?.contains(event.target)) {
                 closePopovers();
             }
         };
         const handleDocumentKeydown = (event) => {
+            if (fallbackPopup && openPopoverType === 'screen' && event.key === 'Tab') {
+                const focusable = Array.from(fallbackPopup.querySelectorAll('select, button, input, [tabindex="0"]')).filter((element) => !element.disabled);
+                const index = focusable.indexOf(global.document.activeElement);
+                if (index < 0 || (!event.shiftKey && index === focusable.length - 1) || (event.shiftKey && index === 0)) {
+                    event.preventDefault();
+                    focusable[event.shiftKey ? focusable.length - 1 : 0]?.focus();
+                }
+            }
             if (event.key === 'Escape') {
                 closePopovers();
             }
@@ -769,6 +876,7 @@
             }
 
             refs = resolveRefs();
+            popovers = Array.from(root.querySelectorAll('[data-device-popover]'));
             initialized = true;
             root.dataset.mediaDockInitialized = 'true';
             refs.resolutionSelect.value = resolutionPreset;
@@ -778,9 +886,20 @@
             listen(refs.micButton, 'click', handleMicrophoneClick);
             listen(refs.cameraButton, 'click', handleCameraClick);
             listen(refs.screenButton, 'click', handleScreenClick);
+            listen(refs.screenStartButton, 'click', handleScreenStart);
+            listen(refs.screenCancelButton, 'click', closePopovers);
             listen(refs.outputButton, 'click', handleOutputClick);
+            listen(refs.statusMessages, 'click', (event) => {
+                if (event.target.closest?.('[data-audio-recovery]')) {
+                    adapter.recoverAudio?.();
+                }
+            });
             listen(refs.outputSlider, 'input', handleOutputInput);
             listen(refs.micGainSlider, 'input', handleMicGainInput);
+            listen(refs.noiseModeSelect, 'change', (event) => {
+                // The controller handles rapid selections across mode and mic.
+                void adapter.selectNoiseMode?.(event.target.value);
+            });
             listen(refs.noiseToggle, 'click', handleNoiseClick);
             listen(refs.noiseToggle, 'keydown', handleKeyboardActivation);
             listen(refs.aiNoiseToggle, 'click', handleAiNoiseClick);
@@ -788,10 +907,65 @@
             listen(refs.copyButton, 'click', handleCopyClick);
             listen(refs.resolutionSelect, 'change', handleResolutionChange);
             listen(refs.frameRateSelect, 'change', handleFrameRateChange);
+            listen(root.querySelector('[data-screen-share-mode]'), 'change', (event) => {
+                shareMode = event.target.value === 'detail' ? 'detail' : 'game';
+                frameRate = shareMode === 'game' ? 60 : 30;
+                render(lastSnapshot);
+            });
+            listen(root.querySelector('[data-screen-share-codec]'), 'change', (event) => {
+                codecMode = ['h264', 'vp8'].includes(event.target.value) ? event.target.value : 'auto';
+                render(lastSnapshot);
+            });
+            listen(root.querySelector('[data-screen-share-start-bitrate]'), 'change', (event) => {
+                startBitrate = ['1500', '5500'].includes(event.target.value) ? event.target.value : 'browser';
+                render(lastSnapshot);
+            });
             listen(root, 'click', handleRootClick);
+            root.querySelectorAll('[data-device-control]').forEach(
+                (control) => {
+                    listen(control, 'pointerenter', (event) => {
+                        if (event.pointerType !== 'mouse') return;
+                        if (control.dataset.deviceControl === 'screen' || openPopoverType === 'screen') return;
+                        cancelHoverClose();
+                        const type = control.dataset.deviceControl;
+                        if (openPopoverType !== type) openPopover(type, true);
+                    });
+                    listen(control, 'pointerleave', (event) => {
+                        if (event.pointerType !== 'mouse') return;
+                        if (openPopoverType === 'screen') return;
+                        cancelHoverClose();
+                        hoverCloseTimer = global.setTimeout(closePopovers, 250);
+                    });
+                }
+            );
+            root.querySelectorAll('[data-device-popover]').forEach(
+                (popover) => {
+                    listen(popover, 'click', (event) => {
+                        if (!root.contains(popover)) handleRootClick(event);
+                    });
+                    if (popover.dataset.devicePopover === 'screen') {
+                        listen(popover, 'cancel', (event) => { event.preventDefault(); closePopovers(); });
+                        listen(popover, 'click', (event) => {
+                            if (event.target !== popover) return;
+                            const rect = popover.getBoundingClientRect?.();
+                            if (rect && (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom)) {
+                                event.preventDefault(); event.stopPropagation(); closePopovers();
+                            }
+                        });
+                        return;
+                    }
+                    listen(popover, 'pointerenter', cancelHoverClose);
+                    listen(popover, 'pointerleave', (event) => {
+                        if (event.pointerType !== 'mouse') return;
+                        cancelHoverClose();
+                        hoverCloseTimer = global.setTimeout(closePopovers, 250);
+                    });
+                }
+            );
             listen(global.document, 'click', handleDocumentClick);
             listen(global.document, 'keydown', handleDocumentKeydown);
             listen(global, 'resize', handleResize);
+            listen(global, 'scroll', handleResize, true);
 
             try {
                 unsubscribe = adapter.subscribe(render);
@@ -820,9 +994,6 @@
             unsubscribe?.();
             unsubscribe = undefined;
             global.clearTimeout(copyRestoreTimer);
-            global.clearTimeout(restartNoticeTimer);
-            restartNotice?.remove();
-            restartNotice = undefined;
             delete root.dataset.mediaDockInitialized;
             return true;
         };

@@ -20,7 +20,7 @@
 #page-layout-board > #video-grid {
     position: absolute;
     inset: 0;
-    z-index: 1;
+    z-index: auto;
     display: block;
     min-height: 100%;
     pointer-events: none;
@@ -200,7 +200,9 @@
     place-items: center;
     opacity: 0.04;
     color: var(--muted);
-    pointer-events: none;
+    pointer-events: auto;
+    cursor: grab;
+    touch-action: none;
     transition: opacity 160ms ease;
 }
 
@@ -208,6 +210,18 @@
     width: 12px;
     height: 18px;
     fill: currentColor;
+}
+
+/* Temporary viewport presentation overrides saved inline coordinates only. */
+.video-tile.is-web-fullscreen {
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    max-width: none !important;
+    max-height: none !important;
+    z-index: 100000 !important;
+    border-radius: 0;
 }
 
 .video-tile:hover .window-drag-handle {

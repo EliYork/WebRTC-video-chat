@@ -184,11 +184,21 @@
     });
 
     const saveLayoutToStorage = ({ storageKey, payload } = {}) => {
-        global.localStorage.setItem(storageKey, JSON.stringify(payload));
+        try {
+            global.localStorage.setItem(storageKey, JSON.stringify(payload));
+            return true;
+        } catch {
+            return false;
+        }
     };
 
     const clearSavedLayout = ({ storageKey } = {}) => {
-        global.localStorage.removeItem(storageKey);
+        try {
+            global.localStorage.removeItem(storageKey);
+            return true;
+        } catch {
+            return false;
+        }
     };
 
     global.PageLayoutStorage = {

@@ -67,22 +67,39 @@
                 );
             }
 
-            socket.emit('chat:send', payload);
-            return Promise.resolve({ ok: true });
+            return new Promise((resolve, reject) => {
+                socket
+                    .timeout(8000)
+                    .emit('chat:send', payload, (error, result) => {
+                        if (error || result?.ok !== true) {
+                            reject(
+                                new Error(
+                                    result?.error ||
+                                        '消息未获服务端确认，请检查连接。'
+                                )
+                            );
+                            return;
+                        }
+                        resolve(result);
+                    });
+            });
         };
 
         const subscribeHistory = (handler) => {
             const socket = getActiveSocket();
-            const listener = (messages) => {
+            const listener = (messages, metadata) => {
                 const inferredRoomId = inferHistoryRoomId(messages);
-                const roomId = inferredRoomId || inFlightJoinRoomId;
+                const roomId =
+                    metadata?.roomId || inferredRoomId || inFlightJoinRoomId;
 
                 handler({
                     messages: Array.isArray(messages) ? messages : [],
                     roomId,
                 });
-                inFlightJoinRoomId = undefined;
-                flushNextJoin();
+                if (roomId === inFlightJoinRoomId) {
+                    inFlightJoinRoomId = undefined;
+                    flushNextJoin();
+                }
             };
 
             socket.on('chat:history', listener);

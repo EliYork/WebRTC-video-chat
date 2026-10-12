@@ -133,6 +133,39 @@ const stream = (videoTrack = track()) => ({
 });
 const stats = (report) => new Map([[report.id || 'inbound', report]]);
 
+test('diagnostics mount immediately on late sharing state and return after restart', async () => {
+    const { win, runTimers } = load();
+    const { tile } = tileStructure();
+    const s = stream();
+    const source = { tile, stream: s, video: { srcObject: s }, isScreenSharing: false };
+    const mounted = new Set();
+    win.VoiceShareDiagnostics = { sync: ({ tile }) => mounted.add(tile), remove: (tile) => mounted.delete(tile) };
+    const rt = win.VoiceMediaQualityRuntime.createRuntime({ getQualitySource: () => source, view: win.VoiceMediaQualityView });
+    rt.syncPeer('peer');
+    assert.equal(mounted.size, 0);
+    source.isScreenSharing = true;
+    rt.syncPeer('peer');
+    assert.equal(mounted.has(tile), true);
+    source.isScreenSharing = false;
+    rt.syncPeer('peer');
+    assert.equal(mounted.size, 0);
+    source.stream = stream();
+    source.video.srcObject = source.stream;
+    source.isScreenSharing = true;
+    rt.syncPeer('peer');
+    assert.equal(mounted.has(tile), true);
+    source.stream = stream();
+    source.video.srcObject = source.stream;
+    await runTimers();
+    assert.equal(rt.getActivePeerCount(), 1);
+    assert.equal(mounted.has(tile), true);
+});
+
+test('presence reconciliation resynchronizes quality after shared-room snapshot', () => {
+    const script = readFileSync(new URL('../src/views/script.js', import.meta.url), 'utf8');
+    assert.match(script, /syncPresenceTilesForJoinedRoom\(channels\);\s*\/\/[^\n]*\n\s*voicePeerRegistry.getPeerIds\(\).forEach\(\(peerId\) =>\s*voiceMediaQualityRuntime\?\.syncPeer\(peerId\)/);
+});
+
 async function sampleLabel(
     report,
     { screen = true, videoSize = {}, videoTrack = track() } = {}
@@ -192,6 +225,52 @@ test('quality pill mounts in title controls before fullscreen actions', async ()
     assert.equal(pill.textContent, '接收 1080p · 60fps');
 });
 
+test('local share shows selected settings regardless of preview frames and handles stop', async () => {
+    const { win, runTimers } = load();
+    let now = 1000;
+    let frames = 0;
+    win.performance = { now: () => now };
+    const { tile } = tileStructure();
+    const videoTrack = track({ width: 1920, height: 1080, frameRate: 60 });
+    const sourceStream = stream(videoTrack);
+    // The preview may use a different stream wrapper for the same capture track.
+    const video = {
+        srcObject: stream(videoTrack),
+        getVideoPlaybackQuality: () => ({ totalVideoFrames: frames }),
+    };
+    const source = {
+        isLocal: true,
+        shareOptions: { resolutionPreset: '1440p', frameRate: 60 },
+        isScreenSharing: true,
+        tile,
+        video,
+        stream: sourceStream,
+    };
+    const rt = win.VoiceMediaQualityRuntime.createRuntime({
+        getQualitySource: () => source,
+        view: win.VoiceMediaQualityView,
+    });
+    rt.syncPeer('local-video');
+    await runTimers();
+    const label = () =>
+        tile.querySelector('.voice-media-quality-pill').textContent;
+    assert.equal(label(), '共享设置 1440p · 60fps');
+    now += 1000;
+    frames = 27;
+    await runTimers();
+    assert.equal(label(), '共享设置 1440p · 60fps');
+    now += 1000;
+    await runTimers();
+    assert.equal(label(), '共享设置 1440p · 60fps');
+    source.previewHidden = true;
+    await runTimers();
+    assert.equal(label(), '共享设置 1440p · 60fps');
+    source.isScreenSharing = false;
+    await runTimers();
+    assert.equal(rt.getActivePeerCount(), 0);
+    assert.equal(label(), '');
+});
+
 test('formats standard and non-standard resolutions', async () => {
     assert.equal(
         (
@@ -232,7 +311,7 @@ test('omits missing pieces and never renders zero fps', async () => {
         (await sampleLabel({ framesPerSecond: 60 })).text,
         '接收 60fps'
     );
-    assert.equal((await sampleLabel({})).text, '');
+    assert.equal((await sampleLabel({})).text, '接收 帧率待采样');
 });
 
 test('falls back to element and track dimensions without CSS sizes', async () => {
@@ -336,9 +415,20 @@ test('screen-only lifecycle hides camera, ended, audio-only, reject, stale and c
     await runTimers();
     assert.equal(
         tile.querySelector('.voice-media-quality-pill')?.textContent || '',
-        ''
+        '接收 帧率待采样'
     );
     assert.equal(rt.getActivePeerCount(), 1);
+    let playbackFrames = 10;
+    let playbackTime = 1000;
+    win.performance = { now: () => playbackTime };
+    video.videoWidth = 1280;
+    video.videoHeight = 720;
+    video.getVideoPlaybackQuality = () => ({ totalVideoFrames: playbackFrames });
+    await runTimers();
+    playbackFrames += 25;
+    playbackTime += 1000;
+    await runTimers();
+    assert.equal(tile.querySelector('.voice-media-quality-pill').textContent, '接收 720p · 25fps');
     rt.stop('peer-a', 'leave', { remove: true });
     assert.equal(rt.getActivePeerCount(), 0);
 });

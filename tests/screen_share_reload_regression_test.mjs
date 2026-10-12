@@ -128,7 +128,7 @@ test('screen capture constraints map stable defaults and every resolution preset
     assert.deepEqual(defaults, {
         audio: true,
         video: {
-            frameRate: { ideal: 30, max: 30 },
+            frameRate: { ideal: 60, max: 60 },
             height: { ideal: 1080, max: 1080 },
             width: { ideal: 1920, max: 1920 },
         },
@@ -194,7 +194,7 @@ test('screen capture constraints accept 15 30 and 60 fps targets and normalize i
                 resolutionPreset: '8k',
             })
         ),
-        { frameRate: 30, resolutionPreset: '1080p' }
+        { frameRate: 60, resolutionPreset: '1080p', mode: 'game', codecMode: 'auto', startBitrate: 'browser' }
     );
 });
 

@@ -14,8 +14,12 @@
         return Math.min(1, Math.max(0, numericVolume));
     };
 
-    const getPeerVolumes = () =>
-        readJsonStorage(PEER_VOLUME_STORAGE_KEY, {}) || {};
+    const getPeerVolumes = () => {
+        const saved = readJsonStorage(PEER_VOLUME_STORAGE_KEY, {});
+        return saved && typeof saved === 'object' && !Array.isArray(saved)
+            ? { ...saved }
+            : {};
+    };
 
     const getPeerVolume = (peerId) => clampVolume(getPeerVolumes()[peerId], 1);
 

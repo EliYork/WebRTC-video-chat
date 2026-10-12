@@ -97,6 +97,7 @@
     min-height: 0;
     margin-top: 16px;
     overflow-y: auto;
+    padding: 10px;
 }
 
 .channel-group {
@@ -120,23 +121,24 @@
     align-items: center;
     justify-content: space-between;
     gap: 10px;
-    min-height: 34px;
-    padding: 7px 9px;
+    min-height: 40px;
+    padding: 7px 10px;
     border: 1px solid transparent;
     border-radius: 8px;
-    color: #69485a;
+    color: var(--text);
     text-decoration: none;
 }
 
 .tree-channel-link:hover,
 .tree-channel.is-viewing .tree-channel-link {
-    border-color: rgba(216, 111, 154, 0.24);
-    background-color: rgba(255, 255, 255, 0.74);
+    border-color: transparent;
+    background-color: var(--panel-warm);
 }
 
 .tree-channel.is-viewing .tree-channel-link {
-    box-shadow: 0 8px 18px rgba(216, 111, 154, 0.13);
-    color: #57354a;
+    box-shadow: none;
+    background-color: var(--accent-soft);
+    color: var(--accent-strong);
     font-weight: 700;
 }
 
@@ -189,7 +191,7 @@
 .channel-members {
     display: grid;
     gap: 3px;
-    margin: 3px 0 8px;
+    margin: 2px 0 4px;
     padding: 0 0 0 32px;
     list-style: none;
 }
@@ -204,6 +206,10 @@
     border-radius: 7px;
     color: #7b596b;
     font-size: 13px;
+}
+
+.channel-members:empty {
+    margin: 0;
 }
 
 .channel-member::before {
@@ -533,10 +539,10 @@
     min-width: 34px;
     place-items: center;
     padding: 0;
-    border: 1px solid rgba(216, 111, 154, 0.24);
-    border-radius: 999px;
-    background-color: rgba(255, 255, 255, 0.88);
-    box-shadow: 0 10px 24px rgba(111, 58, 83, 0.11);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background-color: var(--panel);
+    box-shadow: var(--shadow);
     color: var(--accent-strong);
     cursor: pointer;
 }

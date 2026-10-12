@@ -294,3 +294,81 @@ test('adding a sender kind reports one required renegotiation', async () => {
     assert.equal(replacement.ok, false);
     assert.equal(replacement.reason, 'renegotiation-required');
 });
+
+test('a failed track replacement returns a rebuild result and leaves the reverse microphone intact', async () => {
+    const network = new StrictMediaNetwork();
+    const a = createFixture('A', network);
+    const b = createFixture('B', network);
+    const current = publish(a, 'B', 1, stream(audio('a-mic')));
+    publish(b, 'A', 1, stream(audio('b-mic')));
+    network.flush();
+    const reverse = a.registry.getSnapshot('B').incomingCall;
+    current.peerConnection.getSenders()[0].replaceTrack = async () => { throw new Error('sender closed'); };
+    const result = await a.registry.replaceOutgoingTracks({ generation: 2, peerId: 'B', stream: stream(audio('new-mic')) });
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, 'replacement-failed');
+    publish(a, 'B', 2, stream(audio('new-mic')));
+    network.flush();
+    assert.equal(a.registry.getSnapshot('B').incomingCall, reverse);
+    assert.equal(a.registry.getSnapshot('B').remoteStream.getAudioTracks()[0].id, 'b-mic');
+    assert.equal(b.registry.getSnapshot('A').remoteStream.getAudioTracks()[0].id, 'new-mic');
+});
+
+test('same-object remote track changes refresh playback once and old stream events cannot restore stale audio', async () => {
+    const network = new StrictMediaNetwork();
+    const a = createFixture('A', network);
+    const b = createFixture('B', network);
+    const incoming = stream(audio('first'));
+    publish(a, 'B', 1, incoming);
+    network.flush();
+    const remote = b.registry.getSnapshot('A').incomingCall.remoteStream;
+    // Use the actual incoming object emitted by this strict network.
+    const source = remote || incoming;
+    source.addTrack(audio('joined-mic'));
+    source.emitEvent('addtrack');
+    source.emitEvent('addtrack');
+    await Promise.resolve();
+    assert.ok(b.registry.getSnapshot('A').remoteStream.getAudioTracks().some((track) => track.id === 'joined-mic'));
+    publish(a, 'B', 2, stream(audio('latest')));
+    network.flush();
+    source.emitEvent('addtrack');
+    await Promise.resolve();
+    assert.deepEqual(b.registry.getSnapshot('A').remoteStream.getAudioTracks().map((track) => track.id), ['latest']);
+});
+
+test('screen P2P codec offer composes existing transform and camera/codec transitions require fresh negotiation', async (t) => {
+    vm.runInNewContext(readFileSync(new URL('../src/views/js/voice/voice-screen-codecs.js', import.meta.url), 'utf8'), { window: registryWindow });
+    t.after(() => { delete registryWindow.VoiceScreenCodecs; });
+    const network = new StrictMediaNetwork();
+    const a = createFixture('A', network);
+    createFixture('B', network);
+    const screen = video('actual-screen');
+    await registryWindow.VoiceScreenCodecs.prepare(screen, { frameRate: 60 }, { probe: async () => ({ passed: true, reason: 'passed' }) });
+    const original = a.peer.call.bind(a.peer);
+    let options;
+    a.peer.call = (peerId, media, value) => { options = value; return original(peerId, media, value); };
+    publish(a, 'B', 1, stream(audio('mic'), screen), { sdpTransform: (sdp) => sdp.replace('v=0', 'v=0\r\na=x-existing') });
+    const answerer = network.calls[0].answerer;
+    const originalAnswer = answerer.answer.bind(answerer);
+    let answerOptions;
+    answerer.answer = (media, value) => { assert.equal(media, undefined); answerOptions = value; return originalAnswer(media); };
+    network.flush();
+    const sdp = 'v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96 98\r\na=rtpmap:96 VP8/90000\r\na=rtpmap:98 H264/90000\r\na=fmtp:98 packetization-mode=1\r\n';
+    assert.match(options.sdpTransform(sdp), /m=video 9 UDP\/TLS\/RTP\/SAVPF 98 96/);
+    assert.match(options.sdpTransform(sdp), /a=x-existing/);
+    assert.equal(options.metadata.screenVideoCodec, 'h264');
+    assert.match(answerOptions.sdpTransform(sdp), /m=video 9 UDP\/TLS\/RTP\/SAVPF 98 96/);
+    assert.equal(answerer.answerCount, 1);
+    const parked = await a.registry.replaceOutgoingTracks({ generation: 2, peerId: 'B', stream: stream(audio('mic')) });
+    assert.equal(parked.ok, true, 'parking screen video for SFU must retain the negotiated codec and sender slot');
+    assert.equal(a.peer.calls.length, 1, 'SFU parking must not create a new offer loop');
+    const resumed = await a.registry.replaceOutgoingTracks({ generation: 3, peerId: 'B', stream: stream(audio('mic'), screen) });
+    assert.equal(resumed.ok, true, 'P2P fallback resumes the existing video slot');
+    assert.equal(a.peer.calls.length, 1);
+    const camera = video('camera');
+    assert.equal((await a.registry.replaceOutgoingTracks({ generation: 4, peerId: 'B', stream: stream(audio('mic'), camera) })).reason, 'renegotiation-required');
+    const vp8Screen = video('vp8-screen');
+    await registryWindow.VoiceScreenCodecs.prepare(vp8Screen, { codecMode: 'vp8' });
+    assert.equal((await a.registry.replaceOutgoingTracks({ generation: 4, peerId: 'B', stream: stream(audio('mic'), vp8Screen) })).reason, 'renegotiation-required');
+    assert.equal(screen.readyState, 'live');
+});

@@ -22,6 +22,12 @@ export const createVoiceCallSignaling = ({
     onScreenShareChange,
 } = {}) => {
     const roomJoinQueues = new Map();
+    const socketRevisions = new WeakMap();
+    const advanceRevision = (socket) => {
+        const revision = (socketRevisions.get(socket) || 0) + 1;
+        socketRevisions.set(socket, revision);
+        return revision;
+    };
 
     const normalizeClientSessionEpoch = (value) => {
         const epoch = Number(value);
@@ -97,12 +103,22 @@ export const createVoiceCallSignaling = ({
         if (!ownedRoomId || !ownedPeerId || !socket) {
             return Promise.resolve({ ok: false, reason: 'invalid-voice-join' });
         }
+        const revision = advanceRevision(socket);
+        const cancelled = () => socketRevisions.get(socket) !== revision;
 
         return enqueueRoomJoin(ownedRoomId, async () => {
+            if (socket.disconnected === true) {
+                return { ok: false, reason: 'socket-disconnected' };
+            }
+            if (cancelled()) return { ok: false, reason: 'voice-join-cancelled' };
             const { peerIds: existingPeerIds, roomSockets } = await getPeerIds(
                 ownedRoomId,
                 socket
             );
+            if (socket.disconnected === true) {
+                return { ok: false, reason: 'socket-disconnected' };
+            }
+            if (cancelled()) return { ok: false, reason: 'voice-join-cancelled' };
             if (
                 socket.data.voiceRoomId === ownedRoomId &&
                 socket.data.voicePeerId === ownedPeerId &&
@@ -165,6 +181,10 @@ export const createVoiceCallSignaling = ({
             }
 
             await socket.join(ownedRoomId);
+            if (socket.disconnected === true || cancelled()) {
+                await socket.leave(ownedRoomId);
+                return { ok: false, reason: socket.disconnected ? 'socket-disconnected' : 'voice-join-cancelled' };
+            }
             const voiceSessionGeneration =
                 Number(socket.data.voiceSessionGeneration || 0) + 1;
             socket.data.voiceRoomId = ownedRoomId;
@@ -242,6 +262,7 @@ export const createVoiceCallSignaling = ({
     };
 
     const leave = async (socket, { reason = 'voice-leave' } = {}) => {
+        if (socket) advanceRevision(socket);
         const owner = getVoiceOwner(socket, { requireMembership: false });
 
         if (!owner) {

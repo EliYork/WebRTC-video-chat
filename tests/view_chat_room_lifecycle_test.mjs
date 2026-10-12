@@ -71,6 +71,32 @@ const switchRoom = (socket, roomId) =>
         isAllowedRoomId: allowFixedChannels,
     });
 
+test('concurrent switches leave exactly one owned subscription', async () => {
+    const socket = new FakeHub().createSocket('concurrent');
+    await switchRoom(socket, 'lobby');
+    await Promise.all([
+        switchRoom(socket, 'game'),
+        switchRoom(socket, 'project'),
+    ]);
+    assert.deepEqual(
+        socket.rooms,
+        new Set(['concurrent', 'view-chat:project'])
+    );
+    assert.equal(socket.data.chatRoomId, 'project');
+});
+
+test('disconnect during asynchronous join cannot restore stale ownership', async () => {
+    const socket = new FakeHub().createSocket('gone');
+    socket.join = async (room) => {
+        socket.rooms.add(room);
+        socket.disconnected = true;
+    };
+    const result = await switchRoom(socket, 'game');
+    assert.equal(result.valid, false);
+    assert.equal(socket.data.chatRoomId, undefined);
+    assert.equal(socket.rooms.has('view-chat:game'), false);
+});
+
 test('lobby -> game -> project leaves old view/chat rooms', async () => {
     const hub = new FakeHub();
     const socket = hub.createSocket('socket-a');
