@@ -1,0 +1,112 @@
+{
+  "tag": "media-20261017-030639-686",
+  "version": "1.0.5",
+  "deployedAt": "2026-10-16T19:17:15.333268+00:00",
+  "archive": "webrtc-video-chat-1.0.5-20261017-030639-686.zip",
+  "archiveSha256": "8960D40FCC0BBC113CB8D836EC1EB57B77A6AEF25DFA02F6BBDF5AF82DD37F43",
+  "archiveFiles": 128,
+  "deployedFiles": {
+    "src/views/js/voice/voice-media-lifecycle.js": "eb83f3c3ee89012e5bcb28ccaf75539a8f9f7aeccd244c9c9fb366a160e34cd4",
+    "src/views/js/voice/voice-peer-registry.js": "2ca7baeb46bd79cc70b79602b4b4f41d16f7186a9bafb37ffd641e0265c446be",
+    "src/views/js/voice/voice-screen-sfu-runtime.js": "2b848eda1db41ebf267655f21e293273e3086800dc79b01c914895356341173f",
+    "src/views/script.js": "462a2e31ec327df60fc6ea4e9446887d104c0d1124668a49da23f1265aa7935d"
+  },
+  "tests": {
+    "passed": 331,
+    "failed": 0,
+    "skipped": 0
+  },
+  "processes": {
+    "voice-room-0.pid": "523169",
+    "friend-footprints-2.pid": "600469"
+  },
+  "mediasoupWorkerPids": [
+    "523181"
+  ],
+  "serviceRestarted": false,
+  "protectedFilesUnchanged": {
+    "/www/wwwroot/voice.eliyork.com/.env": true,
+    "/www/wwwroot/voice.eliyork.com/data/chat-history.json": true,
+    "/www/wwwroot/voice.eliyork.com/node_modules/mediasoup/package.json": true
+  },
+  "rollback": "/www/backup/voice-deploy/media-20261017-030639-686/rollback.py",
+  "publicVerification": {
+    "utc": "2026-10-16T19:19:22.335Z",
+    "tag": "media-20261017-030639-686",
+    "publicFiles": [
+      {
+        "file": "src/views/js/voice/voice-media-lifecycle.js",
+        "status": 200,
+        "sha256": "eb83f3c3ee89012e5bcb28ccaf75539a8f9f7aeccd244c9c9fb366a160e34cd4"
+      },
+      {
+        "file": "src/views/js/voice/voice-peer-registry.js",
+        "status": 200,
+        "sha256": "2ca7baeb46bd79cc70b79602b4b4f41d16f7186a9bafb37ffd641e0265c446be"
+      },
+      {
+        "file": "src/views/js/voice/voice-screen-sfu-runtime.js",
+        "status": 200,
+        "sha256": "2b848eda1db41ebf267655f21e293273e3086800dc79b01c914895356341173f"
+      },
+      {
+        "file": "src/views/script.js",
+        "status": 200,
+        "sha256": "462a2e31ec327df60fc6ea4e9446887d104c0d1124668a49da23f1265aa7935d"
+      }
+    ],
+    "browser": {
+      "boot": "ready",
+      "title": "大厅 - 语音据点",
+      "constraints": {
+        "audio": true,
+        "audioSelection": "preferred",
+        "selfBrowserSurface": "exclude",
+        "windowAudio": "window",
+        "video": {
+          "displaySurface": "window",
+          "frameRate": {
+            "ideal": 60,
+            "max": 60
+          },
+          "height": {
+            "ideal": 1080,
+            "max": 1080
+          },
+          "width": {
+            "ideal": 1920,
+            "max": 1920
+          }
+        }
+      },
+      "registryLoaded": true,
+      "runtimeLoaded": true,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/155.0.0.0 Safari/537.36 Edg/155.0.0.0",
+      "pageErrors": [],
+      "loadedPatchedFiles": [
+        {
+          "path": "/js/voice/voice-screen-sfu-runtime.js",
+          "status": 200,
+          "sha256": "2b848eda1db41ebf267655f21e293273e3086800dc79b01c914895356341173f"
+        },
+        {
+          "path": "/js/voice/voice-peer-registry.js",
+          "status": 200,
+          "sha256": "2ca7baeb46bd79cc70b79602b4b4f41d16f7186a9bafb37ffd641e0265c446be"
+        },
+        {
+          "path": "/js/voice/voice-media-lifecycle.js",
+          "status": 200,
+          "sha256": "eb83f3c3ee89012e5bcb28ccaf75539a8f9f7aeccd244c9c9fb366a160e34cd4"
+        },
+        {
+          "path": "/script.js",
+          "status": 200,
+          "sha256": "462a2e31ec327df60fc6ea4e9446887d104c0d1124668a49da23f1265aa7935d"
+        }
+      ],
+      "joinedVoice": false,
+      "realCaptureTested": false
+    }
+  }
+}

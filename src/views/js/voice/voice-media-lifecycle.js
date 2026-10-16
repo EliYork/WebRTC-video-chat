@@ -64,6 +64,7 @@
         // disable game audio or local playback to hide a conference echo.
         const audioOptions = {
             audio: supportedConstraints.restrictOwnAudio === true ? { restrictOwnAudio: true } : true,
+            audioSelection: 'preferred',
             selfBrowserSurface: 'exclude',
             windowAudio: 'window',
         };
@@ -72,6 +73,7 @@
             return {
                 ...audioOptions,
                 video: {
+                    displaySurface: 'window',
                     frameRate: frameRateConstraint,
                 },
             };
@@ -81,6 +83,7 @@
             return {
                 ...audioOptions,
                 video: {
+                    displaySurface: 'window',
                     frameRate: frameRateConstraint,
                     height: { ideal: 1080 },
                     width: { ideal: 1920 },
@@ -94,6 +97,7 @@
         return {
             ...audioOptions,
             video: {
+                displaySurface: 'window',
                 frameRate: frameRateConstraint,
                 height: {
                     ideal: resolution.height,

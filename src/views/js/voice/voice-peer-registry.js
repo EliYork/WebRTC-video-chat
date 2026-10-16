@@ -549,6 +549,11 @@
                 return { ok: false, reason: 'renegotiation-required' };
             }
             if (
+                // replaceTrack may succeed after ICE/DTLS has failed. Let the
+                // caller create a fresh offer instead of reviving a dead slot.
+                // A temporary disconnected state keeps its recovery grace.
+                ['failed', 'closed'].includes(peerConnection?.connectionState) ||
+                ['failed', 'closed'].includes(peerConnection?.iceConnectionState) ||
                 (sessionDisconnected && !['connected', 'completed'].includes(peerConnection?.connectionState) && !['connected', 'completed'].includes(peerConnection?.iceConnectionState)) ||
                 !record ||
                 !isGeneration(normalizedGeneration) ||
@@ -587,15 +592,13 @@
                 return { ok: false, reason: 'renegotiation-required' };
             }
 
+            const replacements = Array.from(senderSlotsByKind).flatMap(([kind, slots]) => {
+                const tracks = nextTracksByKind.get(kind) || [];
+                return slots.map((sender, index) => ({ sender, track: tracks[index] || null }))
+                    .filter(({ sender, track }) => (sender.track ?? null) !== track);
+            });
             try {
-                await Promise.all(
-                    Array.from(senderSlotsByKind).flatMap(([kind, slots]) => {
-                        const tracks = nextTracksByKind.get(kind) || [];
-                        return slots.map((sender, index) =>
-                            sender.replaceTrack(tracks[index] || null)
-                        );
-                    })
-                );
+                await Promise.all(replacements.map(({ sender, track }) => sender.replaceTrack(track)));
             } catch (error) {
                 warn(`Could not replace media tracks for ${peerId}.`, error);
                 return { ok: false, reason: 'replacement-failed' };
@@ -606,13 +609,15 @@
             record.generation = normalizedGeneration;
             await global.VoiceScreenSendPolicy?.apply(peerConnection, warn);
             entry.lastOutgoingGeneration = normalizedGeneration;
-            debug({
-                direction: 'outgoing',
-                event: 'tracks-replaced',
-                generation: normalizedGeneration,
-                peerId,
-                tracks: getLiveTracks(stream).map(({ kind }) => kind),
-            });
+            if (replacements.length) {
+                debug({
+                    direction: 'outgoing',
+                    event: 'tracks-replaced',
+                    generation: normalizedGeneration,
+                    peerId,
+                    tracks: getLiveTracks(stream).map(({ kind }) => kind),
+                });
+            }
             return { ok: true };
         };
 

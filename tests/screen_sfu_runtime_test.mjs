@@ -142,7 +142,7 @@ test('an unavailable optional SFU SDK preserves P2P and never stops the captured
     assert.equal(track.readyState, 'live');
 });
 
-async function publishFixture({ primary = 'h264', startBitrate = 'browser', rejectH264 = false, offered = ['h264', 'vp8'] } = {}) {
+async function publishFixture({ primary = 'h264', startBitrate = 'browser', rejectH264 = false, offered = ['h264', 'vp8'], onRoutes, onUplinkBudget } = {}) {
     const window = { MediaStream: StrictStream, setTimeout, clearTimeout, setInterval, clearInterval };
     for (const file of ['voice-screen-codecs.js', 'voice-screen-send-policy.js', 'voice-screen-sfu-runtime.js'])
         vm.runInNewContext(readFileSync(new URL('../src/views/js/voice/' + file, import.meta.url), 'utf8'), { window });
@@ -179,7 +179,7 @@ async function publishFixture({ primary = 'h264', startBitrate = 'browser', reje
                 list: { publications: [] }, transport: { id: 'send' }, publish: { publicationId: 'pub' } };
             ack({ ok: true, ...responses[payload.action] });
         } };
-    const runtime = window.VoiceScreenSfuRuntime.createRuntime({ config: { enabled: true }, Device });
+    const runtime = window.VoiceScreenSfuRuntime.createRuntime({ config: { enabled: true }, Device, onRoutes, onUplinkBudget });
     runtime.attachSocket(socket);
     runtime.setSession({ roomId: 'game', peerId: 'me', voiceSessionGeneration: 1 });
     await runtime.publish(new StrictStream([video, audio]), { frameRate: 60, startBitrate });
@@ -272,4 +272,88 @@ test('SFU budget updates apply without logging fictional path switches; close re
     assert.equal(f.runtime.snapshot().routeHistory.at(-1).reason, 'closed');
     f.handlers['sfu:closed']({ ...event, reason: 'private error with host address' });
     assert.equal(f.runtime.snapshot().routeHistory.at(-1).reason, 'other');
+});
+
+test('SFU budget changes update policies without refreshing unchanged viewer routes', async (t) => {
+    const routes = [];
+    const budgets = [];
+    const f = await publishFixture({
+        onRoutes: (peers) => routes.push([...peers]),
+        onUplinkBudget: () => budgets.push('update'),
+    });
+    t.after(() => f.runtime.leave());
+    routes.length = budgets.length = 0;
+    const event = { publicationId: 'pub', roomId: 'game', voiceSessionGeneration: 1 };
+    f.handlers['sfu:routes']({ ...event, peerIds: ['viewer'], uplinkBitrate: 1000000, videoMaxBitrate: 22000000 });
+    assert.deepEqual(routes, [['viewer']]);
+    assert.equal(budgets.length, 0, 'route changes already update the budget through onRoutes');
+    const history = JSON.stringify(f.runtime.snapshot().routeHistory);
+
+    f.handlers['sfu:routes']({ ...event, peerIds: ['viewer'], uplinkBitrate: 8000000, videoMaxBitrate: 6000000 });
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    assert.equal(routes.length, 1, 'budget-only updates must not refresh media tracks');
+    assert.equal(budgets.length, 1);
+    assert.equal(f.runtime.getUplinkBitrate(), 8000000);
+    assert.equal(JSON.stringify(f.runtime.snapshot().routeHistory), history);
+    assert.equal(f.producers[0].rtpSender.getParameters().encodings[0].maxBitrate, 6000000);
+    assert.equal(f.producers[0].rtpSender.getParameters().encodings[0].maxFramerate, 60);
+    assert.equal(f.producers[0].rtpSender.getParameters().encodings[0].scaleResolutionDownBy, 1);
+
+    f.handlers['sfu:routes']({ ...event, peerIds: ['viewer'], uplinkBitrate: 8000000 });
+    f.handlers['sfu:routes']({ ...event, voiceSessionGeneration: 0, peerIds: ['stale'], uplinkBitrate: 2000000 });
+    assert.equal(routes.length, 1);
+    assert.equal(budgets.length, 1, 'unchanged or stale events must not reconfigure policies');
+    f.handlers['sfu:routes']({ ...event, peerIds: ['other-viewer'], uplinkBitrate: 8000000 });
+    f.handlers['sfu:routes']({ ...event, peerIds: [], uplinkBitrate: 8000000 });
+    assert.deepEqual(routes, [['viewer'], ['other-viewer'], []], 'same-size membership changes and P2P fallback still refresh tracks');
+});
+
+test('app budget callback reapplies existing P2P parameters without replacing tracks or refreshing media', async () => {
+    const window = {};
+    vm.runInNewContext(readFileSync(new URL('../src/views/js/voice/voice-screen-send-policy.js', import.meta.url), 'utf8'), { window });
+    const video = new StrictTrack('video', 'screen');
+    let videoParameters = { degradationPreference: 'maintain-resolution', encodings: [{ maxBitrate: 18000000, maxFramerate: 60, scaleResolutionDownBy: 1 }] };
+    const audioParameters = { encodings: [{ maxBitrate: 128000 }] };
+    let writes = 0;
+    const sender = { track: video, getParameters: () => structuredClone(videoParameters),
+        setParameters: async (value) => { videoParameters = value; writes++; },
+        replaceTrack() { assert.fail('budget updates must not replace tracks'); } };
+    const pc = { getSenders: () => [sender, { track: { kind: 'audio' }, getParameters: () => audioParameters,
+        setParameters() { assert.fail('screen budget must not change microphone parameters'); } }] };
+    const pending = [];
+    const apply = window.VoiceScreenSendPolicy.apply;
+    window.VoiceScreenSendPolicy.apply = (...args) => { const work = apply(...args); pending.push(work); return work; };
+    let callbacks;
+    let budgetUpdates = 0;
+    let mediaUpdates = 0;
+    let dockUpdates = 0;
+    const call = { peerConnection: pc };
+    const context = {
+        window, currentPeer: {}, screenSfuRuntime: null,
+        voicePeerRegistry: { getPeerIds: () => ['viewer'], getSnapshot: () => ({ outgoingCall: call }) },
+        updateScreenP2pBudget() { budgetUpdates++; window.VoiceScreenSendPolicy.register(video, { frameRate: 60, maxBitrate: 6000000 }); },
+        refreshVoiceCallsForLocalMedia() { mediaUpdates++; },
+        notifyMediaDock() { dockUpdates++; },
+        console: { warn() {} },
+    };
+    window.VoiceScreenSfuRuntime = { createRuntime: (options) => { callbacks = options; return {}; } };
+    const source = readFileSync(new URL('../src/views/script.js', import.meta.url), 'utf8');
+    const start = source.indexOf('screenSfuRuntime = window.VoiceScreenSfuRuntime.createRuntime({');
+    vm.runInNewContext(source.slice(start, source.indexOf('const getDiagnosticQualitySource =', start)), context);
+    assert.equal(typeof callbacks.onUplinkBudget, 'function');
+    callbacks.onUplinkBudget();
+    await Promise.all(pending.splice(0));
+    assert.equal(budgetUpdates, 1);
+    assert.equal(mediaUpdates, 0);
+    assert.equal(dockUpdates, 0);
+    assert.equal(writes, 1);
+    assert.equal(videoParameters.encodings[0].maxBitrate, 6000000);
+    assert.equal(videoParameters.encodings[0].maxFramerate, 60);
+    assert.equal(videoParameters.encodings[0].scaleResolutionDownBy, 1);
+    assert.equal(videoParameters.degradationPreference, 'maintain-resolution');
+    callbacks.onUplinkBudget();
+    await Promise.all(pending.splice(0));
+    assert.equal(writes, 1, 'identical parameters remain deduplicated');
+    callbacks.onRoutes(['viewer']);
+    assert.equal(mediaUpdates, 1, 'actual route changes still refresh media');
 });

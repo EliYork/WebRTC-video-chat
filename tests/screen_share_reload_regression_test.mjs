@@ -127,9 +127,11 @@ test('screen capture constraints map stable defaults and every resolution preset
     const defaults = plain(lifecycle.buildScreenCaptureConstraints());
     assert.deepEqual(defaults, {
         audio: true,
+        audioSelection: 'preferred',
         selfBrowserSurface: 'exclude',
         windowAudio: 'window',
         video: {
+            displaySurface: 'window',
             frameRate: { ideal: 60, max: 60 },
             height: { ideal: 1080, max: 1080 },
             width: { ideal: 1920, max: 1920 },
@@ -149,6 +151,8 @@ test('screen capture constraints map stable defaults and every resolution preset
                     resolutionPreset,
                 })
             );
+            assert.equal(constraints.video.displaySurface, 'window');
+            assert.equal(constraints.audioSelection, 'preferred');
             assert.deepEqual(constraints.video.height, {
                 ideal: resolution.height,
                 max: resolution.height,
@@ -170,6 +174,11 @@ test('screen capture constraints map stable defaults and every resolution preset
     );
     assert.deepEqual(automatic.video.height, { ideal: 1080 });
     assert.deepEqual(automatic.video.width, { ideal: 1920 });
+    [automatic, original].forEach((constraints) => {
+        assert.equal(constraints.video.displaySurface, 'window');
+        assert.equal(constraints.audioSelection, 'preferred');
+        assert.equal(constraints.audio, true);
+    });
     assert.equal(Object.hasOwn(original.video, 'height'), false);
     assert.equal(Object.hasOwn(original.video, 'width'), false);
     assert.equal(
@@ -191,6 +200,8 @@ test('supported own audio exclusion is requested without silencing game playback
     const result = await api.requestScreenCapture({ supportedConstraints: support, getDisplayMedia: async (constraints) => { requested = plain(constraints); return stream; } });
     assert.equal(result.stream, stream);
     assert.deepEqual(requested.audio, { restrictOwnAudio: true });
+    assert.equal(requested.audioSelection, 'preferred');
+    assert.equal(requested.video.displaySurface, 'window');
     assert.equal(requested.audio.suppressLocalAudioPlayback, undefined);
     assert.equal(requested.systemAudio, undefined);
     assert.equal(api.describeScreenAudio(stream).实际排除通话声音, true);
@@ -239,10 +250,12 @@ test('screen capture runtime owns option-to-constraint mapping before calling th
 
     assert.equal(result.ok, true);
     assert.deepEqual(receivedConstraints.video, {
+        displaySurface: 'window',
         frameRate: { ideal: 60, max: 60 },
         height: { ideal: 1440, max: 1440 },
         width: { ideal: 2560, max: 2560 },
     });
+    assert.equal(receivedConstraints.audioSelection, 'preferred');
 });
 
 test('remote media attachment updates srcObject and starts playback', async () => {

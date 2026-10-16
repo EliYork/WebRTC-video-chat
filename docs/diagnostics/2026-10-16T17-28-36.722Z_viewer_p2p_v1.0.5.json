@@ -1,0 +1,123 @@
+{
+  "版本": "1.0.5",
+  "诊断格式": 4,
+  "角色": "观看者",
+  "观看路径": "P2P",
+  "采样时间": "2026-10-16T17:28:36.722Z",
+  "SFU服务器统计": null,
+  "本机音频": {
+    "请求模式": "rnnoise",
+    "实际模式": null,
+    "降噪模型": null,
+    "模型回退": null,
+    "模型预检p95_ms": null,
+    "麦克风增益_百分比": 150,
+    "浏览器降噪": null,
+    "AEC": null,
+    "AEC采集方式": null,
+    "AEC回退": null,
+    "自动增益": null,
+    "非语音门控启用": false,
+    "处理器回退": null,
+    "最近切换失败": null,
+    "麦克风存活": null,
+    "放大播放": {
+      "amplifiedPlayers": 0,
+      "contextState": null
+    }
+  },
+  "共享路径变化": {
+    "state": "p2p",
+    "serverViewers": 0,
+    "hasUplink": false,
+    "routeHistory": [
+      {
+        "time": 1792171382964,
+        "event": "subscription-ready",
+        "reason": null,
+        "serverViewers": 0
+      },
+      {
+        "time": 1792171433163,
+        "event": "receiver-release",
+        "reason": "receiver-video-stalled",
+        "serverViewers": 0
+      },
+      {
+        "time": 1792171433334,
+        "event": "subscription-closed",
+        "reason": "closed",
+        "serverViewers": 0
+      },
+      {
+        "time": 1792171556313,
+        "event": "subscription-ready",
+        "reason": null,
+        "serverViewers": 0
+      },
+      {
+        "time": 1792171564488,
+        "event": "receiver-release",
+        "reason": "receiver-video-stalled",
+        "serverViewers": 0
+      },
+      {
+        "time": 1792171564654,
+        "event": "subscription-closed",
+        "reason": "closed",
+        "serverViewers": 0
+      }
+    ]
+  },
+  "播放画面": {
+    "宽": 2560,
+    "高": 1440,
+    "提交合成器帧率": 42.32,
+    "区间播放丢帧": 1,
+    "暂停": false,
+    "就绪状态": 4,
+    "页面后台": false
+  },
+  "连接": [
+    {
+      "序号": 1,
+      "路径": "P2P",
+      "连接状态": "connected",
+      "ICE状态": "connected",
+      "发送参数核对": [],
+      "状态": "已采样",
+      "视频流": [
+        {
+          "方向": "接收",
+          "传输协议": "udp",
+          "编码": "video/VP8",
+          "宽": 2560,
+          "高": 1440,
+          "实际帧率": 42,
+          "帧率口径": "解码帧率（不是网络收帧率）",
+          "采样间隔_ms": 2268.46,
+          "区间完整接收帧率": 42.76,
+          "区间解码帧率": 42.76,
+          "区间卡顿次数": 0,
+          "区间卡顿时长_ms": 0,
+          "每帧抖动缓冲等待_ms": 49.34,
+          "每帧目标缓冲等待_ms": 64.53,
+          "每帧组装耗时_ms": 3.64,
+          "区间平均QP": 33.68,
+          "区间NACK次数": 0,
+          "区间PLI次数": 0,
+          "码率_Mbps": 16.41,
+          "区间丢包率_%": 0,
+          "累计丢包": 0,
+          "抖动_ms": 5,
+          "往返延迟_ms": 4,
+          "本端连接估计可用上行_Mbps": 0.3,
+          "每帧编解码_ms": 7.31,
+          "区间解码丢帧": 0,
+          "累计卡顿次数": 40,
+          "编码受限原因": null
+        }
+      ]
+    }
+  ]
+}

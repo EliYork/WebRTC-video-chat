@@ -1,0 +1,495 @@
+{
+  "utc": "2026-10-16T17:34:38.705113+00:00",
+  "local_time": {
+    "code": 0,
+    "out": "2026-10-17T01:34:38+08:00\n",
+    "err": ""
+  },
+  "cpu_count": 1,
+  "memory": {
+    "MemTotal": "984560 kB",
+    "MemAvailable": "251248 kB",
+    "SwapTotal": "3146744 kB",
+    "SwapFree": "3146744 kB"
+  },
+  "processes": {
+    "523169": {
+      "ppid": 1288,
+      "name": "node /www/wwwro",
+      "rss_kib": 90632
+    },
+    "523181": {
+      "ppid": 523169,
+      "name": "mediasoup-worke",
+      "rss_kib": 16916
+    }
+  },
+  "environment_allowlist": {
+    "file": {
+      "PORT": "3000",
+      "SFU_ENABLED": "true",
+      "SFU_ANNOUNCED_ADDRESS": "149.104.21.205",
+      "SFU_LISTEN_IP": "0.0.0.0",
+      "SFU_PORT": "44444",
+      "SFU_VIDEO_MBPS": "22",
+      "SFU_PAYLOAD_MBPS": "23",
+      "SFU_INITIAL_VIEWER_MBPS": "5.5",
+      "SFU_MEMORY_LIMIT_MB": "700",
+      "SFU_CPU_LIMIT_PERCENT": "85"
+    },
+    "process": {
+      "523169": {}
+    }
+  },
+  "file_sha256": {
+    "src/utils/ScreenSfuBudget.js": "d1596ab4aab67b4f8317ada9d413a07d120d78054f0847bcc8cf2207412d6ab7",
+    "src/utils/ScreenSfuService.js": "fbfc4515383a1df9e6117bc7f22db2d1007fbbb4c14fa51c2354183a0bc1468e",
+    "src/views/js/voice/voice-screen-sfu-runtime.js": "47917caf54a4191361a04bcda75272e19e5b924522a71918beade6ce1f335119",
+    "src/views/js/voice/voice-screen-send-policy.js": "f0746ee6c7415f22c3601dd88d413a0db14f5312dd850cc64e9de052fedaac75",
+    "src/views/js/voice/voice-share-diagnostics.js": "3030cfa4ad4b72aee0dff75e5aacaab907097d383e90b487b55272711ecce26e",
+    "src/views/js/voice/voice-screen-codecs.js": "4389c4b289e367016fb4b53ad4cb1c1be4fb96fe10c023052ed970f986f19079"
+  },
+  "qdisc": {
+    "code": 0,
+    "out": "qdisc noqueue 0: dev lo root refcnt 2 \n Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) \n backlog 0b 0p requeues 0\nqdisc fq_codel 0: dev ens17 root refcnt 2 limit 10240p flows 1024 quantum 1514 target 5ms interval 100ms memory_limit 32Mb ecn drop_batch 64 \n Sent 5194272546 bytes 11069300 pkt (dropped 0, overlimits 0 requeues 0) \n backlog 0b 0p requeues 0\n  maxpacket 0 drop_overlimit 0 new_flow_count 0 ecn_mark 0\n  new_flows_len 0 old_flows_len 0\n",
+    "err": ""
+  },
+  "classes": {
+    "code": 0,
+    "out": "",
+    "err": ""
+  },
+  "pressure": {
+    "cpu": "some avg10=1.72 avg60=1.52 avg300=2.32 total=6827331407\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0",
+    "memory": "some avg10=0.00 avg60=0.03 avg300=0.06 total=175417507\nfull avg10=0.00 avg60=0.02 avg300=0.02 total=114947325",
+    "io": "some avg10=0.00 avg60=0.14 avg300=0.20 total=1546400459\nfull avg10=0.00 avg60=0.11 avg300=0.13 total=1303354894"
+  },
+  "udp_initial": {
+    "InDatagrams": 5898518,
+    "NoPorts": 75,
+    "InErrors": 1819,
+    "OutDatagrams": 1158743,
+    "RcvbufErrors": 1819,
+    "SndbufErrors": 0,
+    "InCsumErrors": 0,
+    "IgnoredMulti": 0,
+    "MemErrors": 0
+  },
+  "net_initial": {
+    "lo": [
+      677521790,
+      794192,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      677521790,
+      794192,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "ens17": [
+      9480337094,
+      12192137,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      5148287410,
+      10249574,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "samples": [
+    {
+      "utc": "2026-10-16T17:34:40.725598+00:00",
+      "cpu_busy_percent": 4.55,
+      "iowait_percent": 0.0,
+      "steal_percent": 0.0,
+      "process_cpu_percent": {
+        "523169": 1.0,
+        "523181": 1.5
+      },
+      "network": {
+        "ens17": {
+          "rx_mbps": 0.39,
+          "tx_mbps": 0.243,
+          "rx_drop": 0,
+          "tx_drop": 0,
+          "rx_error": 0,
+          "tx_error": 0
+        }
+      },
+      "udp_delta": {
+        "InDatagrams": 113,
+        "NoPorts": 0,
+        "InErrors": 0,
+        "OutDatagrams": 48,
+        "RcvbufErrors": 0,
+        "SndbufErrors": 0,
+        "InCsumErrors": 0,
+        "IgnoredMulti": 0,
+        "MemErrors": 0
+      }
+    },
+    {
+      "utc": "2026-10-16T17:34:42.727299+00:00",
+      "cpu_busy_percent": 1.53,
+      "iowait_percent": 0.0,
+      "steal_percent": 0.0,
+      "process_cpu_percent": {
+        "523169": 0.0,
+        "523181": 1.5
+      },
+      "network": {
+        "ens17": {
+          "rx_mbps": 0.763,
+          "tx_mbps": 0.033,
+          "rx_drop": 0,
+          "tx_drop": 0,
+          "rx_error": 0,
+          "tx_error": 0
+        }
+      },
+      "udp_delta": {
+        "InDatagrams": 188,
+        "NoPorts": 0,
+        "InErrors": 0,
+        "OutDatagrams": 23,
+        "RcvbufErrors": 0,
+        "SndbufErrors": 0,
+        "InCsumErrors": 0,
+        "IgnoredMulti": 0,
+        "MemErrors": 0
+      }
+    },
+    {
+      "utc": "2026-10-16T17:34:44.728404+00:00",
+      "cpu_busy_percent": 6.57,
+      "iowait_percent": 0.0,
+      "steal_percent": 0.0,
+      "process_cpu_percent": {
+        "523169": 1.0,
+        "523181": 1.0
+      },
+      "network": {
+        "ens17": {
+          "rx_mbps": 0.528,
+          "tx_mbps": 0.057,
+          "rx_drop": 0,
+          "tx_drop": 0,
+          "rx_error": 0,
+          "tx_error": 0
+        }
+      },
+      "udp_delta": {
+        "InDatagrams": 129,
+        "NoPorts": 0,
+        "InErrors": 0,
+        "OutDatagrams": 22,
+        "RcvbufErrors": 0,
+        "SndbufErrors": 0,
+        "InCsumErrors": 0,
+        "IgnoredMulti": 0,
+        "MemErrors": 0
+      }
+    },
+    {
+      "utc": "2026-10-16T17:34:46.729798+00:00",
+      "cpu_busy_percent": 2.54,
+      "iowait_percent": 0.0,
+      "steal_percent": 0.0,
+      "process_cpu_percent": {
+        "523169": 0.5,
+        "523181": 1.5
+      },
+      "network": {
+        "ens17": {
+          "rx_mbps": 0.5,
+          "tx_mbps": 0.22,
+          "rx_drop": 0,
+          "tx_drop": 0,
+          "rx_error": 0,
+          "tx_error": 0
+        }
+      },
+      "udp_delta": {
+        "InDatagrams": 137,
+        "NoPorts": 0,
+        "InErrors": 0,
+        "OutDatagrams": 51,
+        "RcvbufErrors": 0,
+        "SndbufErrors": 0,
+        "InCsumErrors": 0,
+        "IgnoredMulti": 0,
+        "MemErrors": 0
+      }
+    },
+    {
+      "utc": "2026-10-16T17:34:48.732981+00:00",
+      "cpu_busy_percent": 5.56,
+      "iowait_percent": 0.0,
+      "steal_percent": 0.0,
+      "process_cpu_percent": {
+        "523169": 0.5,
+        "523181": 1.5
+      },
+      "network": {
+        "ens17": {
+          "rx_mbps": 0.593,
+          "tx_mbps": 0.06,
+          "rx_drop": 0,
+          "tx_drop": 0,
+          "rx_error": 0,
+          "tx_error": 0
+        }
+      },
+      "udp_delta": {
+        "InDatagrams": 157,
+        "NoPorts": 0,
+        "InErrors": 0,
+        "OutDatagrams": 21,
+        "RcvbufErrors": 0,
+        "SndbufErrors": 0,
+        "InCsumErrors": 0,
+        "IgnoredMulti": 0,
+        "MemErrors": 0
+      }
+    },
+    {
+      "utc": "2026-10-16T17:34:50.735271+00:00",
+      "cpu_busy_percent": 2.04,
+      "iowait_percent": 0.0,
+      "steal_percent": 0.0,
+      "process_cpu_percent": {
+        "523169": 1.0,
+        "523181": 1.5
+      },
+      "network": {
+        "ens17": {
+          "rx_mbps": 0.545,
+          "tx_mbps": 0.219,
+          "rx_drop": 0,
+          "tx_drop": 0,
+          "rx_error": 0,
+          "tx_error": 0
+        }
+      },
+      "udp_delta": {
+        "InDatagrams": 150,
+        "NoPorts": 0,
+        "InErrors": 0,
+        "OutDatagrams": 53,
+        "RcvbufErrors": 0,
+        "SndbufErrors": 0,
+        "InCsumErrors": 0,
+        "IgnoredMulti": 0,
+        "MemErrors": 0
+      }
+    },
+    {
+      "utc": "2026-10-16T17:34:52.736857+00:00",
+      "cpu_busy_percent": 5.03,
+      "iowait_percent": 0.5,
+      "steal_percent": 0.0,
+      "process_cpu_percent": {
+        "523169": 0.5,
+        "523181": 1.0
+      },
+      "network": {
+        "ens17": {
+          "rx_mbps": 0.454,
+          "tx_mbps": 0.043,
+          "rx_drop": 0,
+          "tx_drop": 0,
+          "rx_error": 0,
+          "tx_error": 0
+        }
+      },
+      "udp_delta": {
+        "InDatagrams": 125,
+        "NoPorts": 0,
+        "InErrors": 0,
+        "OutDatagrams": 18,
+        "RcvbufErrors": 0,
+        "SndbufErrors": 0,
+        "InCsumErrors": 0,
+        "IgnoredMulti": 0,
+        "MemErrors": 0
+      }
+    },
+    {
+      "utc": "2026-10-16T17:34:54.738086+00:00",
+      "cpu_busy_percent": 4.57,
+      "iowait_percent": 0.0,
+      "steal_percent": 0.0,
+      "process_cpu_percent": {
+        "523169": 1.0,
+        "523181": 1.5
+      },
+      "network": {
+        "ens17": {
+          "rx_mbps": 0.628,
+          "tx_mbps": 0.059,
+          "rx_drop": 0,
+          "tx_drop": 0,
+          "rx_error": 0,
+          "tx_error": 0
+        }
+      },
+      "udp_delta": {
+        "InDatagrams": 164,
+        "NoPorts": 0,
+        "InErrors": 0,
+        "OutDatagrams": 23,
+        "RcvbufErrors": 0,
+        "SndbufErrors": 0,
+        "InCsumErrors": 0,
+        "IgnoredMulti": 0,
+        "MemErrors": 0
+      }
+    },
+    {
+      "utc": "2026-10-16T17:34:56.739247+00:00",
+      "cpu_busy_percent": 13.27,
+      "iowait_percent": 0.0,
+      "steal_percent": 0.51,
+      "process_cpu_percent": {
+        "523169": 1.0,
+        "523181": 1.5
+      },
+      "network": {
+        "ens17": {
+          "rx_mbps": 0.811,
+          "tx_mbps": 0.621,
+          "rx_drop": 0,
+          "tx_drop": 0,
+          "rx_error": 0,
+          "tx_error": 0
+        }
+      },
+      "udp_delta": {
+        "InDatagrams": 225,
+        "NoPorts": 0,
+        "InErrors": 0,
+        "OutDatagrams": 125,
+        "RcvbufErrors": 0,
+        "SndbufErrors": 0,
+        "InCsumErrors": 0,
+        "IgnoredMulti": 0,
+        "MemErrors": 0
+      }
+    },
+    {
+      "utc": "2026-10-16T17:34:58.740039+00:00",
+      "cpu_busy_percent": 9.09,
+      "iowait_percent": 0.0,
+      "steal_percent": 0.0,
+      "process_cpu_percent": {
+        "523169": 0.5,
+        "523181": 3.5
+      },
+      "network": {
+        "ens17": {
+          "rx_mbps": 3.423,
+          "tx_mbps": 3.823,
+          "rx_drop": 0,
+          "tx_drop": 0,
+          "rx_error": 0,
+          "tx_error": 0
+        }
+      },
+      "udp_delta": {
+        "InDatagrams": 808,
+        "NoPorts": 0,
+        "InErrors": 0,
+        "OutDatagrams": 769,
+        "RcvbufErrors": 0,
+        "SndbufErrors": 0,
+        "InCsumErrors": 0,
+        "IgnoredMulti": 0,
+        "MemErrors": 0
+      }
+    }
+  ],
+  "sfu_sockets": {
+    "code": 0,
+    "out": "State  Recv-Q Send-Q Local Address:Port  Peer Address:PortProcess\nUNCONN 0      0            [ip]:44444      [ip]:*    users:((\"mediasoup-worke\",pid=523181,fd=13))\n",
+    "err": ""
+  },
+  "logs": {
+    "voice-room-error.log": {
+      "size": 17723,
+      "mtime_utc": "2026-10-13T21:49:55.327550+00:00",
+      "matches": 67,
+      "matching_tail": [
+        "Error: ENOENT: no such file or directory, stat '/www/wwwroot/voice.eliyork.com/src/views/vendor/composer/installed.json'",
+        "Error: ENOENT: no such file or directory, stat '/www/wwwroot/voice.eliyork.com/src/views/vendor/composer/installed.json'",
+        "Error: ENOENT: no such file or directory, stat '/www/wwwroot/voice.eliyork.com/src/views/vendor/composer/installed.json'",
+        "ForbiddenError: Forbidden",
+        "    at createHttpError (/www/wwwroot/voice.eliyork.com/node_modules/send/index.js:861:12)",
+        "    at SendStream.error (/www/wwwroot/voice.eliyork.com/node_modules/send/index.js:168:31)",
+        "Error: ENOENT: no such file or directory, stat '/www/wwwroot/voice.eliyork.com/src/views/vendor/composer/installed.json'",
+        "Error: ENOENT: no such file or directory, stat '/www/wwwroot/voice.eliyork.com/src/views/vendor/composer/installed.json'",
+        "ForbiddenError: Forbidden",
+        "    at createHttpError (/www/wwwroot/voice.eliyork.com/node_modules/send/index.js:861:12)",
+        "    at SendStream.error (/www/wwwroot/voice.eliyork.com/node_modules/send/index.js:168:31)",
+        "Error: ENOENT: no such file or directory, stat '/www/wwwroot/voice.eliyork.com/src/views/vendor/composer/installed.json'",
+        "Error: ENOENT: no such file or directory, stat '/www/wwwroot/voice.eliyork.com/src/views/vendor/composer/installed.json'",
+        "TypeError [ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING]: A dynamic import callback was not specified.",
+        "Error: ENOENT: no such file or directory, stat '/www/wwwroot/voice.eliyork.com/src/views/js/config.js'",
+        "Error: ENOENT: no such file or directory, stat '/www/wwwroot/voice.eliyork.com/src/views/js/env.js'",
+        "Error: ENOENT: no such file or directory, stat '/www/wwwroot/voice.eliyork.com/src/views/js/settings.js'",
+        "Error: ENOENT: no such file or directory, stat '/www/wwwroot/voice.eliyork.com/src/views/vendor/composer/installed.json'",
+        "Error: ENOENT: no such file or directory, stat '/www/wwwroot/voice.eliyork.com/src/views/vendor/composer/installed.json'",
+        "[Error: ENOENT: no such file or directory, stat '/www/wwwroot/voice.eliyork.com/src/views/vendor/peerjs/peerjs.min.js.map'] {",
+        "[Error: ENOENT: no such file or directory, stat '/www/wwwroot/voice.eliyork.com/src/views/vendor/composer/installed.json'] {",
+        "[Error: ENOENT: no such file or directory, stat '/www/wwwroot/voice.eliyork.com/src/views/vendor/laravel-filemanager/js/script.js'] {",
+        "ForbiddenError: Forbidden",
+        "    at createHttpError (/www/wwwroot/voice.eliyork.com/node_modules/send/index.js:861:12)",
+        "    at SendStream.error (/www/wwwroot/voice.eliyork.com/node_modules/send/index.js:168:31)"
+      ]
+    },
+    "voice-room-out.log": {
+      "size": 157847,
+      "mtime_utc": "2026-10-16T17:22:21.931097+00:00",
+      "matches": 15,
+      "matching_tail": [
+        "Monday 20/07/2026 02:46:54.237 INFO  [socket] disconnected socket=1Mo7YcmS3bhLbiRbAAAI reason=transport error",
+        "Friday 09/10/2026 17:42:29.126 INFO  [sfu] ready on UDP/TCP 44444; video=22000000bps total=23000000bps",
+        "Friday 09/10/2026 18:03:20.511 INFO  [sfu] ready on UDP/TCP 44444; video=22000000bps total=23000000bps",
+        "Friday 09/10/2026 18:06:09.533 INFO  [sfu] ready on UDP/TCP 44444; video=22000000bps total=23000000bps",
+        "Friday 09/10/2026 22:50:06.204 INFO  [sfu] ready on UDP/TCP 44444; video=22000000bps total=23000000bps",
+        "Friday 09/10/2026 22:55:48.391 INFO  [sfu] ready on UDP/TCP 44444; video=22000000bps total=23000000bps",
+        "Monday 12/10/2026 03:18:43.616 INFO  [sfu] ready on UDP/TCP 44444; video=22000000bps total=23000000bps",
+        "Monday 12/10/2026 04:11:23.986 INFO  [sfu] ready on UDP/TCP 44444; video=22000000bps total=23000000bps",
+        "Monday 12/10/2026 17:55:41.509 INFO  [sfu] ready on UDP/TCP 44444; video=22000000bps total=23000000bps",
+        "Monday 12/10/2026 18:15:35.435 INFO  [sfu] ready on UDP/TCP 44444; video=22000000bps total=23000000bps",
+        "Monday 12/10/2026 19:25:19.891 INFO  [sfu] ready on UDP/TCP 44444; video=22000000bps total=23000000bps",
+        "Monday 12/10/2026 20:26:53.872 INFO  [sfu] ready on UDP/TCP 44444; video=22000000bps total=23000000bps",
+        "Monday 12/10/2026 20:56:49.806 INFO  [sfu] ready on UDP/TCP 44444; video=22000000bps total=23000000bps",
+        "Monday 12/10/2026 22:19:33.833 INFO  [sfu] ready on UDP/TCP 44444; video=22000000bps total=23000000bps",
+        "Wednesday 14/10/2026 06:15:32.225 WARN  [sfu] resource limit reached; returning screen shares to P2P"
+      ]
+    }
+  },
+  "history_files": [],
+  "kernel_recent": {
+    "code": 0,
+    "out": "Oct 17 01:21:45 SVM-YUF5G7Gq kernel: [UFW BLOCK] IN=ens17 OUT= MAC=aa:c1:25:00:00:5d:00:52:56:00:00:5e:08:00 SRC=79.124.40.114 DST=10.0.89.2 LEN=40 TOS=0x00 PREC=0x00 TTL=247 ID=9943 PROTO=TCP SPT=57312 DPT=58325 WINDOW=1024 RES=0x00 SYN URGP=0 \nOct 17 01:22:12 SVM-YUF5G7Gq kernel: [UFW BLOCK] IN=ens17 OUT= MAC=aa:c1:25:00:00:5d:00:52:56:00:00:5e:08:00 SRC=176.65.149.224 DST=10.0.89.2 LEN=40 TOS=0x00 PREC=0x00 TTL=239 ID=54321 PROTO=TCP SPT=48490 DPT=51134 WINDOW=65535 RES=0x00 SYN URGP=0 \nOct 17 01:22:20 SVM-YUF5G7Gq kernel: [UFW BLOCK] IN=ens17 OUT= MAC=aa:c1:25:00:00:5d:00:52:56:00:00:5e:08:00 SRC=43.173.246.100 DST=10.0.89.2 LEN=60 TOS=0x08 PREC=0x60 TTL=49 ID=50586 DF PROTO=TCP SPT=34360 DPT=18722 WINDOW=29200 RES=0x00 SYN URGP=0 \nOct 17 01:22:41 SVM-YUF5G7Gq kernel: [UFW BLOCK] IN=ens17 OUT= MAC=aa:c1:25:00:00:5d:00:52:56:00:00:5e:08:00 SRC=204.76.203.4 DST=10.0.89.2 LEN=48 TOS=0x00 PREC=0x00 TTL=48 ID=0 DF PROTO=TCP SPT=1001 DPT=12379 WINDOW=32768 RES=0x00 SYN URGP=0 \nOct 17 01:23:03 SVM-YUF5G7Gq kernel: [UFW BLOCK] IN=ens17 OUT= MAC=aa:c1:25:00:00:5d:00:52:56:00:00:5e:08:00 SRC=45.148.10.118 DST=10.0.89.2 LEN=40 TOS=0x00 PREC=0x20 TTL=245 ID=52015 PROTO=TCP SPT=47036 DPT=22241 WINDOW=1024 RES=0x00 SYN URGP=0 \nOct 17 01:23:17 SVM-YUF5G7Gq kernel: [UFW BLOCK] IN=ens17 OUT= MAC=aa:c1:25:00:00:5d:00:52:56:00:00:5e:08:00 SRC=45.198.224.125 DST=10.0.89.2 LEN=40 TOS=0x00 PREC=0x00 TTL=238 ID=54321 PROTO=TCP SPT=50057 DPT=8080 WINDOW=65535 RES=0x00 SYN URGP=0 \nOct 17 01:23:43 SVM-YUF5G7Gq kernel: [UFW BLOCK] IN=ens17 OUT= MAC=aa:c1:25:00:00:5d:00:52:56:00:00:5e:08:00 SRC=79.124.40.170 DST=10.0.89.2 LEN=40 TOS=0x00 PREC=0x00 TTL=247 ID=18015 PROTO=TCP SPT=56436 DPT=57153 WINDOW=1024 RES=0x00 SYN URGP=0 \nOct 17 01:23:59 SVM-YUF5G7Gq kernel: [UFW BLOCK] IN=ens17 OUT= MAC=aa:c1:25:00:00:5d:00:52:56:00:00:5e:08:00 SRC=79.124.40.170 DST=10.0.89.2 LEN=40 TOS=0x00 PREC=0x00 TTL=247 ID=31616 PROTO=TCP SPT=56436 DPT=57799 WINDOW=1024 RES=0x00 SYN URGP=0 \nOct 17 01:24:18 SVM-YUF5G7Gq kernel: [UFW BLOCK] IN=ens17 OUT= MAC=aa:c1:25:00:00:5d:00:52:56:00:00:5e:08:00 SRC=100.50.17.159 DST=10.0.89.2 LEN=52 TOS=0x00 PREC=0x00 TTL=55 ID=10605 PROTO=TCP SPT=61234 DPT=2000 WINDOW=65535 RES=0x00 SYN URGP=0 \nOct 17 01:24:41 SVM-YUF5G7Gq kernel: [UFW BLOCK] IN=ens17 OUT= MAC=aa:c1:25:00:00:5d:00:52:56:00:00:5e:08:00 SRC=200.138.46.4 DST=10.0.89.2 LEN=48 TOS=0x00 PREC=0x00 TTL=54 ID=0 DF PROTO=UDP SPT=54575 DPT=3478 LEN=28 \nOct 17 01:24:57 SVM-YUF5G7Gq kernel: [UFW BLOCK] IN=ens17 OUT= MAC=aa:c1:25:00:00:5d:00:52:56:00:00:5e:08:00 SRC=216.180.246.184 DST=10.0.89.2 LEN=44 TOS=0x00 PREC=0x00 TTL=58 ID=8325 PROTO=TCP SPT=21163 DPT=31210 WINDOW=1025 RES=0x00 SYN URGP=0 \nOct 17 01:25:18 SVM-YUF5G7Gq kernel: [UFW BLOCK] IN=ens17 OUT= MAC=aa:c1:25:00:00:5d:00:52:56:00:00:5e:08:00 SRC=216.180.246.184 DST=10.0.89.2 LEN=44 TOS=0x00 PREC=0x00 TTL=58 ID=8325 PROTO=TCP SPT=21163 DPT=31210 WINDOW=1025 RES=0x00 SYN URGP=0 \nOct 17 01:25:47 SVM-YUF5G7Gq kernel: [UFW BLOCK] IN=ens17 OUT= MAC=aa:c1:25:00:00:5d:00:52:56:00:00:5e:08:00 SRC=78.128.114.166 DST=10.0.89.2 LEN=40 TOS=0x00 PREC=0x00 TTL=246 ID=18146 PROTO=TCP SPT=44673 DPT=5989 WINDOW=1024 RES=0x00 SYN URGP=0 \nOct 17 01:26:06 SVM-YUF5G7Gq kernel: [UFW BLOCK] IN=ens17 OUT= MAC=aa:c1:25:00:00:5d:00:52:56:00:00:5e:08:00 SRC=35.203.210.91 DST=10.0.89.2 LEN=44 TOS=0x00 PREC=0x00 TTL=249 ID=54321 PROTO=TCP SPT=56090 DPT=6800 WINDOW=65535 RES=0x00 SYN URGP=0 \nOct 17 01:26:17 SVM-YUF5G7Gq kernel: [UFW BLOCK] IN=ens17 OUT= MAC=aa:c1:25:00:00:5d:00:52:56:00:00:5e:08:00 SRC=57.154.241.144 DST=10.0.89.2 LEN=52 TOS=0x00 PREC=0x20 TTL=45 ID=1771 PROTO=TCP SPT=52875 DPT=2376 WINDOW=65535 RES=0x00 SYN URGP=0 \nOct 17 01:26:39 SVM-YUF5G7Gq kernel: [UFW BLOCK] IN=ens17 OUT= MAC=aa:c1:25:00:00:5d:00:52:56:00:00:5e:08:00 SRC=64.205.72.219 DST=10.0.89.2 LEN=40 TOS=0x00 PREC=0x00 TTL=54 ID=0 PROTO=TCP SPT=28927 DPT=19159 WINDOW=65535 RES=0x00 SYN URGP=0 \nOct 17 01:26:59 SVM-YUF5G7Gq kernel: [UFW BLOCK] IN=ens17 OUT= MAC=aa:c1:25:00:00:5d:00:52:56:00:00:5e:08:00 SRC=66.132.224.19 DST=10.0.89.2 LEN=60 TOS=0x00 PREC=0x00 TTL=49 ID=39844 PROTO=TCP SPT=58308 DPT=18246 WINDOW=42340 RES=0x00 SYN URGP=0 \nOct 17 01:27:20 SVM-YUF5G7Gq kernel: [UFW BLOCK] IN=ens17 OUT= MAC=aa:c1:25:00:00:5d:00:52:56:00:00:5e:08:00 SRC=66.132.172.244 DST=10.0.89.2 LEN=284 TOS=0x00 PREC=0x00 TTL=35 ID=34407 PROTO=UDP SPT=42873 DPT=25 LEN=264 \nOct 17 01:27:51 SVM-YUF5G7Gq kernel: [UFW BLOCK] IN=ens17 OUT= MAC=aa:c1:25:00:00:5d:00:52:56:00:00:5e:08:00 SRC=81.19.216.89 DST=10.0.89.2 LEN=40 TOS=0x00 PREC=0x00 TTL=54 ID=0 PROTO=TCP SPT=65116 DPT=2096 WINDOW=65535 RES=0x00 SYN URGP=0 \nOct 17 01:27:58 SVM-YUF5G7Gq kernel: [UFW BLOCK] IN=ens17 OUT= MAC=aa:c1:25:00:00:5d:00:52:56:00:00:5e:08:00 SRC=79.124.40.170 DST=10.0.89.2 LEN=40 TOS=0x00 PREC=0x00 TTL=247 ID=50859 PROTO=TCP SPT=56436 DPT=56668 WINDOW=1024 RES=0x00 SYN URGP=0 \nOct 17 01:28:17 SVM-YUF5G7Gq kernel: [UFW BLOCK] IN=ens17 OUT= MAC=aa:c1:25:00:00:5d:00:52:56:00:00:5e:08:00 SRC=79.124.58.90 DST=10.0.89.2 LEN=40 TOS=0x00 PREC=0x00 TTL=247 ID=47099 PROTO=TCP SPT=49816 DPT=36936 WINDOW=1024 RES=0x00 SYN URGP=0 \nOct 17 01:28:41 SVM-YUF5G7Gq kernel: [UFW BLOCK] IN=ens17 OUT= MAC=aa:c1:25:00:00:5d:00:52:56:00:00:5e:08:00 SRC=94.154.43.160 DST=10.0.89.2 LEN=40 TOS=0x00 PREC=0x20 TTL=242 ID=13755 PROTO=TCP SPT=51148 DPT=557 WINDOW=1024 RES=0x00 SYN URGP=0 \nOct 17 01:28:57 SVM-YUF5G7Gq kernel: [UFW BLOCK] IN=ens17 OUT= MAC=aa:c1:25:00:00:5d:00:52:56:00:00:5e:08:00 SRC=79.124.40.126 DST=10.0.89.2 LEN=40 TOS=0x00 PREC=0x00 TTL=247 ID=60920 PROTO=TCP SPT=59296 DPT=93 WINDOW=1024 RES=0x00 SYN URGP=0 \nOct 17 01:29:17 SVM-YUF5G7Gq kernel: [UFW BLOCK] IN=ens17 OUT= MAC=aa:c1:25:00:00:5d:00:52:56:00:00:5e:08:00 SRC=64.89.162.189 DST=10.0.89.2 LEN=44 TOS=0x00 PREC=0x00 TTL=242 ID=55394 PROTO=TCP SPT=50518 DPT=33397 WINDOW=1025 RES=0x00 SYN URGP=0 \nOct 17 01:29:40 SVM-YUF5G7Gq kernel: [UFW BLOCK] IN=ens17 OUT= MAC=aa:c1:25:00:00:5d:00:52:56:00:00:5e:08:00 SRC=165.154.151.176 DST=10.0.89.2 LEN=44 TOS=0x00 PREC=0x00 TTL=45 ID=0 DF PROTO=TCP SPT=60907 DPT=46918 WINDOW=1024 RES=0x00 SYN URGP=0 \nOct 17 01:30:10 SVM-YUF5G7Gq kernel: [UFW BLOCK] IN=ens17 OUT= MAC=aa:c1:25:00:00:5d:00:52:56:00:00:5e:08:00 SRC=79.124.40.170 DST=10.0.89.2 LEN=40 TOS=0x00 PREC=0x00 TTL=247 ID=42688 PROTO=TCP SPT=56436 DPT=56078 WINDOW=1024 RES=0x00 SYN URGP=0 \nOct 17 01:30:18 SVM-YUF5G7Gq kernel: [UFW BLOCK] IN=ens17 OUT= MAC=aa:c1:25:00:00:5d:00:52:56:00:00:5e:08:00 SRC=45.148.10.93 DST=10.0.89.2 LEN=40 TOS=0x00 PREC=0x20 TTL=245 ID=43382 PROTO=TCP SPT=48631 DPT=48883 WINDOW=1024 RES=0x00 SYN URGP=0 \nOct 17 01:30:41 SVM-YUF5G7Gq kernel: [UFW BLOCK] IN=ens17 OUT= MAC=aa:c1:25:00:00:5d:00:52:56:00:00:5e:08:00 SRC=79.124.58.102 DST=10.0.89.2 LEN=40 TOS=0x00 PREC=0x00 TTL=247 ID=11316 PROTO=TCP SPT=56304 DPT=43362 WINDOW=1024 RES=0x00 SYN URGP=0 \nOct 17 01:31:02 SVM-YUF5G7Gq kernel: [UFW BLOCK] IN=ens17 OUT= MAC=aa:c1:25:00:00:5d:00:52:56:00:00:5e:08:00 SRC=147.185.133.224 DST=10.0.89.2 LEN=44 TOS=0x00 PREC=0x00 TTL=249 ID=54321 PROTO=TCP SPT=56858 DPT=49385 WINDOW=65535 RES=0x00 SYN URGP=0 \nOct 17 01:31:19 SVM-YUF5G7Gq kernel: [UFW BLOCK] IN=ens17 OUT= MAC=aa:c1:25:00:00:5d:00:52:56:00:00:5e:08:00 SRC=195.184.76.133 DST=10.0.89.2 LEN=60 TOS=0x00 PREC=0x20 TTL=43 ID=11097 DF PROTO=TCP SPT=21040 DPT=21307 WINDOW=5840 RES=0x00 SYN URGP=0 \nOct 17 01:31:38 SVM-YUF5G7Gq kernel: [UFW BLOCK] IN=ens17 OUT= MAC=aa:c1:25:00:00:5d:00:52:56:00:00:5e:08:00 SRC=79.124.40.158 DST=10.0.89.2 LEN=40 TOS=0x00 PREC=0x00 TTL=247 ID=29898 PROTO=TCP SPT=56364 DPT=46833 WINDOW=1024 RES=0x00 SYN URGP=0 \nOct 17 01:31:57 SVM-YUF5G7Gq kernel: [UFW BLOCK] IN=ens17 OUT= MAC=aa:c1:25:00:00:5d:00:52:56:00:00:5e:08:00 SRC=45.148.10.47 DST=10.0.89.2 LEN=40 TOS=0x00 PREC=0x20 TTL=245 ID=55390 PROTO=TCP SPT=50900 DPT=8983 WINDOW=1024 RES=0x00 SYN URGP=0 \nOct 17 01:32:18 SVM-YUF5G7Gq kernel: [UFW BLOCK] IN=ens17 OUT= MAC=aa:c1:25:00:00:5d:00:52:56:00:00:5e:08:00 SRC=143.42.164.204 DST=10.0.89.2 LEN=44 TOS=0x00 PREC=0x20 TTL=242 ID=54321 PROTO=TCP SPT=46287 DPT=7680 WINDOW=65535 RES=0x00 SYN URGP=0 \nOct 17 01:32:37 SVM-YUF5G7Gq kernel: [UFW BLOCK] IN=ens17 OUT= MAC=aa:c1:25:00:00:5d:00:52:56:00:00:5e:08:00 SRC=200.138.46.217 DST=10.0.89.2 LEN=40 TOS=0x00 PREC=0x00 TTL=54 ID=0 PROTO=TCP SPT=59502 DPT=56874 WINDOW=65535 RES=0x00 SYN URGP=0 \nOct 17 01:32:58 SVM-YUF5G7Gq kernel: [UFW BLOCK] IN=ens17 OUT= MAC=aa:c1:25:00:00:5d:00:52:56:00:00:5e:08:00 SRC=91.196.152.7 DST=10.0.89.2 LEN=60 TOS=0x00 PREC=0x00 TTL=50 ID=49338 DF PROTO=TCP SPT=20937 DPT=20201 WINDOW=5840 RES=0x00 SYN URGP=0 \nOct 17 01:33:17 SVM-YUF5G7Gq kernel: [UFW BLOCK] IN=ens17 OUT= MAC=aa:c1:25:00:00:5d:00:52:56:00:00:5e:08:00 SRC=79.124.40.190 DST=10.0.89.2 LEN=40 TOS=0x00 PREC=0x00 TTL=247 ID=624 PROTO=TCP SPT=56293 DPT=36744 WINDOW=1024 RES=0x00 SYN URGP=0 \nOct 17 01:33:44 SVM-YUF5G7Gq kernel: [UFW BLOCK] IN=ens17 OUT= MAC=aa:c1:25:00:00:5d:00:52:56:00:00:5e:08:00 SRC=77.67.26.141 DST=10.0.89.2 LEN=40 TOS=0x00 PREC=0x00 TTL=54 ID=0 PROTO=TCP SPT=30218 DPT=55856 WINDOW=65535 RES=0x00 SYN URGP=0 \nOct 17 01:33:57 SVM-YUF5G7Gq kernel: [UFW BLOCK] IN=ens17 OUT= MAC=aa:c1:25:00:00:5d:00:52:56:00:00:5e:08:00 SRC=79.124.49.130 DST=10.0.89.2 LEN=40 TOS=0x00 PREC=0x00 TTL=246 ID=57916 PROTO=TCP SPT=48998 DPT=8777 WINDOW=1024 RES=0x00 SYN URGP=0 \nOct 17 01:34:22 SVM-YUF5G7Gq kernel: [UFW BLOCK] IN=ens17 OUT= MAC=aa:c1:25:00:00:5d:00:52:56:00:00:5e:08:00 SRC=118.26.105.52 DST=10.0.89.2 LEN=44 TOS=0x00 PREC=0x00 TTL=43 ID=0 DF PROTO=TCP SPT=60907 DPT=46910 WINDOW=1024 RES=0x00 SYN URGP=0 \nOct 17 01:34:37 SVM-YUF5G7Gq kernel: [UFW BLOCK] IN=ens17 OUT= MAC=aa:c1:25:00:00:5d:00:52:56:00:00:5e:08:00 SRC=204.76.203.4 DST=10.0.89.2 LEN=48 TOS=0x00 PREC=0x00 TTL=48 ID=0 DF PROTO=TCP SPT=1001 DPT=44360 WINDOW=32768 RES=0x00 SYN URGP=0 \n",
+    "err": ""
+  }
+}

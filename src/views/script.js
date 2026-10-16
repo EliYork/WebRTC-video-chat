@@ -363,6 +363,16 @@ screenSfuRuntime = window.VoiceScreenSfuRuntime.createRuntime({
         if (currentPeer) refreshVoiceCallsForLocalMedia(currentPeer);
         notifyMediaDock();
     },
+    onUplinkBudget: () => {
+        updateScreenP2pBudget();
+        voicePeerRegistry.getPeerIds({ direction: 'outgoing' }).forEach((peerId) => {
+            const call = voicePeerRegistry.getSnapshot(peerId)?.outgoingCall;
+            void window.VoiceScreenSendPolicy?.apply(
+                call?.peerConnection || call?._pc,
+                (message, error) => console.warn(message, error || '')
+            );
+        });
+    },
     onRemoteStream: ({ peerId, stream, publicationId, trackRoles }) => {
         callDiagnostics?.record('观看路径切换', {
             参与者序号: voicePeerRegistry.getPeerIds().indexOf(peerId) + 1,

@@ -10,6 +10,7 @@
         Device = global.ScreenSfuClient?.Device,
         MediaStreamCtor = global.MediaStream,
         onRoutes,
+        onUplinkBudget,
         onRemoteStream,
         onRouteEvent,
         onState,
@@ -132,9 +133,14 @@
                 return;
             routeBudget = nextBudget;
             routes = nextRoutes;
-            // Budget changes still update senders, but are not path switches.
-            if (membersChanged) recordRoute('sender-routes-changed');
-            onRoutes?.([...routes]);
+            if (membersChanged) {
+                recordRoute('sender-routes-changed');
+                onRoutes?.([...routes]);
+            } else {
+                // Reapply bitrate limits without rebuilding media snapshots or
+                // replacing tracks when the viewer routes have not changed.
+                onUplinkBudget?.();
+            }
         };
         const dropSubscription = (id) => {
             const entry = subscriptions.get(id);

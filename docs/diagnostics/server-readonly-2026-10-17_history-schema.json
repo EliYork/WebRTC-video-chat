@@ -1,0 +1,51 @@
+{
+  "extra_hashes": {
+    "src/views/script.js": "5122e09e0b2765dd319ee93903276160e0a91ffbfc8b414df065b5ddeef2be9f",
+    "src/views/js/voice/voice-peer-registry.js": "9700d4e922c6e19b0f547e14e4ef5dddf558bb3aabe1ddfc93287febeeade802"
+  },
+  "process_cgroup": {
+    "cpu.max": "max 100000",
+    "cpu.stat": "usage_usec 8728127366\nuser_usec 8065940153\nsystem_usec 662187212\ncore_sched.force_idle_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+    "memory.current": "207929344",
+    "memory.max": "max"
+  },
+  "monitor_wal_present": false,
+  "monitor_tables": [
+    [
+      "network",
+      "CREATE TABLE `network` (\r\n  `id` INTEGER PRIMARY KEY AUTOINCREMENT,\r\n  `up` INTEGER,\r\n  `down` INTEGER,\r\n  `total_up` INTEGER,\r\n  `total_down` INTEGER,\r\n  `down_packets` INTEGER,\r\n  `up_packets` INTEGER,\r\n  `addtime` INTEGER\r\n)"
+    ],
+    [
+      "cpuio",
+      "CREATE TABLE `cpuio` (\r\n  `id` INTEGER PRIMARY KEY AUTOINCREMENT,\r\n  `pro` INTEGER,\r\n  `mem` INTEGER,\r\n  `addtime` INTEGER\r\n)"
+    ],
+    [
+      "diskio",
+      "CREATE TABLE `diskio` (\r\n  `id` INTEGER PRIMARY KEY AUTOINCREMENT,\r\n  `read_count` INTEGER,\r\n  `write_count` INTEGER,\r\n  `read_bytes` INTEGER,\r\n  `write_bytes` INTEGER,\r\n  `read_time` INTEGER,\r\n  `write_time` INTEGER,\r\n  `addtime` INTEGER\r\n)"
+    ],
+    [
+      "process_top_list",
+      "CREATE TABLE `process_top_list` (\n    `id` INTEGER PRIMARY KEY AUTOINCREMENT,\n    `cpu_top` REAL,\n    `memory_top` REAL,\n    `disk_top` REAL,\n    `net_top` REAL,\n    `all_top` REAL,\n    `addtime` INTEGER\n)"
+    ],
+    [
+      "load_average",
+      "CREATE TABLE `load_average` (\n    `id` INTEGER PRIMARY KEY AUTOINCREMENT,\n    `pro` REAL,\n    `one` REAL,\n    `five` REAL,\n    `fifteen` REAL,\n    `addtime` INTEGER\n)"
+    ],
+    [
+      "backup_status",
+      "CREATE TABLE `backup_status` (\n    `id` INTEGER,\n    `target` TEXT,\n    `status` INTEGER,\n    `msg` TEXT DEFAULT \"\",\n    `addtime` DATETIME DEFAULT CURRENT_TIMESTAMP\n)"
+    ],
+    [
+      "app_usage",
+      "CREATE TABLE `app_usage` (\n    `time_key` INTEGER PRIMARY KEY,\n    `app` TEXT,\n    `disks` TEXT,\n    `addtime` DATETIME DEFAULT CURRENT_TIMESTAMP\n)"
+    ],
+    [
+      "server_status",
+      "CREATE TABLE `server_status` (\n    `status` TEXT,\n    `addtime` DATETIME DEFAULT CURRENT_TIMESTAMP\n)"
+    ],
+    [
+      "daily",
+      "CREATE TABLE `daily` (\n    `time_key` INTEGER,\n    `evaluate` INTEGER,\n    `addtime` DATETIME DEFAULT CURRENT_TIMESTAMP\n)"
+    ]
+  ]
+}

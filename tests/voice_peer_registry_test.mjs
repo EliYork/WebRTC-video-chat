@@ -295,6 +295,177 @@ test('adding a sender kind reports one required renegotiation', async () => {
     assert.equal(replacement.reason, 'renegotiation-required');
 });
 
+test('identical live tracks in a new snapshot advance generation without replacement or renegotiation', async (t) => {
+    const network = new StrictMediaNetwork();
+    const a = createFixture('A', network);
+    createFixture('B', network);
+    const mic = audio('mic');
+    const screen = video('screen');
+    const current = publish(a, 'B', 1, stream(mic, screen));
+    network.flush();
+    const senders = current.peerConnection.getSenders();
+    let replacements = 0;
+    senders.forEach((sender, index) => {
+        sender.track = [mic, screen][index];
+        sender.replaceTrack = async () => { replacements++; };
+    });
+    let policyChecks = 0;
+    registryWindow.VoiceScreenSendPolicy = { apply: async () => { policyChecks++; } };
+    t.after(() => { delete registryWindow.VoiceScreenSendPolicy; });
+    const eventsBefore = a.debug.filter((event) => event.event === 'tracks-replaced').length;
+    const result = await a.registry.replaceOutgoingTracks({ generation: 2, peerId: 'B', stream: stream(mic, screen) });
+    assert.equal(result.ok, true);
+    assert.equal(replacements, 0);
+    assert.equal(policyChecks, 1, 'unchanged tracks must still repair any changed sender parameters');
+    assert.equal(a.registry.getSnapshot('B').outgoingGeneration, 2);
+    assert.equal(a.registry.getSnapshot('B').outgoingCall, current);
+    assert.equal(a.peer.calls.length, 1);
+    assert.equal(a.debug.filter((event) => event.event === 'tracks-replaced').length, eventsBefore);
+    const stale = await a.registry.replaceOutgoingTracks({ generation: 1, peerId: 'B', stream: stream(audio('old')) });
+    assert.equal(stale.reason, 'replacement-unavailable');
+    assert.equal(replacements, 0);
+});
+
+test('a new microphone with the same id replaces only audio and leaves the unchanged screen alone', async () => {
+    const network = new StrictMediaNetwork();
+    const a = createFixture('A', network);
+    createFixture('B', network);
+    const mic = audio('mic');
+    const screen = video('screen');
+    const current = publish(a, 'B', 1, stream(mic, screen));
+    network.flush();
+    const senders = current.peerConnection.getSenders();
+    const replacements = [];
+    senders.forEach((sender, index) => {
+        sender.track = [mic, screen][index];
+        sender.replaceTrack = async (track) => { replacements.push({ index, track }); sender.track = track; };
+    });
+    const nextMic = audio('mic');
+    nextMic.enabled = false;
+    const result = await a.registry.replaceOutgoingTracks({ generation: 2, peerId: 'B', stream: stream(nextMic, screen) });
+    assert.equal(result.ok, true);
+    assert.deepEqual(replacements, [{ index: 0, track: nextMic }]);
+    assert.equal(senders[0].track.enabled, false);
+    assert.equal(senders[1].track, screen);
+    assert.equal(screen.readyState, 'live');
+    assert.equal(a.peer.calls.length, 1);
+});
+
+test('SFU parking, repeated empty video slots and P2P resume replace only changed tracks', async () => {
+    const network = new StrictMediaNetwork();
+    const a = createFixture('A', network);
+    createFixture('B', network);
+    const mic = audio('mic');
+    const screen = video('screen');
+    const current = publish(a, 'B', 1, stream(mic, screen));
+    network.flush();
+    const senders = current.peerConnection.getSenders();
+    const replacements = [];
+    senders.forEach((sender, index) => {
+        sender.track = [mic, screen][index];
+        sender.replaceTrack = async (track) => { replacements.push({ index, track }); sender.track = track; };
+    });
+    assert.equal((await a.registry.replaceOutgoingTracks({ generation: 2, peerId: 'B', stream: stream(mic) })).ok, true);
+    assert.deepEqual(replacements, [{ index: 1, track: null }]);
+    assert.equal((await a.registry.replaceOutgoingTracks({ generation: 3, peerId: 'B', stream: stream(mic) })).ok, true);
+    assert.equal(replacements.length, 1, 'an already parked sender must not be replaced again');
+    assert.equal((await a.registry.replaceOutgoingTracks({ generation: 4, peerId: 'B', stream: stream(mic, screen) })).ok, true);
+    assert.deepEqual(replacements, [{ index: 1, track: null }, { index: 1, track: screen }]);
+    assert.equal(a.registry.getSnapshot('B').outgoingGeneration, 4);
+    assert.equal(a.peer.calls.length, 1);
+    assert.equal(mic.readyState, 'live');
+    assert.equal(screen.readyState, 'live');
+});
+
+for (const [connectionState, iceConnectionState] of [
+    ['failed', 'disconnected'],
+    ['failed', 'connected'],
+    ['connected', 'failed'],
+    ['closed', 'closed'],
+]) {
+    test(`SFU fallback rejects a terminal P2P connection (${connectionState}/${iceConnectionState}) before replacing tracks`, async () => {
+        const network = new StrictMediaNetwork();
+        const a = createFixture('A', network);
+        createFixture('B', network);
+        const screen = video('screen');
+        const current = publish(a, 'B', 1, stream(screen));
+        network.flush();
+        const pc = current.peerConnection;
+        pc.connectionState = connectionState;
+        pc.iceConnectionState = iceConnectionState;
+        let replacements = 0;
+        pc.getSenders().forEach((sender) => { sender.replaceTrack = async () => { replacements++; }; });
+        const result = await a.registry.replaceOutgoingTracks({ generation: 2, peerId: 'B', stream: stream(screen) });
+        assert.equal(result.ok, false, 'a successful replaceTrack cannot repair a failed transport');
+        assert.equal(result.reason, 'replacement-unavailable');
+        assert.equal(replacements, 0);
+        assert.equal(a.registry.getSnapshot('B').outgoingGeneration, 1, 'the rejected update must leave its generation available for a fresh offer');
+        assert.equal(screen.readyState, 'live');
+    });
+}
+
+test('the app rebuilds failed P2P on SFU fallback without recapturing screen or closing the reverse microphone', async () => {
+    const network = new StrictMediaNetwork();
+    const a = createFixture('A', network);
+    const b = createFixture('B', network);
+    const mic = audio('muted-mic');
+    mic.enabled = false;
+    const screen = video('screen');
+    const media = stream(mic, screen);
+    const previous = publish(a, 'B', 1, media);
+    publish(b, 'A', 1, stream(audio('reverse-mic')));
+    network.flush();
+    const reverse = a.registry.getSnapshot('B').incomingCall;
+    assert.equal((await a.registry.replaceOutgoingTracks({ generation: 2, peerId: 'B', stream: stream(mic) })).ok, true);
+    previous.peerConnection.connectionState = 'failed';
+    previous.peerConnection.iceConnectionState = 'disconnected';
+    let update;
+    const events = [];
+    const context = {
+        window: { clearTimeout() {}, setTimeout: (callback) => { update = callback; return 1; } },
+        currentPeer: a.peer, localVoiceMediaGeneration: 2, sharingNow: true,
+        localMediaUpdateSequence: 0, localMediaUpdateQueuedAt: 0, localMediaUpdateTimer: undefined,
+        mediaOperationController: { getSnapshot: () => ({ promise: null }) },
+        voicePeerRegistry: a.registry, voiceMediaTargets: new Set(['B']),
+        getActiveStream: () => media, getPeerMediaStream: (_, snapshot) => snapshot,
+        voiceCallProtocol: { describeTracks: (snapshot) => snapshot.getTracks().map((track) => track.kind) },
+        voiceMediaDebug: { record: (event) => events.push(event) },
+        publishLocalMediaToPeer: (_, peerId, snapshot, options) => publish(a, peerId, options.generation, snapshot),
+    };
+    const source = readFileSync(new URL('../src/views/script.js', import.meta.url), 'utf8');
+    const start = source.indexOf('const scheduleLocalMediaUpdate =');
+    const end = source.indexOf('const sendVideoTrackToPeers =', start);
+    vm.runInNewContext(source.slice(start, end) + '\nscheduleLocalMediaUpdate(currentPeer);', context);
+    await update();
+    network.flush();
+    const rebuilt = a.registry.getSnapshot('B').outgoingCall;
+    assert.notEqual(rebuilt, previous);
+    assert.equal(a.peer.calls.length, 2, 'one fresh offer replaces the unusable P2P call');
+    assert.equal(previous.closeCount, 1);
+    assert.equal(a.registry.getSnapshot('B').outgoingGeneration, 3);
+    assert.equal(a.registry.getSnapshot('B').incomingCall, reverse);
+    assert.equal(reverse.closeCount, 0);
+    assert.equal(b.registry.getSnapshot('A').remoteStream.getVideoTracks()[0], screen);
+    assert.equal(screen.readyState, 'live');
+    assert.equal(mic.enabled, false);
+    assert.ok(events.some((event) => event.event === 'local-media-renegotiated' && event.reason === 'replacement-unavailable'));
+});
+
+test('a transiently disconnected P2P transport still replaces tracks without immediate renegotiation', async () => {
+    const network = new StrictMediaNetwork();
+    const a = createFixture('A', network);
+    createFixture('B', network);
+    const screen = video('screen');
+    const current = publish(a, 'B', 1, stream(screen));
+    network.flush();
+    current.peerConnection.connectionState = 'disconnected';
+    current.peerConnection.iceConnectionState = 'disconnected';
+    const result = await a.registry.replaceOutgoingTracks({ generation: 2, peerId: 'B', stream: stream(screen) });
+    assert.equal(result.ok, true, 'temporary loss retains the existing recovery grace period');
+    assert.equal(a.peer.calls.length, 1);
+    assert.equal(a.registry.getSnapshot('B').outgoingCall, current);
+});
+
 test('a failed track replacement returns a rebuild result and leaves the reverse microphone intact', async () => {
     const network = new StrictMediaNetwork();
     const a = createFixture('A', network);
