@@ -85,33 +85,16 @@ test('room renders one diagnostics action in the global header and binds it once
     assert.doesNotMatch(read('js/voice/voice-share-diagnostics.js'), /createElement\('button'\)|clipboard|copyCombined/);
 });
 
-test('settings mount alongside the copy action and repeated toolbar initialization reuses its node', () => {
-    const actions = new Element('div');
-    const copy = new Element('button');
-    actions.append(copy);
-    const main = new Element('main');
-    const window = { document: { createElement: (tag) => new Element(tag), querySelector: () => actions } };
-    vm.runInNewContext(read('js/layout/page-layout-toolbar-ui.js'), { window });
-    const first = window.PageLayoutToolbarUI.ensureToolbar({ mainLayout: main });
-    const second = window.PageLayoutToolbarUI.ensureToolbar({ mainLayout: main });
-    assert.equal(first.toolbar, second.toolbar);
-    assert.deepEqual(actions.children, [first.toolbar, copy]);
-    assert.equal(main.children.length, 0);
-    window.document.querySelector = () => null;
-    assert.ok(window.PageLayoutToolbarUI.ensureToolbar({ mainLayout: main }).toolbar);
-    assert.equal(main.children.length, 1, 'legacy mount remains available without the global header');
-});
-
-test('topbar has safe edges, a reserved mobile content area and touch-sized actions', () => {
-    const css = read('styles/layout.css') + read('styles/workspace-refinement.css');
-    const topbar = css.match(/\.workspace-topbar\s*\{([^}]+)\}/)[1];
-    assert.match(topbar, /position: fixed/);
-    for (const side of ['top', 'left', 'right']) assert.match(topbar, new RegExp(`env\\(safe-area-inset-${side}\\)`));
-    assert.match(css, /\.workspace-copy-diagnostics\s*\{[^}]*min-height: 44px/);
-    assert.match(css, /\.workspace-actions \.desktop-window-toolbar\s*\{[^}]*position: relative;[^}]*top: auto;[^}]*right: auto/);
-    assert.match(css, /\.workspace-actions \.layout-settings-toggle\s*\{[^}]*width: 44px;[^}]*height: 44px/);
-    assert.match(read('styles/responsive.css'), /padding: max\(60px, calc\(env\(safe-area-inset-top\) \+ 52px\)\)/);
-    assert.match(read('room/index.ejs'), /viewport-fit=cover/);
+test('stage replaces desktop tools and retains safe edges and touch-sized header actions', () => {
+    const template = read('room/index.ejs');
+    assert.doesNotMatch(template, /js\/layout\/|layout-settings|desktop-window-toolbar/);
+    assert.match(template, /stageChatToggle/);
+    assert.match(template, /stageChannelsToggle/);
+    const css = read('styles/layout.css') + read('styles/stage-layout.css');
+    for (const side of ['top', 'left', 'right']) assert.ok(css.includes(`env(safe-area-inset-${side})`));
+    assert.match(css, /min-height: 44px/);
+    assert.match(css, /padding-top: max\(64px, calc\(env\(safe-area-inset-top\)/);
+    assert.match(template, /viewport-fit=cover/);
 });
 
 test('copy works before joining or sharing, blocks concurrent clicks and restores its label after success', async () => {

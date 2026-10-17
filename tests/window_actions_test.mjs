@@ -15,12 +15,3 @@ test('dismiss media error without suppressing later failures', () => {
     view.setMediaError('output', 'unknown');
     assert.equal(container.children.length, 1);
 });
-test('media pin state survives normalization and video layer shares window stack', () => {
-    const window = {};
-    vm.runInNewContext(read('js/layout/page-layout-config.js'), { window });
-    for (const type of ['localPeer', 'remotePeer', 'screen-share']) {
-        assert.equal(window.PageLayoutConfig.normalizeComponentConfig(type, { pinned: true }).pinned, true);
-    }
-    assert.match(read('styles/participants.css'), /#page-layout-board > #video-grid\s*\{[^}]*z-index: auto/);
-    assert.match(read('js/layout/page-layout-runtime.js'), /const ensurePanelShellActions[\s\S]*?canPin: true, canCollapse: false, canHide: false/);
-});

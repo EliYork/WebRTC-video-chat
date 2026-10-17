@@ -16,7 +16,7 @@
     </style>
     <noscript><style>html[data-room-boot='pending'] #main, html[data-room-boot='pending'] .workspace-topbar { visibility: visible; } .room-boot-status { display: none !important; }</style></noscript>
     <script src="/js/shared/room-boot.js"></script>
-    <link rel="stylesheet" href="/style.css?v=ui-20261012">
+    <link rel="stylesheet" href="/style.css?v=stage-20261018">
     <link rel="stylesheet" href="/vendor/fontawesome/css/fontawesome.min.css">
     <link rel="stylesheet" href="/vendor/fontawesome/css/solid.min.css">
     <link rel="stylesheet" href="/vendor/fontawesome/css/regular.min.css">
@@ -39,11 +39,15 @@
             <strong>语音据点</strong>
         </div>
         <div class="workspace-actions">
+            <button type="button" id="stageChannelsToggle" aria-controls="stage-channels" aria-expanded="false">频道</button>
+            <button type="button" id="stageChatToggle" aria-controls="chat-panel" aria-expanded="true">聊天</button>
             <button type="button" class="workspace-copy-diagnostics" data-copy-call-diagnostics aria-live="polite" aria-atomic="true">复制诊断</button>
         </div>
     </header>
-    <div id="main" class="room-layout">
-        <aside class="room-sidebar" aria-label="频道列表">
+    <div id="main" class="room-layout stage-layout" data-stage-mode="voice">
+        <aside id="stage-channels" class="room-sidebar" aria-label="频道列表">
+            <nav class="server-navigation" aria-label="服务器导航"><a href="/" title="返回频道首页" aria-label="频道首页">◖◗</a><strong>语音据点</strong></nav>
+            <h2 class="channel-section-title">语音频道</h2>
             <nav id="channel-sidebar" class="sidebar-channel-tree">
                 <% channels.forEach((channel) => { %>
                     <div
@@ -70,7 +74,28 @@
                     </div>
                 <% }) %>
             </nav>
+        </aside>
 
+        <main class="room-stage" aria-label="屏幕共享舞台">
+            <header class="share-stage-header"><strong>正在观看</strong><nav id="share-sources" aria-label="选择共享源"></nav></header>
+            <section id="canvas" class="stage-canvas" aria-label="共享画面"><div id="video-grid"></div></section>
+        </main>
+        <section class="stage-members" aria-label="语音成员">
+            <header class="members-heading"><strong>语音成员</strong><span id="member-count">0 人</span></header>
+            <p id="members-empty" class="members-empty">加入语音后，成员会显示在这里</p>
+            <div id="member-cards" role="list" aria-label="成员卡片"></div>
+        </section>
+
+        <aside id="chat-panel" class="chat-panel" aria-label="频道聊天">
+            <header class="stage-chat-heading"><h2 id="chatTitle">频道聊天</h2></header>
+            <input id="chatName" type="hidden" maxlength="32" autocomplete="nickname">
+            <ol id="chatMessages" class="chat-messages"></ol>
+            <form id="chatForm" class="chat-form">
+                <textarea id="chatInput" maxlength="500" rows="2" placeholder="发送消息"></textarea>
+                <button type="submit">发送</button>
+            </form>
+        </aside>
+        <footer class="stage-dock">
             <section class="local-user-card" aria-label="本地用户控制">
                 <div id="buttons" class="hidden media-dock" aria-label="通话控制">
                     <div class="media-dock-header">
@@ -253,28 +278,7 @@
                     </dialog>
                 </div>
             </section>
-        </aside>
-
-        <main class="room-stage" aria-label="活动区">
-            <button id="mobileBackToChannels" class="mobile-back-button" type="button">返回</button>
-            <div class="mobile-tile-nav" aria-label="玩家窗口切换">
-                <button id="mobilePrevTile" type="button" aria-label="上一个窗口">‹</button>
-                <span id="mobileTileCount">0 / 0</span>
-                <button id="mobileNextTile" type="button" aria-label="下一个窗口">›</button>
-            </div>
-            <section id="canvas" class="stage-canvas" aria-label="玩家窗口区">
-                <div id="video-grid"></div>
-            </section>
-        </main>
-
-        <aside id="chat-panel" class="chat-panel" aria-label="频道聊天">
-            <input id="chatName" type="hidden" maxlength="32" autocomplete="nickname">
-            <ol id="chatMessages" class="chat-messages"></ol>
-            <form id="chatForm" class="chat-form">
-                <textarea id="chatInput" maxlength="500" rows="2" placeholder="发送消息"></textarea>
-                <button type="submit">发送</button>
-            </form>
-        </aside>
+        </footer>
     </div> 
     <script src="/js/shared/view-utils.js"></script>
     <script src="/js/chat/chat-name-state.js"></script>
@@ -293,23 +297,7 @@
     <script src="/js/media/fullscreen-controls.js"></script>
     <script src="/js/media/local-screen-share-preview-controller.js"></script>
     <script src="/js/media/voice-join-overlay-ui.js"></script>
-    <script src="/js/layout/page-layout-snap-utils.js"></script>
-    <script src="/js/layout/page-layout-resize-utils.js"></script>
-    <script src="/js/layout/page-layout-interaction-ui.js"></script>
-    <script src="/js/layout/page-layout-storage.js"></script>
-    <script src="/js/layout/page-layout-config.js"></script>
-    <script src="/js/layout/page-layout-ids.js"></script>
-    <script src="/js/layout/page-layout-placement-utils.js"></script>
-    <script src="/js/layout/page-layout-components.js"></script>
-    <script src="/js/layout/page-layout-toolbar-ui.js"></script>
-    <script src="/js/layout/page-layout-component-menu-ui.js"></script>
-    <script src="/js/layout/page-layout-recovery-ui.js"></script>
-    <script src="/js/layout/page-layout-runtime.js"></script>
-    <script src="/js/layout/page-layout-window-manager-runtime.js"></script>
-    <script src="/js/layout/page-layout-component-runtime.js"></script>
-    <script src="/js/layout/page-layout-store-runtime.js"></script>
     <script src="/js/room/room-ui-state.js"></script>
-    <script src="/js/room/mobile-room-state.js"></script>
     <script src="/js/room/presence-view-model.js"></script>
     <script src="/js/room/participants-list-ui.js"></script>
     <script src="/js/room/tile-status-ui.js"></script>
@@ -341,6 +329,8 @@
     <script src="/js/voice/voice-share-diagnostics.js"></script>
     <script src="/js/voice/voice-call-diagnostics.js"></script>
     <script src="/js/voice/voice-media-quality-runtime.js"></script>
+    <script src="/js/room/stage-layout-runtime.js"></script>
+    <script src="/js/voice/voice-speaking-runtime.js"></script>
     <script type="module" src="/script.js"></script> <!-- So we defined the static files of the server so we can use it here-->
 </body>
 </html>

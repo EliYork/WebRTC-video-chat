@@ -115,28 +115,11 @@ test('wrong-shaped stored peer volumes are recoverable and explicit mute survive
     }
 });
 
-test('blocked layout storage does not throw or claim a successful save', () => {
-    const window = { localStorage: {
-        setItem() { throw new Error('quota exceeded'); },
-        removeItem() { throw new Error('access denied'); },
-    } };
-    vm.runInNewContext(source('views/js/layout/page-layout-storage.js'), { window });
-    assert.equal(window.PageLayoutStorage.saveLayoutToStorage({ storageKey: 'layout', payload: {} }), false);
-    assert.equal(window.PageLayoutStorage.clearSavedLayout({ storageKey: 'layout' }), false);
-    vm.runInNewContext(source('views/js/layout/page-layout-store-runtime.js'), { window });
-    const notices = [];
-    const runtime = window.PageLayoutStoreRuntime.createRuntime({
-        getDefaultLayoutPreferences: () => ({}), getLayoutStorageKey: () => 'layout',
-        layoutStorage: {
-            ...window.PageLayoutStorage,
-            loadLayoutFromStorage: () => [], readLayoutPreferencesFromStorage: () => ({}),
-            serializeLayoutItems: () => [], buildLayoutStoragePayload: () => ({}),
-        },
-        showLayoutSaveStatus: (text) => notices.push(text),
-    });
-    assert.equal(runtime.saveLayoutToStorage(), false);
-    assert.equal(runtime.clearSavedLayout(), false);
-    assert.ok(notices.every((text) => text.includes('存储不可用')));
+test('stage runtime never accesses old layout storage, including denied storage', () => {
+    const window = { get localStorage() { throw new Error('storage denied'); } };
+    vm.runInNewContext(source('views/js/room/stage-layout-runtime.js'), { window });
+    assert.equal(typeof window.VoiceStageLayout.createRuntime, 'function');
+    assert.doesNotMatch(source('views/script.js'), /PageLayout|voicePageLayout|initializeLayoutFromStorage/);
 });
 
 test('real server supports both WebSocket protocols and survives malformed PeerJS messages', { timeout: 20000 }, async () => {

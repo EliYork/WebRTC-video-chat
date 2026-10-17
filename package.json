@@ -8,6 +8,7 @@
         "package:release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-release.ps1",
         "build:sfu": "node scripts/build-sfu-client.mjs",
         "test": "node --test tests/*.mjs",
+        "test:stage-browser": "node scripts/test-stage-browser.mjs",
         "start": "node ./src/server.js",
         "dev": "nodemon ./src/server.js",
         "eslint": "eslint",

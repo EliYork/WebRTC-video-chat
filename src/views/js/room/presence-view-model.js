@@ -66,6 +66,10 @@
             });
         }
 
+        if (member.outputMuted === true) {
+            statuses.push({ key: 'deafened', label: '耳机静音', icon: 'fas fa-headphones' });
+        }
+
         if (member.screenSharing) {
             statuses.push({
                 key: 'screen',
