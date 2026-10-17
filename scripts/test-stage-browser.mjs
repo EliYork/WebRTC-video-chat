@@ -145,6 +145,7 @@ try {
     assert.deepEqual(await evaluate(b, `({offers:__stageProbe.offers,replaceTracks:__stageProbe.replaceTracks,captures:__stageProbe.captures})`), counters, 'layout must not negotiate or capture');
     const routeSession = b; // The first publisher has SFU admission; the second may legitimately use P2P.
     const routeTile = await evaluate(routeSession, `document.querySelector('#video-grid > .is-stage-focus').id`);
+    assert.notEqual(routeTile, 'local-video', 'the receiver route controls must be exercised');
     if (routeTile !== 'local-video') {
         await wait(() => evaluate(routeSession, `Boolean(document.getElementById('${routeTile}').querySelector('.voice-route-toggle'))`), 'remote route control');
         await click(routeSession, `[id="${routeTile}"] .voice-route-toggle`);

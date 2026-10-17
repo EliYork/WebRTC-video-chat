@@ -30,6 +30,7 @@
 .stage-layout > .chat-panel { grid-area: chat; border: 0; overflow: hidden; }
 .stage-chat-heading { padding: 14px 22px; border-bottom: 1px solid var(--line-soft); }
 .stage-chat-heading h2 { margin: 0; font-size: 15px; }
+.stage-chat-heading p { margin: 4px 0 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .stage-layout .chat-messages { width: 100%; max-width: 1040px; align-self: center; padding: 16px clamp(16px, 3vw, 48px); scrollbar-gutter: stable; }
 .stage-layout .chat-form { width: 100%; max-width: 1040px; align-self: center; }
 .stage-layout .chat-form textarea { min-width: 0; resize: vertical; max-height: 24dvh; padding: 10px; }

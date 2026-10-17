@@ -910,6 +910,13 @@ const syncRoomCompositionState = () => {
         refs: { chatTitle },
         channelName: viewingName,
     });
+    const viewedChannel = Array.from(sidebarRoot.querySelectorAll('[data-channel-room]'))
+        .find((channel) => channel.dataset.channelRoom === viewingRoomId);
+    const description = byId('chatDescription');
+    if (description) {
+        description.textContent = viewedChannel?.dataset.channelDescription || '';
+        description.hidden = !description.textContent;
+    }
 
     updateLocalUserCard();
     updateMobileRoomState();
