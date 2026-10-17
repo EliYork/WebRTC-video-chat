@@ -1,0 +1,257 @@
+{
+  "date": "2026-10-18",
+  "snapshotCommit": "772dc3f339c030a08679113763aa4b04a2f8a05e",
+  "tag": "free-desktop-abandoned-20261018",
+  "implementationCommit": "e112fa6f8595d2046470b3e89dc74d3a1a12dcea",
+  "baselineNodeTests": {
+    "passed": 363,
+    "failed": 0,
+    "skipped": 0
+  },
+  "currentNodeTests": {
+    "passed": 360,
+    "failed": 0,
+    "skipped": 0
+  },
+  "retiredOrMergedDesktopTestCount": 11,
+  "newTests": 8,
+  "checks": {
+    "changedSourceEslint": "passed",
+    "preExistingAuditTestEslintErrors": [
+      "no-await-in-loop",
+      "no-empty",
+      "no-await-in-loop"
+    ],
+    "gitDiffCheck": "passed"
+  },
+  "p2pBrowser": {
+    "status": "passed",
+    "browser": "Edg/155.0.4283.45",
+    "syntheticMediaOnly": true,
+    "serverForwardingEnabled": false,
+    "viewportCases": 22,
+    "cssViewports": [
+      [
+        3840,
+        2160,
+        1
+      ],
+      [
+        2560,
+        1440,
+        1
+      ],
+      [
+        1920,
+        1080,
+        1
+      ],
+      [
+        1600,
+        900,
+        1
+      ],
+      [
+        1366,
+        768,
+        1
+      ],
+      [
+        2560,
+        1440,
+        1.5
+      ],
+      [
+        900,
+        700,
+        1
+      ],
+      [
+        640,
+        700,
+        1
+      ],
+      [
+        390,
+        844,
+        3
+      ],
+      [
+        320,
+        640,
+        2
+      ],
+      [
+        844,
+        390,
+        2
+      ]
+    ],
+    "routeChecks": [
+      "P2P",
+      "manual P2P",
+      "per-sharer preference retention"
+    ],
+    "tests": [
+      "entry point",
+      "voice join",
+      "camera",
+      "two voice peers",
+      "synthetic share",
+      "responsive geometry in both modes",
+      "chat draft",
+      "no layout renegotiation/capture",
+      "two shares",
+      "focus retention/fallback",
+      "manual route retention",
+      "preview hide retains capture",
+      "last share end",
+      "member departure"
+    ],
+    "runtimeErrors": 0,
+    "failedResources": 0
+  },
+  "sfuBrowser": {
+    "status": "passed",
+    "browser": "Edg/155.0.4283.45",
+    "syntheticMediaOnly": true,
+    "serverForwardingEnabled": true,
+    "viewportCases": 22,
+    "cssViewports": [
+      [
+        3840,
+        2160,
+        1
+      ],
+      [
+        2560,
+        1440,
+        1
+      ],
+      [
+        1920,
+        1080,
+        1
+      ],
+      [
+        1600,
+        900,
+        1
+      ],
+      [
+        1366,
+        768,
+        1
+      ],
+      [
+        2560,
+        1440,
+        1.5
+      ],
+      [
+        900,
+        700,
+        1
+      ],
+      [
+        640,
+        700,
+        1
+      ],
+      [
+        390,
+        844,
+        3
+      ],
+      [
+        320,
+        640,
+        2
+      ],
+      [
+        844,
+        390,
+        2
+      ]
+    ],
+    "routeChecks": [
+      "automatic SFU",
+      "manual P2P",
+      "manual SFU",
+      "per-sharer preference retention"
+    ],
+    "tests": [
+      "entry point",
+      "voice join",
+      "camera",
+      "two voice peers",
+      "synthetic share",
+      "responsive geometry in both modes",
+      "chat draft",
+      "no layout renegotiation/capture",
+      "two shares",
+      "focus retention/fallback",
+      "manual route retention",
+      "preview hide retains capture",
+      "last share end",
+      "member departure"
+    ],
+    "runtimeErrors": 0,
+    "failedResources": 0
+  },
+  "unchangedMedia": [
+    {
+      "path": "src/views/js/voice/voice-screen-sfu-runtime.js",
+      "unchanged": true
+    },
+    {
+      "path": "src/views/js/voice/voice-media-quality-runtime.js",
+      "unchanged": true
+    },
+    {
+      "path": "src/views/js/voice/voice-media-quality-view.js",
+      "unchanged": true
+    },
+    {
+      "path": "src/views/js/voice/voice-peer-registry.js",
+      "unchanged": true
+    },
+    {
+      "path": "src/views/js/voice/voice-media-lifecycle.js",
+      "unchanged": true
+    },
+    {
+      "path": "src/views/js/media/screen-share-volume-controller.js",
+      "unchanged": true
+    },
+    {
+      "path": "src/views/js/media/local-screen-share-preview-controller.js",
+      "unchanged": true
+    },
+    {
+      "path": "src/views/js/voice/voice-screen-codecs.js",
+      "unchanged": true
+    },
+    {
+      "path": "src/views/js/voice/voice-call-diagnostics.js",
+      "unchanged": true
+    },
+    {
+      "path": "src/utils/ScreenSfuService.js",
+      "unchanged": true
+    },
+    {
+      "path": "src/utils/ScreenSfuBudget.js",
+      "unchanged": true
+    }
+  ],
+  "productionAccess": false,
+  "push": false,
+  "deployment": false,
+  "physicalOrVisualAcceptance": false,
+  "coreImplementationCommit": "f17b7ad47be9c22ac61b219b649a2baad0447577",
+  "implementationCommits": [
+    "f17b7ad47be9c22ac61b219b649a2baad0447577",
+    "e112fa6f8595d2046470b3e89dc74d3a1a12dcea"
+  ]
+}
