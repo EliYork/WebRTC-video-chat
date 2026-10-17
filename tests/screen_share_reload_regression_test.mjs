@@ -123,7 +123,7 @@ test('successful picker completion releases pending before follow-up media work'
     assert.deepEqual(pendingStates, [true, false]);
 });
 
-test('screen capture constraints map stable defaults and every resolution preset without exact', () => {
+test('screen capture constraints prefer the entire screen for defaults and every resolution preset without exact', () => {
     const defaults = plain(lifecycle.buildScreenCaptureConstraints());
     assert.deepEqual(defaults, {
         audio: true,
@@ -131,7 +131,7 @@ test('screen capture constraints map stable defaults and every resolution preset
         selfBrowserSurface: 'exclude',
         windowAudio: 'window',
         video: {
-            displaySurface: 'window',
+            displaySurface: 'monitor',
             frameRate: { ideal: 60, max: 60 },
             height: { ideal: 1080, max: 1080 },
             width: { ideal: 1920, max: 1920 },
@@ -151,7 +151,7 @@ test('screen capture constraints map stable defaults and every resolution preset
                     resolutionPreset,
                 })
             );
-            assert.equal(constraints.video.displaySurface, 'window');
+            assert.equal(constraints.video.displaySurface, 'monitor');
             assert.equal(constraints.audioSelection, 'preferred');
             assert.deepEqual(constraints.video.height, {
                 ideal: resolution.height,
@@ -175,7 +175,7 @@ test('screen capture constraints map stable defaults and every resolution preset
     assert.deepEqual(automatic.video.height, { ideal: 1080 });
     assert.deepEqual(automatic.video.width, { ideal: 1920 });
     [automatic, original].forEach((constraints) => {
-        assert.equal(constraints.video.displaySurface, 'window');
+        assert.equal(constraints.video.displaySurface, 'monitor');
         assert.equal(constraints.audioSelection, 'preferred');
         assert.equal(constraints.audio, true);
     });
@@ -201,7 +201,7 @@ test('supported own audio exclusion is requested without silencing game playback
     assert.equal(result.stream, stream);
     assert.deepEqual(requested.audio, { restrictOwnAudio: true });
     assert.equal(requested.audioSelection, 'preferred');
-    assert.equal(requested.video.displaySurface, 'window');
+    assert.equal(requested.video.displaySurface, 'monitor');
     assert.equal(requested.audio.suppressLocalAudioPlayback, undefined);
     assert.equal(requested.systemAudio, undefined);
     assert.equal(api.describeScreenAudio(stream).实际排除通话声音, true);
@@ -250,7 +250,7 @@ test('screen capture runtime owns option-to-constraint mapping before calling th
 
     assert.equal(result.ok, true);
     assert.deepEqual(receivedConstraints.video, {
-        displaySurface: 'window',
+        displaySurface: 'monitor',
         frameRate: { ideal: 60, max: 60 },
         height: { ideal: 1440, max: 1440 },
         width: { ideal: 2560, max: 2560 },

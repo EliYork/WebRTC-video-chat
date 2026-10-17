@@ -7,7 +7,7 @@ import { createVoiceDiagnosticsRelay } from '../src/utils/VoiceDiagnosticsRelay.
 /* eslint-disable no-await-in-loop -- Exercise sequential samples and call lifecycles. */
 
 const source = readFileSync(new URL('../src/views/js/voice/voice-call-diagnostics.js', import.meta.url), 'utf8');
-function fixture({ storage, connections = [], shares = [] } = {}) {
+function fixture({ storage, connections = [], shares = [], getReceiverHealth } = {}) {
     const timers = new Map();
     let id = 0;
     const state = { 会话: { state: 'joined', generation: 1 }, 本机音频: { 请求模式: 'rnnoise', 静音: true, deviceId: 'secret-device' } };
@@ -21,7 +21,7 @@ function fixture({ storage, connections = [], shares = [] } = {}) {
         VoiceShareDiagnostics: { sync: async (share, options) => { assert.equal(options.force, true); return share; } },
     };
     vm.runInNewContext(source, { window });
-    const runtime = window.VoiceCallDiagnostics.createRuntime({ sanitize: sanitizeVoiceDiagnostic, getState: () => state, getConnections: () => connections, getSources: () => shares });
+    const runtime = window.VoiceCallDiagnostics.createRuntime({ sanitize: sanitizeVoiceDiagnostic, getState: () => state, getConnections: () => connections, getSources: () => shares, getReceiverHealth });
     return { runtime, state, saved, window, timers };
 }
 const flush = () => new Promise((resolve) => setImmediate(resolve));
@@ -143,4 +143,58 @@ test('schema bounds payload depth, arrays and strings and drops sensitive fields
     assert.equal(value.事件.length, 250);
     assert.equal(value.事件[0].内容.state.length, 160);
     assert.doesNotMatch(JSON.stringify(value), /secret/);
+});
+
+test('SFU health is exported once outside periodic snapshots and its failure window persists after switching to P2P', async () => {
+    const failure = { 序号: 1, reason: 'receiver-video-stalled', 健康采样: [{ 采样时间_ms: 1000,
+        连续低帧次数: 3, 接收字节增长: 10, 解码帧增长: 0, 停滞线索: '本端收到数据但未解码出帧', ip: 'secret' }] };
+    const { runtime, saved } = fixture({ getReceiverHealth: () => ({ 活跃接收: [], 最近回退: [failure] }) });
+    runtime.start();
+    await flush();
+    runtime.record('SFU接收回退诊断', failure);
+    const report = await runtime.report();
+    assert.equal(report.SFU接收健康.最近回退[0].健康采样[0].解码帧增长, 0);
+    assert.equal(report.当前状态.SFU接收健康, undefined);
+    assert.ok(report.当前会话.历史采样.every((sample) => sample.SFU接收健康 === undefined));
+    const { api, self, member } = relayFixture();
+    member.respond = (_, payload, ack) => ack(null, { ok: true, voiceSessionGeneration: payload.voiceSessionGeneration, report });
+    const relayed = await api.collect(self);
+    assert.equal(relayed.results[0].数据.SFU接收健康.最近回退[0].健康采样[0].接收字节增长, 10);
+    runtime.end();
+    const stored = JSON.parse([...saved.values()][0]);
+    assert.equal(stored[0].事件.find((event) => event.类型 === 'SFU接收回退诊断').内容.健康采样[0].连续低帧次数, 3);
+    assert.doesNotMatch(JSON.stringify([report, relayed, stored]), /secret/);
+    runtime.destroy();
+});
+
+test('a receiver fallback during export sampling is included in that same report', async () => {
+    let finish;
+    let health = { 接收健康格式: 1, 活跃接收: [], 最近回退: [] };
+    const pc = { getStats: () => new Promise((resolve) => { finish = resolve; }) };
+    const { runtime } = fixture({ connections: [pc], getReceiverHealth: () => health });
+    runtime.start();
+    await flush();
+    const pending = runtime.report();
+    health = { ...health, 最近回退: [{ 序号: 1, reason: 'receiver-video-stalled', 健康采样: [{ 解码帧增长: 0 }] }] };
+    runtime.record('SFU接收回退诊断', health.最近回退[0]);
+    finish(new Map());
+    assert.equal((await pending).SFU接收健康.最近回退.length, 1);
+    runtime.destroy();
+});
+
+test('full receiver windows survive the shared node budget before oversized histories are truncated', () => {
+    const sample = { 采样时间_ms: 1000, 解码帧数: 100, 完整接收帧数: 100, 接收统计间隔_ms: 2000,
+        区间解码帧率: 0, 判定解码帧率: 0, 连续低帧次数: 3, 接收字节增长: 10,
+        解码帧增长: 0, 服务器入站字节增长: 20, 服务器出站字节增长: 20 };
+    const health = { 接收健康格式: 1,
+        活跃接收: Array.from({ length: 8 }, (_, i) => ({ 序号: i + 1, 健康采样: Array(8).fill(sample) })),
+        最近回退: Array.from({ length: 3 }, (_, i) => ({ 序号: i + 9, reason: 'receiver-video-stalled', 健康采样: Array(8).fill(sample) })) };
+    const report = { SFU接收健康: health, 当前会话: { 历史采样: Array(24).fill({
+        共享: Array(8).fill({ 连接: Array(16).fill({ 视频流: Array(16).fill(sample) }) }),
+    }) } };
+    const safe = sanitizeVoiceDiagnostic(report);
+    assert.equal(safe.截断, true, 'the existing 16000-node budget still caps unrelated large histories');
+    assert.deepEqual(safe.SFU接收健康, health);
+    assert.deepEqual(sanitizeVoiceDiagnostic(safe).SFU接收健康, health);
+    assert.ok(Buffer.byteLength(JSON.stringify(safe.SFU接收健康)) < 128 * 1024);
 });

@@ -26,21 +26,13 @@ class Element {
     }
 }
 function load() {
-    let copied;
     const window = {
         document: { createElement: () => new Element() },
-        navigator: {
-            clipboard: {
-                writeText: async (text) => {
-                    copied = text;
-                },
-            },
-        },
         setTimeout,
         clearTimeout,
     };
     vm.runInNewContext(source, { window });
-    return { api: window.VoiceShareDiagnostics, copied: () => copied };
+    return { api: window.VoiceShareDiagnostics };
 }
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
@@ -75,7 +67,7 @@ test('presentation callback is sampled separately and cancelled when panel is re
     callback(0, { presentedFrames: 10 });
     api.sync(input);
     await flush();
-    const snapshot = JSON.parse(tile.children[0].children[3].textContent);
+    const snapshot = JSON.parse(tile.children[0].children[2].textContent);
     assert.equal(snapshot.诊断格式, 4);
     assert.equal(snapshot.播放画面.提交合成器帧率, null);
     api.remove(tile);
@@ -185,8 +177,8 @@ test('interval capture, encode and send cadence can diverge; zero and source res
     assert.equal(api.summarize([{ ...captureAfter, frames: 60 }], after, before, captureBefore).区间采集帧率, 0);
 });
 
-test('panel is collapsed, samples only when open, copies sanitized data and removes on stop', async () => {
-    const { api, copied } = load();
+test('panel is collapsed, samples only when open, shows sanitized data without copy buttons and removes on stop', async () => {
+    const { api } = load();
     const tile = new Element();
     let calls = 0;
     const pc = {
@@ -222,10 +214,10 @@ test('panel is collapsed, samples only when open, copies sanitized data and remo
     api.sync(input);
     await flush();
     assert.equal(calls, 1);
-    const copy = panel.children[2];
-    await copy.listeners.click();
-    assert.match(copied(), /观看者/);
-    assert.doesNotMatch(copied(), /secret/);
+    assert.equal(panel.children.length, 3, 'only summary, note and statistics remain');
+    assert.ok(panel.children.every((child) => !child.listeners.click), 'no copy handlers remain');
+    assert.match(panel.children[2].textContent, /观看者/);
+    assert.doesNotMatch(panel.children[2].textContent, /secret/);
     api.remove(tile);
     assert.equal(panel.removed, true);
 });
@@ -249,11 +241,11 @@ test('failed stats stay visible and late reads cannot update a removed panel', a
     panel.open = true;
     api.sync(input);
     await flush();
-    const before = panel.children[3].textContent;
+    const before = panel.children[2].textContent;
     api.remove(tile);
     finish(new Map());
     await flush();
-    assert.equal(panel.children[3].textContent, before);
+    assert.equal(panel.children[2].textContent, before);
     input.pc = {
         getStats: async () => {
             throw Error('private IP');
@@ -264,8 +256,8 @@ test('failed stats stay visible and late reads cannot update a removed panel', a
     replacement.open = true;
     api.sync(input);
     await flush();
-    assert.match(replacement.children[3].textContent, /统计读取失败/);
-    assert.doesNotMatch(replacement.children[3].textContent, /private IP/);
+    assert.match(replacement.children[2].textContent, /统计读取失败/);
+    assert.doesNotMatch(replacement.children[2].textContent, /private IP/);
 });
 test('call log samples a collapsed share and keeps compositor callbacks alive until removal', async () => {
     const { api } = load();

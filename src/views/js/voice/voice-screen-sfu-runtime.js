@@ -13,6 +13,7 @@
         onUplinkBudget,
         onRemoteStream,
         onRouteEvent,
+        onReceiverFailure,
         onState,
         onWarning,
         waitForMedia,
@@ -65,12 +66,43 @@
         const producers = new Set();
         const subscriptions = new Map();
         const receiverCooldowns = new Map();
+        // Viewing preferences live only for this voice session, independently
+        // for each sharer. They never change the publisher's capture settings.
+        const receivePreferences = new Map();
+        const receiveMode = (peerId) => receivePreferences.get(peerId)?.mode || 'auto';
+        const receiverFailures = [];
+        let receiverOrdinal = 0;
+        const copyHealth = (value) => JSON.parse(JSON.stringify(value));
+        const healthDelta = (row, previous, key) =>
+            Number.isFinite(row?.[key]) && Number.isFinite(previous?.[key]) && row[key] >= previous[key]
+                ? row[key] - previous[key] : null;
+        const keepHealthSample = (entry, row) => {
+            entry.healthSamples ||= [];
+            entry.healthSamples.push(row);
+            // Eight existing two-second checks cover about 14 seconds. Do not
+            // poll any faster or retain raw RTP reports, IDs or candidates.
+            while (entry.healthSamples.length > 8 ||
+                row.采样时间_ms - entry.healthSamples[0].采样时间_ms > 15000) entry.healthSamples.shift();
+        };
+        const retainReceiverFailure = (entry, reason) => {
+            const failure = { 序号: entry.healthOrdinal, 时间: new Date().toISOString(), reason,
+                健康采样: copyHealth(entry.healthSamples || []) };
+            receiverFailures.push(failure);
+            if (receiverFailures.length > 3) receiverFailures.shift();
+            // Persist before disposal, so later P2P statistics cannot erase
+            // the evidence which triggered this receiver's release.
+            try { onReceiverFailure?.(copyHealth(failure)); } catch { /* Diagnostics must not prevent recovery. */ }
+        };
         const statsConnections = new WeakMap();
         const statsConnection = (transport) => {
             if (!transport) return undefined;
             let connection = statsConnections.get(transport);
             if (!connection) {
-                connection = { getStats: () => transport.getStats(), screenRoute: 'SFU',
+                connection = { getStats: (track) => {
+                    const consumer = track && [...subscriptions.values()]
+                        .flatMap((entry) => entry.consumers).find((item) => item.track === track);
+                    return consumer ? consumer.getStats() : transport.getStats();
+                }, screenRoute: 'SFU',
                     getSenders: () => transport === sendTransport ? [...producers].map((producer) => producer.rtpSender).filter(Boolean) : [],
                 };
                 statsConnections.set(transport, connection);
@@ -167,7 +199,8 @@
                         .sort((a, b) => (b.framesDecoded || 0) - (a.framesDecoded || 0))[0];
                     const now = Date.now();
                     const previous = entry.healthBaseline;
-                    const baseline = { time: now, id: report?.id, frames: report?.framesDecoded, sourceBytes: entry.sourceBytes };
+                    const baseline = { time: now, id: report?.id, frames: report?.framesDecoded, sourceBytes: entry.sourceBytes,
+                        report, serverHealth: entry.serverHealth };
                     entry.healthBaseline = baseline;
                     entry.statsFailures = 0;
                     if (previous && baseline.sourceBytes > previous.sourceBytes) entry.sourceActiveAt = now;
@@ -177,7 +210,49 @@
                         now - (entry.sourceActiveAt || 0) < 4500 && baseline.frames >= previous.frames;
                     const fps = active ? (baseline.frames - previous.frames) * 1000 / Math.max(1, now - previous.time) : undefined;
                     entry.slowSamples = fps !== undefined && fps < 5 ? (entry.slowSamples || 0) + 1 : 0;
-                    if (entry.slowSamples >= 3) {
+                    const comparable = previous && report?.id === previous.id && report?.timestamp > previous.report?.timestamp;
+                    const delta = (key) => comparable ? healthDelta(report, previous.report, key) : null;
+                    const server = entry.serverHealth;
+                    const serverElapsed = server?.采样时间_ms - previous?.serverHealth?.采样时间_ms;
+                    const serverDelta = (direction) => serverElapsed > 0
+                        ? healthDelta(server?.[direction], previous?.serverHealth?.[direction], '累计字节') : null;
+                    const ingress = serverDelta('入站');
+                    const egress = serverDelta('出站');
+                    const received = delta('bytesReceived');
+                    const decoded = delta('framesDecoded');
+                    const measuredFps = decoded === null ? null : decoded * 1000 / (report.timestamp - previous.report.timestamp);
+                    const serverAge = Number.isFinite(entry.serverHealthReceivedAt) ? now - entry.serverHealthReceivedAt : null;
+                    let clue = measuredFps === null ? '证据不足' : '未观察到低解码帧率';
+                    if (measuredFps !== null && measuredFps < 5) {
+                        clue = '证据不足';
+                        if (serverAge === null || serverAge > 4500) clue = '服务器统计缺失或过期';
+                        else if (ingress > 0 && egress === 0) clue = '服务器入站增长但出站未增长';
+                        else if (egress > 0 && received === 0) clue = '服务器出站增长但本端未收数据';
+                        else if (received > 0 && decoded === 0) clue = '本端收到数据但未解码出帧';
+                    }
+                    keepHealthSample(entry, {
+                        采样时间_ms: now, 采样间隔_ms: previous ? now - previous.time : null, 状态: '已采样',
+                        页面后台: Boolean(global.document?.hidden), 判定有效: Boolean(active),
+                        来源活跃: now - (entry.sourceActiveAt || 0) < 4500,
+                        统计对象变化: Boolean(previous && report?.id !== previous.id),
+                        接收统计间隔_ms: comparable ? report.timestamp - previous.report.timestamp : null,
+                        完整接收帧数: Number.isFinite(report?.framesReceived) ? report.framesReceived : null,
+                        解码帧数: Number.isFinite(report?.framesDecoded) ? report.framesDecoded : null,
+                        区间解码帧率: measuredFps === null ? null : Math.round(measuredFps * 100) / 100,
+                        判定解码帧率: fps === undefined ? null : Math.round(fps * 100) / 100,
+                        连续低帧次数: entry.slowSamples, 服务器统计距接收_ms: serverAge,
+                        服务器采样间隔_ms: serverElapsed > 0 ? serverElapsed : null,
+                        服务器入站字节增长: ingress, 服务器出站字节增长: egress,
+                        源视频字节增长: healthDelta(baseline, previous, 'sourceBytes'),
+                        接收字节增长: received, 完整接收帧增长: delta('framesReceived'), 解码帧增长: decoded,
+                        接收包增长: delta('packetsReceived'), 丢包增长: delta('packetsLost'),
+                        NACK增长: delta('nackCount'), PLI增长: delta('pliCount'),
+                        卡顿次数增长: delta('freezeCount'),
+                        区间卡顿时长_ms: delta('totalFreezesDuration') === null ? null : Math.round(delta('totalFreezesDuration') * 1000),
+                        停滞线索: clue,
+                    });
+                    if (entry.slowSamples >= 3 && receiveMode(entry.peerId) === 'auto') {
+                        retainReceiverFailure(entry, 'receiver-video-stalled');
                         entry.slowSamples = 0;
                         receiverCooldowns.set(publication.id, Date.now() + 120000);
                         if (await releaseSubscription(publication.id, token, 'receiver-video-stalled'))
@@ -187,7 +262,10 @@
                 } catch (error) {
                     if (current(token) && subscriptions.get(publication.id) === entry) {
                         entry.statsFailures = (entry.statsFailures || 0) + 1;
-                        if (entry.statsFailures >= 3) {
+                        keepHealthSample(entry, { 采样时间_ms: Date.now(), 状态: '统计读取失败或超时',
+                            页面后台: Boolean(global.document?.hidden), 判定有效: false, 连续统计失败次数: entry.statsFailures });
+                        if (entry.statsFailures >= 3 && receiveMode(entry.peerId) === 'auto') {
+                            retainReceiverFailure(entry, 'receiver-stats-timeout');
                             receiverCooldowns.set(publication.id, Date.now() + 120000);
                             if (await releaseSubscription(publication.id, token, 'receiver-stats-timeout'))
                                 onWarning?.('服务器共享统计无响应，已切换直连', error);
@@ -324,6 +402,7 @@
                     if (
                         !current(token) ||
                         !device ||
+                        receiveMode(publication.peerId) === 'p2p' ||
                         subscriptions.has(publication.id) ||
                         (receiverCooldowns.get(publication.id) || 0) > Date.now() ||
                         publication.peerId === session.peerId
@@ -331,6 +410,7 @@
                         return;
                     const entry = {
                         peerId: publication.peerId,
+                        healthOrdinal: ++receiverOrdinal,
                         consumers: [],
                         attached: false,
                     };
@@ -379,10 +459,16 @@
                             subscriptions.get(publication.id) !== entry
                         )
                             throw new Error('stale-sfu-session');
+                        if (receiveMode(entry.peerId) === 'p2p') {
+                            await releaseSubscription(publication.id, token);
+                            return;
+                        }
                         const stream = new MediaStreamCtor(
                             entry.consumers.map((consumer) => consumer.track)
                         );
                         entry.attached = true;
+                        const preference = receivePreferences.get(entry.peerId);
+                        if (preference) preference.error = '';
                         recordRoute('subscription-ready');
                         entry.stream = stream;
                         entry.transport = transport;
@@ -409,6 +495,8 @@
                             if (['server-bandwidth-limit', 'server-resource-limit'].includes(error?.message))
                                 receiverCooldowns.set(publication.id, Date.now() + 120000);
                             await releaseSubscription(publication.id, token, 'receiver-ready-failed');
+                            const preference = receivePreferences.get(publication.peerId);
+                            if (preference && preference.mode !== 'p2p') preference.error = receiveError(error?.message);
                             onWarning?.('该共享使用直连观看', error);
                         }
                     }
@@ -612,6 +700,56 @@
             updateRoutes([]);
             changeState('p2p');
         };
+        const getReceiveRoute = (peerId) => {
+            const preference = receivePreferences.get(peerId);
+            const attached = [...subscriptions.values()].some((entry) => entry.peerId === peerId && entry.attached);
+            return { mode: receiveMode(peerId), route: attached ? 'sfu' : 'p2p',
+                pending: Boolean(preference?.pending), available: Boolean(config.enabled && Device),
+                error: preference?.error || (preference?.mode === 'sfu' && !attached
+                    ? '服务器转发当前不可用，当前使用 P2P；可重试或更改设置' : '') };
+        };
+        const receiveError = (reason) => ({
+            'server-bandwidth-limit': '服务器带宽名额不足，当前使用 P2P',
+            'server-resource-limit': '服务器资源不足，当前使用 P2P',
+            'publication-unavailable': '这位共享者尚未提供服务器转发，当前使用 P2P',
+        })[reason] || '服务器转发不可用，当前使用 P2P';
+        const setReceiveRoute = async (peerId, mode) => {
+            if (!peerId || !['auto', 'p2p', 'sfu'].includes(mode) || receivePreferences.get(peerId)?.pending)
+                return getReceiveRoute(peerId);
+            const preference = { mode, pending: true, error: '' };
+            receivePreferences.set(peerId, preference);
+            const voiceSession = session;
+            try {
+                if (mode === 'p2p') {
+                    // Drain pending consume/ready requests before releasing the
+                    // reservation, so a late response cannot park P2P again.
+                    await receiveQueue.catch(() => {});
+                    if (session !== voiceSession || receivePreferences.get(peerId) !== preference) return getReceiveRoute(peerId);
+                    for (const [id, entry] of subscriptions) {
+                        if (entry.peerId === peerId) await releaseSubscription(id);
+                    }
+                } else {
+                    if (!(await initialize())) throw new Error('unavailable');
+                    const token = epoch;
+                    const result = await request('list', {}, token);
+                    if (session !== voiceSession || receivePreferences.get(peerId) !== preference) return getReceiveRoute(peerId);
+                    const publication = result.publications.find((item) => item.peerId === peerId);
+                    if (!publication) throw new Error('publication-unavailable');
+                    // An explicit retry is allowed; automatic discovery retains
+                    // the original cooldown after receiver failure.
+                    if (mode === 'sfu') receiverCooldowns.delete(publication.id);
+                    await subscribe(publication, token);
+                    if (mode === 'sfu' && getReceiveRoute(peerId).route !== 'sfu' && !preference.error)
+                        throw new Error('unavailable');
+                }
+            } catch (error) {
+                preference.error = getReceiveRoute(peerId).route === 'sfu'
+                    ? '路径设置未完成，当前仍为服务器转发' : receiveError(error?.message);
+            } finally {
+                preference.pending = false;
+            }
+            return getReceiveRoute(peerId);
+        };
         const handlers = {
             'sfu:publication': (payload) => {
                 if (guardEvent(payload))
@@ -633,10 +771,13 @@
             },
             'sfu:closed': (payload) => {
                 if (guardEvent(payload)) {
+                    const entry = subscriptions.get(payload.publicationId);
                     recordRoute('subscription-closed', payload.reason);
                     if (payload.reason === 'server-bandwidth-priority')
                         receiverCooldowns.set(payload.publicationId, Date.now() + 120000);
                     dropSubscription(payload.publicationId);
+                    const preference = receivePreferences.get(entry?.peerId);
+                    if (preference?.mode === 'sfu') preference.error = '服务器转发已断开，当前使用 P2P';
                 }
             },
             'sfu:health': (payload) => {
@@ -648,7 +789,10 @@
                 const health = payload.serverHealth;
                 if (health && Number.isFinite(health.采样时间_ms)) {
                     const safe = { 采样时间_ms: health.采样时间_ms, 入站: sanitize(health.入站), 出站: sanitize(health.出站) };
-                    if (entry) entry.serverHealth = safe;
+                    if (entry) {
+                        entry.serverHealth = safe;
+                        entry.serverHealthReceivedAt = Date.now();
+                    }
                     if (payload.publicationId === publicationId) sendServerHealth = safe;
                 }
             },
@@ -683,6 +827,7 @@
                     return;
                 }
                 clearLocal();
+                receivePreferences.clear();
                 session = next;
                 cooldownUntil = 0;
                 if (next) void initialize().then(() => publishDesired());
@@ -699,10 +844,16 @@
                 clearLocal();
                 session = undefined;
                 receiverCooldowns.clear();
+                receivePreferences.clear();
                 routeHistory.length = 0;
+                receiverFailures.length = 0;
+                receiverOrdinal = 0;
             },
             usesServer: (peerId) => routes.has(peerId),
+            getReceiveRoute,
+            setReceiveRoute,
             forgetPeer(peerId) {
+                receivePreferences.delete(peerId);
                 for (const [id, entry] of subscriptions) {
                     if (entry.peerId !== peerId) continue;
                     if (session && socket?.connected)
@@ -726,6 +877,13 @@
             },
             getSendConnection: () => statsConnection(sendTransport),
             getSendHealth: () => sendServerHealth,
+            getReceiverHealth: () => copyHealth({
+                接收健康格式: 1,
+                活跃接收: [...subscriptions.values()].filter((entry) => entry.attached).map((entry) => ({
+                    序号: entry.healthOrdinal, 健康采样: entry.healthSamples || [],
+                })).slice(0, 8),
+                最近回退: receiverFailures,
+            }),
             snapshot: () => ({
                 state,
                 serverViewers: routes.size,

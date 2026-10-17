@@ -1,0 +1,55 @@
+{
+  "status": "local-only-not-deployed",
+  "packageVersion": "1.0.5",
+  "receiverHealthFormat": 1,
+  "files": [
+    {
+      "path": "src/views/js/voice/voice-screen-sfu-runtime.js",
+      "bytes": 44183,
+      "sha256": "4397C0F59085E05686A938339958221ECBAB55E0E8D501FE5B5746E898A61200",
+      "requiresNodeModuleReload": false
+    },
+    {
+      "path": "src/views/js/voice/voice-call-diagnostics.js",
+      "bytes": 16230,
+      "sha256": "6940C36106305216FE4F112C22B61B9FBDEDAF8017BE4E9ACF384D3A0341DBC3",
+      "requiresNodeModuleReload": false
+    },
+    {
+      "path": "src/views/script.js",
+      "bytes": 185380,
+      "sha256": "04CBFA9B3E354811322372F3F2905D5C705176C3EF2B1158FA9C90CB8709933C",
+      "requiresNodeModuleReload": false
+    },
+    {
+      "path": "src/views/js/shared/voice-diagnostic-schema.js",
+      "bytes": 4702,
+      "sha256": "0C15F85998CD014EA0B48BAECE3D3BDAE9705D62109AD53F8F018456A9E265FD",
+      "requiresNodeModuleReload": true
+    }
+  ],
+  "checks": {
+    "testsPassed": 345,
+    "testsFailed": 0,
+    "testsSkipped": 0,
+    "focusedEslintPassed": true,
+    "gitDiffCheckPassed": true,
+    "historicalDiagnosticChecksumsPassed": true,
+    "monitorTriggeredFallbackToBothParticipantJson": "automated-only",
+    "browserManualAcceptancePerformed": false,
+    "productionAccessPerformed": false
+  },
+  "deploymentRequirements": {
+    "replaceAllFourFilesTogether": true,
+    "nodeBusinessProcessModuleReloadRequired": true,
+    "bothBrowsersFreshLoadRequired": true,
+    "userOwnsDeploymentAndPhysicalAcceptance": true
+  },
+  "policyChanges": {
+    "sfuFallbackThreshold": false,
+    "bitrate": false,
+    "codec": false,
+    "keyframeRecovery": false,
+    "pollingFrequency": false
+  }
+}

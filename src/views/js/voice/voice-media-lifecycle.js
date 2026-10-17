@@ -73,7 +73,7 @@
             return {
                 ...audioOptions,
                 video: {
-                    displaySurface: 'window',
+                    displaySurface: 'monitor',
                     frameRate: frameRateConstraint,
                 },
             };
@@ -83,7 +83,7 @@
             return {
                 ...audioOptions,
                 video: {
-                    displaySurface: 'window',
+                    displaySurface: 'monitor',
                     frameRate: frameRateConstraint,
                     height: { ideal: 1080 },
                     width: { ideal: 1920 },
@@ -97,7 +97,7 @@
         return {
             ...audioOptions,
             video: {
-                displaySurface: 'window',
+                displaySurface: 'monitor',
                 frameRate: frameRateConstraint,
                 height: {
                     ideal: resolution.height,

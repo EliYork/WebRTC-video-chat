@@ -7,6 +7,9 @@ for (const key of `共享音频采集 捕获来源 音频轨道数 排除通话�
 
 for (const key of `降噪模型 模型回退 模型预检p95_ms`.split(' ')) keys.add(key);
 
+for (const key of `SFU接收健康 活跃接收 最近回退 健康采样 判定有效 判定解码帧率 来源活跃 统计对象变化 连续低帧次数 连续统计失败次数 服务器统计距接收_ms 服务器采样间隔_ms 服务器入站字节增长 服务器出站字节增长 源视频字节增长 接收字节增长 完整接收帧增长 解码帧增长 接收包增长 丢包增长 NACK增长 PLI增长 卡顿次数增长 停滞线索`.split(' ')) keys.add(key);
+for (const key of `接收健康格式 接收统计间隔_ms 完整接收帧数 解码帧数`.split(' ')) keys.add(key);
+
 export function sanitizeVoiceDiagnostic(value) {
     let budget = 16000;
     const visit = (item, depth) => {

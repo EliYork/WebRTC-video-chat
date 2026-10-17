@@ -32,11 +32,11 @@
     const formatLabel = ({ fps, height, width } = {}) => {
         const parts = [];
         const resolution = formatResolution(width, height);
-        const roundedFps = roundPositive(fps);
+        const roundedFps = Number.isFinite(fps) && fps >= 0 ? Math.round(fps) : undefined;
         if (resolution) {
             parts.push(resolution);
         }
-        if (roundedFps) {
+        if (roundedFps !== undefined) {
             parts.push(`${roundedFps}fps`);
         }
         return parts.join(' · ');
@@ -59,7 +59,9 @@
             : Array.isArray(stats)
               ? stats
               : [];
-    const selectInboundVideoReport = (stats, previous) =>
+    const getCounter = (report, key) =>
+        Number.isFinite(report?.[key]) && report[key] >= 0 ? report[key] : undefined;
+    const selectInboundVideoReport = (stats, track) =>
         toStatsArray(stats)
             .filter(
                 (report) =>
@@ -68,21 +70,13 @@
                     !report.isRemote
             )
             .sort((a, b) => {
-                const aGrowth =
-                    Number(
-                        a.framesDecoded ||
-                            a.framesReceived ||
-                            a.bytesReceived ||
-                            0
-                    ) - Number(previous?.frames || previous?.bytes || 0);
-                const bGrowth =
-                    Number(
-                        b.framesDecoded ||
-                            b.framesReceived ||
-                            b.bytesReceived ||
-                            0
-                    ) - Number(previous?.frames || previous?.bytes || 0);
-                return bGrowth - aGrowth;
+                // SFU transport stats include every receiver, including idle
+                // RTP rows. Compare like counters, and prefer the playing track.
+                const match = Number(b.trackIdentifier === track?.id && Boolean(track?.id)) -
+                    Number(a.trackIdentifier === track?.id && Boolean(track?.id));
+                return match || Number(b.framesDecoded || 0) - Number(a.framesDecoded || 0) ||
+                    Number(b.framesReceived || 0) - Number(a.framesReceived || 0) ||
+                    Number(b.bytesReceived || 0) - Number(a.bytesReceived || 0);
             })[0];
     const buildSample = ({ report, state, video, track }) => {
         const width =
@@ -93,32 +87,36 @@
             getReportValue(report, ['framesHeight', 'frameHeight']) ||
             roundPositive(video?.videoHeight) ||
             roundPositive(track?.getSettings?.().height);
-        let fps = getReportValue(report, ['framesPerSecond']);
-        const frames = getReportValue(report, [
-            'framesDecoded',
-            'framesReceived',
-        ]);
+        let fps = getCounter(report, 'framesPerSecond');
+        const frameKey = getCounter(report, 'framesDecoded') !== undefined ? 'framesDecoded' : 'framesReceived';
+        const frames = getCounter(report, frameKey);
         const timestamp = Number(report?.timestamp);
+        const sameReport = state.baseline?.id === report?.id && state.baseline?.frameKey === frameKey;
+        if (!sameReport || (frames !== undefined && frames < state.baseline?.frames)) state.fpsSamples = [];
         if (
-            !fps &&
-            frames &&
-            state.baseline?.frames &&
+            fps === undefined &&
+            frames !== undefined &&
+            sameReport &&
+            state.baseline?.frames !== undefined &&
             timestamp > state.baseline.timestamp
         ) {
             const seconds = (timestamp - state.baseline.timestamp) / 1000;
             const delta = frames - state.baseline.frames;
-            if (seconds > 0 && delta > 0) {
+            if (seconds > 0 && delta >= 0) {
                 fps = delta / seconds;
             }
         }
-        if (frames && Number.isFinite(timestamp)) {
+        if (frames !== undefined && Number.isFinite(timestamp)) {
             state.baseline = {
-                bytes: Number(report.bytesReceived || 0),
+                id: report.id,
+                frameKey,
                 frames,
                 timestamp,
             };
         }
-        if (fps) {
+        if (fps !== undefined) {
+            // A stopped decoder must not retain an earlier healthy FPS badge.
+            if (fps === 0) state.fpsSamples = [];
             state.fpsSamples.push(fps);
             state.fpsSamples = state.fpsSamples.slice(-3);
             fps =
@@ -135,7 +133,7 @@
         view,
     } = {}) => {
         const states = new Map();
-        const renderPlaybackSample = (state, source) => {
+        const getPlaybackSample = (state, source) => {
             const video = source.video;
             const frames = video?.getVideoPlaybackQuality?.().totalVideoFrames;
             const timestamp = global.performance?.now?.() ?? Date.now();
@@ -145,8 +143,13 @@
                 fps = Math.round((frames - previous.frames) * 1000 / (timestamp - previous.timestamp));
             }
             state.playbackBaseline = Number.isFinite(frames) ? { frames, timestamp } : null;
-            const resolution = formatResolution(video?.videoWidth, video?.videoHeight);
-            view?.render?.(state.tile, [resolution, fps === undefined ? '帧率待采样' : `${fps}fps`].filter(Boolean).join(' · '));
+            return { fps, width: video?.videoWidth, height: video?.videoHeight };
+        };
+        const renderSample = (state, sample) => {
+            view?.render?.(state.tile, [formatLabel(sample), sample.fps === undefined ? '帧率待采样' : ''].filter(Boolean).join(' · '));
+        };
+        const renderPlaybackSample = (state, source) => {
+            renderSample(state, getPlaybackSample(state, source));
         };
         const logOnce = (state, event) => {
             if (!state.logged.has(event.event)) {
@@ -161,6 +164,7 @@
             state.generation += 1;
             global.VoiceShareDiagnostics?.remove(state.tile);
             view?.hide?.(state.tile);
+            if (reason !== 'source-replaced') view?.removeRoute?.(state.tile);
             if (remove) view?.remove?.(state.tile);
             states.delete(peerId);
             debug?.({ event: 'quality-hidden', reason });
@@ -176,6 +180,7 @@
             const state = states.get(peerId);
             if (!state || state.generation !== generation) return;
             const source = getQualitySource?.(peerId);
+            if (!source?.isLocal) view?.renderRoute?.(state.tile, source?.routeControl);
             const track = getLiveVideoTrack(source?.stream);
             if (source?.isScreenSharing && track &&
                 (source.stream !== state.stream || track !== state.track || source.pc !== state.pc)) {
@@ -218,6 +223,7 @@
                 schedule(peerId, state);
                 return;
             }
+            const playback = getPlaybackSample(state, source);
             try {
                 global.VoiceShareDiagnostics?.sync(source);
                 const stats = await source.pc.getStats(track);
@@ -228,19 +234,16 @@
                     debug?.({ event: 'stale-sample-ignored' });
                     return;
                 }
-                const report = selectInboundVideoReport(stats, state.baseline);
-                const label = formatLabel(
-                    buildSample({ report, state, track, video: source.video })
-                );
-                if (label) {
-                    view?.render?.(state.tile, label);
+                const report = selectInboundVideoReport(stats, track);
+                const quality = buildSample({ report, state, track, video: source.video });
+                if (quality.fps === undefined) quality.fps = playback.fps;
+                renderSample(state, quality);
+                if (quality.fps !== undefined) {
                     logOnce(state, { event: 'first-valid-quality-sample' });
-                } else {
-                    renderPlaybackSample(state, source);
                 }
             } catch (error) {
                 if (states.get(peerId) !== state) return;
-                renderPlaybackSample(state, source);
+                renderSample(state, playback);
                 logOnce(state, {
                     errorType: error?.name || 'Error',
                     event: 'getStats-failed',
@@ -290,6 +293,7 @@
                 timer: null,
             };
             states.set(peerId, state);
+            if (!source.isLocal) view?.renderRoute?.(state.tile, source.routeControl);
             global.VoiceShareDiagnostics?.sync(source);
             if (!source.isLocal) view?.render?.(state.tile, '画质待采样');
             debug?.({

@@ -2,19 +2,19 @@
 <html lang="zh-CN" data-room-boot="pending">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title><%= channelName %> - 语音据点</title>
     <style>
         html[data-room-boot='pending'] body { background: #fbf7f9; }
         html[data-room-boot='pending'] #main,
-        html[data-room-boot='pending'] .workspace-brand { visibility: hidden; }
+        html[data-room-boot='pending'] .workspace-topbar { visibility: hidden; }
         .room-boot-status { display: none; }
         html[data-room-boot='pending'] .room-boot-status { display: flex; position: fixed; inset: 0; align-items: center; justify-content: center; color: #887681; font: 14px system-ui, sans-serif; }
         html[data-room-boot='fallback'] .room-boot-status { display: flex; position: fixed; top: 58px; left: 50%; transform: translateX(-50%); z-index: 30000; gap: 12px; padding: 12px 16px; border-radius: 10px; background: #fff; color: #887681; box-shadow: 0 4px 24px #44364118; }
         .room-boot-status button { display: none; }
         html[data-room-boot='fallback'] .room-boot-status button { display: block; }
     </style>
-    <noscript><style>html[data-room-boot='pending'] #main, html[data-room-boot='pending'] .workspace-brand { visibility: visible; } .room-boot-status { display: none !important; }</style></noscript>
+    <noscript><style>html[data-room-boot='pending'] #main, html[data-room-boot='pending'] .workspace-topbar { visibility: visible; } .room-boot-status { display: none !important; }</style></noscript>
     <script src="/js/shared/room-boot.js"></script>
     <link rel="stylesheet" href="/style.css?v=ui-20261012">
     <link rel="stylesheet" href="/vendor/fontawesome/css/fontawesome.min.css">
@@ -33,9 +33,14 @@
 </head>
 <body>
     <div class="room-boot-status" role="status"><span data-room-load-message>正在加载布局…</span><button type="button" data-room-reload>刷新重试</button></div>
-    <header class="workspace-brand" aria-label="语音据点">
-        <span class="workspace-mark" aria-hidden="true">◖◗</span>
-        <strong>语音据点</strong>
+    <header class="workspace-topbar" aria-label="语音据点">
+        <div class="workspace-brand">
+            <span class="workspace-mark" aria-hidden="true">◖◗</span>
+            <strong>语音据点</strong>
+        </div>
+        <div class="workspace-actions">
+            <button type="button" class="workspace-copy-diagnostics" data-copy-call-diagnostics aria-live="polite" aria-atomic="true">复制诊断</button>
+        </div>
     </header>
     <div id="main" class="room-layout">
         <aside class="room-sidebar" aria-label="频道列表">
@@ -166,7 +171,6 @@
                             <summary>通话诊断与日志</summary>
                             <p class="media-device-status">非语音门控主要压低不讲话时的残留；讲话时的键盘声仍由 RNNoise 处理。本机保留最近 5 次日志，不录音。</p>
                             <div class="media-audio-options">
-                                <button type="button" data-copy-call-diagnostics>复制双方诊断与本次日志</button>
                                 <button type="button" data-show-call-logs>查看最近通话日志</button>
                                 <button type="button" data-clear-call-logs>清除历史日志</button>
                             </div>

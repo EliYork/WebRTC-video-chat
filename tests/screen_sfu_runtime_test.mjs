@@ -138,8 +138,57 @@ test('an unavailable optional SFU SDK preserves P2P and never stops the captured
     await runtime.publish(new StrictStream([track]));
     assert.equal(runtime.snapshot().hasUplink, false);
     assert.equal(runtime.usesServer('viewer'), false);
+    await runtime.setReceiveRoute('source', 'sfu');
+    assert.equal(runtime.getReceiveRoute('source').mode, 'sfu');
+    assert.equal(runtime.getReceiveRoute('source').route, 'p2p');
+    assert.equal(runtime.getReceiveRoute('source').available, false);
+    assert.match(runtime.getReceiveRoute('source').error, /不可用/);
+    assert.equal(runtime.getReceiveRoute('source').pending, false);
     runtime.leave();
     assert.equal(track.readyState, 'live');
+});
+
+test('manual route choices are isolated by sharer and admission failures retain a useful reason', async (t) => {
+    const api = load({ setTimeout: () => 0, clearTimeout() {}, setInterval: () => 0, clearInterval() {} });
+    const publications = ['first', 'second'].map((peerId) => ({ id: peerId, peerId, roomId: 'game', voiceSessionGeneration: 1 }));
+    const handlers = {};
+    const released = [];
+    let denied = false;
+    class Device {
+        async load() {}
+        createRecvTransport() {
+            return { id: 'recv', on() {}, close() {},
+                consume: async (parameters) => ({ kind: 'video', track: new StrictTrack('video', parameters.id), close() {} }) };
+        }
+    }
+    const socket = { connected: true, on(name, callback) { handlers[name] = callback; }, off() {},
+        emit(_, payload, ack) {
+            if (payload.action === 'unsubscribe') released.push(payload.publicationId);
+            if (denied && payload.action === 'consume' && payload.publicationId === 'first') {
+                ack({ ok: false, reason: 'server-bandwidth-limit' }); return;
+            }
+            const responses = { capabilities: { rtpCapabilities: {} }, list: { publications }, transport: { id: 'recv' },
+                consume: { peerId: payload.publicationId, consumers: [{ id: payload.publicationId, kind: 'video' }] } };
+            ack({ ok: true, ...responses[payload.action] });
+        } };
+    const rt = api.createRuntime({ config: { enabled: true }, Device, waitForMedia: async () => {} });
+    t.after(() => rt.leave());
+    rt.attachSocket(socket);
+    rt.setSession({ roomId: 'game', peerId: 'viewer', voiceSessionGeneration: 1 });
+    for (let i = 0; i < 120; i++) await Promise.resolve();
+    await rt.setReceiveRoute('first', 'p2p');
+    assert.deepEqual(released, ['first']);
+    assert.equal(rt.getReceiveRoute('second').mode, 'auto');
+    assert.equal(rt.getReceiveRoute('second').route, 'sfu');
+    await rt.setReceiveRoute('second', 'sfu');
+    denied = true;
+    await rt.setReceiveRoute('first', 'sfu');
+    assert.match(rt.getReceiveRoute('first').error, /带宽名额不足/);
+    assert.equal(rt.getReceiveRoute('first').route, 'p2p');
+    handlers['sfu:closed']({ ...publications[0], publicationId: 'first', reason: 'closed' });
+    assert.equal(rt.getReceiveRoute('second').error, '', 'another sharer closing cannot overwrite this status');
+    rt.leave();
+    assert.equal(rt.getReceiveRoute('second').mode, 'auto');
 });
 
 async function publishFixture({ primary = 'h264', startBitrate = 'browser', rejectH264 = false, offered = ['h264', 'vp8'], onRoutes, onUplinkBudget } = {}) {

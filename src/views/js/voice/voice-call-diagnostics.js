@@ -43,12 +43,13 @@
             WebAudio输出切换支持: typeof global.AudioContext?.prototype.setSinkId === 'function',
         };
     };
-    const createRuntime = ({ getState, getConnections, getSources, getAudioRole, sanitize, storage } = {}) => {
+    const createRuntime = ({ getState, getConnections, getSources, getAudioRole, getReceiverHealth, sanitize, storage } = {}) => {
         let sessions = [];
         let current;
         let socket;
         let timer;
         let saveTimer;
+        let copyFeedbackTimer;
         let pending;
         let pendingOwner;
         let lastObserved;
@@ -172,14 +173,20 @@
             observe();
             void tick();
         };
-        const report = async () => ({
-            版本: '1.0.5', 诊断格式: 4,
-            当前状态: await sample(),
-            当前会话: current ? sanitize(current) : null,
-            存储状态: storageState,
-            记录上限: limits,
-            日志覆盖说明: '本机最近5次通话；每次最多200事件，保留前12与最近12次采样；不录音。页面关闭仅能记录最后保存时间。',
-        });
+        const report = async () => {
+            const state = await sample();
+            return {
+                版本: '1.0.5', 诊断格式: 4,
+                // Keep failure evidence ahead of large histories in the relay's
+                // bounded allowlist traversal; do not duplicate it per snapshot.
+                ...(getReceiverHealth ? { SFU接收健康: sanitize(getReceiverHealth()) } : {}),
+                当前状态: state,
+                当前会话: current ? sanitize(current) : null,
+                存储状态: storageState,
+                记录上限: limits,
+                日志覆盖说明: '本机最近5次通话；每次最多200事件，保留前12与最近12次采样；不录音。页面关闭仅能记录最后保存时间。',
+            };
+        };
         const handleRequest = async (payload, ack) => {
             const generation = getState()?.会话?.generation;
             if (typeof ack !== 'function' || !current || !generation || payload?.voiceSessionGeneration !== generation) return;
@@ -204,17 +211,24 @@
         };
         const copyCombined = async (button) => {
             if (button?.disabled) return;
-            if (button) { button.disabled = true; button.textContent = '正在收集双方诊断…'; }
+            global.clearTimeout(copyFeedbackTimer);
+            if (button) { button.disabled = true; button.setAttribute('aria-busy', 'true'); button.textContent = '正在收集诊断…'; }
             try {
                 const data = await collectCombined();
                 const text = JSON.stringify(data, null, 2);
-                try { await global.navigator.clipboard.writeText(text); if (button) button.textContent = '双方诊断已复制'; }
+                try { await global.navigator.clipboard.writeText(text); if (button) button.textContent = '诊断已复制'; }
                 catch {
                     showText(text);
                     if (button) button.textContent = '请在日志窗口手动复制';
                 }
             } catch { if (button) button.textContent = '会话已变化，请重试'; }
-            finally { if (button) button.disabled = false; }
+            finally {
+                if (button) {
+                    button.disabled = false;
+                    button.setAttribute('aria-busy', 'false');
+                    copyFeedbackTimer = global.setTimeout(() => { button.textContent = '复制诊断'; copyFeedbackTimer = null; }, 2000);
+                }
+            }
         };
         const showText = (text) => {
             const dialog = global.document.createElement('dialog');
@@ -246,7 +260,7 @@
             attachSocket(next) { socket?.off?.('voice:diagnostics:sample', handleRequest); socket = next; socket?.on?.('voice:diagnostics:sample', handleRequest); },
             showLogs: () => showText(JSON.stringify({ 版本: '1.0.5', 诊断格式: 4, 存储状态: storageState, 通话: sessions.map(sanitize) }, null, 2)),
             clearLogs() { sessions = current ? [current] : []; persist(); },
-            destroy() { end('页面关闭'); socket?.off?.('voice:diagnostics:sample', handleRequest); },
+            destroy() { end('页面关闭'); global.clearTimeout(copyFeedbackTimer); socket?.off?.('voice:diagnostics:sample', handleRequest); },
         };
     };
     global.VoiceCallDiagnostics = { createRuntime, audioSummary };

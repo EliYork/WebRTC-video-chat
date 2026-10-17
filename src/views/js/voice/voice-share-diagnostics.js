@@ -201,19 +201,11 @@
             const note = global.document.createElement('p');
             note.textContent =
                 '每秒采样；null = 待采样或不支持。显示帧率指提交合成器。QP 仅适合同编码对比。编码能效报告不证明硬件选择或性能。SFU仅提供RTP包统计，不提供编码/解码帧率。需对比同一时段双端采样；静止画面低帧率不代表故障。';
-            const copy = global.document.createElement('button');
-            copy.type = 'button';
-            copy.textContent = '复制脱敏诊断';
             const output = global.document.createElement('pre');
             output.tabIndex = 0;
             output.textContent =
-                '展开后等待两个采样周期，复现模糊或卡顿再复制。';
-            panel.append(summary, note, copy, output);
-            const combined = global.document.createElement('button');
-            combined.type = 'button';
-            combined.textContent = '复制双方诊断与本次日志';
-            combined.addEventListener('click', () => global.VoiceCallDiagnostics?.copyCombined(combined));
-            panel.append(combined);
+                '展开后等待两个采样周期；复现模糊或卡顿后，可从页面右上角复制诊断。';
+            panel.append(summary, note, output);
             panel.addEventListener('dblclick', (event) =>
                 event.stopPropagation()
             );
@@ -234,16 +226,6 @@
                     state.video = null;
                     state.playbackBaseline = null;
                     state.baselines = new WeakMap();
-                }
-            });
-            copy.addEventListener('click', async () => {
-                try {
-                    await global.navigator.clipboard.writeText(
-                        output.textContent
-                    );
-                    copy.textContent = '已复制';
-                } catch {
-                    copy.textContent = '复制失败，请选中下方文本复制';
                 }
             });
         }

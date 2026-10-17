@@ -3,16 +3,57 @@
     background-color: var(--page);
 }
 
-.workspace-brand {
+.workspace-topbar {
     position: fixed;
-    top: 20px;
-    left: 3.125%;
-    z-index: 19000;
+    top: max(14px, env(safe-area-inset-top));
+    left: max(3.125%, env(safe-area-inset-left));
+    right: max(18px, env(safe-area-inset-right));
+    z-index: 20000;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-height: 44px;
+    pointer-events: none;
+}
+
+.workspace-brand {
     display: flex;
     align-items: center;
     gap: 10px;
-    pointer-events: none;
+    flex-shrink: 0;
     font-size: 15px;
+}
+
+.workspace-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    pointer-events: auto;
+}
+
+.workspace-copy-diagnostics {
+    box-sizing: border-box;
+    width: 124px;
+    min-height: 44px;
+    padding: 6px 10px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--panel);
+    box-shadow: var(--shadow);
+    color: var(--accent-strong);
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.workspace-copy-diagnostics:hover {
+    border-color: rgba(216, 111, 154, 0.42);
+    background: #fff2f7;
+}
+
+.workspace-copy-diagnostics:disabled {
+    cursor: wait;
+    opacity: 0.7;
 }
 
 .workspace-mark {
@@ -37,9 +78,19 @@
 }
 
 @media (max-width: 768px) {
-    .workspace-brand {
-        top: 16px;
-        left: 14px;
+    .workspace-topbar {
+        top: max(8px, env(safe-area-inset-top));
+        left: max(14px, env(safe-area-inset-left));
+        right: max(8px, env(safe-area-inset-right));
+    }
+    .workspace-actions .layout-settings-toggle {
+        width: 44px;
+        height: 44px;
+        min-width: 44px;
+    }
+    .workspace-actions .layout-settings-menu {
+        top: 50px;
+        right: -130px;
     }
     .workspace-tagline {
         display: none;

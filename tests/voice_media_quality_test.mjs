@@ -36,6 +36,7 @@ function element(tag) {
         classList: createClassList(),
         dataset: {},
         attributes: {},
+        listeners: {},
         textContent: '',
         append(...nodes) {
             nodes.forEach((node) => {
@@ -62,6 +63,9 @@ function element(tag) {
         setAttribute(k, v) {
             this.attributes[k] = v;
         },
+        addEventListener(name, listener) { this.listeners[name] = listener; },
+        showModal() { this.open = true; },
+        close() { this.open = false; this.listeners.close?.(); },
         querySelector(selector) {
             const cls = selector.startsWith('.') ? selector.slice(1) : null;
             for (const child of children) {
@@ -284,19 +288,19 @@ test('formats standard and non-standard resolutions', async () => {
     );
     assert.equal(
         (await sampleLabel({ framesWidth: 2560, framesHeight: 1440 })).text,
-        '接收 1440p'
+        '接收 1440p · 帧率待采样'
     );
     assert.equal(
         (await sampleLabel({ framesWidth: 3840, framesHeight: 2160 })).text,
-        '接收 4K'
+        '接收 4K · 帧率待采样'
     );
     assert.equal(
         (await sampleLabel({ framesWidth: 1600, framesHeight: 900 })).text,
-        '接收 1600×900'
+        '接收 1600×900 · 帧率待采样'
     );
 });
 
-test('omits missing pieces and never renders zero fps', async () => {
+test('distinguishes measured zero FPS from unavailable FPS', async () => {
     assert.equal(
         (
             await sampleLabel({
@@ -305,7 +309,7 @@ test('omits missing pieces and never renders zero fps', async () => {
                 framesPerSecond: 0,
             })
         ).text,
-        '接收 1080p'
+        '接收 1080p · 0fps'
     );
     assert.equal(
         (await sampleLabel({ framesPerSecond: 60 })).text,
@@ -331,7 +335,7 @@ test('falls back to element and track dimensions without CSS sizes', async () =>
                 { videoTrack: track({ width: 1280, height: 720 }) }
             )
         ).text,
-        '接收 720p'
+        '接收 720p · 帧率待采样'
     );
 });
 
@@ -509,4 +513,102 @@ test('independent peers, call replacement and timer cleanup', async () => {
     rt.stop('a');
     rt.stop('b');
     assert.equal(timers.size, 0);
+});
+
+function qualitySequence() {
+    const f = load();
+    const { tile } = tileStructure();
+    const videoTrack = { ...track(), id: 'playing-video' };
+    const s = stream(videoTrack);
+    let now = 0;
+    let playbackFrames = 0;
+    let rows = [];
+    f.win.performance = { now: () => now };
+    const source = { tile, stream: s, isScreenSharing: true,
+        video: { srcObject: s, videoWidth: 3840, videoHeight: 2160,
+            getVideoPlaybackQuality: () => ({ totalVideoFrames: playbackFrames }) },
+        pc: { getStats: async () => new Map(rows.map((row) => [row.id, row])) } };
+    const rt = f.win.VoiceMediaQualityRuntime.createRuntime({ getQualitySource: () => source, view: f.win.VoiceMediaQualityView });
+    rt.syncPeer('viewer');
+    return { ...f, source, rt, tile,
+        async step(reports, rendered = 60) {
+            now += 1000;
+            playbackFrames += rendered;
+            rows = reports.map((report) => ({ type: 'inbound-rtp', kind: 'video', timestamp: now, ...report }));
+            await f.runTimers();
+            return tile.querySelector('.voice-media-quality-pill').textContent;
+        } };
+}
+
+test('SFU quality ignores idle byte counters and prefers the playing track over other active receivers', async () => {
+    const f = qualitySequence();
+    const reports = (frames) => [
+        { id: 'idle', bytesReceived: 9000000, framesDecoded: 0 },
+        { id: 'other', trackIdentifier: 'other-track', framesDecoded: 9000, framesPerSecond: 15 },
+        { id: 'playing', trackIdentifier: 'playing-video', framesDecoded: frames },
+    ];
+    await f.step(reports(100));
+    assert.equal(await f.step(reports(160)), '接收 4K · 60fps');
+    const withoutIds = [{ id: 'idle', bytesReceived: 9000000 }, { id: 'playing', framesDecoded: 220 }];
+    assert.equal(await f.step(withoutIds), '接收 4K · 60fps');
+});
+
+test('FPS falls back to playback even when stats already provide dimensions', async () => {
+    const f = qualitySequence();
+    const rows = [{ id: 'no-fps', frameWidth: 3840, frameHeight: 2160 }];
+    assert.equal(await f.step(rows), '接收 4K · 帧率待采样');
+    assert.equal(await f.step(rows, 47), '接收 4K · 47fps');
+});
+
+test('zero decoded growth displays a stall immediately and report replacement never mixes counters', async () => {
+    const f = qualitySequence();
+    await f.step([{ id: 'old', framesDecoded: 100 }]);
+    assert.equal(await f.step([{ id: 'old', framesDecoded: 160 }]), '接收 4K · 60fps');
+    assert.equal(await f.step([{ id: 'old', framesDecoded: 160 }]), '接收 4K · 0fps');
+    assert.equal(await f.step([{ id: 'new', framesDecoded: 9000 }], 25), '接收 4K · 25fps');
+    assert.equal(await f.step([{ id: 'new', framesDecoded: 9030 }]), '接收 4K · 30fps');
+});
+
+test('route button is adjacent to FPS, binds once, exposes auto/manual choices and cleans up its dialog', async () => {
+    const { win } = load();
+    const { tile, controls } = tileStructure();
+    const view = win.VoiceMediaQualityView;
+    const current = { mode: 'auto', route: 'sfu', available: true, pending: false, error: '' };
+    const changes = [];
+    let finish;
+    const control = { get: () => current, change(mode) {
+        changes.push(mode);
+        current.mode = mode;
+        current.pending = true;
+        return new Promise((resolve) => { finish = () => { current.pending = false; resolve(); }; });
+    } };
+    view.render(tile, '4K · 60fps');
+    view.renderRoute(tile, control);
+    view.renderRoute(tile, control);
+    const button = tile.querySelector('.voice-route-toggle');
+    const dialog = tile.querySelector('.voice-route-dialog');
+    const checkbox = tile.querySelector('input');
+    const choices = tile.querySelector('.voice-route-choices');
+    assert.equal(controls.children.filter((child) => child === button).length, 1);
+    assert.equal(controls.children.indexOf(button), controls.children.indexOf(tile.querySelector('.voice-media-quality-pill')) + 1);
+    button.listeners.click({ stopPropagation() {} });
+    assert.equal(dialog.open, true);
+    assert.equal(checkbox.checked, true);
+    assert.ok(choices.children.every((choice) => choice.disabled));
+    checkbox.checked = false;
+    const manual = checkbox.listeners.change();
+    assert.deepEqual(changes, ['sfu'], 'unchecking auto holds the current route');
+    assert.equal(checkbox.disabled, true);
+    assert.equal(tile.querySelector('.voice-route-status').textContent, '正在切换…');
+    finish();
+    await manual;
+    assert.equal(choices.children[0].disabled, false);
+    const direct = choices.children[0].listeners.click();
+    assert.deepEqual(changes, ['sfu', 'p2p']);
+    finish();
+    await direct;
+    view.remove(tile);
+    assert.equal(dialog.open, false);
+    assert.equal(tile.querySelector('.voice-route-dialog'), undefined);
+    assert.equal(tile.querySelector('.voice-route-toggle'), undefined);
 });

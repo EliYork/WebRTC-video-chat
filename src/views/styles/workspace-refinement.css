@@ -9,8 +9,9 @@
         linear-gradient(var(--layout-grid-line-color) 1px, transparent 1px),
         linear-gradient(90deg, var(--layout-grid-line-color) 1px, transparent 1px);
 }
-.workspace-brand { top: 22px; font-size: 14px; gap: 9px; }
+.workspace-brand { font-size: 14px; gap: 9px; }
 .workspace-mark { width: 28px; height: 28px; border-radius: 8px; }
+.workspace-actions .desktop-window-toolbar { position: relative; top: auto; right: auto; }
 .page-layout-tile .tile-header { min-height: 36px; }
 .sidebar-channel-tree { padding: 12px; }
 .tree-channel-link { min-height: 42px; padding: 8px 12px; border-radius: 8px; }
@@ -141,7 +142,6 @@
     #buttons .media-dock-action-button span { font-size: 11px; }
 }
 @media (max-width: 768px) {
-    .workspace-brand { top: 16px; }
     #buttons button { min-height: 40px; }
     .media-device-popover { max-height: calc(100dvh - 32px); }
     #main .page-layout-board #buttons.media-dock { padding: 12px; gap: 12px; }

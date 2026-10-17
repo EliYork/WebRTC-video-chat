@@ -1,0 +1,108 @@
+{
+  "tag": "sfu-health-20261017-043338-233",
+  "status": "deployed",
+  "version": "1.0.5",
+  "deployedAt": "2026-10-16T20:36:58.014749+00:00",
+  "archive": "release/webrtc-video-chat-1.0.5-20261017-043338-233.zip",
+  "archiveBytes": 3844278,
+  "archiveSha256": "eb9a384db1452e40cd2f911e0003abdbf1b454edc6ecd26bf53f69c1e5b6f35a",
+  "archiveFiles": 128,
+  "deployedFiles": {
+    "src/views/js/voice/voice-screen-sfu-runtime.js": "4397c0f59085e05686a938339958221ecbab55e0e8d501fe5b5746e898a61200",
+    "src/views/js/voice/voice-call-diagnostics.js": "6940c36106305216fe4f112c22b61b9fbdedaf8017be4e9acf384d3a0341dbc3",
+    "src/views/script.js": "04cbfa9b3e354811322372f3f2905d5c705176c3ef2b1158fa9c90cb8709933c",
+    "src/views/js/shared/voice-diagnostic-schema.js": "0c15f85998cd014ea0b48baece3d3bdae9705d62109ad53f8f018456a9e265fd"
+  },
+  "appsBefore": [
+    {
+      "name": "voice-room",
+      "pm_id": 0,
+      "pid": 523169,
+      "status": "online",
+      "cwd": "/www/wwwroot/voice.eliyork.com",
+      "exec_path": "/www/wwwroot/voice.eliyork.com/src/server.js",
+      "restart_time": 0
+    },
+    {
+      "name": "friend-footprints",
+      "pm_id": 2,
+      "pid": 600469,
+      "status": "online",
+      "cwd": "/www/wwwroot/map.eliyork.com",
+      "exec_path": "/www/wwwroot/map.eliyork.com/server-dist/index.js",
+      "restart_time": 0
+    }
+  ],
+  "appsAfter": [
+    {
+      "name": "voice-room",
+      "pm_id": 0,
+      "pid": 628639,
+      "status": "online",
+      "cwd": "/www/wwwroot/voice.eliyork.com",
+      "exec_path": "/www/wwwroot/voice.eliyork.com/src/server.js",
+      "restart_time": 1
+    },
+    {
+      "name": "friend-footprints",
+      "pm_id": 2,
+      "pid": 600469,
+      "status": "online",
+      "cwd": "/www/wwwroot/map.eliyork.com",
+      "exec_path": "/www/wwwroot/map.eliyork.com/server-dist/index.js",
+      "restart_time": 0
+    }
+  ],
+  "mediasoupWorkerPid": 628653,
+  "serviceRestarted": true,
+  "schemaProbePassed": true,
+  "protectedFilesUnchanged": {
+    ".env": true,
+    "data/chat-history.json": true,
+    "node_modules/mediasoup/package.json": true,
+    "src/utils/ScreenSfuService.js": true,
+    "src/utils/ScreenSfuBudget.js": true,
+    "src/utils/VoiceDiagnosticsRelay.js": true,
+    "package.json": true,
+    "package-lock.json": true
+  },
+  "rollback": "/www/backup/voice-deploy/sfu-health-20261017-043338-233/rollback.py",
+  "startupMarkers": [
+    "Monday 12/10/2026 22:19:33.833 INFO  [sfu] ready on UDP/TCP 44444; video=22000000bps total=23000000bps",
+    "Saturday 17/10/2026 04:36:57.682 INFO  [sfu] ready on UDP/TCP 44444; video=22000000bps total=23000000bps"
+  ],
+  "tests": {
+    "passed": 345,
+    "failed": 0,
+    "skipped": 0
+  },
+  "publicVerification": {
+    "utc": "2026-10-16T20:37:26.904Z",
+    "files": [
+      {
+        "file": "src/views/js/voice/voice-screen-sfu-runtime.js",
+        "status": 200,
+        "sha256": "4397C0F59085E05686A938339958221ECBAB55E0E8D501FE5B5746E898A61200"
+      },
+      {
+        "file": "src/views/js/voice/voice-call-diagnostics.js",
+        "status": 200,
+        "sha256": "6940C36106305216FE4F112C22B61B9FBDEDAF8017BE4E9ACF384D3A0341DBC3"
+      },
+      {
+        "file": "src/views/script.js",
+        "status": 200,
+        "sha256": "04CBFA9B3E354811322372F3F2905D5C705176C3EF2B1158FA9C90CB8709933C"
+      },
+      {
+        "file": "src/views/js/shared/voice-diagnostic-schema.js",
+        "status": 200,
+        "sha256": "0C15F85998CD014EA0B48BAECE3D3BDAE9705D62109AD53F8F018456A9E265FD"
+      }
+    ],
+    "roomHttpStatus": 200,
+    "browserManualAcceptancePerformed": false
+  },
+  "browserManualAcceptancePerformed": false,
+  "physicalAcceptance": "user-pending"
+}

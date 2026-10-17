@@ -48,7 +48,8 @@
             return {};
         }
 
-        const existing = mainLayout.querySelector('.page-layout-toolbar');
+        const toolbarHost = global.document.querySelector('.workspace-actions') || mainLayout;
+        const existing = toolbarHost.querySelector('.page-layout-toolbar');
         if (existing) {
             return {
                 componentMenu: existing.querySelector('.layout-component-menu'),
@@ -103,7 +104,7 @@
         layoutGroup.append(layoutGroupLabel, resetDefaultButton);
         settingsMenu.append(settingsHeading, windowGroup, layoutGroup);
         toolbar.append(settingsToggle, settingsMenu, saveStatus);
-        mainLayout.prepend(toolbar);
+        toolbarHost.prepend(toolbar);
 
         return {
             componentMenu,

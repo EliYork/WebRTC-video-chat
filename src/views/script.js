@@ -358,6 +358,7 @@ const voicePeerRegistry = voicePeerRegistryApi.createRegistry({
 screenSfuRuntime = window.VoiceScreenSfuRuntime.createRuntime({
     config: window.voiceScreenSfuConfig || {},
     onRouteEvent: (event) => callDiagnostics?.record('共享路径事件', event),
+    onReceiverFailure: (failure) => callDiagnostics?.record('SFU接收回退诊断', failure),
     onRoutes: () => {
         updateScreenP2pBudget();
         if (currentPeer) refreshVoiceCallsForLocalMedia(currentPeer);
@@ -434,8 +435,13 @@ const getDiagnosticQualitySource = (peerId) => {
             ...(serverSource ? { pc: serverSource.pc } : {}),
             serverHealth: serverSource?.serverHealth,
             screenRoute: serverSource ? '服务器转发' : 'P2P',
+            routeControl: {
+                get: () => screenSfuRuntime.getReceiveRoute(peerId),
+                change: (mode) => screenSfuRuntime.setReceiveRoute(peerId, mode),
+            },
             isScreenSharing: screenSharers.has(peerId),
             stream: playbackStream,
+            tile,
             video: tile?.querySelector('video'),
         };
 };
@@ -5029,6 +5035,7 @@ window.addEventListener('popstate', () => {
 
 callDiagnostics = window.VoiceCallDiagnostics.createRuntime({
     sanitize: sanitizeVoiceDiagnostic,
+    getReceiverHealth: () => screenSfuRuntime.getReceiverHealth(),
     getState: () => {
         const session = voiceSessionRuntime.getSnapshot();
         const settings = audioSettingsController.snapshot();
@@ -5108,8 +5115,7 @@ callDiagnostics = window.VoiceCallDiagnostics.createRuntime({
         return null;
     },
 });
-window.VoiceCallDiagnostics.copyCombined = (button) => callDiagnostics.copyCombined(button);
-mediaDockRoot.querySelector('[data-copy-call-diagnostics]')?.addEventListener('click', (event) => callDiagnostics.copyCombined(event.currentTarget));
+document.querySelector('[data-copy-call-diagnostics]')?.addEventListener('click', (event) => callDiagnostics.copyCombined(event.currentTarget));
 mediaDockRoot.querySelector('[data-show-call-logs]')?.addEventListener('click', () => callDiagnostics.showLogs());
 mediaDockRoot.querySelector('[data-clear-call-logs]')?.addEventListener('click', (event) => {
     callDiagnostics.clearLogs();
