@@ -333,7 +333,7 @@ app.get('/room/:channel', (req, res) => {
         channelName: channel.name,
         roomBootstrap: JSON.stringify({
             iceServers: iceServersList,
-            screenSfu: { enabled: screenSfuConfig.enabled, videoBitrate: screenSfuConfig.videoBitrate, initialViewerBitrate: screenSfuConfig.initialViewerBitrate, p2pBudget: 24000000 },
+            screenSfu: { enabled: screenSfuConfig.enabled, videoBitrate: screenSfuConfig.videoBitrate, initialViewerBitrate: screenSfuConfig.initialViewerBitrate, defaultReceiveMode: 'p2p-first', p2pBudget: 24000000 },
             roomId: channel.slug,
         }).replace(
             /[<>&\u2028\u2029]/g,

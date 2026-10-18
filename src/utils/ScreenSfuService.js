@@ -47,6 +47,31 @@ const boundedConsumerStats = (consumer) => new Promise((resolve) => {
     Promise.resolve().then(() => consumer.getStats()).then(resolve, () => resolve([])).finally(() => clearTimeout(timer));
 });
 
+// Observe the default uplink's real transmitted bytes, including other sites.
+// First sample, unsupported hosts and counter resets remain unknown.
+export const createHostEgressSampler = (read = readFile, now = Date.now) => {
+    let previous;
+    return async () => {
+        try {
+            const routes = (await read('/proc/net/route', 'utf8')).trim().split('\n').slice(1)
+                .map((line) => line.trim().split(/\s+/))
+                .filter((row) => row[1] === '00000000' && (parseInt(row[3], 16) & 1))
+                .sort((a, b) => Number(a[6]) - Number(b[6]));
+            const iface = routes[0]?.[0];
+            if (!iface || !/^[\w.-]+$/.test(iface)) throw new Error('no uplink');
+            const bytes = Number((await read(`/sys/class/net/${iface}/statistics/tx_bytes`, 'utf8')).trim());
+            const at = now();
+            const old = previous;
+            previous = Number.isSafeInteger(bytes) && bytes >= 0 ? { iface, bytes, at } : undefined;
+            return previous && old?.iface === iface && at > old.at && bytes >= old.bytes
+                ? (bytes - old.bytes) * 8000 / (at - old.at) : null;
+        } catch {
+            previous = undefined;
+            return null;
+        }
+    };
+};
+
 // Linux keeps reclaimable cache in used memory. MemAvailable reflects what
 // applications can allocate without swapping; MemFree would reject this 1GB host.
 const availableMemory = async () => {
@@ -68,6 +93,8 @@ export const createScreenSfuService = ({
     logger,
     createWorker,
     resourceSample,
+    egressSample = createHostEgressSampler(),
+    now = Date.now,
 } = {}) => {
     const budget = createScreenSfuBudget(config);
     const rooms = new Map();
@@ -87,6 +114,15 @@ export const createScreenSfuService = ({
     let lastNodeCpu = process.cpuUsage();
     let lastSampleTime = Date.now();
     let health = { available: true };
+    let trafficSampling = false;
+    let egress = { sampledAt: 0, sfuBps: null, hostBps: null, rtxBps: null, probationBps: null };
+    let egressBlocked = false;
+    let highSamples = 0;
+    let lowSamples = 0;
+    let lastReleaseAt = -Infinity;
+    const transportTimestamps = new WeakMap();
+    const demandFor = (publication) => publication.demandAt !== undefined && now() - publication.demandAt <= 6000
+        ? publication.demand : config.initialViewerBitrate + config.audioBitrate;
 
     const validClient = (client) => {
         const owner = getVoiceOwner(client.socket);
@@ -110,8 +146,7 @@ export const createScreenSfuService = ({
         emit(publication.client, 'sfu:routes', {
             publicationId: publication.id,
             uplinkBitrate:
-                publication.demand ||
-                config.initialViewerBitrate + config.audioBitrate,
+                demandFor(publication),
             videoMaxBitrate:
                 publication.videoMaxBitrate || config.initialViewerBitrate,
             peerIds: [...publication.subscriptions.values()]
@@ -232,6 +267,8 @@ export const createScreenSfuService = ({
         }
     };
     const sampleTraffic = async () => {
+        if (trafficSampling || stopped) return;
+        trafficSampling = true;
         try {
             const currentPublications = [...publications.values()].filter(
                 (publication) => publication.published
@@ -240,27 +277,32 @@ export const createScreenSfuService = ({
                 currentPublications.map(async (publication) => {
                     const reports = await Promise.all(
                         [...publication.producers.values()].map((producer) =>
-                            producer.getStats()
+                            boundedConsumerStats(producer)
                         )
                     );
                     if (publications.get(publication.id) !== publication)
                         return;
-                    const actual = reports
-                        .flat()
-                        .filter((report) => report.type === 'inbound-rtp')
-                        .reduce(
-                            (sum, report) => sum + (report.bitrate || 0),
-                            0
-                        );
-                    publication.demand = Math.max(
-                        config.initialViewerBitrate + config.audioBitrate,
-                        Math.ceil(actual * 1.2)
-                    );
+                    const rows = reports.flat().filter((report) => report.type === 'inbound-rtp');
+                    const ready = [...publication.subscriptions.values()].some((subscription) => subscription.ready);
+                    const valid = reports.length > 0 && reports.every((report) => report.some((row) =>
+                        row.type === 'inbound-rtp' && safeNumber(row.bitrate) !== null)) &&
+                        rows.every((row) => safeNumber(row.bitrate) !== null);
+                    if (valid && ready) {
+                        const actual = rows.reduce((sum, row) => sum + row.bitrate, 0);
+                        // Only 5% within the media budget; the separate 4Mbps
+                        // reserve covers host/protocol headroom. 15Mbps + audio
+                        // can fit one viewer without clamping excess demand.
+                        publication.demand = Math.max(config.audioBitrate, Math.ceil(actual * 1.05));
+                        publication.demandAt = now();
+                    } else {
+                        publication.demand = undefined;
+                        publication.demandAt = undefined;
+                    }
                     const videoBytes = reports.flat()
                         .filter((report) => report.type === 'inbound-rtp' && report.kind === 'video')
                         .reduce((sum, report) => sum + (report.byteCount || 0), 0);
                     const ingress = summarizeScreenSfuStats(reports.flat(), 'inbound-rtp');
-                    const sampledAt = Date.now();
+                    const sampledAt = now();
                     emit(publication.client, 'sfu:health', {
                         publicationId: publication.id, videoBytes,
                         serverHealth: { 采样时间_ms: sampledAt, 入站: ingress },
@@ -279,8 +321,6 @@ export const createScreenSfuService = ({
                     // Keep the original quality ceiling for active viewing.
                     // Admission and P2P failover handle downstream congestion;
                     // a weak receiver must not lower the shared source bitrate.
-                    const ready = [...publication.subscriptions.values()]
-                        .some((subscription) => subscription.ready);
                     if (!ready) {
                         // Keep enough video for a pending viewer to decode, but
                         // don't let an unused SFU uplink starve P2P fallback.
@@ -295,9 +335,7 @@ export const createScreenSfuService = ({
                         ([viewerId, subscription]) => ({
                             key: `${publication.id}:${viewerId}`,
                             amount:
-                                publication.demand ||
-                                config.initialViewerBitrate +
-                                    config.audioBitrate,
+                                demandFor(publication),
                             sequence: subscription.sequence,
                             publication,
                             viewerId,
@@ -305,22 +343,60 @@ export const createScreenSfuService = ({
                     )
                 )
                 .sort((a, b) => a.sequence - b.sequence);
-            const rejected = new Set(budget.rebalance(entries));
-            entries
-                .filter((entry) => rejected.has(entry.key))
-                .forEach((entry) =>
-                    dropSubscription(
-                        entry.publication,
-                        entry.viewerId,
-                        'server-bandwidth-priority'
-                    )
-                );
+            budget.refresh(entries);
+            const transports = [...new Set([...clients.values()].flatMap((client) =>
+                [...client.transports.values()].filter((transport) => !transport.closed && transport.appData.direction === 'recv')))];
+            const [outgoing, hostBps] = await Promise.all([
+                Promise.all(transports.map(async (transport) => {
+                    const rows = await boundedConsumerStats(transport);
+                    if (transport.closed) return null;
+                    const row = rows.find((item) => item.type === 'webrtc-transport');
+                    const previous = transportTimestamps.get(transport);
+                    if (!row || safeNumber(row.sendBitrate) === null || !Number.isFinite(row.timestamp) ||
+                        (previous !== undefined && row.timestamp <= previous)) return null;
+                    transportTimestamps.set(transport, row.timestamp);
+                    return row;
+                })),
+                Promise.resolve().then(egressSample).catch(() => null),
+            ]);
+            if (stopped) return;
+            const known = outgoing.every(Boolean);
+            const total = (key) => known && outgoing.every((row) => safeNumber(row[key]) !== null)
+                ? outgoing.reduce((sum, row) => sum + row[key], 0) : null;
+            egress = { sampledAt: now(), sfuBps: total('sendBitrate'), hostBps: safeNumber(hostBps),
+                rtxBps: total('rtxSendBitrate'), probationBps: total('probationSendBitrate') };
+            const high = (egress.sfuBps !== null && egress.sfuBps > config.payloadBudget) ||
+                (egress.hostBps !== null && egress.hostBps > config.payloadBudget);
+            const low = egress.sfuBps !== null && egress.sfuBps < config.payloadBudget * .9 &&
+                (egress.hostBps === null || egress.hostBps < config.payloadBudget * .9);
+            highSamples = high ? highSamples + 1 : 0;
+            lowSamples = low ? lowSamples + 1 : 0;
+            if (high && !egressBlocked) {
+                egressBlocked = true;
+                logger?.warn?.(`[sfu] egress admission paused; sfu=${egress.sfuBps}bps host=${egress.hostBps}bps`);
+            } else if (egressBlocked && lowSamples >= 3) {
+                egressBlocked = false;
+                logger?.info?.('[sfu] egress recovered; admission resumed');
+            }
+            // A transient burst never kicks a viewer. Persistent real egress
+            // releases at most one newest subscription per 15 seconds.
+            if (highSamples >= 3 && now() - lastReleaseAt >= 15000) {
+                const latest = entries.filter((entry) => entry.publication.subscriptions.get(entry.viewerId)?.sequence === entry.sequence).at(-1);
+                if (latest) {
+                    lastReleaseAt = now();
+                    highSamples = 0;
+                    dropSubscription(latest.publication, latest.viewerId, 'server-bandwidth-priority');
+                    logger?.warn?.('[sfu] sustained egress pressure; one viewer returned to P2P');
+                }
+            }
             currentPublications.forEach((publication) => {
                 if (publications.get(publication.id) === publication)
                     notifyRoutes(publication);
             });
         } catch (error) {
             logger?.warn?.(`[sfu] bitrate sampling failed: ${error.message}`);
+        } finally {
+            trafficSampling = false;
         }
     };
     const start = () => {
@@ -351,6 +427,7 @@ export const createScreenSfuService = ({
             trafficTimer = setInterval(() => void sampleTraffic(), 2000);
             trafficTimer.unref?.();
             await sampleHealth();
+            await sampleTraffic();
             logger?.info?.(
                 `[sfu] ready on UDP/TCP ${config.port}; video=${config.videoBitrate}bps total=${config.payloadBudget}bps`
             );
@@ -630,10 +707,12 @@ export const createScreenSfuService = ({
                 'recv'
             );
             if (!subscription) {
+                if (egressBlocked || (budget.snapshot().viewers > 0 &&
+                    (now() - egress.sampledAt > 6000 || egress.sfuBps === null))) throw fail('server-bandwidth-limit');
                 if (
                     !budget.reserve(
                         `${publication.id}:${socket.id}`,
-                        publication.demand || config.initialViewerBitrate + config.audioBitrate
+                        demandFor(publication)
                     )
                 )
                     throw fail('server-bandwidth-limit');
@@ -790,6 +869,7 @@ export const createScreenSfuService = ({
             ...budget.snapshot(),
             unhealthy,
             health,
+            egress: { ...egress, admissionBlocked: egressBlocked },
         }),
         close: () => {
             stopped = true;

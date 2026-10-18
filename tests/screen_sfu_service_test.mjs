@@ -6,7 +6,7 @@ import {
     readScreenSfuConfig,
     createScreenSfuBudget,
 } from '../src/utils/ScreenSfuBudget.js';
-import { createScreenSfuService, summarizeScreenSfuStats, screenRouterCodecs } from '../src/utils/ScreenSfuService.js';
+import { createScreenSfuService, summarizeScreenSfuStats, screenRouterCodecs, createHostEgressSampler } from '../src/utils/ScreenSfuService.js';
 
 let sequence = 0;
 test('SFU stats expose video packet counters only and missing counters remain unknown', () => {
@@ -32,9 +32,12 @@ class NativeObject extends EventEmitter {
     }
 }
 const fixture = (overrides = {}) => {
-    const config = readScreenSfuConfig({ SFU_ANNOUNCED_ADDRESS: '127.0.0.1', SFU_EGRESS_MBPS: 30, SFU_VIDEO_MBPS: 22, SFU_PAYLOAD_MBPS: 23, ...overrides });
+    const config = readScreenSfuConfig({ SFU_ANNOUNCED_ADDRESS: '127.0.0.1', SFU_EGRESS_MBPS: 30, SFU_VIDEO_MBPS: 22, SFU_PAYLOAD_MBPS: 23, SFU_INITIAL_VIEWER_MBPS: 5.5, ...overrides });
     const created = [];
     let trafficBitrate = 0;
+    let clock = 100000;
+    let hostBps = 0;
+    const logs = [];
     const fakeWorker = new NativeObject();
     fakeWorker.createWebRtcServer = async () => new NativeObject();
     fakeWorker.getResourceUsage = async () => ({
@@ -55,7 +58,10 @@ const fixture = (overrides = {}) => {
                 dtlsParameters: {},
             });
             transport.connect = async () => {};
-            transport.getStats = async () => [{ availableOutgoingBitrate: transport.capacity || 23000000 }];
+            transport.getStats = async () => [{ type: 'webrtc-transport', timestamp: clock,
+                sendBitrate: transport.consumers?.some((consumer) => !consumer.closed && !consumer.paused) ? transport.sendBitrate ?? 0 : 0, rtxSendBitrate: transport.rtxSendBitrate ?? 0,
+                probationSendBitrate: transport.probationSendBitrate ?? 0,
+                availableOutgoingBitrate: transport.capacity || 23000000 }];
             transport.setMaxIncomingBitrate = async (value) => {
                 transport.incoming = value;
             };
@@ -96,7 +102,12 @@ const fixture = (overrides = {}) => {
         getVoiceOwner: (socket) => socket.owner,
         createWorker: async () => fakeWorker,
         resourceSample: () => sample,
+        egressSample: () => hostBps,
+        now: () => clock,
+        logger: { warn: (line) => logs.push(line), info: (line) => logs.push(line) },
     });
+    const sampleTraffic = service.sampleTraffic;
+    service.sampleTraffic = () => { clock += 2000; return sampleTraffic(); };
     const socket = (peerId, roomId = 'game') => ({
         id: peerId,
         disconnected: false,
@@ -152,6 +163,9 @@ const fixture = (overrides = {}) => {
         subscribe,
         created,
         fakeWorker,
+        logs,
+        setHostBps: (value) => { hostBps = value; },
+        advance: (ms) => { clock += ms; },
         setSample: (next) => {
             sample = next;
         },
@@ -162,7 +176,7 @@ const fixture = (overrides = {}) => {
 };
 
 test('global budget admits four 5.5Mbps viewers, rejects fifth, and returns released capacity', () => {
-    const config = readScreenSfuConfig({ SFU_EGRESS_MBPS: 30, SFU_VIDEO_MBPS: 22, SFU_PAYLOAD_MBPS: 23 });
+    const config = readScreenSfuConfig({ SFU_EGRESS_MBPS: 30, SFU_VIDEO_MBPS: 22, SFU_PAYLOAD_MBPS: 23, SFU_INITIAL_VIEWER_MBPS: 5.5 });
     assert.equal(config.enabled, false);
     assert.throws(() => readScreenSfuConfig({ SFU_VIDEO_MBPS: '27' }));
     assert.throws(() => readScreenSfuConfig({ SFU_PORT: '44444.5' }));
@@ -304,7 +318,7 @@ test('concurrent viewers share the global budget; only resumed/ready receivers s
     assert.equal(f.service.snapshot().viewers, 3);
     assert.equal((await f.subscribe(viewers[4], id)).ok, true);
 });
-test('one or two viewers may exceed 5.5Mbps; rising demand evicts newest viewers without cutting older bitrate', async (t) => {
+test('rising source estimates block new admission without evicting existing viewers on a transient change', async (t) => {
     const f = fixture();
     t.after(f.service.close);
     const publisher = f.socket('publisher');
@@ -322,12 +336,12 @@ test('one or two viewers may exceed 5.5Mbps; rising demand evicts newest viewers
     }
     f.setBitrate(8000000);
     await f.service.sampleTraffic();
-    assert.equal(f.service.snapshot().viewers, 2);
-    assert.equal(f.service.snapshot().reservedBps, 19200000);
+    assert.equal(f.service.snapshot().viewers, 4);
+    assert.equal(f.service.snapshot().reservedBps, 33600000);
     assert.deepEqual(
         publisher.events.filter((event) => event.event === 'sfu:routes').at(-1)
             .payload.peerIds,
-        ['first', 'second']
+        ['first', 'second', 'third', 'fourth']
     );
     assert.equal(
         (await f.subscribe(f.socket('later'), id)).reason,
@@ -335,13 +349,13 @@ test('one or two viewers may exceed 5.5Mbps; rising demand evicts newest viewers
     );
     f.setBitrate(15000000);
     await f.service.sampleTraffic();
-    assert.equal(f.service.snapshot().viewers, 1);
+    assert.equal(f.service.snapshot().viewers, 4);
     assert.deepEqual(
         publisher.events.filter((event) => event.event === 'sfu:routes').at(-1)
             .payload.peerIds,
-        ['first']
+        ['first', 'second', 'third', 'fourth']
     );
-    assert.equal(f.service.snapshot().reservedBps, 18000000);
+    assert.equal(f.service.snapshot().reservedBps, 63000000);
 });
 
 test('stop/restart sharing frees send transport and budget while retaining receive session', async (t) => {
@@ -424,8 +438,8 @@ const outlet20 = {
     SFU_VIDEO_MBPS: 15,
 };
 
-test('20Mbps with 5.5Mbps initial reserve remains limited to two subscriptions even for a quiet source', async (t) => {
-    const f = fixture(outlet20);
+test('initial reservations yield to real low-rate AV1 demand rather than retaining a permanent viewer-count floor', async (t) => {
+    const f = fixture({ ...outlet20, SFU_INITIAL_VIEWER_MBPS: 3.5 });
     t.after(f.service.close);
     const source = f.socket('source');
     const id = await f.publish(source);
@@ -437,12 +451,15 @@ test('20Mbps with 5.5Mbps initial reserve remains limited to two subscriptions e
     }
     f.setBitrate(1000000);
     await f.service.sampleTraffic();
-    assert.equal(f.service.snapshot().reservedBps, 11256000);
-    assert.equal((await f.subscribe(f.socket('third'), id)).reason, 'server-bandwidth-limit');
-    assert.equal(f.service.snapshot().viewers, 2);
+    assert.equal(f.service.snapshot().reservedBps, 2100000);
+    assert.equal((await f.subscribe(f.socket('third'), id)).ok, true);
+    assert.equal(f.service.snapshot().viewers, 3);
+    f.advance(7000);
+    // Expired measurements cannot masquerade as a cheap live source.
+    assert.equal((await f.subscribe(f.socket('stale'), id)).reason, 'server-bandwidth-limit');
 });
 
-test('proposed 3.5Mbps reserve admits four low-rate subscriptions but measured demand can evict even the last viewer', async (t) => {
+test('3.5Mbps admits four initial subscriptions and one 15Mbps source plus audio fits without clamping demand', async (t) => {
     const f = fixture({ ...outlet20, SFU_INITIAL_VIEWER_MBPS: 3.5 });
     t.after(f.service.close);
     const source = f.socket('source');
@@ -455,27 +472,23 @@ test('proposed 3.5Mbps reserve admits four low-rate subscriptions but measured d
     }
     assert.equal(f.service.snapshot().reservedBps, 14512000);
     assert.equal((await f.subscribe(viewers[4], id)).reason, 'server-bandwidth-limit');
-    for (const [bitrate, remaining, reserved] of [
-        [3300000, 4, 15840000],
-        [4400000, 3, 15840000],
-        [6600000, 2, 15840000],
-        [13200000, 1, 15840000],
-        [15000000, 0, 0],
-    ]) {
+    for (const bitrate of [3300000, 4400000, 6600000, 13200000, 15000000]) {
         f.setBitrate(bitrate);
         await f.service.sampleTraffic();
-        assert.equal(f.service.snapshot().viewers, remaining);
-        assert.equal(f.service.snapshot().reservedBps, reserved);
-        if (remaining > 0) {
-            const route = source.events.filter((event) => event.event === 'sfu:routes').at(-1).payload;
-            assert.equal(route.videoMaxBitrate, 15000000, '15Mbps remains a ceiling rather than a fixed measured rate');
-        }
+        assert.equal(f.service.snapshot().viewers, 4);
+        assert.equal(f.service.snapshot().reservedBps, Math.ceil(bitrate * 1.05) * 4);
+        const route = source.events.filter((event) => event.event === 'sfu:routes').at(-1).payload;
+        assert.equal(route.videoMaxBitrate, 15000000);
     }
-    assert.ok(viewers.slice(0, 4).every((viewer) => viewer.events.some((event) =>
-        event.event === 'sfu:closed' && event.payload.reason === 'server-bandwidth-priority')));
+    for (const viewer of viewers.slice(1, 4)) f.service.cleanupSocket(viewer);
+    f.setBitrate(15128000);
+    await f.service.sampleTraffic();
+    assert.equal(f.service.snapshot().reservedBps, 15884400);
+    assert.equal(f.service.snapshot().viewers, 1);
+    assert.equal((await f.subscribe(f.socket('over-budget'), id)).reason, 'server-bandwidth-limit');
 });
 
-test('proposed four-subscription allowance is shared across publishers and channels, not four per source', async (t) => {
+test('unknown-source initial allowance is shared across publishers and channels, not four per source', async (t) => {
     const f = fixture({ ...outlet20, SFU_INITIAL_VIEWER_MBPS: 3.5 });
     t.after(f.service.close);
     for (const room of ['game', 'project']) {
@@ -489,6 +502,122 @@ test('proposed four-subscription allowance is shared across publishers and chann
     }
     assert.equal(f.service.snapshot().viewers, 4);
     assert.equal(f.service.snapshot().reservedBps, 14512000);
+});
+
+test('real total SFU egress tolerates bursts, releases one viewer after sustained pressure and waits 15s before another', async (t) => {
+    const f = fixture({ ...outlet20, SFU_INITIAL_VIEWER_MBPS: 3.5 });
+    t.after(f.service.close);
+    const source = f.socket('source');
+    const id = await f.publish(source);
+    for (let index = 0; index < 4; index++) {
+        const viewer = f.socket(`viewer-${index}`);
+        await f.subscribe(viewer, id);
+        await f.request(viewer, 'resume', { publicationId: id });
+        await f.request(viewer, 'ready', { publicationId: id });
+        f.created[index + 1].sendBitrate = 6000000;
+        f.created[index + 1].rtxSendBitrate = 500000;
+        f.created[index + 1].probationSendBitrate = 100000;
+    }
+    await f.service.sampleTraffic();
+    assert.equal(f.service.snapshot().egress.sfuBps, 24000000);
+    assert.equal(f.service.snapshot().egress.rtxBps, 2000000);
+    assert.equal(f.service.snapshot().egress.probationBps, 400000);
+    assert.equal(f.service.snapshot().viewers, 4, 'one burst never releases a viewer');
+    assert.equal(f.service.snapshot().egress.admissionBlocked, true);
+    assert.equal((await f.subscribe(f.socket('new'), id)).reason, 'server-bandwidth-limit');
+    f.created.slice(1, 5).forEach((transport) => { transport.sendBitrate = 1000000; });
+    await f.service.sampleTraffic();
+    f.created.slice(1, 5).forEach((transport) => { transport.sendBitrate = 6000000; });
+    for (let index = 0; index < 2; index++) await f.service.sampleTraffic();
+    assert.equal(f.service.snapshot().viewers, 4);
+    await f.service.sampleTraffic();
+    assert.equal(f.service.snapshot().viewers, 3);
+    for (let index = 0; index < 3; index++) await f.service.sampleTraffic();
+    assert.equal(f.service.snapshot().viewers, 3, 'no frequent repeated eviction');
+    f.advance(9000);
+    await f.service.sampleTraffic();
+    assert.equal(f.service.snapshot().viewers, 2);
+    for (let index = 0; index < 3; index++) await f.service.sampleTraffic();
+    assert.equal(f.service.snapshot().egress.admissionBlocked, false);
+    assert.equal(f.logs.filter((line) => /admission paused/.test(line)).length, 1);
+    assert.equal(f.logs.filter((line) => /admission resumed/.test(line)).length, 1);
+    assert.equal(f.logs.filter((line) => /one viewer returned/.test(line)).length, 2);
+});
+
+test('host traffic protects shared outlet; unknown or repeated Transport statistics do not masquerade as zero', async (t) => {
+    const f = fixture({ ...outlet20, SFU_INITIAL_VIEWER_MBPS: 3.5 });
+    t.after(f.service.close);
+    const id = await f.publish(f.socket('source'));
+    const viewer = f.socket('viewer');
+    await f.subscribe(viewer, id);
+    await f.request(viewer, 'resume', { publicationId: id });
+    await f.request(viewer, 'ready', { publicationId: id });
+    f.setBitrate(1000000);
+    f.setHostBps(18000000);
+    await f.service.sampleTraffic();
+    assert.equal(f.service.snapshot().egress.hostBps, 18000000);
+    assert.equal(f.service.snapshot().egress.admissionBlocked, true);
+    assert.equal(f.service.snapshot().viewers, 1);
+    f.setHostBps(0);
+    const timestamp = 123;
+    f.created[1].getStats = async () => [{ type: 'webrtc-transport', timestamp, sendBitrate: 0 }];
+    await f.service.sampleTraffic();
+    await f.service.sampleTraffic();
+    assert.equal(f.service.snapshot().egress.sfuBps, null);
+    assert.equal((await f.subscribe(f.socket('unknown'), id)).reason, 'server-bandwidth-limit');
+    assert.equal(f.service.snapshot().viewers, 1, 'missing data alone does not evict');
+});
+
+test('missing source measurements restore initial reservation and concurrent samples are bounded and cannot revive stopped state', async (t) => {
+    const f = fixture({ ...outlet20, SFU_INITIAL_VIEWER_MBPS: 3.5 });
+    t.after(f.service.close);
+    const source = f.socket('source');
+    const id = await f.publish(source);
+    const viewer = f.socket('viewer');
+    await f.subscribe(viewer, id);
+    await f.request(viewer, 'resume', { publicationId: id });
+    await f.request(viewer, 'ready', { publicationId: id });
+    f.setBitrate(1000000);
+    await f.service.sampleTraffic();
+    assert.equal(f.service.snapshot().reservedBps, 1050000);
+    f.setBitrate(NaN);
+    await f.service.sampleTraffic();
+    assert.equal(f.service.snapshot().reservedBps, 3628000, 'missing producer bitrate uses the initial reservation');
+    f.setBitrate(1000000);
+    let calls = 0;
+    let finish;
+    f.created[1].getStats = () => { calls++; return new Promise((resolve) => { finish = resolve; }); };
+    const first = f.service.sampleTraffic();
+    for (let index = 0; index < 30 && !finish; index++) await Promise.resolve();
+    await f.service.sampleTraffic();
+    assert.equal(calls, 1);
+    f.service.close();
+    finish([]);
+    await first;
+    assert.equal(f.service.snapshot().viewers, 0);
+    assert.equal(f.service.snapshot().ready, false);
+});
+
+test('host egress sampler uses actual uplink byte deltas, preserves unknown on resets and route changes, and exports no interface/address', async () => {
+    let at = 1000;
+    let bytes = '100';
+    let iface = 'eth0';
+    const sample = createHostEgressSampler(async (path) => {
+        if (path === '/proc/net/route') return `Iface Destination Gateway Flags RefCnt Use Metric\n${iface}\t00000000\t00000000\t0003\t0\t0\t100\n`;
+        assert.equal(path, `/sys/class/net/${iface}/statistics/tx_bytes`);
+        return bytes;
+    }, () => at);
+    assert.equal(await sample(), null);
+    at += 2000; bytes = '2000100';
+    assert.equal(await sample(), 8000000);
+    at += 2000; bytes = '10';
+    assert.equal(await sample(), null);
+    at += 2000; iface = 'eth1';
+    assert.equal(await sample(), null);
+    at += 2000;
+    assert.equal(await sample(), 0);
+    iface = '../secret';
+    assert.equal(await sample(), null);
 });
 
 test('SFU mixed codec consumer rejection releases its reservation and never suppresses compatible P2P', async (t) => {

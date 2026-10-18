@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import { StrictStream, StrictTrack } from './helpers/strict_media_peer.mjs';
 
 const flush = async () => { for (let index = 0; index < 100; index++) await Promise.resolve(); };
-async function fixture({ deny = false } = {}) {
+async function fixture({ deny = false, useDefault = false } = {}) {
     let now = 100000;
     class Clock extends Date { static now() { return now; } }
     const window = { MediaStream: StrictStream, document: { hidden: false }, setTimeout: () => 0, clearTimeout() {}, setInterval: () => 0, clearInterval() {} };
@@ -25,10 +25,10 @@ async function fixture({ deny = false } = {}) {
         const responses = { capabilities: { rtpCapabilities: {} }, list: { publications }, transport: { id: 'recv' }, consume: { peerId: 'source', consumers: [{ kind: 'video' }] } };
         ack({ ok: true, ...responses[payload.action] });
     } };
-    const runtime = window.VoiceScreenSfuRuntime.createRuntime({ config: { enabled: true }, Device, waitForMedia: async () => {} });
+    const runtime = window.VoiceScreenSfuRuntime.createRuntime({ config: { enabled: true, ...(useDefault ? { defaultReceiveMode: 'p2p-first' } : {}) }, Device, waitForMedia: async () => {} });
     runtime.attachSocket(socket);
     runtime.setSession({ roomId: 'room', peerId: 'viewer', voiceSessionGeneration: 1 });
-    await runtime.setReceiveRoute('source', 'p2p-first');
+    if (!useDefault) await runtime.setReceiveRoute('source', 'p2p-first');
     await flush();
     const pc = { connectionState: 'connected' };
     const stats = (frames, bytes, relay = false) => new Map([
@@ -40,6 +40,20 @@ async function fixture({ deny = false } = {}) {
     ]);
     return { runtime, window, actions, pc, stats, advance: (ms) => { now += ms; } };
 }
+
+test('deployed default starts with P2P and enables existing SFU recovery only after real failure; manual auto remains usable', async (t) => {
+    const f = await fixture({ useDefault: true }); t.after(() => f.runtime.leave());
+    assert.equal(f.runtime.getReceiveRoute('source').mode, 'p2p-first');
+    assert.equal(f.actions.some((row) => row.payload.action === 'consume'), false);
+    f.advance(11000);
+    f.runtime.observeP2p('source', { connectionState: 'failed' });
+    await flush();
+    assert.equal(f.runtime.getReceiveRoute('source').route, 'sfu');
+    await f.runtime.setReceiveRoute('source', 'p2p');
+    await f.runtime.setReceiveRoute('source', 'auto');
+    assert.equal(f.runtime.getReceiveRoute('source').mode, 'auto');
+    assert.equal(f.runtime.getReceiveRoute('source').route, 'sfu');
+});
 
 test('P2P-first avoids automatic SFU subscription, identifies direct vs TURN and keeps healthy direct media', async (t) => {
     const f = await fixture(); t.after(() => f.runtime.leave());

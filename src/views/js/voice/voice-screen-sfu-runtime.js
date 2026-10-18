@@ -74,7 +74,12 @@
         const p2pSamples = new Map();
         let pressureSamples = 0;
         let lastPressureAt = 0;
-        const receiveMode = (peerId) => receivePreferences.get(peerId)?.mode || 'auto';
+        const receiveMode = (peerId) => {
+            if (session && peerId && !receivePreferences.has(peerId) && config.defaultReceiveMode === 'p2p-first') {
+                receivePreferences.set(peerId, { mode: 'p2p-first', pending: false, error: '', startedAt: Date.now(), fallback: false });
+            }
+            return receivePreferences.get(peerId)?.mode || 'auto';
+        };
         const automaticReceive = (peerId) => ['auto', 'p2p-first'].includes(receiveMode(peerId));
         const maySubscribe = (peerId) => receiveMode(peerId) !== 'p2p' &&
             (receiveMode(peerId) !== 'p2p-first' || receivePreferences.get(peerId)?.fallback);

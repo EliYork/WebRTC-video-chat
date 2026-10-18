@@ -14,7 +14,7 @@ export const readScreenSfuConfig = (env = process.env) => {
         number('SFU_VIDEO_MBPS', 15, 1, 9999) * 1e6
     );
     const initialViewerBitrate = Math.round(
-        number('SFU_INITIAL_VIEWER_MBPS', 5.5, 1, 10) * 1e6
+        number('SFU_INITIAL_VIEWER_MBPS', 3.5, 1, 10) * 1e6
     );
     const audioBitrate = 128000;
     const payloadBudget = Math.round(
@@ -74,6 +74,14 @@ export const createScreenSfuBudget = (config) => {
                 else reservations.set(key, allocation);
             }
             return rejected;
+        },
+        refresh(entries) {
+            // Existing viewers are not evicted by an estimate. Keep the full
+            // demand visible, including overcommit, and block new admission.
+            reservations.clear();
+            for (const { key, amount } of entries) {
+                reservations.set(key, Number.isFinite(amount) && amount > 0 ? amount : perViewer);
+            }
         },
         release: (key) => reservations.delete(key),
         clear: () => reservations.clear(),
