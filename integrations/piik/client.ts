@@ -3,6 +3,8 @@
 import { HostProvisionalChild } from './.deps/upstream/src/client/media/host-provisional-child';
 import { ViewerPeer } from './.deps/upstream/src/client/webrtc/viewer-peer';
 import { decodeServerMessage } from './.deps/upstream/src/shared/protocol';
+import { NativeSenderPeer } from './.deps/upstream/src/client/native/native-sender-peer';
+import { createNativeCapture } from './native';
 import type { HostMediaPeer } from './.deps/upstream/src/client/webrtc/host-peer';
 import type {
     IceConfig,
@@ -35,6 +37,13 @@ function createRuntime({
                     else resolve(result);
                 });
         });
+    const nativeCapture = createNativeCapture(
+        () => request({ action: 'list' }),
+        () => {
+            desired = null;
+            onPublicationFailure?.();
+        }
+    );
     const send = (edge: any, message: any) => {
         if (edge.closed) return false;
         void request({ action: 'send', sessionId: edge.id, message }).catch(
@@ -107,6 +116,24 @@ function createRuntime({
             send(edge, { type: 'signal', targetPeerId, payload });
         const prepare = () =>
             new HostProvisionalChild({
+                createPeer: nativeCapture.get(stream)
+                    ? (candidate, input, events) => {
+                          const native = nativeCapture.get(stream);
+                          if (!native) throw new Error('Native share ended');
+                          return new NativeSenderPeer(
+                              candidate.childPeerId,
+                              candidate.connectionId,
+                              native.shareId,
+                              input.iceConfig,
+                              false,
+                              native.client,
+                              events,
+                              native.codec,
+                              undefined,
+                              (candidate.connectionAttempt?.current ?? 1) > 1
+                          );
+                      }
+                    : undefined,
                 sendSignal: signal,
                 activeConnectionId: (peerId) =>
                     edge.peers.get(peerId)?.connectionId ?? null,
@@ -478,7 +505,14 @@ function createRuntime({
                     onPublicationFailure?.();
                 }
             });
-            socket.on('disconnect', reset);
+            socket.on('disconnect', () => {
+                reset();
+                if (nativeCapture.isActive()) {
+                    nativeCapture.stop();
+                    desired = null;
+                    onPublicationFailure?.();
+                }
+            });
         },
         setSession(next: any) {
             if (
@@ -487,6 +521,13 @@ function createRuntime({
                 session?.voiceSessionGeneration === next.voiceSessionGeneration
             )
                 return;
+            // Native capture is authorized for this voice owner. A different
+            // owner/channel must start it explicitly rather than inherit it.
+            if (session && nativeCapture.isActive()) {
+                nativeCapture.stop();
+                desired = null;
+                onPublicationFailure?.();
+            }
             reset();
             session = next;
             const token = epoch;
@@ -511,7 +552,8 @@ function createRuntime({
             const version = ++publicationVersion;
             desired = { stream, options };
             const settings = stream.getVideoTracks()[0].getSettings();
-            const quality = {
+            const native = nativeCapture.get(stream);
+            const quality = native?.profile || {
                 resolution: {
                     width: settings.width || 1920,
                     height: settings.height || 1080,
@@ -532,8 +574,10 @@ function createRuntime({
                 stream,
                 quality,
                 {
-                    primary: options.codecMode === 'vp8' ? 'vp8' : 'h264',
-                    vp8Fallback: options.codecMode !== 'vp8',
+                    primary:
+                        native?.codec ||
+                        (options.codecMode === 'vp8' ? 'vp8' : 'h264'),
+                    vp8Fallback: !native && options.codecMode !== 'vp8',
                 }
             );
         },
@@ -542,14 +586,18 @@ function createRuntime({
             publicationVersion++;
             if (local) dispose(local);
             local = null;
+            nativeCapture.stop();
             if (socket?.connected)
                 void request({ action: 'stop' }).catch(() => {});
         },
         leave() {
+            nativeCapture.stop();
             desired = null;
             publicationVersion++;
             reset();
         },
+        captureNative: (options: any, signal: AbortSignal) =>
+            nativeCapture.capture(options, signal),
         forgetPeer(peerId: string) {
             for (const edge of [...edges.values()])
                 if (edge.peerId === peerId) dispose(edge);

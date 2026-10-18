@@ -1,8 +1,33 @@
-# 本轮验证记录
+# 本地验证记录
 
 日期：2026-10-18。分支：`codex/piik-integration`。Piik：`9925486cec9910c0a76e47208b29b6f39942e096`。所有结果是本地开发验证，未发布。
 
-## 已通过
+## 第二阶段 · 2026-10-19
+
+实机验收准备前复跑：429/429 单元测试、真实 Go gateway、静音网页及原生三观看者回归、web-only TypeScript/bundle 构建、新增 JS ESLint 和 Go overlay 的 signal/nativehost/mediaedge/loopback 四包测试均通过。复跑日志在 ignored `.build/acceptance-*.log`。原生报告本次一条接收采样累计 95 帧 / 416864 bytes，仍不代表真实硬编或稳定 FPS。上游 tracked 工作区干净。
+
+先复跑第一阶段的 429 个单元测试、gateway 和静音浏览器回归，全部通过后，提交独立回退基线 **`378f2b8`**。未合并 main、Push 或部署。
+
+本阶段完成 Windows 原生采集程序（MSVC C++）和 Piik App（Go）的实际编译，包含 SDK SHA256/NOTICE 校验。没有运行真实屏幕采集，也没有实测物理硬件编码。App 启动/播放验证使用独立合成采集输入，原 App 控制授权、nativehost、Pion、Node 频道、舞台均为真实实现。
+
+静音 `test:piik:native` 验证：
+
+- 未批准站点不能获得 App health/capability，错误 capability 不能打开 control。
+- 原频道三名观看者实际解码 H.264；采集输入为 1280×720/30 FPS 目标动态画面。
+- 三名观看者只有一个合成采集进程；共享者浏览器视频 sender 为 **0**，没有预览流重编码/旧 PeerJS 重复发送。
+- 原双向 Opus RTP、聊天仍工作；网页 VP8 和 App H.264 两名共享者可以同时存在，停止网页共享保留原生共享。
+- 跨频道访问拒绝；三个名额满时，连续三次主动离开/立即重入恢复播放，不等待 20 秒。
+- 停止/重开、关闭 App 后原平台共享状态、Pion 与采集子进程清理。
+
+编码输出复用通过上游同一 nativehost source/output-group 路径接入。合成输入不包含物理 MFT 编码器，不能把“一个采集进程”当成“实际 GPU 只有一个编码器”的测量；不同需求可让上游派生较低输出。上游 `TestOutputGroupsShareSplitRejoinAndRetire` 等分组检查随实际 mediaedge 包通过。
+
+Go overlay 下 `./internal/server/signal`、`./internal/app/nativehost`、`./internal/app/mediaedge`、`./internal/app/loopback` 均通过；保留意外断连重连宽限的原信令测试也通过。网页 gateway/浏览器回归与 429 个单元测试通过。详细本地日志在 `.build/phase2-*.log`，原生报告在 `artifacts/native-browser-report.json`；累计解码帧与字节不代表稳定 FPS/码率。
+
+剩余实机门槛：WGC、所选 H.264 硬件 MFT/驱动、系统声音、Android、跨 NAT、长时间多观看者与 4K 性能。网页 BrowserEncodingPool、多级 ViewerRelay、SFU 与原生 AV1 未启用。详见 README 的启动与验收步骤。
+
+App 自动测试使用 `PIIK_CLIENT_GATE_NO_BROWSER=true`、独立配置、无桌面/音频设备的合成输入、静音 headless Edge。没有使用用户浏览器、in-app browser 或系统输入。生产配置、证书信任、系统音量、AV1 实验均未修改；SDK/二进制在 ignored 目录。第二阶段代码留在同一开发分支供审阅。
+
+## 第一阶段已通过（基线记录）
 
 | 检查 | 结果与证据 |
 | --- | --- |
@@ -29,7 +54,7 @@
 
 完整本地日志位于 ignored `.build/final-build.log`、`.build/final-unit-tests.log`、`.build/final-browser-test.log`；机器可读结果在 ignored `artifacts/browser-report.json`。构建产物/大型依赖未加入 Git。
 
-## 验收边界
+## 第一阶段验收边界（历史）
 
 本轮确认了**原平台界面通过 Piik P2P 播放浏览器采集的视频**。原生 NVENC AV1 A、原生 AV1 WebRTC B、真实双设备目标帧率 C 都不是本轮测试对象，不能标记成功。
 
@@ -37,7 +62,7 @@
 
 浏览器测试使用专用临时 profile、假麦克风、动态 canvas 与 `--mute-audio`，没有系统输入注入、真实屏幕采集或用户浏览器操作。最后一次回归后，已确认该任务的 headless Edge、Node 测试实例和 Go 服务全部退出。后续自动媒体测试保持静音。
 
-## 本机改动范围
+## 第一阶段改动范围（历史）
 
 - 创建隔离 worktree 和 `codex/piik-integration` 开发分支；原 checkout 仍只有原有未跟踪 `native/` 实验。
 - 下载固定 Piik 源码、其 npm/Go 依赖；Go 工具链放用户缓存，不写系统 PATH。

@@ -111,6 +111,9 @@ app.use((req, res, next) =>
                 fontSrc: ["'self'", 'https://ka-f.fontawesome.com', 'data:'],
                 connectSrc: [
                     "'self'",
+                    ...(process.env.PIIK_ENABLED === 'true'
+                        ? Array.from({ length: 10 }, (_, index) => `http://127.0.0.1:${39721 + index}`)
+                        : []),
                     'https://ka-f.fontawesome.com',
                     'ws:',
                     'wss:',

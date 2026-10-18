@@ -55,7 +55,10 @@ export function createPiikMediaGateway({
             connection.ws.readyState === WebSocket.OPEN
         )
             connection.ws.send(JSON.stringify({ type: 'abandon-room' }));
-        connection.ws.close();
+        connection.ws.close(
+            1000,
+            connection.role === 'viewer' ? 'viewer-left' : 'share-ended'
+        );
         connection.socket.emit('piik:closed', { sessionId: connection.id });
     };
     const stop = (share) => {

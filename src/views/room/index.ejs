@@ -259,6 +259,24 @@
                                 <option value="60" selected>60 fps</option>
                             </select>
                         </label>
+                            <% if (piikPrototype) { %>
+                            <label class="media-select-row">
+                                <span>共享方式</span>
+                                <select data-screen-share-provider>
+                                    <option value="web">网页屏幕共享</option>
+                                    <option value="native">Piik App 原生屏幕共享 · H.264</option>
+                                </select>
+                            </label>
+                            <div data-piik-native-options hidden>
+                                <label class="media-select-row"><span>显示器 / 窗口</span><select data-piik-native-source><option value="">请连接 App</option></select></label>
+                                <label><input type="checkbox" data-piik-native-audio>共享所选源声音（可能包含通话声音）</label>
+                                <p class="media-device-hint" data-piik-native-status>请先启动 Piik App 并批准此网站。</p>
+                                <button type="button" data-piik-native-refresh>重新连接 / 刷新来源</button>
+                                <button type="button" data-piik-native-approve>查找 App 授权入口</button>
+                                <a data-piik-native-approval-link hidden target="_blank" rel="noopener noreferrer">打开 App 授权</a>
+                                <p class="media-device-hint">原生模式固定使用 App 的 H.264 硬件路径，请选择明确的分辨率档位；下方编码选项仅用于网页共享。</p>
+                            </div>
+                            <% } %>
                         <details>
                             <summary>高级设置</summary>
                             <label class="media-select-row">

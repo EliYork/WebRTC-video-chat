@@ -2465,7 +2465,9 @@ const startScreenShare = async (peer, options = {}) => {
     const capture = await mediaOperationController.run(
         'screen',
         async () => {
-            const result = await voiceMediaLifecycle.requestScreenCapture({
+            const result = usingPiik && document.querySelector('[data-screen-share-provider]')?.value === 'native'
+                ? { ok: true, stream: await screenSfuRuntime.captureNative(voiceMediaLifecycle.normalizeScreenShareOptions(options), codecAbort.signal) }
+                : await voiceMediaLifecycle.requestScreenCapture({
                 getDisplayMedia: requestDisplayMedia,
                 supportedConstraints: navigator.mediaDevices?.getSupportedConstraints?.(),
                 options,
@@ -2509,6 +2511,7 @@ const startScreenShare = async (peer, options = {}) => {
     if (screenCodecAbort === codecAbort) screenCodecAbort = undefined;
     setScreenShareRequestPending(false);
     if (!capture.ok) {
+        if (usingPiik) screenSfuRuntime.stopPublishing();
         mediaOperationController.setDesired('screen', false);
         setMediaOperationError('screen', capture);
         return false;

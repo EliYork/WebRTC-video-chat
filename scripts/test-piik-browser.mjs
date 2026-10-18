@@ -17,6 +17,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import WebSocket from 'ws';
 import { startPiikLocal } from './piik-local-service.mjs';
+import { runNativeScenario } from './piik-native-scenario.mjs';
 const work = mkdtempSync(join(tmpdir(), 'piik-platform-'));
 const artifacts = resolve('integrations/piik/artifacts');
 mkdirSync(artifacts, { recursive: true });
@@ -211,188 +212,215 @@ try {
                 m.params.args.map((a) => a.value ?? a.description).join(' ')
             );
     });
-    const a = await open(),
-        b = await open(),
-        c = await open('game');
-    assert.equal(
-        (await mediaRequest(c, { action: 'list' })).ok,
-        false,
-        'unjoined socket denied'
-    );
-    for (const s of [a, b, c]) {
-        await click(s, '#stageJoinVoice');
-        await wait(
-            () =>
-                evaluate(
-                    s,
-                    `document.querySelector('#destroyPeer').dataset.sessionAction==='hangup'`
-                ),
-            'voice joined'
+    if (process.argv.includes('--native')) {
+        const report = await runNativeScenario({
+            open,
+            evaluate,
+            click,
+            wait,
+            mediaRequest,
+            port,
+            work,
+        });
+        writeFileSync(
+            join(artifacts, 'native-browser-report.json'),
+            JSON.stringify(report, null, 2)
         );
-    }
-    for (const s of [a, b]) {
-        await click(s, '#toggleAudio');
-        await wait(
-            () =>
-                evaluate(
-                    s,
-                    `document.querySelector('#toggleAudio').title.includes('关闭')`
-                ),
-            'fake microphone enabled'
+        console.log(JSON.stringify(report, null, 2));
+    } else {
+        const a = await open(),
+            b = await open(),
+            c = await open('game');
+        assert.equal(
+            (await mediaRequest(c, { action: 'list' })).ok,
+            false,
+            'unjoined socket denied'
         );
-    }
-    await share(a);
-    await wait(() => receiving(b), 'Piik video in original stage');
-    const list = await mediaRequest(b, { action: 'list' });
-    assert.equal(list.shares.length, 1);
-    assert.equal(
-        (await mediaRequest(c, { action: 'watch', shareId: list.shares[0].id }))
-            .ok,
-        false,
-        'cross-channel denied'
-    );
-    await evaluate(
-        a,
-        `document.querySelector('#chatInput').value='Piik unified chat';document.querySelector('#chatForm').requestSubmit()`
-    );
-    await wait(
-        () =>
-            evaluate(
-                b,
-                `document.querySelector('#chatMessages').textContent.includes('Piik unified chat')`
-            ),
-        'existing chat during Piik sharing'
-    );
-    await delay(2500);
-    const first = await evaluate(b, '__mediaStats()');
-    assert.ok(
-        first.some(
-            (r) =>
-                r.kind === 'video' &&
-                r.framesDecoded > 0 &&
-                r.codec === 'video/VP8'
-        ),
-        JSON.stringify({
-            first,
-            pcs: await evaluate(
-                b,
-                `__pcs.map(pc=>({state:pc.connectionState,receivers:pc.getReceivers().map(r=>r.track.kind)}))`
-            ),
-            messages: await evaluate(b, '__piikMessages'),
-        })
-    );
-    for (const s of [a, b])
-        assert.ok(
-            (await evaluate(s, '__mediaStats()')).some(
-                (r) =>
-                    r.type === 'inbound-rtp' &&
-                    r.kind === 'audio' &&
-                    r.bytesReceived > 0
-            ),
-            JSON.stringify(
-                await evaluate(
-                    s,
-                    `({pcs:__pcs.map(pc=>({state:pc.connectionState,s:pc.getSenders().map(r=>r.track?.kind),r:pc.getReceivers().map(r=>r.track?.kind)})),buttons:[...document.querySelectorAll('#buttons button')].map(b=>({id:b.id,title:b.title,text:b.textContent}))})`
-                )
-            )
-        );
-    // Piik owns screen video: existing PeerJS metadata identifies connections;
-    // their screen video must be absent, avoiding a duplicate browser encoder.
-    const senderVideoTracks = await evaluate(
-        a,
-        `__pcs.filter(pc=>pc.connectionState==='connected').flatMap(pc=>pc.getSenders()).filter(sender=>sender.track?.kind==='video').length`
-    );
-    assert.equal(
-        senderVideoTracks,
-        1,
-        'one Piik screen sender and no duplicate PeerJS video sender'
-    );
-    await share(b);
-    await wait(() => receiving(a), 'second independent publisher');
-    assert.equal((await mediaRequest(a, { action: 'list' })).shares.length, 2);
-    await click(b, '#shareScreen');
-    await wait(
-        async () =>
-            (await mediaRequest(a, { action: 'list' })).shares.length === 1,
-        'stop only own share'
-    );
-    assert.equal(
-        await receiving(b),
-        true,
-        'stopping publication retains viewing'
-    );
-    await click(a, '#shareScreen');
-    await wait(
-        async () =>
-            (await mediaRequest(b, { action: 'list' })).shares.length === 0,
-        'stop cleanup'
-    );
-    await share(a);
-    await wait(() => receiving(b), 'restart sharing');
-    const oldId = (await mediaRequest(b, { action: 'list' })).shares[0].id;
-    await evaluate(a, `void __socket.io.engine.close()`);
-    await wait(async () => {
+        for (const s of [a, b, c]) {
+            await click(s, '#stageJoinVoice');
+            await wait(
+                () =>
+                    evaluate(
+                        s,
+                        `document.querySelector('#destroyPeer').dataset.sessionAction==='hangup'`
+                    ),
+                'voice joined'
+            );
+        }
+        for (const s of [a, b]) {
+            await click(s, '#toggleAudio');
+            await wait(
+                () =>
+                    evaluate(
+                        s,
+                        `document.querySelector('#toggleAudio').title.includes('关闭')`
+                    ),
+                'fake microphone enabled'
+            );
+        }
+        await share(a);
+        await wait(() => receiving(b), 'Piik video in original stage');
         const list = await mediaRequest(b, { action: 'list' });
-        return list.shares.length === 1 && list.shares[0].id !== oldId;
-    }, 'publisher signaling reconnect');
-    await wait(() => receiving(b), 'reconnected publication in stage');
-    assert.equal(
-        await evaluate(a, `__capture.getVideoTracks()[0].readyState`),
-        'live',
-        'reconnect retains capture'
-    );
-    await send('Page.reload', {}, b);
-    await wait(
-        () =>
-            evaluate(b, `document.documentElement.dataset.roomBoot==='ready'`),
-        'refresh'
-    );
-    assert.equal(
-        (await mediaRequest(b, { action: 'list' })).ok,
-        false,
-        'refresh removes membership'
-    );
-    await click(b, '#stageJoinVoice');
-    await wait(() => receiving(b), 'rejoin receives existing Piik share');
-    await click(a, '#destroyPeer');
-    await wait(
-        async () =>
-            (await mediaRequest(b, { action: 'list' })).shares.length === 0,
-        'publisher departure cleanup'
-    );
-    assert.deepEqual(errors, []);
-    const report = {
-        status: 'passed',
-        browser: (await send('Browser.getVersion')).product,
-        source: '9925486cec9910c0a76e47208b29b6f39942e096',
-        syntheticMediaOnly: true,
-        codec: 'VP8',
-        sourceSize: [1280, 720],
-        targetFps: 30,
-        firstReceiveStats: first,
-        senderVideoTracks,
-        checks: [
-            'original channel and stage',
-            'real Piik P2P',
-            'no duplicate legacy video sender',
-            'bidirectional voice RTP',
-            'existing chat',
-            'unjoined/cross-channel denied',
-            'two simultaneous publishers',
-            'stop keeps viewing',
-            'restart',
-            'publisher signaling reconnect',
-            'refresh/rejoin',
-            'publisher departure',
-        ],
-        audioOutputMuted: true,
-        physicalDeviceAcceptance: false,
-    };
-    writeFileSync(
-        join(artifacts, 'browser-report.json'),
-        JSON.stringify(report, null, 2)
-    );
-    console.log(JSON.stringify(report, null, 2));
+        assert.equal(list.shares.length, 1);
+        assert.equal(
+            (
+                await mediaRequest(c, {
+                    action: 'watch',
+                    shareId: list.shares[0].id,
+                })
+            ).ok,
+            false,
+            'cross-channel denied'
+        );
+        await evaluate(
+            a,
+            `document.querySelector('#chatInput').value='Piik unified chat';document.querySelector('#chatForm').requestSubmit()`
+        );
+        await wait(
+            () =>
+                evaluate(
+                    b,
+                    `document.querySelector('#chatMessages').textContent.includes('Piik unified chat')`
+                ),
+            'existing chat during Piik sharing'
+        );
+        await delay(2500);
+        const first = await evaluate(b, '__mediaStats()');
+        assert.ok(
+            first.some(
+                (r) =>
+                    r.kind === 'video' &&
+                    r.framesDecoded > 0 &&
+                    r.codec === 'video/VP8'
+            ),
+            JSON.stringify({
+                first,
+                pcs: await evaluate(
+                    b,
+                    `__pcs.map(pc=>({state:pc.connectionState,receivers:pc.getReceivers().map(r=>r.track.kind)}))`
+                ),
+                messages: await evaluate(b, '__piikMessages'),
+            })
+        );
+        for (const s of [a, b])
+            assert.ok(
+                (await evaluate(s, '__mediaStats()')).some(
+                    (r) =>
+                        r.type === 'inbound-rtp' &&
+                        r.kind === 'audio' &&
+                        r.bytesReceived > 0
+                ),
+                JSON.stringify(
+                    await evaluate(
+                        s,
+                        `({pcs:__pcs.map(pc=>({state:pc.connectionState,s:pc.getSenders().map(r=>r.track?.kind),r:pc.getReceivers().map(r=>r.track?.kind)})),buttons:[...document.querySelectorAll('#buttons button')].map(b=>({id:b.id,title:b.title,text:b.textContent}))})`
+                    )
+                )
+            );
+        // Piik owns screen video: existing PeerJS metadata identifies connections;
+        // their screen video must be absent, avoiding a duplicate browser encoder.
+        const senderVideoTracks = await evaluate(
+            a,
+            `__pcs.filter(pc=>pc.connectionState==='connected').flatMap(pc=>pc.getSenders()).filter(sender=>sender.track?.kind==='video').length`
+        );
+        assert.equal(
+            senderVideoTracks,
+            1,
+            'one Piik screen sender and no duplicate PeerJS video sender'
+        );
+        await share(b);
+        await wait(() => receiving(a), 'second independent publisher');
+        assert.equal(
+            (await mediaRequest(a, { action: 'list' })).shares.length,
+            2
+        );
+        await click(b, '#shareScreen');
+        await wait(
+            async () =>
+                (await mediaRequest(a, { action: 'list' })).shares.length === 1,
+            'stop only own share'
+        );
+        assert.equal(
+            await receiving(b),
+            true,
+            'stopping publication retains viewing'
+        );
+        await click(a, '#shareScreen');
+        await wait(
+            async () =>
+                (await mediaRequest(b, { action: 'list' })).shares.length === 0,
+            'stop cleanup'
+        );
+        await share(a);
+        await wait(() => receiving(b), 'restart sharing');
+        const oldId = (await mediaRequest(b, { action: 'list' })).shares[0].id;
+        await evaluate(a, `void __socket.io.engine.close()`);
+        await wait(async () => {
+            const list = await mediaRequest(b, { action: 'list' });
+            return list.shares.length === 1 && list.shares[0].id !== oldId;
+        }, 'publisher signaling reconnect');
+        await wait(() => receiving(b), 'reconnected publication in stage');
+        assert.equal(
+            await evaluate(a, `__capture.getVideoTracks()[0].readyState`),
+            'live',
+            'reconnect retains capture'
+        );
+        await send('Page.reload', {}, b);
+        await wait(
+            () =>
+                evaluate(
+                    b,
+                    `document.documentElement.dataset.roomBoot==='ready'`
+                ),
+            'refresh'
+        );
+        assert.equal(
+            (await mediaRequest(b, { action: 'list' })).ok,
+            false,
+            'refresh removes membership'
+        );
+        await click(b, '#stageJoinVoice');
+        await wait(() => receiving(b), 'rejoin receives existing Piik share');
+        await click(a, '#destroyPeer');
+        await wait(
+            async () =>
+                (await mediaRequest(b, { action: 'list' })).shares.length === 0,
+            'publisher departure cleanup'
+        );
+        assert.deepEqual(errors, []);
+        const report = {
+            status: 'passed',
+            browser: (await send('Browser.getVersion')).product,
+            source: '9925486cec9910c0a76e47208b29b6f39942e096',
+            syntheticMediaOnly: true,
+            codec: 'VP8',
+            sourceSize: [1280, 720],
+            targetFps: 30,
+            firstReceiveStats: first,
+            senderVideoTracks,
+            checks: [
+                'original channel and stage',
+                'real Piik P2P',
+                'no duplicate legacy video sender',
+                'bidirectional voice RTP',
+                'existing chat',
+                'unjoined/cross-channel denied',
+                'two simultaneous publishers',
+                'stop keeps viewing',
+                'restart',
+                'publisher signaling reconnect',
+                'refresh/rejoin',
+                'publisher departure',
+            ],
+            audioOutputMuted: true,
+            physicalDeviceAcceptance: false,
+        };
+        writeFileSync(
+            join(artifacts, 'browser-report.json'),
+            JSON.stringify(report, null, 2)
+        );
+        console.log(JSON.stringify(report, null, 2));
+    }
 } catch (error) {
     writeFileSync(
         join(artifacts, 'failure.json'),
