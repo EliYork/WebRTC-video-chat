@@ -11,6 +11,8 @@
         "build:piik:app": "node scripts/build-piik.mjs --native",
         "dev:piik": "node scripts/start-piik-dev.mjs",
         "dev:piik:acceptance": "node scripts/start-piik-acceptance.mjs",
+        "test:desktop": "node scripts/test-voice-desktop.mjs",
+        "package:piik:server": "node scripts/package-piik-server.mjs",
         "test:piik:gateway": "node scripts/test-piik-gateway.mjs",
         "test:piik:browser": "node scripts/test-piik-browser.mjs",
         "test:piik:native": "node scripts/test-piik-browser.mjs --native",

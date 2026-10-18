@@ -179,6 +179,15 @@ const piikMedia = piikEnabled ? createPiikMediaGateway({
     baseURL: process.env.PIIK_INTERNAL_URL || 'http://127.0.0.1:17887',
     onSharing: (socket, sharing, owner) => voiceCallSignaling.updateScreenShare({ sharing, voiceSessionGeneration: owner.voiceSessionGeneration }, socket),
 }) : undefined;
+app.get('/healthz', async (_req, res) => {
+    let mediaReady = !piikEnabled;
+    if (piikEnabled) {
+        try {
+            mediaReady = (await fetch(new URL('/healthz', process.env.PIIK_INTERNAL_URL || 'http://127.0.0.1:17887'), { signal: AbortSignal.timeout(1500) })).ok;
+        } catch { mediaReady = false; }
+    }
+    res.set('Cache-Control', 'no-store').json({ ok: true, build: process.env.VOICE_BUILD_ID || 'development', screenProvider: piikEnabled ? 'piik' : 'legacy', mediaReady });
+});
 let screenSfuConfig;
 try {
     screenSfuConfig = readScreenSfuConfig(piikEnabled ? { SFU_ENABLED: 'false' } : process.env);
