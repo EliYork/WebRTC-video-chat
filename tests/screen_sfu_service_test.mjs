@@ -31,8 +31,8 @@ class NativeObject extends EventEmitter {
         this.closed = true;
     }
 }
-const fixture = () => {
-    const config = readScreenSfuConfig({ SFU_ANNOUNCED_ADDRESS: '127.0.0.1', SFU_EGRESS_MBPS: 30, SFU_VIDEO_MBPS: 22, SFU_PAYLOAD_MBPS: 23 });
+const fixture = (overrides = {}) => {
+    const config = readScreenSfuConfig({ SFU_ANNOUNCED_ADDRESS: '127.0.0.1', SFU_EGRESS_MBPS: 30, SFU_VIDEO_MBPS: 22, SFU_PAYLOAD_MBPS: 23, ...overrides });
     const created = [];
     let trafficBitrate = 0;
     const fakeWorker = new NativeObject();
@@ -415,6 +415,80 @@ test('20Mbps defaults reserve transport/system headroom and reject inconsistent 
     assert.deepEqual(budget.rebalance([{ key: 'oversized', amount: 17000000 }, { key: 'ok', amount: 7000000 }]), ['oversized']);
     assert.equal(budget.snapshot().reservedBps, 7000000);
     assert.equal(budget.reserve('bad', NaN), false);
+});
+
+const outlet20 = {
+    SFU_EGRESS_MBPS: 20,
+    SFU_RESERVED_MBPS: 4,
+    SFU_PAYLOAD_MBPS: 16,
+    SFU_VIDEO_MBPS: 15,
+};
+
+test('20Mbps with 5.5Mbps initial reserve remains limited to two subscriptions even for a quiet source', async (t) => {
+    const f = fixture(outlet20);
+    t.after(f.service.close);
+    const source = f.socket('source');
+    const id = await f.publish(source);
+    for (const name of ['first', 'second']) {
+        const viewer = f.socket(name);
+        assert.equal((await f.subscribe(viewer, id)).ok, true);
+        await f.request(viewer, 'resume', { publicationId: id });
+        await f.request(viewer, 'ready', { publicationId: id });
+    }
+    f.setBitrate(1000000);
+    await f.service.sampleTraffic();
+    assert.equal(f.service.snapshot().reservedBps, 11256000);
+    assert.equal((await f.subscribe(f.socket('third'), id)).reason, 'server-bandwidth-limit');
+    assert.equal(f.service.snapshot().viewers, 2);
+});
+
+test('proposed 3.5Mbps reserve admits four low-rate subscriptions but measured demand can evict even the last viewer', async (t) => {
+    const f = fixture({ ...outlet20, SFU_INITIAL_VIEWER_MBPS: 3.5 });
+    t.after(f.service.close);
+    const source = f.socket('source');
+    const id = await f.publish(source);
+    const viewers = Array.from({ length: 5 }, (_, index) => f.socket(`viewer-${index}`));
+    for (const viewer of viewers.slice(0, 4)) {
+        assert.equal((await f.subscribe(viewer, id)).ok, true);
+        await f.request(viewer, 'resume', { publicationId: id });
+        await f.request(viewer, 'ready', { publicationId: id });
+    }
+    assert.equal(f.service.snapshot().reservedBps, 14512000);
+    assert.equal((await f.subscribe(viewers[4], id)).reason, 'server-bandwidth-limit');
+    for (const [bitrate, remaining, reserved] of [
+        [3300000, 4, 15840000],
+        [4400000, 3, 15840000],
+        [6600000, 2, 15840000],
+        [13200000, 1, 15840000],
+        [15000000, 0, 0],
+    ]) {
+        f.setBitrate(bitrate);
+        await f.service.sampleTraffic();
+        assert.equal(f.service.snapshot().viewers, remaining);
+        assert.equal(f.service.snapshot().reservedBps, reserved);
+        if (remaining > 0) {
+            const route = source.events.filter((event) => event.event === 'sfu:routes').at(-1).payload;
+            assert.equal(route.videoMaxBitrate, 15000000, '15Mbps remains a ceiling rather than a fixed measured rate');
+        }
+    }
+    assert.ok(viewers.slice(0, 4).every((viewer) => viewer.events.some((event) =>
+        event.event === 'sfu:closed' && event.payload.reason === 'server-bandwidth-priority')));
+});
+
+test('proposed four-subscription allowance is shared across publishers and channels, not four per source', async (t) => {
+    const f = fixture({ ...outlet20, SFU_INITIAL_VIEWER_MBPS: 3.5 });
+    t.after(f.service.close);
+    for (const room of ['game', 'project']) {
+        const id = await f.publish(f.socket(`${room}-source`, room));
+        for (const name of ['one', 'two']) {
+            assert.equal((await f.subscribe(f.socket(`${room}-${name}`, room), id)).ok, true);
+        }
+        if (room === 'project') {
+            assert.equal((await f.subscribe(f.socket('fifth', room), id)).reason, 'server-bandwidth-limit');
+        }
+    }
+    assert.equal(f.service.snapshot().viewers, 4);
+    assert.equal(f.service.snapshot().reservedBps, 14512000);
 });
 
 test('SFU mixed codec consumer rejection releases its reservation and never suppresses compatible P2P', async (t) => {
