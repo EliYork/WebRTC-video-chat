@@ -162,7 +162,13 @@ const voiceCallSignaling = createVoiceCallSignaling({
     onScreenShareChange: (event) => syncPresenceScreenSharing(event),
     resolveRoomId: (roomId) => getChannel(roomId)?.slug,
 });
-const screenSfuConfig = readScreenSfuConfig();
+let screenSfuConfig;
+try {
+    screenSfuConfig = readScreenSfuConfig();
+} catch (error) {
+    Log.error(`[sfu] invalid bandwidth/configuration; using P2P until reviewed: ${error.message}`);
+    screenSfuConfig = readScreenSfuConfig({ SFU_ENABLED: 'false' });
+}
 const voiceDiagnostics = createVoiceDiagnosticsRelay({
     io,
     getVoiceOwner: (socket) => voiceCallSignaling.getVoiceOwner(socket),
@@ -687,6 +693,9 @@ io.on('connection', (socket) => {
             }
         }
     });
+    socket.on('voice:diagnostics:checkpoint', (payload) => {
+        voiceDiagnostics.checkpoint(socket, payload);
+    });
     socket.on('voice:diagnostics:collect', (acknowledge) => {
         if (typeof acknowledge !== 'function') return;
         void voiceDiagnostics.collect(socket).then(acknowledge);
@@ -714,6 +723,8 @@ io.on('connection', (socket) => {
         const result = voiceCallSignaling.updateScreenShare(payload, socket);
         if (result.ok && payload.sharing === false) screenSfu.stopScreen(socket);
     });
+    socket.on('screen:codec-feedback', (payload) => voiceCallSignaling.relayCodecFeedback(payload, socket));
+    socket.on('screen:route-pressure', (payload) => voiceCallSignaling.relayRoutePressure(payload, socket));
 });
 
 httpServer.listen(PORT, () =>

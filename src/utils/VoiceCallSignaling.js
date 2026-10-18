@@ -23,6 +23,8 @@ export const createVoiceCallSignaling = ({
 } = {}) => {
     const roomJoinQueues = new Map();
     const socketRevisions = new WeakMap();
+    const codecFeedbackTimes = new WeakMap();
+    const routePressureTimes = new WeakMap();
     const advanceRevision = (socket) => {
         const revision = (socketRevisions.get(socket) || 0) + 1;
         socketRevisions.set(socket, revision);
@@ -293,6 +295,40 @@ export const createVoiceCallSignaling = ({
     };
 
     return {
+        relayRoutePressure(payload, socket) {
+            const owner = getVoiceOwner(socket);
+            if (!owner || socket.data.voiceScreenSharing !== true || payload?.voiceSessionGeneration !== owner.voiceSessionGeneration ||
+                !['sender-encoder-pressure', 'sender-uplink-pressure'].includes(payload.reason)) return false;
+            const previous = routePressureTimes.get(socket);
+            if (previous !== undefined && Date.now() - previous < 5000) return false;
+            routePressureTimes.set(socket, Date.now());
+            for (const member of io.sockets?.sockets?.values() || []) {
+                const target = getVoiceOwner(member);
+                if (member === socket || target?.roomId !== owner.roomId) continue;
+                member.emit('screen:route-pressure', { peerId: owner.peerId, roomId: owner.roomId,
+                    voiceSessionGeneration: target.voiceSessionGeneration, reason: payload.reason });
+            }
+            return true;
+        },
+        relayCodecFeedback(payload, socket) {
+            const owner = getVoiceOwner(socket);
+            if (!owner || payload?.voiceSessionGeneration !== owner.voiceSessionGeneration ||
+                payload.reason !== 'decoder-start-failed' || !Number.isSafeInteger(payload.generation) || payload.generation <= 0 ||
+                !Number.isSafeInteger(payload.targetSessionGeneration) ||
+                normalizeVoicePeerId(payload.peerId) !== payload.peerId) return false;
+            const previous = codecFeedbackTimes.get(socket);
+            if (previous !== undefined && Date.now() - previous < 1000) return false;
+            const target = [...(io.sockets?.sockets?.values() || [])].find((member) => {
+                const current = getVoiceOwner(member);
+                return member !== socket && current?.roomId === owner.roomId && current.peerId === payload.peerId &&
+                    current.voiceSessionGeneration === payload.targetSessionGeneration && member.data.voiceScreenSharing === true;
+            });
+            if (!target) return false;
+            codecFeedbackTimes.set(socket, Date.now());
+            target.emit('screen:codec-feedback', { peerId: owner.peerId, generation: payload.generation,
+                reason: 'decoder-start-failed', voiceSessionGeneration: payload.targetSessionGeneration });
+            return true;
+        },
         getVoiceOwner,
         getSnapshot,
         join,

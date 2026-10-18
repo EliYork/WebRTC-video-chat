@@ -14,6 +14,8 @@
         onRemoteStream,
         onRouteEvent,
         onReceiverFailure,
+        onReceiverIssue,
+        onCodecEvent,
         onState,
         onWarning,
         waitForMedia,
@@ -36,7 +38,7 @@
                 for (const producer of producers) {
                     if (producer.kind !== 'video' || producer.closed || !producer.rtpSender?.setParameters) continue;
                     const parameters = producer.rtpSender.getParameters();
-                    const maxBitrate = Math.min(config.videoBitrate || 22000000, videoMaxBitrate);
+                    const maxBitrate = Math.min(config.videoBitrate || 15000000, videoMaxBitrate);
                     if (!parameters.encodings?.length || parameters.encodings.every((encoding) => encoding.maxBitrate === maxBitrate)) continue;
                     parameters.encodings.forEach((encoding) => { encoding.maxBitrate = maxBitrate; });
                     global.VoiceScreenSendPolicy?.observe(producer.rtpSender, parameters, {
@@ -69,8 +71,15 @@
         // Viewing preferences live only for this voice session, independently
         // for each sharer. They never change the publisher's capture settings.
         const receivePreferences = new Map();
+        const p2pSamples = new Map();
+        let pressureSamples = 0;
+        let lastPressureAt = 0;
         const receiveMode = (peerId) => receivePreferences.get(peerId)?.mode || 'auto';
+        const automaticReceive = (peerId) => ['auto', 'p2p-first'].includes(receiveMode(peerId));
+        const maySubscribe = (peerId) => receiveMode(peerId) !== 'p2p' &&
+            (receiveMode(peerId) !== 'p2p-first' || receivePreferences.get(peerId)?.fallback);
         const receiverFailures = [];
+        const receiverIssues = [];
         let receiverOrdinal = 0;
         const copyHealth = (value) => JSON.parse(JSON.stringify(value));
         const healthDelta = (row, previous, key) =>
@@ -92,6 +101,15 @@
             // Persist before disposal, so later P2P statistics cannot erase
             // the evidence which triggered this receiver's release.
             try { onReceiverFailure?.(copyHealth(failure)); } catch { /* Diagnostics must not prevent recovery. */ }
+        };
+        const retainReceiverIssue = (entry, reason) => {
+            if (entry.issueRecorded) return;
+            entry.issueRecorded = true;
+            const issue = { 序号: entry.healthOrdinal, 时间: new Date().toISOString(), reason,
+                健康采样: copyHealth(entry.healthSamples || []) };
+            receiverIssues.push(issue);
+            if (receiverIssues.length > 3) receiverIssues.shift();
+            try { onReceiverIssue?.(copyHealth(issue)); } catch { /* Keep media running if diagnostics fail. */ }
         };
         const statsConnections = new WeakMap();
         const statsConnection = (transport) => {
@@ -115,7 +133,7 @@
         let state = 'p2p';
         const routeHistory = [];
         const recordRoute = (event, reason) => {
-            const allowedReasons = ['server-bandwidth-limit', 'server-bandwidth-priority', 'server-resource-limit', 'publisher-stopped', 'producer-closed', 'transport-closed', 'subscription-timeout', 'sfu-video-not-arriving', 'sfu-timeout', 'unsupported-codec', 'closed', 'session-left', 'transport-failed', 'sfu-transport-failed', 'receiver-video-stalled', 'receiver-stats-timeout', 'receiver-ready-failed', 'receiver-unsubscribed'];
+            const allowedReasons = ['server-bandwidth-limit', 'server-bandwidth-priority', 'server-resource-limit', 'publisher-stopped', 'producer-closed', 'transport-closed', 'subscription-timeout', 'sfu-video-not-arriving', 'sfu-timeout', 'unsupported-codec', 'closed', 'session-left', 'transport-failed', 'sfu-transport-failed', 'receiver-video-stalled', 'receiver-stats-timeout', 'receiver-ready-failed', 'receiver-unsubscribed', 'p2p-connection-failed', 'p2p-video-stalled', 'turn-relay', 'sender-encoder-pressure', 'sender-uplink-pressure'];
             routeHistory.push({ time: Date.now(), event, reason: reason ? allowedReasons.includes(reason) ? reason : 'other' : null, serverViewers: routes.size });
             onRouteEvent?.({ ...routeHistory[routeHistory.length - 1] });
             if (routeHistory.length > 12) routeHistory.shift();
@@ -177,6 +195,7 @@
         const dropSubscription = (id) => {
             const entry = subscriptions.get(id);
             if (!entry) return;
+            if (entry.slowSamples > 0) retainReceiverIssue(entry, 'receiver-video-stalled');
             subscriptions.delete(id);
             global.clearTimeout(entry.healthTimer);
             entry.consumers.forEach((consumer) => consumer.close());
@@ -251,7 +270,12 @@
                         区间卡顿时长_ms: delta('totalFreezesDuration') === null ? null : Math.round(delta('totalFreezesDuration') * 1000),
                         停滞线索: clue,
                     });
-                    if (entry.slowSamples >= 3 && receiveMode(entry.peerId) === 'auto') {
+                    // Manual SFU mode intentionally doesn't fail over. It must
+                    // still preserve the low-FPS window before a route change.
+                    if (!entry.slowSamples) entry.issueRecorded = false;
+                    if (entry.slowSamples >= 3 && !automaticReceive(entry.peerId))
+                        retainReceiverIssue(entry, 'receiver-video-stalled');
+                    if (entry.slowSamples >= 3 && automaticReceive(entry.peerId)) {
                         retainReceiverFailure(entry, 'receiver-video-stalled');
                         entry.slowSamples = 0;
                         receiverCooldowns.set(publication.id, Date.now() + 120000);
@@ -264,7 +288,9 @@
                         entry.statsFailures = (entry.statsFailures || 0) + 1;
                         keepHealthSample(entry, { 采样时间_ms: Date.now(), 状态: '统计读取失败或超时',
                             页面后台: Boolean(global.document?.hidden), 判定有效: false, 连续统计失败次数: entry.statsFailures });
-                        if (entry.statsFailures >= 3 && receiveMode(entry.peerId) === 'auto') {
+                        if (entry.statsFailures >= 3 && !automaticReceive(entry.peerId))
+                            retainReceiverIssue(entry, 'receiver-stats-timeout');
+                        if (entry.statsFailures >= 3 && automaticReceive(entry.peerId)) {
                             retainReceiverFailure(entry, 'receiver-stats-timeout');
                             receiverCooldowns.set(publication.id, Date.now() + 120000);
                             if (await releaseSubscription(publication.id, token, 'receiver-stats-timeout'))
@@ -281,6 +307,8 @@
         const clearLocal = () => {
             sendServerHealth = undefined;
             epoch++;
+            pressureSamples = 0;
+            lastPressureAt = 0;
             publicationVersion++;
             global.clearTimeout(retryTimer);
             global.clearInterval(discoveryTimer);
@@ -402,7 +430,7 @@
                     if (
                         !current(token) ||
                         !device ||
-                        receiveMode(publication.peerId) === 'p2p' ||
+                        !maySubscribe(publication.peerId) ||
                         subscriptions.has(publication.id) ||
                         (receiverCooldowns.get(publication.id) || 0) > Date.now() ||
                         publication.peerId === session.peerId
@@ -452,14 +480,32 @@
                         // Wait for actual decoded video before suppressing P2P.
                         await (waitForMedia || waitForDecodedVideo)(
                             entry.consumers,
-                            transport
+                            transport,
+                            (reports) => {
+                                const row = [...reports.values()].find((item) => item.type === 'inbound-rtp' && (item.kind === 'video' || item.mediaType === 'video'));
+                                const previous = entry.startupStats;
+                                const now = Date.now();
+                                if (previous && now - previous.time < 1000) return;
+                                const comparable = row && previous?.row?.id === row.id && row.timestamp > previous.row.timestamp;
+                                const delta = (key) => comparable ? healthDelta(row, previous.row, key) : null;
+                                keepHealthSample(entry, {
+                                    采样时间_ms: now, 状态: '等待首帧', 页面后台: Boolean(global.document?.hidden), 判定有效: false,
+                                    接收统计间隔_ms: comparable ? row.timestamp - previous.row.timestamp : null,
+                                    接收字节增长: delta('bytesReceived'), 完整接收帧增长: delta('framesReceived'), 解码帧增长: delta('framesDecoded'),
+                                    完整接收帧数: Number.isFinite(row?.framesReceived) ? row.framesReceived : null,
+                                    解码帧数: Number.isFinite(row?.framesDecoded) ? row.framesDecoded : null,
+                                    NACK增长: delta('nackCount'), PLI增长: delta('pliCount'),
+                                    停滞线索: delta('bytesReceived') > 0 && row?.framesDecoded === 0 ? '首帧等待期间收到数据但未解码出帧' : '首帧等待中',
+                                });
+                                entry.startupStats = { time: now, row };
+                            }
                         );
                         if (
                             !current(token) ||
                             subscriptions.get(publication.id) !== entry
                         )
                             throw new Error('stale-sfu-session');
-                        if (receiveMode(entry.peerId) === 'p2p') {
+                        if (!maySubscribe(entry.peerId)) {
                             await releaseSubscription(publication.id, token);
                             return;
                         }
@@ -490,12 +536,21 @@
                         );
                         monitorSubscription(publication, entry, token);
                     } catch (error) {
-                        if (current(token)) {
+                        if (current(token) && subscriptions.get(publication.id) === entry) {
+                            if (!entry.attached) {
+                                if (!entry.healthSamples?.length) keepHealthSample(entry, {
+                                    采样时间_ms: Date.now(), 状态: '首帧准备失败', 判定有效: false,
+                                    停滞线索: '首帧准备失败，未取得可用接收统计',
+                                });
+                                retainReceiverIssue(entry, 'receiver-ready-failed');
+                            }
                             recordRoute('subscribe-failed', error?.message);
-                            if (['server-bandwidth-limit', 'server-resource-limit'].includes(error?.message))
+                            if (['server-bandwidth-limit', 'server-resource-limit', 'unsupported-codec'].includes(error?.message))
                                 receiverCooldowns.set(publication.id, Date.now() + 120000);
                             await releaseSubscription(publication.id, token, 'receiver-ready-failed');
-                            const preference = receivePreferences.get(publication.peerId);
+                            if (!current(token)) return;
+                            const preference = receivePreferences.get(publication.peerId) || { mode: 'auto', pending: false, error: '' };
+                            if (!receivePreferences.has(publication.peerId)) receivePreferences.set(publication.peerId, preference);
                             if (preference && preference.mode !== 'p2p') preference.error = receiveError(error?.message);
                             onWarning?.('该共享使用直连观看', error);
                         }
@@ -585,7 +640,9 @@
                         return;
                     const video = track.kind === 'video';
                     const decision = video ? global.VoiceScreenCodecs?.getDecision(track) : undefined;
-                    const selectedCodec = decision ? global.VoiceScreenCodecs.findCodec(device.sendRtpCapabilities?.codecs || device.rtpCapabilities?.codecs, decision.primary) : undefined;
+                    const codecPrimary = capture.codecPrimary || decision?.primary;
+                    const availableCodecs = device.sendRtpCapabilities?.codecs || device.rtpCapabilities?.codecs;
+                    let selectedCodec = decision ? global.VoiceScreenCodecs.findCodec(availableCodecs, codecPrimary) : undefined;
                     if (video && decision && !selectedCodec) throw new Error('screen-codec-unavailable');
                     const bitrate = Math.min(config.videoBitrate, videoMaxBitrate);
                     const startBitrateKbps = ['1500', '5500'].includes(String(capture.options.startBitrate))
@@ -605,6 +662,7 @@
                                           maxFramerate:
                                               capture.options.frameRate || 60,
                                           scaleResolutionDownBy: 1,
+                                          ...(selectedCodec?.mimeType?.toLowerCase() === 'video/av1' ? { scalabilityMode: 'L1T1' } : {}),
                                       },
                                   ],
                                   ...(selectedCodec ? { codec: selectedCodec } : {}),
@@ -619,17 +677,25 @@
                               }),
                     };
                     let producer;
-                    try {
-                        producer = await sendTransport.produce(produceOptions);
-                    } catch (error) {
-                        const fallbackCodec = video && decision && global.VoiceScreenCodecs.findCodec(
-                            device.sendRtpCapabilities?.codecs || device.rtpCapabilities?.codecs, 'vp8'
-                        );
-                        if (!current(token) || version !== publicationVersion ||
-                            !/^video\/h264$/i.test(selectedCodec?.mimeType || '') || !fallbackCodec ||
-                            !(error.name === 'UnsupportedError' || /unsupported.codec|codec.*not.supported/i.test(error.message || ''))) throw error;
-                        onWarning?.('SFU H.264 不兼容，本次服务器发布回退 VP8');
-                        producer = await sendTransport.produce({ ...produceOptions, codec: fallbackCodec });
+                    const codecTrials = video && decision ? global.VoiceScreenCodecs.candidates(codecPrimary)
+                        .map((key) => availableCodecs?.find(global.VoiceScreenCodecs.codecs[key].matches)).filter(Boolean) : [undefined];
+                    for (let index = 0; index < codecTrials.length; index++) {
+                        selectedCodec = codecTrials[index];
+                        try {
+                            const encodings = produceOptions.encodings?.map((encoding) => {
+                                const value = { ...encoding };
+                                if (selectedCodec?.mimeType?.toLowerCase() === 'video/av1') value.scalabilityMode = 'L1T1';
+                                else delete value.scalabilityMode;
+                                return value;
+                            });
+                            producer = await sendTransport.produce({ ...produceOptions, ...(encodings ? { encodings } : {}),
+                                ...(selectedCodec ? { codec: selectedCodec } : {}) });
+                            break;
+                        } catch (error) {
+                            if (!current(token) || desired !== capture || version !== publicationVersion || index === codecTrials.length - 1 ||
+                                !(error.name === 'UnsupportedError' || /unsupported.codec|codec.*not.supported|encoder/i.test(error.message || ''))) throw error;
+                            onCodecEvent?.({ 路径: 'SFU', primary: selectedCodec?.mimeType, reason: 'producer-codec-failed' });
+                        }
                     }
                     if (
                         !current(token) ||
@@ -640,6 +706,23 @@
                         return;
                     }
                     producers.add(producer);
+                    if (video && decision?.mode === 'av1') {
+                        const primary = Object.keys(global.VoiceScreenCodecs.codecs).find((key) => global.VoiceScreenCodecs.codecs[key].matches(selectedCodec));
+                        onCodecEvent?.({ 路径: 'SFU', primary, reason: primary === decision.primary ? 'producer-created' : 'router-codec-fallback' });
+                        global.VoiceScreenCodecs.registerConnection(statsConnection(sendTransport), {
+                            sending: true, requested: decision.mode, primary,
+                            isCurrent: () => current(token) && version === publicationVersion && desired === capture && !producer.closed && track.readyState !== 'ended',
+                            onFallback: (reason) => {
+                                if (primary === 'vp8') return;
+                                const next = primary === 'av1' ? 'h264' : 'vp8';
+                                onCodecEvent?.({ 路径: 'SFU', primary: next, reason });
+                                stopPublishing();
+                                desired = { ...capture, codecPrimary: next };
+                                void publishDesired();
+                            },
+                        });
+                        global.VoiceScreenCodecs.markConnected(statsConnection(sendTransport));
+                    }
                     if (video && producer.rtpSender?.setParameters) {
                         const value = producer.rtpSender.getParameters();
                         value.degradationPreference = 'maintain-resolution';
@@ -703,24 +786,27 @@
         const getReceiveRoute = (peerId) => {
             const preference = receivePreferences.get(peerId);
             const attached = [...subscriptions.values()].some((entry) => entry.peerId === peerId && entry.attached);
-            return { mode: receiveMode(peerId), route: attached ? 'sfu' : 'p2p',
+            return { mode: receiveMode(peerId), route: attached ? 'sfu' : 'p2p', transport: attached ? 'SFU' : p2pSamples.get(peerId)?.path || 'unknown',
+                reason: preference?.fallbackReason || null,
                 pending: Boolean(preference?.pending), available: Boolean(config.enabled && Device),
                 error: preference?.error || (preference?.mode === 'sfu' && !attached
                     ? '服务器转发当前不可用，当前使用 P2P；可重试或更改设置' : '') };
         };
         const receiveError = (reason) => ({
+            'unsupported-codec': '此设备不能解码服务器共享编码，当前保留 P2P 兼容协商',
             'server-bandwidth-limit': '服务器带宽名额不足，当前使用 P2P',
             'server-resource-limit': '服务器资源不足，当前使用 P2P',
             'publication-unavailable': '这位共享者尚未提供服务器转发，当前使用 P2P',
         })[reason] || '服务器转发不可用，当前使用 P2P';
         const setReceiveRoute = async (peerId, mode) => {
-            if (!peerId || !['auto', 'p2p', 'sfu'].includes(mode) || receivePreferences.get(peerId)?.pending)
+            if (!peerId || !['auto', 'p2p', 'sfu', 'p2p-first'].includes(mode) || receivePreferences.get(peerId)?.pending)
                 return getReceiveRoute(peerId);
-            const preference = { mode, pending: true, error: '' };
+            const preference = { mode, pending: true, error: '', startedAt: Date.now(), fallback: false };
+            p2pSamples.delete(peerId);
             receivePreferences.set(peerId, preference);
             const voiceSession = session;
             try {
-                if (mode === 'p2p') {
+                if (mode === 'p2p' || mode === 'p2p-first') {
                     // Drain pending consume/ready requests before releasing the
                     // reservation, so a late response cannot park P2P again.
                     await receiveQueue.catch(() => {});
@@ -749,6 +835,45 @@
                 preference.pending = false;
             }
             return getReceiveRoute(peerId);
+        };
+        const requestP2pFallback = async (peerId, reason) => {
+            const preference = receivePreferences.get(peerId);
+            if (!current(epoch) || preference?.mode !== 'p2p-first' || preference.pending || preference.fallback || global.document?.hidden) return;
+            preference.fallback = true;
+            preference.fallbackReason = reason;
+            preference.pending = true;
+            recordRoute('p2p-fallback-requested', reason);
+            try {
+                if (!(await initialize()) || receivePreferences.get(peerId) !== preference) return;
+                const token = epoch;
+                const result = await request('list', {}, token);
+                if (!current(token) || receivePreferences.get(peerId) !== preference) return;
+                const publication = result.publications.find((item) => item.peerId === peerId);
+                if (!publication) throw new Error('publication-unavailable');
+                await subscribe(publication, token);
+            } catch (error) { preference.error = receiveError(error?.message); }
+            finally { preference.pending = false; }
+        };
+        const observeP2p = (peerId, pc, reports) => {
+            if (!session || [...subscriptions.values()].some((entry) => entry.peerId === peerId && entry.attached)) return;
+            const preference = receivePreferences.get(peerId);
+            const before = p2pSamples.get(peerId);
+            const rows = Array.from(reports?.values?.() || reports || []);
+            const row = rows.filter((item) => item.type === 'inbound-rtp' && (item.kind === 'video' || item.mediaType === 'video'))
+                .sort((a, b) => (b.framesDecoded || 0) - (a.framesDecoded || 0))[0];
+            const path = reports ? global.VoiceScreenCodecs?.describePath?.(pc, reports) || 'unknown' : before?.path || 'unknown';
+            if (!global.document?.hidden && row && before?.pc === pc && row.id === before.row?.id && row.timestamp - before.row.timestamp >= 900) {
+                const stalled = Number.isFinite(row.framesDecoded) && row.framesDecoded === before.row.framesDecoded && row.bytesReceived > before.row.bytesReceived;
+                const stalls = stalled ? (before.stalls || 0) + 1 : 0;
+                p2pSamples.set(peerId, { pc, row, path, stalls });
+                if (stalls >= 3) void requestP2pFallback(peerId, 'p2p-video-stalled');
+            } else if (!before || before.pc !== pc || (row && row.id !== before.row?.id)) p2pSamples.set(peerId, { pc, row, path, stalls: 0 });
+            if (preference?.mode !== 'p2p-first' || Date.now() - preference.startedAt < 10000) return;
+            if (!pc || ['failed', 'closed', 'disconnected'].includes(pc.connectionState) || ['failed', 'closed', 'disconnected'].includes(pc.iceConnectionState))
+                void requestP2pFallback(peerId, 'p2p-connection-failed');
+            else if (path === 'TURN') void requestP2pFallback(peerId, 'turn-relay');
+            else if (Date.now() - preference.startedAt >= 20000 && !['connected', 'completed'].includes(pc.connectionState) && !['connected', 'completed'].includes(pc.iceConnectionState))
+                void requestP2pFallback(peerId, 'p2p-connection-failed');
         };
         const handlers = {
             'sfu:publication': (payload) => {
@@ -828,6 +953,7 @@
                 }
                 clearLocal();
                 receivePreferences.clear();
+                p2pSamples.clear();
                 session = next;
                 cooldownUntil = 0;
                 if (next) void initialize().then(() => publishDesired());
@@ -845,15 +971,38 @@
                 session = undefined;
                 receiverCooldowns.clear();
                 receivePreferences.clear();
+                p2pSamples.clear();
                 routeHistory.length = 0;
                 receiverFailures.length = 0;
+                receiverIssues.length = 0;
                 receiverOrdinal = 0;
             },
             usesServer: (peerId) => routes.has(peerId),
+            observeP2p,
+            observeSender(snapshot, { directViewers = 0, budget = 24000000 } = {}) {
+                if (!current(epoch) || !desired || directViewers < 2) { pressureSamples = 0; return; }
+                const rows = (snapshot.连接 || []).filter((connection) => connection.路径 === 'P2P')
+                    .flatMap((connection) => connection.视频流 || []).filter((row) => row.统计状态 === '已采样' && row.区间发送帧率 > 0);
+                const totalBps = (snapshot.连接 || []).flatMap((connection) => connection.视频流 || [])
+                    .filter((row) => row.统计状态 === '已采样' && row.方向 === '发送')
+                    .reduce((sum, row) => sum + (row.码率_Mbps || 0) * 1e6, 0);
+                const cpu = rows.some((row) => row.编码受限原因 === 'cpu' && row.区间采集帧率 > 0 && row.区间编码帧率 < row.区间采集帧率 * 0.8);
+                const bandwidth = rows.some((row) => row.编码受限原因 === 'bandwidth') && totalBps > budget * 0.9;
+                pressureSamples = cpu || bandwidth ? pressureSamples + 1 : 0;
+                if (pressureSamples < 3 || Date.now() - lastPressureAt < 10000) return;
+                lastPressureAt = Date.now();
+                socket.emit('screen:route-pressure', { voiceSessionGeneration: session.voiceSessionGeneration,
+                    reason: cpu ? 'sender-encoder-pressure' : 'sender-uplink-pressure' });
+            },
+            receivePressure(payload) {
+                if (guardEvent(payload) && ['sender-encoder-pressure', 'sender-uplink-pressure'].includes(payload.reason))
+                    void requestP2pFallback(payload.peerId, payload.reason);
+            },
             getReceiveRoute,
             setReceiveRoute,
             forgetPeer(peerId) {
                 receivePreferences.delete(peerId);
+                p2pSamples.delete(peerId);
                 for (const [id, entry] of subscriptions) {
                     if (entry.peerId !== peerId) continue;
                     if (session && socket?.connected)
@@ -883,6 +1032,7 @@
                     序号: entry.healthOrdinal, 健康采样: entry.healthSamples || [],
                 })).slice(0, 8),
                 最近回退: receiverFailures,
+                最近异常: receiverIssues,
             }),
             snapshot: () => ({
                 state,
@@ -892,12 +1042,13 @@
             }),
         };
     };
-    const waitForDecodedVideo = async (consumers) => {
+    const waitForDecodedVideo = async (consumers, transport, onStats) => {
         const video = consumers.find((consumer) => consumer.kind === 'video');
         if (!video) throw new Error('video-required');
         const deadline = Date.now() + 8000;
         while (Date.now() < deadline && !video.closed) {
             const reports = await video.getStats();
+            try { onStats?.(reports); } catch { /* Observing startup must not alter readiness. */ }
             if (
                 [...reports.values()].some(
                     (report) =>

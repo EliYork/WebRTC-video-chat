@@ -3,9 +3,10 @@ import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { createScreenSfuBudget } from './ScreenSfuBudget.js';
 
-const codecs = [
+export const screenRouterCodecs = [
     { kind: 'audio', mimeType: 'audio/opus', clockRate: 48000, channels: 2 },
     { kind: 'video', mimeType: 'video/VP8', clockRate: 90000 },
+    { kind: 'video', mimeType: 'video/AV1', clockRate: 90000, parameters: { profile: 0 } },
     {
         kind: 'video',
         mimeType: 'video/H264',
@@ -17,6 +18,7 @@ const codecs = [
         },
     },
 ];
+const codecs = screenRouterCodecs;
 const actions = new Set([
     'capabilities',
     'transport',
@@ -631,12 +633,7 @@ export const createScreenSfuService = ({
                 if (
                     !budget.reserve(
                         `${publication.id}:${socket.id}`,
-                        Math.min(
-                            config.payloadBudget,
-                            publication.demand ||
-                                config.initialViewerBitrate +
-                                    config.audioBitrate
-                        )
+                        publication.demand || config.initialViewerBitrate + config.audioBitrate
                     )
                 )
                     throw fail('server-bandwidth-limit');

@@ -15,12 +15,13 @@ const fixture = (width = 1920) => {
     const node = (id, host = document.body) => { const element = document.createElement('div'); element.id = id; host.append(element); return element; };
     const root = node('main'); const stage = node('video-grid', root); const members = node('member-cards', root); const chat = node('chat-panel', root);
     const sources = node('share-sources', root);
-    for (const id of ['stageChatToggle', 'stageChannelsToggle', 'member-count', 'members-empty']) node(id);
+    for (const id of ['stageChatToggle', 'stageChannelsToggle', 'member-count', 'members-empty', 'stageChannelName', 'stageChannelStatus', 'stageWelcomeTitle', 'stageWelcomeDetail', 'stageJoinVoice']) node(id);
     node('chatMessages', chat); node('chatInput', chat);
-    const state = new Map(); const volumes = [];
+    const state = new Map(); const volumes = []; const channel = {}; let joins = 0;
     const runtime = window.VoiceStageLayout.createRuntime({ root, stage, members, sources, chat,
         getTiles: () => root.querySelectorAll('.video-tile'), getMember: (tile) => state.get(tile.id),
         getCameraStream: (tile) => state.get(tile.id).cameraStream,
+        getChannelState: () => channel, onJoin: () => { joins++; },
         onVolume: (_, tile) => volumes.push(tile.id) });
     const add = (id, sharing = false) => {
         const tile = node(id, stage); tile.className = 'video-tile';
@@ -31,7 +32,7 @@ const fixture = (width = 1920) => {
         return tile;
     };
     runtime.init();
-    return { root, stage, members, chat, sources, document, window, runtime, state, add, volumes };
+    return { root, stage, members, chat, sources, document, window, runtime, state, add, volumes, channel, getJoins: () => joins };
 };
 
 test('voice uses member cards, shares choose one stable focus and last end returns to voice', () => {
@@ -119,12 +120,51 @@ test('hidden local screen preview remains a share; distinct camera preview is si
     assert.equal(local.querySelector('video').srcObject, null, 'preview stays hidden');
 });
 
-test('mobile starts with viewable media, channels and chat have independent controls', () => {
-    const f = fixture(390); assert.equal(f.runtime.snapshot().chatOpen, false);
-    f.document.getElementById('stageChannelsToggle').click(); assert.equal(f.runtime.snapshot().channelsOpen, true);
-    f.document.getElementById('stageChatToggle').click(); assert.equal(f.runtime.snapshot().chatOpen, true);
-    f.runtime.setChannelsOpen(false); assert.equal(f.runtime.snapshot().chatOpen, true);
-    f.runtime.destroy(); assert.equal(f.document.getElementById('stageChatToggle').listeners.get('click').size, 0);
+test('chat starts expanded at every width and a manual collapse survives view and member updates', () => {
+    for (const width of [3840, 1920, 900, 390, 320]) {
+        const f = fixture(width); assert.equal(f.runtime.snapshot().chatOpen, true);
+        const toggle = f.document.getElementById('stageChatToggle');
+        assert.equal(toggle.getAttribute('aria-expanded'), 'true');
+        toggle.click(); assert.equal(f.runtime.snapshot().chatOpen, false);
+        f.runtime.syncViewport(); f.runtime.sync();
+        assert.equal(f.runtime.snapshot().chatOpen, false);
+        assert.equal(f.chat.inert, true);
+        f.document.getElementById('stageChannelsToggle').click(); assert.equal(f.runtime.snapshot().channelsOpen, true);
+        toggle.click(); assert.equal(f.runtime.snapshot().chatOpen, true);
+        assert.equal(f.runtime.snapshot().channelsOpen, false);
+        f.runtime.destroy(); assert.equal(toggle.listeners.get('click').size, 0);
+    }
+});
+
+test('channel guide distinguishes unknown, empty, occupied, joining and joined without creating media', () => {
+    const f = fixture(); const get = (id) => f.document.getElementById(id);
+    assert.equal(f.root.dataset.channelOccupancy, 'unknown');
+    assert.equal(f.members.hidden, true);
+    Object.assign(f.channel, { joined: false, memberCount: 0, channelName: '大厅' }); f.runtime.sync();
+    assert.equal(f.root.dataset.voiceState, 'not-joined');
+    assert.equal(f.root.dataset.channelOccupancy, 'empty');
+    assert.match(get('stageWelcomeTitle').textContent, /第一个/);
+    get('stageJoinVoice').click(); assert.equal(f.getJoins(), 1);
+    f.channel.memberCount = 3; f.runtime.sync();
+    assert.equal(f.root.dataset.channelOccupancy, 'occupied');
+    assert.match(get('stageWelcomeTitle').textContent, /3 位/);
+    assert.equal(get('stageChannelName').textContent, '大厅');
+    f.channel.pending = true; f.runtime.sync();
+    assert.equal(f.root.dataset.voiceState, 'joining'); assert.equal(get('stageJoinVoice').disabled, true);
+    f.channel.joined = true; f.channel.pending = false; f.add('local-video'); f.runtime.sync();
+    assert.equal(f.root.dataset.voiceState, 'joined'); assert.equal(f.members.hidden, false);
+    assert.equal(get('members-empty').hidden, true); assert.equal(get('stageJoinVoice').hidden, true);
+});
+
+test('one, two, three, four and larger member grids retain every original tile and speaking state', () => {
+    const f = fixture();
+    for (let n = 1; n <= 12; n++) {
+        const tile = f.add(`member-${n}`); const video = tile.querySelector('video');
+        f.runtime.sync(); f.runtime.setSpeaking(tile.id, true);
+        assert.equal(f.members.children.length, n);
+        assert.equal(f.members.dataset.memberCount, String(n));
+        assert.equal(tile.querySelector('video'), video); assert.equal(tile.classList.contains('is-speaking'), true);
+    }
 });
 
 test('page loads only active resources and stage code cannot capture or change media routes', () => {

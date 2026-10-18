@@ -3,7 +3,7 @@
 // microphone/camera and synthetic canvas shares. No real screen is captured.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { once } from 'node:events';
@@ -13,6 +13,8 @@ import WebSocket from 'ws';
 const browserPath = process.env.STAGE_TEST_BROWSER || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';
 assert.ok(existsSync(browserPath), 'Set STAGE_TEST_BROWSER to an installed Chromium/Edge executable');
 const work = mkdtempSync(join(tmpdir(), 'webrtc-stage-test-'));
+const artifacts = process.env.STAGE_TEST_ARTIFACTS;
+if (artifacts) mkdirSync(artifacts, { recursive: true });
 const reservation = createServer(); reservation.listen(0, '127.0.0.1'); await once(reservation, 'listening');
 const port = reservation.address().port; await new Promise((done) => reservation.close(done));
 const useSfu = process.env.STAGE_TEST_SFU === 'true';
@@ -41,6 +43,7 @@ const evaluate = async (sessionId, expression) => {
 };
 const probe = `(() => {
     window.__stageProbe = { offers: 0, replaceTracks: 0, captures: 0, shares: [] };
+    Object.defineProperty(navigator, 'clipboard', { configurable:true, value:{writeText:async(text)=>{window.__copiedDiagnostics=JSON.parse(text);}} });
     const offer = RTCPeerConnection.prototype.createOffer;
     RTCPeerConnection.prototype.createOffer = function(...args) { window.__stageProbe.offers++; return offer.apply(this, args); };
     const replace = RTCRtpSender.prototype.replaceTrack;
@@ -68,6 +71,11 @@ const open = async () => {
     return sessionId;
 };
 const click = (session, selector) => evaluate(session, `document.querySelector(${JSON.stringify(selector)}).click()`);
+const screenshot = async (session, name) => {
+    if (!artifacts) return;
+    const { data } = await send('Page.captureScreenshot', { format: 'png' }, session);
+    writeFileSync(join(artifacts, `${name}.png`), Buffer.from(data, 'base64'));
+};
 const share = async (session) => {
     await click(session, '#shareScreen');
     await evaluate(session, `(() => { const select = document.querySelector('[data-screen-share-codec]'); select.value = 'vp8'; select.dispatchEvent(new Event('change', {bubbles:true})); })()`);
@@ -78,10 +86,20 @@ const geometry = (session) => evaluate(session, `(() => {
     const rect = (selector) => { const node = document.querySelector(selector); const r = node.getBoundingClientRect(); const css = getComputedStyle(node); return {x:r.x,y:r.y,w:r.width,h:r.height,display:css.display,cols:css.gridTemplateColumns}; };
     const result = { viewport:[innerWidth,innerHeight,devicePixelRatio], overflow:document.documentElement.scrollWidth > innerWidth, mode:document.querySelector('#main').dataset.stageMode,
         stage:rect('.room-stage'), members:rect('.stage-members'), chat:rect('#chat-panel'), dock:rect('.stage-dock'), nav:rect('.room-sidebar'), main:rect('#main'),
-        cards:[...document.querySelectorAll('#member-cards > *')].map((n) => { const r=n.getBoundingClientRect(); return {w:r.width,h:r.height}; }) };
+        cards:[...document.querySelectorAll('#member-cards > *')].map((n) => { const r=n.getBoundingClientRect(); return {x:r.x,y:r.y,w:r.width,h:r.height}; }),
+        icons:[...document.querySelectorAll('.stage-dock svg, .stage-dock button > i')].filter(n=>n.getBoundingClientRect().width>0).map(n=>{const r=n.getBoundingClientRect(),b=n.closest('button').getBoundingClientRect();return {w:r.width,h:r.height,inside:r.x>=b.x && r.y>=b.y && r.right<=b.right+.5 && r.bottom<=b.bottom+.5};}),
+        controls:[...document.querySelectorAll('.media-dock-actions button, #destroyPeer, #copyRoomLink')].map(n=>{const r=n.getBoundingClientRect();return {w:r.width,h:r.height,x:r.x,right:r.right};}),
+        cardActions:[...document.querySelectorAll('#member-cards .tile-header button')].filter(n=>n.getBoundingClientRect().width>0).map(n=>{const r=n.getBoundingClientRect(),c=n.closest('.member-card').getBoundingClientRect();return r.left>=c.left && r.right<=c.right+.5 && r.top>=c.top && r.bottom<=c.bottom+.5;}) };
     const focus = document.querySelector('#video-grid > .is-stage-focus video'); if (focus) result.fit = getComputedStyle(focus).objectFit;
     return result;
 })()`);
+const checkDock = (result) => {
+    const [width,height] = result.viewport;
+    assert.ok(result.dock.y + result.dock.h <= height + 1, `dock within viewport ${width}x${height}`);
+    assert.ok(result.icons.length >= 4 && result.icons.every(i=>i.w<=24 && i.h<=24 && i.inside), `bounded icons ${width}x${height}: ${JSON.stringify(result.icons)}`);
+    assert.ok(result.controls.every(b=>b.h===44 && b.x>=0 && b.right<=width+1), `aligned controls ${width}: ${JSON.stringify(result.controls)}`);
+    assert.ok(result.cardActions.every(Boolean), `member actions contained ${width}x${height}`);
+};
 
 try {
     await wait(async () => { try { return (await fetch(`http://127.0.0.1:${port}/room/lobby`)).ok; } catch { return false; } }, 'isolated local server');
@@ -106,13 +124,19 @@ try {
     });
     const a = await open();
     assert.equal((await geometry(a)).stage.display, 'none');
-    await click(a, '#destroyPeer');
+    await wait(() => evaluate(a, `document.querySelector('#main').dataset.channelOccupancy === 'empty'`), 'empty channel guide');
+    assert.equal(await evaluate(a, `document.querySelector('#members-empty').hidden`), false);
+    await screenshot(a, 'not-joined');
+    await click(a, '#stageJoinVoice');
     await wait(() => evaluate(a, `document.querySelector('#destroyPeer').dataset.sessionAction === 'hangup' && Boolean(document.querySelector('#local-video'))`), 'first voice join');
     await click(a, '#toggleVideo');
     await wait(() => evaluate(a, `document.querySelector('#member-cards #local-video video')?.videoWidth > 0`), 'fake camera in member card');
-    const b = await open(); await click(b, '#destroyPeer');
+    const b = await open();
+    await wait(() => evaluate(b, `document.querySelector('#main').dataset.channelOccupancy === 'occupied' && document.querySelector('#stageWelcomeTitle').textContent.includes('1 位')`), 'occupied channel guide');
+    await click(b, '#stageJoinVoice');
     await wait(() => evaluate(a, `document.querySelectorAll('#member-cards > *').length === 2`), 'second participant');
     await wait(() => evaluate(b, `document.querySelector('#destroyPeer').dataset.sessionAction === 'hangup'`), 'second voice join');
+    await screenshot(a, 'voice-two-members');
     await share(a);
     await wait(() => evaluate(b, `document.querySelector('#main').dataset.stageMode === 'sharing' && document.querySelector('#video-grid > .is-stage-focus video')?.videoWidth > 0`), 'remote screen reception');
     await delay(1800); // Let initial microphone/camera/share negotiations settle.
@@ -124,20 +148,21 @@ try {
     for (const [width,height,dpr] of viewports) {
         await send('Emulation.setDeviceMetricsOverride', { width,height,deviceScaleFactor:dpr,mobile:false }, b);
         await delay(120);
-        if (width <= 640) {
-            const expanded = await evaluate(b, `document.querySelector('#stageChatToggle').getAttribute('aria-expanded')`);
-            if (expanded === 'true') await click(b, '#stageChatToggle');
-        }
+        const expanded = await evaluate(b, `document.querySelector('#stageChatToggle').getAttribute('aria-expanded')`);
+        if ((width > 640) !== (expanded === 'true')) await click(b, '#stageChatToggle');
         const result = await geometry(b);
         assert.equal(result.overflow, false, `horizontal overflow ${width}x${height}`);
         assert.ok(result.stage.w > 0 && result.stage.h > 0, `visible stage ${width}`);
-        assert.ok(result.dock.y + result.dock.h <= height + 1, `dock within viewport ${width}x${height}`);
+        checkDock(result);
         assert.ok(result.stage.y + result.stage.h <= result.members.y + 1, 'stage above member strip');
         assert.ok(result.members.y + result.members.h <= result.dock.y + 1, 'member strip above dock');
         assert.equal(result.fit, 'contain');
         assert.ok(result.cards.every((card) => card.w <= 320 && card.h <= 210), 'bounded member cards');
         layouts.push(result);
-        await click(b, '#stageChatToggle'); await click(b, '#stageChatToggle');
+        if (width===1920 || width===390) await screenshot(b, `sharing-${width}`);
+        await click(b, '#stageChatToggle');
+        if (width>640) assert.ok((await geometry(b)).stage.w>result.stage.w,`closing chat expands sharing stage ${width}`);
+        await click(b, '#stageChatToggle');
         assert.equal(await evaluate(b, `document.querySelector('#chatInput').value`), 'preserved draft');
     }
     const playerChanges = await evaluate(b, `__originalPlayers.filter(({node,stream})=>!node.isConnected || node.srcObject!==stream).map(({node,stream})=>({tag:node.tagName,id:node.closest('.video-tile')?.id,connected:node.isConnected,oldTracks:stream?.getTracks().map(t=>t.kind+':'+t.id),newTracks:node.srcObject?.getTracks().map(t=>t.kind+':'+t.id)}))`);
@@ -196,20 +221,66 @@ try {
         assert.equal(result.overflow, false, `voice horizontal overflow ${width}`);
         assert.equal(result.stage.display, 'none', 'no empty black stage in voice mode');
         assert.ok(result.members.h > 0 && result.members.w > 0, `voice members ${width}`);
-        assert.ok(result.cards.every((card) => card.w <= 320 && card.h <= 210));
-        if (width > 640) assert.ok(result.chat.w > 0 && result.chat.h > 0);
-        assert.ok(result.dock.y + result.dock.h <= height + 1);
+        assert.ok(result.cards.every((card) => card.w <= 720 && card.h >= 140));
+        if (width > 640) {
+            assert.ok(result.chat.w > 0 && result.chat.h > 0);
+            assert.ok(result.members.x + result.members.w <= result.chat.x + 1, 'voice members precede right chat');
+            await click(a, '#stageChatToggle');
+            const closed = await geometry(a);
+            assert.ok(closed.members.w>result.members.w && closed.members.x+closed.members.w>=width-1,'closing chat expands voice stage without blank columns');
+            await click(a, '#stageChatToggle');
+        }
+        checkDock(result);
         voiceLayouts.push(result);
     }
+    // Geometry fixtures use the actual card markup, with media removed. Real
+    // two-party WebRTC behavior is exercised above; these are count/layout cases.
+    const memberGrids = [];
+    await evaluate(a, `window.__gridOriginals=[...document.querySelector('#member-cards').children];`);
+    for (const count of [1,2,3,4,8,12]) {
+        for (const [width,height,dpr] of viewports) {
+            await send('Emulation.setDeviceMetricsOverride', { width,height,deviceScaleFactor:dpr,mobile:false }, a);
+            const expanded = await evaluate(a, `document.querySelector('#stageChatToggle').getAttribute('aria-expanded')`);
+            if ((width > 640) !== (expanded === 'true')) await click(a, '#stageChatToggle');
+            await evaluate(a, `(() => {
+                const host=document.querySelector('#member-cards');host.replaceChildren();host.hidden=false;
+                for(let i=0;i<${count};i++) {
+                    const card=__gridOriginals[i%__gridOriginals.length].cloneNode(true); card.id='geometry-member-'+i;card.querySelectorAll('video,audio').forEach(n=>n.remove());
+                    let placeholder=card.querySelector('.voice-placeholder');
+                    if(!placeholder) { placeholder=document.createElement('div');placeholder.className='voice-placeholder';const avatar=document.createElement('div');avatar.className='voice-placeholder-avatar';avatar.textContent='G'+(i+1);placeholder.append(avatar);card.querySelector('.tile-body').append(placeholder); }
+                    placeholder.hidden=false;host.append(card);
+                }
+                host.dataset.memberCount='${count}';
+            })()`);
+            await delay(40);
+            const result=await geometry(a); checkDock(result);
+            assert.equal(result.overflow,false,`member grid overflow ${count}/${width}`);
+            assert.equal(result.cards.length,count);
+            assert.ok(result.cards.every(c=>c.w>90 && c.x>=result.members.x && c.x+c.w<=result.members.x+result.members.w+1),'cards fit central region');
+            if(width>640) assert.ok(result.members.x+result.members.w<=result.chat.x+1,'chat remains right sidebar');
+            else assert.equal(result.chat.display,'none','mobile starts with central members visible');
+            if(count===1 && width>=1366) assert.ok(result.cards[0].w>=400,'single large central card');
+            memberGrids.push({count,viewport:result.viewport});
+            if(count===4 && (width===1920 || width===390)) await screenshot(a,`voice-four-${width}`);
+        }
+    }
+    await evaluate(a, `document.querySelector('#member-cards').replaceChildren(...__gridOriginals);`);
     await click(b, '#destroyPeer');
     await wait(() => evaluate(a, `document.querySelectorAll('#member-cards > *').length === 1`), 'member departure');
+    await click(a, '[data-copy-call-diagnostics]');
+    await wait(() => evaluate(a, `Boolean(window.__copiedDiagnostics)`), 'diagnostics after peer departure');
+    const diagnostics = await evaluate(a, `window.__copiedDiagnostics`);
+    assert.ok(diagnostics.对端.some(row=>/缓存.*已离开/.test(row.状态) && row.数据?.当前状态), 'departed peer checkpoint is included');
+    assert.equal(diagnostics.本机.当前会话.当前状态, undefined, 'current state is not duplicated');
     assert.deepEqual(errors, [], 'no unhandled browser runtime errors');
     assert.deepEqual(requests, [], 'no failed runtime resources');
-    console.log(JSON.stringify({ status:'passed', browser: (await send('Browser.getVersion')).product, syntheticMediaOnly:true, serverForwardingEnabled:useSfu,
-        viewportCases: layouts.length + voiceLayouts.length, cssViewports:layouts.map((row)=>row.viewport),
+    const report = { status:'passed', browser: (await send('Browser.getVersion')).product, syntheticMediaOnly:true, serverForwardingEnabled:useSfu,
+        viewportCases: layouts.length + voiceLayouts.length, memberGridCases:memberGrids.length, memberCounts:[1,2,3,4,8,12], cssViewports:layouts.map((row)=>row.viewport),
         routeChecks:useSfu ? ['automatic SFU','manual P2P','manual SFU','per-sharer preference retention'] : ['P2P','manual P2P','per-sharer preference retention'],
-        tests:['entry point','voice join','camera','two voice peers','synthetic share','responsive geometry in both modes','chat draft','no layout renegotiation/capture','two shares','focus retention/fallback','manual route retention','preview hide retains capture','last share end','member departure'],
-        runtimeErrors:errors.length, failedResources:requests.length }, null, 2));
+        tests:['empty and occupied channel guides','central join action','voice join','camera','two voice peers','synthetic share','responsive geometry in both modes','1/2/3/4/8/12 member grid fixtures','bounded dock icons and member actions','closing chat expands central stage','chat draft','no layout renegotiation/capture','two shares','focus retention/fallback','manual route retention','preview hide retains capture','last share end','member departure'],
+        diagnosticChecks:['compact export','checkpoint survives peer departure'], runtimeErrors:errors.length, failedResources:requests.length };
+    if (artifacts) writeFileSync(join(artifacts, 'report.json'), JSON.stringify(report, null, 2));
+    console.log(JSON.stringify(report, null, 2));
 } finally {
     if (ws?.readyState === WebSocket.OPEN) { await send('Browser.close').catch(() => {}); ws.close(); }
     browser?.kill(); app.kill();

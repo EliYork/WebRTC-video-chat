@@ -8,19 +8,23 @@ export const readScreenSfuConfig = (env = process.env) => {
         }
         return value;
     };
+    const egressBudget = Math.round(number('SFU_EGRESS_MBPS', 20, 4, 10000) * 1e6);
+    const reservedEgress = Math.round(number('SFU_RESERVED_MBPS', 4, 1, 9999) * 1e6);
     const videoBitrate = Math.round(
-        number('SFU_VIDEO_MBPS', 22, 1, 22.5) * 1e6
+        number('SFU_VIDEO_MBPS', 15, 1, 9999) * 1e6
     );
     const initialViewerBitrate = Math.round(
         number('SFU_INITIAL_VIEWER_MBPS', 5.5, 1, 10) * 1e6
     );
     const audioBitrate = 128000;
     const payloadBudget = Math.round(
-        number('SFU_PAYLOAD_MBPS', 23, 2, 24) * 1e6
+        number('SFU_PAYLOAD_MBPS', 16, 2, 9999) * 1e6
     );
+    if (payloadBudget + reservedEgress > egressBudget) throw new Error('SFU_PAYLOAD_MBPS + SFU_RESERVED_MBPS exceeds SFU_EGRESS_MBPS');
     if (videoBitrate + audioBitrate > payloadBudget) {
         throw new Error('SFU_VIDEO_MBPS exceeds SFU_PAYLOAD_MBPS');
     }
+    if (initialViewerBitrate + audioBitrate > payloadBudget) throw new Error('SFU_INITIAL_VIEWER_MBPS exceeds SFU_PAYLOAD_MBPS');
     const port = number('SFU_PORT', 44444, 1024, 65535);
     if (!Number.isInteger(port)) throw new Error('Invalid SFU_PORT');
     return {
@@ -33,6 +37,8 @@ export const readScreenSfuConfig = (env = process.env) => {
         initialViewerBitrate,
         audioBitrate,
         payloadBudget,
+        egressBudget,
+        reservedEgress,
         ingressBudget: 40000000,
         maxPublishers: 2,
         maxClients: 24,
@@ -51,6 +57,7 @@ export const createScreenSfuBudget = (config) => {
     return {
         reserve(key, amount = perViewer) {
             if (reservations.has(key)) return true;
+            if (!Number.isFinite(amount) || amount <= 0) return false;
             if (reserved() + amount > config.payloadBudget) return false;
             reservations.set(key, amount);
             return true;
@@ -61,8 +68,8 @@ export const createScreenSfuBudget = (config) => {
             reservations.clear();
             const rejected = [];
             for (const { key, amount } of entries) {
-                const allocation = Math.min(config.payloadBudget, amount);
-                if (reserved() + allocation > config.payloadBudget)
+                const allocation = amount;
+                if (!Number.isFinite(allocation) || allocation <= 0 || reserved() + allocation > config.payloadBudget)
                     rejected.push(key);
                 else reservations.set(key, allocation);
             }

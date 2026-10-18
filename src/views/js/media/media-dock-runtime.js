@@ -156,7 +156,7 @@
         );
         let frameRate = normalizeFrameRate(initialScreenShareOptions.frameRate);
         let shareMode = initialScreenShareOptions.mode === 'detail' ? 'detail' : 'game';
-        let codecMode = ['h264', 'vp8'].includes(initialScreenShareOptions.codecMode) ? initialScreenShareOptions.codecMode : 'auto';
+        let codecMode = ['av1', 'h264', 'vp8'].includes(initialScreenShareOptions.codecMode) ? initialScreenShareOptions.codecMode : 'auto';
         let startBitrate = ['1500', '5500'].includes(String(initialScreenShareOptions.startBitrate)) ? String(initialScreenShareOptions.startBitrate) : 'browser';
         const pendingActions = new Set();
         const intentRevisions = new Map();
@@ -925,7 +925,7 @@
                 render(lastSnapshot);
             });
             listen(root.querySelector('[data-screen-share-codec]'), 'change', (event) => {
-                codecMode = ['h264', 'vp8'].includes(event.target.value) ? event.target.value : 'auto';
+                codecMode = ['av1', 'h264', 'vp8'].includes(event.target.value) ? event.target.value : 'auto';
                 render(lastSnapshot);
             });
             listen(root.querySelector('[data-screen-share-start-bitrate]'), 'change', (event) => {

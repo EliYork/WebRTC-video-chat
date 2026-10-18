@@ -16,7 +16,7 @@
     </style>
     <noscript><style>html[data-room-boot='pending'] #main, html[data-room-boot='pending'] .workspace-topbar { visibility: visible; } .room-boot-status { display: none !important; }</style></noscript>
     <script src="/js/shared/room-boot.js"></script>
-    <link rel="stylesheet" href="/style.css?v=stage-20261018">
+    <link rel="stylesheet" href="/style.css?v=stage-voice-20261018">
     <link rel="stylesheet" href="/vendor/fontawesome/css/fontawesome.min.css">
     <link rel="stylesheet" href="/vendor/fontawesome/css/solid.min.css">
     <link rel="stylesheet" href="/vendor/fontawesome/css/regular.min.css">
@@ -80,9 +80,14 @@
             <header class="share-stage-header"><strong>正在观看</strong><nav id="share-sources" aria-label="选择共享源"></nav></header>
             <section id="canvas" class="stage-canvas" aria-label="共享画面"><div id="video-grid"></div></section>
         </main>
-        <section class="stage-members" aria-label="语音成员">
-            <header class="members-heading"><strong>语音成员</strong><span id="member-count">0 人</span></header>
-            <p id="members-empty" class="members-empty">加入语音后，成员会显示在这里</p>
+        <section class="stage-members" aria-label="语音成员舞台">
+            <header class="members-heading"><div><strong id="stageChannelName"><%= channelName %></strong><span id="stageChannelStatus">语音成员舞台</span></div><span id="member-count">0 人</span></header>
+            <div id="members-empty" class="members-empty" role="status">
+                <div class="stage-welcome-mark" aria-hidden="true">◖◗</div>
+                <h1 id="stageWelcomeTitle">加入语音，一起待一会儿</h1>
+                <p id="stageWelcomeDetail">加入后，成员头像与摄像头会显示在中央；共享屏幕时自动切换到观看舞台。</p>
+                <button id="stageJoinVoice" type="button">加入语音</button>
+            </div>
             <div id="member-cards" role="list" aria-label="成员卡片"></div>
         </section>
 
@@ -257,6 +262,7 @@
                                 <span>视频编码器</span>
                                 <select data-screen-share-codec>
                                     <option value="auto" selected>自动 · 实测 H.264，失败回退 VP8</option>
+                                    <option value="av1">AV1 优先（实验）· 不可用时 H.264 → VP8</option>
                                     <option value="h264">H.264 优先 · 不兼容时回退 VP8</option>
                                     <option value="vp8">VP8 · 对照测试</option>
                                 </select>
@@ -326,7 +332,10 @@
     <script src="/js/voice/voice-audio-settings-controller.js"></script>
     <script src="/js/voice/voice-status-view.js"></script>
     <script src="/js/voice/voice-media-quality-view.js"></script>
+    <script src="/js/voice/voice-share-stats-view.js"></script>
+    <script src="/js/voice/voice-player-menu.js"></script>
     <script src="/js/voice/voice-share-diagnostics.js"></script>
+    <script src="/js/voice/voice-player-events.js"></script>
     <script src="/js/voice/voice-call-diagnostics.js"></script>
     <script src="/js/voice/voice-media-quality-runtime.js"></script>
     <script src="/js/room/stage-layout-runtime.js"></script>

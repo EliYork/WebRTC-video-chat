@@ -1,3 +1,4 @@
+/* eslint-disable no-await-in-loop -- Admission, release and native lifecycle checks must retain their ordering. */
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { EventEmitter } from 'node:events';
@@ -5,7 +6,7 @@ import {
     readScreenSfuConfig,
     createScreenSfuBudget,
 } from '../src/utils/ScreenSfuBudget.js';
-import { createScreenSfuService, summarizeScreenSfuStats } from '../src/utils/ScreenSfuService.js';
+import { createScreenSfuService, summarizeScreenSfuStats, screenRouterCodecs } from '../src/utils/ScreenSfuService.js';
 
 let sequence = 0;
 test('SFU stats expose video packet counters only and missing counters remain unknown', () => {
@@ -31,7 +32,7 @@ class NativeObject extends EventEmitter {
     }
 }
 const fixture = () => {
-    const config = readScreenSfuConfig({ SFU_ANNOUNCED_ADDRESS: '127.0.0.1' });
+    const config = readScreenSfuConfig({ SFU_ANNOUNCED_ADDRESS: '127.0.0.1', SFU_EGRESS_MBPS: 30, SFU_VIDEO_MBPS: 22, SFU_PAYLOAD_MBPS: 23 });
     const created = [];
     let trafficBitrate = 0;
     const fakeWorker = new NativeObject();
@@ -44,7 +45,7 @@ const fixture = () => {
     fakeWorker.createRouter = async () => {
         const router = new NativeObject({
             rtpCapabilities: { codecs: [] },
-            canConsume: () => true,
+            canConsume: ({ rtpCapabilities }) => rtpCapabilities.noAV1 !== true,
         });
         router.createWebRtcTransport = async (options) => {
             const transport = new NativeObject({
@@ -161,7 +162,7 @@ const fixture = () => {
 };
 
 test('global budget admits four 5.5Mbps viewers, rejects fifth, and returns released capacity', () => {
-    const config = readScreenSfuConfig({});
+    const config = readScreenSfuConfig({ SFU_EGRESS_MBPS: 30, SFU_VIDEO_MBPS: 22, SFU_PAYLOAD_MBPS: 23 });
     assert.equal(config.enabled, false);
     assert.throws(() => readScreenSfuConfig({ SFU_VIDEO_MBPS: '27' }));
     assert.throws(() => readScreenSfuConfig({ SFU_PORT: '44444.5' }));
@@ -399,4 +400,41 @@ test('session disappearing during native creation closes the result rather than 
     client.owner = undefined;
     assert.equal((await result).ok, false);
     assert.equal(f.service.snapshot().viewers, 0);
+});
+
+test('20Mbps defaults reserve transport/system headroom and reject inconsistent or oversized reservations', () => {
+    const config = readScreenSfuConfig({});
+    assert.equal(config.egressBudget, 20000000);
+    assert.equal(config.reservedEgress, 4000000);
+    assert.equal(config.payloadBudget, 16000000);
+    assert.equal(config.videoBitrate, 15000000);
+    assert.throws(() => readScreenSfuConfig({ SFU_VIDEO_MBPS: 22, SFU_PAYLOAD_MBPS: 23 }), /exceeds/);
+    assert.throws(() => readScreenSfuConfig({ SFU_INITIAL_VIEWER_MBPS: 9, SFU_PAYLOAD_MBPS: 5, SFU_VIDEO_MBPS: 4 }), /INITIAL_VIEWER/);
+    const budget = createScreenSfuBudget(config);
+    assert.equal(budget.reserve('oversized', 17000000), false);
+    assert.deepEqual(budget.rebalance([{ key: 'oversized', amount: 17000000 }, { key: 'ok', amount: 7000000 }]), ['oversized']);
+    assert.equal(budget.snapshot().reservedBps, 7000000);
+    assert.equal(budget.reserve('bad', NaN), false);
+});
+
+test('SFU mixed codec consumer rejection releases its reservation and never suppresses compatible P2P', async (t) => {
+    const f = fixture();
+    t.after(f.service.close);
+    const publisher = f.socket('av1-source');
+    const id = await f.publish(publisher);
+    const desktop = f.socket('desktop');
+    await f.subscribe(desktop, id);
+    await f.request(desktop, 'resume', { publicationId: id });
+    await f.request(desktop, 'ready', { publicationId: id });
+    const phone = f.socket('phone');
+    await f.request(phone, 'capabilities');
+    const transport = await f.request(phone, 'transport', { direction: 'recv' });
+    const before = f.service.snapshot().reservedBps;
+    const denied = await f.request(phone, 'consume', { publicationId: id, transportId: transport.id, rtpCapabilities: { noAV1: true } });
+    assert.equal(denied.ok, false);
+    assert.equal(denied.reason, 'unsupported-codec');
+    assert.deepEqual(f.service.snapshot().reservedBps, before);
+    const route = publisher.events.filter((event) => event.event === 'sfu:routes').at(-1).payload.peerIds;
+    assert.deepEqual(route, ['desktop']);
+    assert.ok(screenRouterCodecs.some((codec) => codec.mimeType === 'video/AV1'));
 });

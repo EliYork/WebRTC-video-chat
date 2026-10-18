@@ -1,8 +1,13 @@
 (function exposeScreenCodecs(global) {
     'use strict';
-    // Only validated codecs are enabled. A future codec adds its capability
-    // matcher and probe here; selection and both routing adapters stay shared.
+    // AV1 is opt-in. Auto retains the measured H.264 -> VP8 policy.
     const codecs = Object.freeze({
+        av1: {
+            mimeType: 'video/AV1', fallbacks: ['h264', 'vp8'],
+            probe: (target, options) => measuredCodec('av1', target, options),
+            matches: (codec) => /^video\/AV1$/i.test(codec.mimeType || '') &&
+                Number(codec.parameters?.profile ?? /(?:^|;)\s*profile=(\d+)/.exec(codec.sdpFmtpLine || '')?.[1] ?? 0) === 0,
+        },
         h264: {
             mimeType: 'video/H264',
             autoPriority: 1,
@@ -16,13 +21,14 @@
     });
     const decisions = new WeakMap();
     const probeCache = new Map();
-    const measuredH264 = async (target, options) => {
-        const key = `${target.width}x${target.height}@${target.frameRate}`;
+    const measuredH264 = (target, options) => measuredCodec('h264', target, options);
+    const measuredCodec = async (primary, target, options) => {
+        const key = `${primary}:${target.width}x${target.height}@${target.frameRate}`;
         const cached = probeCache.get(key);
         const age = cached ? Date.now() - cached.time : Infinity;
         if (age >= 0 && age < 30000 && !options?.signal?.aborted)
             return { ...cached.result, windows: cached.result.windows.map((row) => ({ ...row })), cacheHit: true, ageMs: age };
-        const result = await probeH264(target, options);
+        const result = await probeCodec(primary, target, options);
         if (!options?.signal?.aborted && result.windows?.length === 2 &&
             result.windows.every((row) => Number.isFinite(row.captureFps) && Number.isFinite(row.encodeFps))) {
             if (probeCache.size >= 8) probeCache.delete(probeCache.keys().next().value);
@@ -38,6 +44,14 @@
         try { return global.RTCRtpSender?.getCapabilities?.('video')?.codecs || []; }
         catch { return []; }
     };
+    const receiverCapabilities = () => {
+        try { return global.RTCRtpReceiver?.getCapabilities?.('video')?.codecs; }
+        catch { return undefined; }
+    };
+    const support = () => ({
+        av1Send: capabilities().some(codecs.av1.matches),
+        av1Receive: receiverCapabilities() ? receiverCapabilities().some(codecs.av1.matches) : null,
+    });
     const targetFor = (track, options) => {
         const settings = track.getSettings?.() || {};
         return {
@@ -59,7 +73,7 @@
             codec: codec?.mimeType,
         } : null;
     };
-    const evaluateWindow = (before, after, target) => {
+    const evaluateWindow = (before, after, target, primary = 'h264') => {
         if (!before || !after || before.id !== after.id || before.sourceId !== after.sourceId ||
             !before.sourceId || !Number.isFinite(after.timestamp) || after.timestamp <= before.timestamp ||
             ![before.encoded, after.encoded, before.captured, after.captured].every(Number.isFinite) ||
@@ -71,16 +85,19 @@
         const captureFps = (after.captured - before.captured) / seconds;
         const encodeFps = (after.encoded - before.encoded) / seconds;
         const minimum = target.frameRate * 0.95;
-        const reason = !/^video\/h264$/i.test(after.codec || '') ? 'codec-mismatch' :
+        const reason = !codecs[primary]?.matches({ mimeType: after.codec, parameters: { 'packetization-mode': 1 } }) ? 'codec-mismatch' :
             after.width !== target.width || after.height !== target.height ? 'resolution-reduced' :
             captureFps < minimum ? 'probe-source-slow' : encodeFps < minimum ? 'encoder-slow' : 'passed';
         return { passed: reason === 'passed', reason,
             captureFps: Math.round(captureFps * 100) / 100,
-            encodeFps: Math.round(encodeFps * 100) / 100 };
+            encodeFps: Math.round(encodeFps * 100) / 100,
+            actualCodec: after.codec, width: after.width, height: after.height,
+            resolutionReduced: after.width !== target.width || after.height !== target.height };
     };
     // Local loopback only: no camera/microphone permission, STUN, or server.
     // Two one-second windows at >=95% of target, without lowering dimensions.
-    const probeH264 = (target, { signal } = {}) => new Promise((resolve) => {
+    const probeH264 = (target, options) => probeCodec('h264', target, options);
+    const probeCodec = (primary, target, { signal } = {}) => new Promise((resolve) => {
         let finished = false;
         let send;
         let receive;
@@ -114,7 +131,8 @@
         if (signal?.aborted) { aborted(); return; }
         deadline = global.setTimeout(() => finish({ passed: false, reason: 'timeout', windows: [] }), 6500);
         void (async () => {
-            if (!global.RTCPeerConnection || !capabilities().some(codecs.h264.matches))
+            if (!global.RTCPeerConnection || !capabilities().some(codecs[primary].matches) ||
+                (receiverCapabilities() && !receiverCapabilities().some(codecs[primary].matches)))
                 return finish({ passed: false, reason: 'unsupported', windows: [] });
             if (target.width <= 0 || target.height <= 0 || target.width * target.height > 3840 * 2160)
                 return finish({ passed: false, reason: 'probe-size-unsupported', windows: [] });
@@ -151,7 +169,7 @@
             link(receive, send);
             const transceiver = send.addTransceiver(track, { direction: 'sendonly', streams: [stream] });
             if (!transceiver.setCodecPreferences) return finish({ passed: false, reason: 'unsupported', windows: [] });
-            transceiver.setCodecPreferences(capabilities().filter((codec) => codecs.h264.matches(codec) || /^video\/rtx$/i.test(codec.mimeType || '')));
+            transceiver.setCodecPreferences(capabilities().filter((codec) => codecs[primary].matches(codec) || /^video\/rtx$/i.test(codec.mimeType || '')));
             await send.setLocalDescription(await send.createOffer()); alive();
             await receive.setRemoteDescription(send.localDescription); alive();
             await Promise.all(pending.get(receive).splice(0).map((candidate) => receive.addIceCandidate(candidate))); alive();
@@ -175,7 +193,7 @@
             const first = probeSample(await send.getStats()); alive();
             await wait(1000); alive();
             const second = probeSample(await send.getStats()); alive();
-            const windows = [evaluateWindow(baseline, first, target), evaluateWindow(first, second, target)];
+            const windows = [evaluateWindow(baseline, first, target, primary), evaluateWindow(first, second, target, primary)];
             finish({ passed: windows.every((row) => row.passed),
                 reason: windows.find((row) => !row.passed)?.reason || 'passed', windows });
         })().catch(() => finish({ passed: false, reason: 'probe-failed', windows: [] }));
@@ -187,19 +205,27 @@
         const target = targetFor(track, options);
         let result = { passed: false, reason: 'manual-vp8', windows: [] };
         let primary = 'vp8';
+        const trials = [];
         const candidateKeys = mode === 'auto'
             ? Object.keys(codecs).filter((key) => codecs[key].autoPriority).sort((a, b) => codecs[a].autoPriority - codecs[b].autoPriority)
-            : [mode];
+            : mode === 'av1' ? ['av1', 'h264'] : [mode];
         for (const candidate of candidateKeys) {
             if (!codecs[candidate]?.probe || signal?.aborted || track.readyState === 'ended') continue;
-            try { result = await (probe || codecs[candidate].probe)(target, { signal }); }
+            // A failed AV1 trial has already consumed the startup budget. Keep
+            // H.264 as a compatibility preference; never allocate two long probes.
+            if (candidate === 'h264' && trials.some((trial) => trial.primary === 'av1' && trial.reason !== 'unsupported')) {
+                result = { passed: false, reason: 'compatibility-fallback', windows: [] };
+            } else try { result = await (probe || codecs[candidate].probe)(target, { signal, primary: candidate }); }
             catch { result = { passed: false, reason: 'probe-failed', windows: [] }; }
-            if (mode === 'auto' ? result.passed : capabilities().some(codecs[candidate].matches)) {
+            trials.push({ primary: candidate, ...result });
+            const av1Trial = result.passed || (result.reason === 'probe-source-slow' && result.windows?.length === 2 &&
+                result.windows.every((row) => row.encodeFps > 0 && row.actualCodec === 'video/AV1' && !row.resolutionReduced));
+            if (mode === 'auto' ? result.passed : capabilities().some(codecs[candidate].matches) && (candidate === 'av1' ? av1Trial : true)) {
                 primary = candidate;
                 break;
             }
         }
-        const decision = { mode, primary, target, probe: result, preparationMs: Date.now() - startedAt,
+        const decision = { mode, primary, target, probe: result, trials, support: support(), hardwareAcceleration: 'unknown', preparationMs: Date.now() - startedAt,
             reason: mode !== 'auto' && primary === mode && codecs[mode].probe ? 'manual-preference' : result.reason };
         if (!signal?.aborted && track.readyState !== 'ended') decisions.set(track, decision);
         return decision;
@@ -238,6 +264,72 @@
             }).join(newline);
         }).join('');
     };
-    global.VoiceScreenCodecs = { codecs, normalizeMode, candidates, findCodec, prepare,
+    const connections = new WeakMap();
+    const describePath = (pc, reports) => {
+        if (pc?.screenRoute === 'SFU') return 'SFU';
+        const rows = Array.from(reports?.values?.() || reports || []);
+        const transport = rows.find((row) => row.type === 'transport' && row.selectedCandidatePairId);
+        const pair = rows.find((row) => row.id === transport?.selectedCandidatePairId) ||
+            rows.find((row) => row.type === 'candidate-pair' && row.state === 'succeeded' && (row.nominated || row.selected));
+        const local = rows.find((row) => row.id === pair?.localCandidateId);
+        const remote = rows.find((row) => row.id === pair?.remoteCandidateId);
+        if (local?.candidateType === 'relay' || remote?.candidateType === 'relay') return 'TURN';
+        return local?.candidateType && remote?.candidateType ? 'direct' : 'unknown';
+    };
+    const negotiatedCodec = (pc, sending) => {
+        const sdp = (sending ? pc.remoteDescription : pc.localDescription)?.sdp;
+        const section = sdp?.split(/(?=^m=)/m).find((item) => item.startsWith('m=video ') && !item.startsWith('m=video 0 '));
+        if (!section) return null;
+        for (const pt of section.split(/\r?\n/)[0].split(/\s+/).slice(3)) {
+            const name = new RegExp(`^a=rtpmap:${pt} (AV1|H264|VP8)/`, 'im').exec(section)?.[1];
+            if (name) return `video/${name.toUpperCase() === 'H264' ? 'H264' : name.toUpperCase()}`;
+        }
+        return null;
+    };
+    const registerConnection = (pc, options) => {
+        if (!pc) return;
+        connections.set(pc, { ...options, startedAt: Date.now(), ready: false, status: 'waiting-negotiation', reason: options.fallbackReason || null });
+    };
+    const markConnected = (pc) => {
+        const state = connections.get(pc);
+        if (state && !state.connectedAt) state.connectedAt = Date.now();
+    };
+    const failConnection = (pc, reason) => {
+        const state = connections.get(pc);
+        if (!state || state.retired || !state.isCurrent?.() || state.failed) return false;
+        state.failed = true;
+        state.status = 'fallback-requested';
+        state.reason = reason;
+        state.onFallback?.(reason);
+        return true;
+    };
+    // Called by existing diagnostic/quality samples. No additional getStats loop.
+    const observeConnection = (pc, reports) => {
+        const state = connections.get(pc);
+        if (!state || state.retired || !state.isCurrent?.() || state.failed) return;
+        if (['connected', 'completed'].includes(pc.connectionState) || ['connected', 'completed'].includes(pc.iceConnectionState)) markConnected(pc);
+        const rows = Array.from(reports?.values?.() || reports || []);
+        const output = rows.find((row) => row.type === (state.sending ? 'outbound-rtp' : 'inbound-rtp') &&
+            (row.kind === 'video' || row.mediaType === 'video') && !row.isRemote);
+        const mime = rows.find((row) => row.id === output?.codecId)?.mimeType;
+        state.negotiated = negotiatedCodec(pc, state.sending);
+        const remoteVideo = pc.remoteDescription?.sdp?.split(/(?=^m=)/m).find((item) => item.startsWith('m=video ') && !item.startsWith('m=video 0 '));
+        state.remoteAV1 = remoteVideo ? /^a=rtpmap:\d+ AV1\/90000\s*$/im.test(remoteVideo) : null;
+        state.actual = /^video\/(AV1|H264|VP8)$/i.test(mime || '') ? mime : null;
+        if (!state.fallbackReason && state.primary === 'av1' && state.actual && !/^video\/AV1$/i.test(state.actual)) state.reason = 'remote-codec-fallback';
+        const count = output?.[state.sending ? 'framesEncoded' : 'framesDecoded'];
+        if (count > 0) { state.ready = true; state.status = 'frames-verified'; }
+        else if (state.connectedAt) state.status = 'waiting-frames';
+        if (state.connectedAt && !state.ready && Date.now() - state.connectedAt >= 8000)
+            failConnection(pc, state.sending ? 'encoder-start-failed' : 'decoder-start-failed');
+    };
+    const getConnectionState = (pc) => {
+        const state = connections.get(pc);
+        return state ? { requested: state.requested, primary: state.primary, negotiated: state.negotiated || null,
+            actual: state.actual || null, remoteAV1: state.remoteAV1 ?? null, status: state.status, reason: state.reason, hardwareAcceleration: 'unknown' } : null;
+    };
+    const retireConnection = (pc) => { const state = connections.get(pc); if (state) state.retired = true; };
+    global.VoiceScreenCodecs = { codecs, normalizeMode, candidates, findCodec, prepare, support,
+        registerConnection, markConnected, observeConnection, failConnection, getConnectionState, retireConnection, describePath,
         probeH264, probeSample, evaluateWindow, transformOffer, getDecision: (track) => decisions.get(track) };
 })(window);

@@ -25,6 +25,8 @@
         onPeerCleanup,
         onRemoteMediaState,
         onOutgoingConnected,
+        onCodecFallback,
+        onCodecFeedback,
         onWarning,
         removeRemoteTile,
     } = {}) => {
@@ -111,6 +113,7 @@
                 return;
             }
             unbindCall(entry, record);
+            global.VoiceScreenCodecs?.retireConnection?.(record.call?.peerConnection || record.call?._pc);
             if (close) {
                 closeCallOnce(record.call);
             }
@@ -363,26 +366,33 @@
                 },
                 {
                     event: 'close',
-                    listener: () =>
+                    listener: () => {
+                        const pc = call.peerConnection || call._pc;
+                        if (direction === 'outgoing' && global.VoiceScreenCodecs?.getConnectionState?.(pc)?.status !== 'frames-verified')
+                            global.VoiceScreenCodecs?.failConnection?.(pc, 'negotiation-failed');
                         handleCallTerminal(
                             entry,
                             direction,
                             record,
                             'call-close'
-                        ),
+                        );
+                    },
                     target: call,
                     type: 'emitter',
                 },
                 {
                     event: 'error',
-                    listener: (error) =>
+                    listener: (error) => {
+                        if (direction === 'outgoing') global.VoiceScreenCodecs?.failConnection?.(call.peerConnection || call._pc, 'negotiation-failed');
+                        else global.VoiceScreenCodecs?.failConnection?.(call.peerConnection || call._pc, 'decoder-start-failed');
                         handleCallTerminal(
                             entry,
                             direction,
                             record,
                             'call-error',
                             error
-                        ),
+                        );
+                    },
                     target: call,
                     type: 'emitter',
                 },
@@ -391,6 +401,8 @@
             const peerConnection = call.peerConnection;
             if (typeof peerConnection?.addEventListener === 'function') {
                 const handleConnectionState = () => {
+                    if (peerConnection.connectionState === 'connected' || ['connected', 'completed'].includes(peerConnection.iceConnectionState))
+                        global.VoiceScreenCodecs?.markConnected?.(peerConnection);
                     debug({
                         connection:
                             protocol.describePeerConnection?.(peerConnection),
@@ -476,6 +488,10 @@
 
             entry.outgoingCreatingGeneration = normalizedGeneration;
             let call;
+            const videoTrack = tracks.find((track) => track.kind === 'video');
+            const screenDecision = global.VoiceScreenCodecs?.getDecision(videoTrack);
+            if (entry.codecTrack !== videoTrack) { entry.codecTrack = videoTrack; entry.codecPrimary = undefined; entry.codecReason = undefined; }
+            const screenPrimary = entry.codecPrimary || screenDecision?.primary;
             try {
                 const metadata = {
                     ...options.metadata,
@@ -483,16 +499,25 @@
                     [MEDIA_GENERATION_METADATA]: normalizedGeneration,
                     [MEDIA_KINDS_METADATA]: tracks.map(({ kind }) => kind),
                 };
-                const screenDecision = global.VoiceScreenCodecs?.getDecision(tracks.find((track) => track.kind === 'video'));
                 const callOptions = { ...options, metadata };
                 if (screenDecision) {
-                    metadata.screenVideoCodec = screenDecision.primary;
+                    metadata.screenVideoCodec = screenPrimary;
+                    metadata.screenVideoMode = screenDecision.mode;
                     callOptions.sdpTransform = (sdp) => global.VoiceScreenCodecs.transformOffer(
-                        options.sdpTransform ? options.sdpTransform(sdp) : sdp, screenDecision.primary
+                        options.sdpTransform ? options.sdpTransform(sdp) : sdp, screenPrimary
                     );
                 }
                 call = peer.call(peerId, stream, callOptions);
             } catch (error) {
+                if (screenDecision?.mode === 'av1' && screenPrimary !== 'vp8') {
+                    entry.codecPrimary = screenPrimary === 'av1' ? 'h264' : 'vp8';
+                    entry.codecReason = 'negotiation-failed';
+                    // The caller's existing media update queue owns generations.
+                    Promise.resolve().then(() => {
+                        if (entries.get(peerId) === entry && entry.codecTrack === videoTrack && videoTrack?.readyState !== 'ended')
+                            onCodecFallback?.({ peerId, reason: 'negotiation-failed', primary: entry.codecPrimary });
+                    });
+                }
                 warn(`Could not call peer ${peerId}.`, error);
                 return undefined;
             } finally {
@@ -506,7 +531,7 @@
 
             const record = {
                 call,
-                screenCodec: global.VoiceScreenCodecs?.getDecision(tracks.find((track) => track.kind === 'video'))?.primary,
+                screenCodec: screenPrimary,
                 generation: normalizedGeneration,
                 state: 'pending',
             };
@@ -515,6 +540,18 @@
             entry.outgoing.current = record;
             entry.outgoing.pending = null;
             entry.lastOutgoingGeneration = normalizedGeneration;
+            if (screenDecision?.mode === 'av1') global.VoiceScreenCodecs?.registerConnection?.(call.peerConnection || call._pc, {
+                sending: true, primary: screenPrimary, requested: screenDecision.mode,
+                fallbackReason: entry.codecReason || (screenPrimary !== 'av1' ? screenDecision.trials?.[0]?.reason : null),
+                isCurrent: () => entries.get(peerId) === entry && entry.outgoing.current === record && entry.codecTrack === videoTrack && videoTrack?.readyState !== 'ended' &&
+                    (!call.peerConnection?.getSenders || call.peerConnection.getSenders().some((sender) => sender.track === videoTrack)),
+                onFallback: (reason) => {
+                    if (screenPrimary === 'vp8') { onWarning?.('共享编码启动失败，请重新共享'); return; }
+                    entry.codecPrimary = screenPrimary === 'av1' ? 'h264' : 'vp8';
+                    entry.codecReason = reason;
+                    onCodecFallback?.({ peerId, reason, primary: entry.codecPrimary });
+                },
+            });
             bindCall(entry, 'outgoing', record);
             void global.VoiceScreenSendPolicy?.apply(call.peerConnection || call._pc, warn);
             retireRecord(entry, previousPending);
@@ -542,7 +579,9 @@
                 record?.call?.peerConnection || record?.call?._pc;
             const senders = peerConnection?.getSenders?.() || [];
             const nextVideoTrack = getLiveTracks(stream).find((track) => track.kind === 'video');
-            const nextCodec = global.VoiceScreenCodecs?.getDecision(nextVideoTrack)?.primary;
+            const nextCodec = (entry?.codecTrack === nextVideoTrack && entry.codecPrimary) || global.VoiceScreenCodecs?.getDecision(nextVideoTrack)?.primary;
+            if (nextVideoTrack && entry?.codecTrack !== nextVideoTrack && global.VoiceScreenCodecs?.getDecision(nextVideoTrack)?.mode === 'av1')
+                return { ok: false, reason: 'renegotiation-required' };
             if (record && nextVideoTrack && record.screenCodec !== nextCodec) {
                 // Camera/screen and codec transitions need a fresh offer; a
                 // replaceTrack alone cannot change the negotiated codec list.
@@ -660,7 +699,7 @@
                 if (global.VoiceScreenCodecs && Object.hasOwn(global.VoiceScreenCodecs.codecs, codec)) {
                     const existing = call.options?.sdpTransform;
                     call.answer(undefined, { sdpTransform: (sdp) => global.VoiceScreenCodecs.transformOffer(
-                        existing ? existing(sdp) : sdp, codec
+                        existing ? existing(sdp) : sdp, codec === 'av1' && global.VoiceScreenCodecs.support?.().av1Receive === false ? 'h264' : codec
                     ) });
                 } else call.answer();
             } catch (error) {
@@ -673,6 +712,11 @@
             }
 
             entry.lastIncomingGeneration = generation;
+            if (call.metadata?.screenVideoMode === 'av1') global.VoiceScreenCodecs?.registerConnection?.(call.peerConnection || call._pc, {
+                sending: false, primary: call.metadata.screenVideoCodec, requested: 'av1',
+                isCurrent: () => entries.get(peerId) === entry && entry.incoming.current === record,
+                onFallback: (reason) => onCodecFeedback?.({ peerId, generation, reason, targetSessionGeneration: call.metadata.screenVoiceSessionGeneration }),
+            });
             retireRecord(entry, previousPending);
             retireRecord(entry, previousCurrent);
             debug({
@@ -862,6 +906,11 @@
         };
 
         return {
+            handleCodecFeedback({ peerId, generation, reason } = {}) {
+                const record = entries.get(peerId)?.outgoing.current;
+                if (!record || Number(record.call.metadata?.[MEDIA_GENERATION_METADATA]) !== generation || reason !== 'decoder-start-failed') return false;
+                return global.VoiceScreenCodecs?.failConnection?.(record.call.peerConnection || record.call._pc, reason) || false;
+            },
             answerCall,
             callPeer,
             cleanupPeer,

@@ -1,0 +1,829 @@
+{
+  "status": "deployed",
+  "utc_started": "2026-10-18T09:23:48.663520+00:00",
+  "root": "/www/wwwroot/voice.eliyork.com",
+  "base": "/www/backup/voice-deploy/diagnostics-20261018-172311-538",
+  "manifest": {
+    "tag": "diagnostics-20261018-172311-538",
+    "source": "authorized-dirty-workspace",
+    "base_commit": "68652954ad3e8fef3ee065d4c1049e8cdd64c0af",
+    "zip": "webrtc-video-chat-1.0.5-20261018-172311-538.zip",
+    "zip_sha256": "8584db667c047de103a4ddf033281302d233611a0e6e20bee237957b8c68f08d",
+    "archive_entries": 111,
+    "old": {
+      "src/server.js": "2fccc406083fe596b08388797638d0048c9de7c4fb8f4a41c712fe03c9a950bb",
+      "src/utils/ChatHistoryStore.js": "7b9ccf39c0a08f3017754d1f45e266632348ff3102856f7be9af4f0f677e94d4",
+      "src/utils/ChatRateLimit.js": "16ee7d087b4d252d867b2edd56092b29bd135278f71e71e7e8064c92ad0d269d",
+      "src/utils/iceServers.js": "b677b3f561376c08ee170a067ad99e52998c2e77b22d9c6ca6d68f49fdbd6a38",
+      "src/utils/Log.js": "698321c936e5ffdb8a6ee1701ade1efb083ddc69a5f72f095153639fdb06d6cc",
+      "src/utils/LogMemoryUsage.js": "878d3a7fdfa06c5d759a486de94c3f3d240155ed9aa249aa0cd58ac208d8ff84",
+      "src/utils/PeerWebSocketServer.js": "2be87c942c0903273db6528cfdb0bce6c1f6ab3806523730202c6f84dd9e6170",
+      "src/utils/ScreenSfuBudget.js": "d1596ab4aab67b4f8317ada9d413a07d120d78054f0847bcc8cf2207412d6ab7",
+      "src/utils/ScreenSfuService.js": "fbfc4515383a1df9e6117bc7f22db2d1007fbbb4c14fa51c2354183a0bc1468e",
+      "src/utils/SocketDisconnectLifecycle.js": "ed2a3a5b846ea13de9f9371da55efdd923617d3c2cf9704dbc075af2e5e19111",
+      "src/utils/SocketPacketValidation.js": "837b611261871af04d36e4cd1a1283b25749c012a1d9ce8a9cc11166650b0eb9",
+      "src/utils/ViewChatRoomLifecycle.js": "38f7308319c1c4ca1550e73f2a3837664358075b18761e8c42234a05af00deff",
+      "src/utils/VoiceCallSignaling.js": "6deb69705dcba8663613d6a43d101af6cdeb72b5b36cd64395d4bcef7abd7e9c",
+      "src/utils/VoiceDiagnosticsRelay.js": "fb1c15c2530a87fe637da59ce6e36f843f379d83615cf0e164cce217e515a12a",
+      "src/views/index.ejs": "4f4d3826de7c7a7a8f83a2978d87b932c68e1be4ea3939b8fcffd43b34cbd59d",
+      "src/views/script.js": "0e0a2aa10855c78bacba11700348cc18d0e3565ccce5e021f5ac94ae7ce1a5a8",
+      "src/views/style.css": "11c6162c7165b247985a8785a3ace1f619b6782556fbec67bab27fda0725280e",
+      "src/views/audio-worklet/passthrough-processor.js": "17acf22bb9f3ffcf5d4f1cd9e692a002412975e6dc4facaa0ab737508f308679",
+      "src/views/audio-worklet/rnnoise-processor.js": "44f72db6a5d402b3ffd8ff8d61968a8d7a53d376f1c49e85cd242aaf8442ed5e",
+      "src/views/audio-worklet/rnnoise-speech-gate.js": "61fdf5e6c3d218e334acb07a563cffae9207e402ad9858d9f1b422b24056f419",
+      "src/views/audio-worklet/rnnoise-v2-wasm.js": "723f4087b2a740d57a11993cc6e864854c7739535bd8c3e518e52cd1f6ab447a",
+      "src/views/js/chat/chat-form-ui.js": "4f6fe56222b89265608e5a6584d7ea62e94701058e713553298ef06e31f3ca6e",
+      "src/views/js/chat/chat-message-ui.js": "2632f9050cab94239918333088b15d01e4465f8a7a72145793a328292449302b",
+      "src/views/js/chat/chat-name-state.js": "6b96b4c86f0d0cc8a94e313d0f468394ec515ccce2076a4e14b40d7407378fcc",
+      "src/views/js/chat/chat-panel-runtime.js": "b5dd143a005dee228f03c6c94ff12aeed054d6edc5135559038dc437333dbb59",
+      "src/views/js/chat/chat-socket-transport.js": "e50b170d1642946c2e0c3af258c12f1444846f4835a709510c8ffe8c8a5f0cb0",
+      "src/views/js/media/audio-processing-view.js": "62e4f7ec636a7ba65990194efc8c1b3fd7e7962d1855f11b58c18474576a4ea8",
+      "src/views/js/media/fullscreen-controls.js": "faaaa0192873dfec6be1c947e62a469ca8c3fc6462428a78d181a5971dfea848",
+      "src/views/js/media/local-screen-share-preview-controller.js": "e842fd72a9c77fe0d3deaa740df4c97187d37b06ce0c09ec9af162bde8161e4b",
+      "src/views/js/media/media-controls-ui.js": "ed3efcfa51a2113838dd0f222b7974c564d939c8ac39c99c8a0310ea03059227",
+      "src/views/js/media/media-dock-adapter.js": "8a09aa8f6632ed5f740f02a889a91b16b73b7c161b491e60bfd42c4ed28bc9f1",
+      "src/views/js/media/media-dock-runtime.js": "cc2d3b1f91cc39ee947d9fbe2507f8f6a3bd02ac0e75d84ca90560a48d3be6d2",
+      "src/views/js/media/noise-settings-ui.js": "3466b9845449caf45896cb337df283168bbf0375c1fa83c6661c925e8bf0641c",
+      "src/views/js/media/output-volume-state.js": "b5da379aa5137cd640a64e6101adb867e65dc50d6381beec6a5a75f7eb6c0121",
+      "src/views/js/media/output-volume-ui.js": "8eff4c87767c1e64f1777d5d00d346668c53243db045b6fcaa1c510633122b8e",
+      "src/views/js/media/peer-volume-ui.js": "74823b34f6b3bfd2e45a274aa188e3637f67973f057c3754ac9ec838d8c20bda",
+      "src/views/js/media/remote-audio-gain.js": "4671a62eb57fa54568da644c823246caae4c45381cfa7d161c6b84b234862280",
+      "src/views/js/media/screen-share-volume-controller.js": "8f99d3d88d748b77ac448ab79553b81a971bb2985ba1a728a20ab8e690667e30",
+      "src/views/js/media/voice-join-overlay-ui.js": "8f5c32c2f6cd803ea073d6b2f10a350cd761627cad082997f75284851f7c029f",
+      "src/views/js/room/channel-sidebar-ui.js": "4124e723152d76f732c3e6bf01b20037f69b6056e49eb213d768510580593b15",
+      "src/views/js/room/cursor-share-ui.js": "e04ba970ae2ad64eba98f0a7e1cd9bda193381297969ba9cb5e970a4bafaef0a",
+      "src/views/js/room/participants-list-ui.js": "ea7fac3df1b82a034d117a5a097e75d1e86a5158cf0f22a1714d4e45b3ccd386",
+      "src/views/js/room/presence-view-model.js": "89622a80e30f397dbf7a346c7b43f175b948f73de15652d7f02df5db793f00c4",
+      "src/views/js/room/room-ui-state.js": "c6810cb29b66d26375a5719f23e5b0dc99fb68f1629e5c5f8d5f7461ae7b8085",
+      "src/views/js/room/stage-layout-runtime.js": "9b13f28f5c056212f85a4572212e99a4df3553aae51f8ef4beb901e458892089",
+      "src/views/js/room/tile-status-ui.js": "65db7feb32c6ac489878f70195357ecdc1ef8f43e22a3600bfab3d53b7d74358",
+      "src/views/js/room/video-tile-structure-ui.js": "bc41a37f02a1207dc324dea378d28e02ea0a86bc982903a7f3b0036740bcbe96",
+      "src/views/js/shared/control-popovers-ui.js": "0a2d69efbfb3eec742adb984bd35fa4522f88dc4b092e74531f8815b441f0cba",
+      "src/views/js/shared/copy-link-ui.js": "ddcf9de0afa34810be1cf87a2ffff7dd4c53498b119934a2c55d50d323ebe2fa",
+      "src/views/js/shared/morph-icon-ui.js": "88b85c544ef31e3807836709d6dd1e9ae5adfda26eadfff08ffaeed1d9fdf1aa",
+      "src/views/js/shared/room-boot.js": "1e38795b69a39397a9476bb75f139f9213bc7c6f51eb6d7a02eddb3e01174674",
+      "src/views/js/shared/view-utils.js": "1afae990b5b243d58b994d458b322225ec62fb51eb0ad3d870342349a0e905ff",
+      "src/views/js/shared/voice-diagnostic-schema.js": "0c15f85998cd014ea0b48baece3d3bdae9705d62109ad53f8f018456a9e265fd",
+      "src/views/js/sidebar/sidebar-runtime.js": "c239076e65764645c5b7b52f783f3e83d90ba4d4bd36c9a3bb25aa285375fbd0",
+      "src/views/js/sidebar/sidebar-socket-transport.js": "d21ba887efafbc1edac5e70ae30e09a8e02c196147933ee42efd08c95768fea5",
+      "src/views/js/voice/rnnoise-engine.js": "bddb52ac0df7f75c480397cb4547bf83c7f0d15cc7c70ca72193383614505a51",
+      "src/views/js/voice/voice-audio-processing.js": "9fcc700aa669916dfbebc847d48ef0676ee5e25cf0ce3617d8ab3d43d306f5f3",
+      "src/views/js/voice/voice-audio-recovery.js": "efa4f4cdfc32a6ac1a24859c76d31271cfa53d0cf7ed1907c14e8052384688d9",
+      "src/views/js/voice/voice-audio-settings-controller.js": "39fec29d7b40c0cbb060f157f2704a01d04aeb18c90e0fab0c4d219b7020bed7",
+      "src/views/js/voice/voice-call-diagnostics.js": "3267e0f3f39ab3a14c22b28135f95d3b599b83fb697915fbc757a4c9412caf00",
+      "src/views/js/voice/voice-call-protocol.js": "c12d9eca0681fc5705b37eade9a582ce11e40a15d01ee1c37d1ca3590fbeb41f",
+      "src/views/js/voice/voice-device-runtime.js": "a48cc4b9647c17ac7fe063a27ec021af3449d54e9f92cf75725f5adc2fd9131d",
+      "src/views/js/voice/voice-media-lifecycle.js": "f16a951be608c66a196eea352cab4fc8da8a1ac80248d7113f246b23eca21bf0",
+      "src/views/js/voice/voice-media-operation-runtime.js": "db60afeab8b37a76f2f7acf0d6f45ba198d3824239777590afc42b8bea0026d0",
+      "src/views/js/voice/voice-media-quality-runtime.js": "67050eda17083c42eabd7e98da9428e3453b49bcbc8d0642f8fccb43eeca1a09",
+      "src/views/js/voice/voice-media-quality-view.js": "a714ce8dda52ff2b50009e5886a2ef45555924079434ab35f7c10e805fbf90a4",
+      "src/views/js/voice/voice-peer-registry.js": "2ca7baeb46bd79cc70b79602b4b4f41d16f7186a9bafb37ffd641e0265c446be",
+      "src/views/js/voice/voice-retry-controller.js": "754e32414977af233b26d02fcde4baa74a82acb7eed211ef9f5083a0109048be",
+      "src/views/js/voice/voice-screen-codecs.js": "4389c4b289e367016fb4b53ad4cb1c1be4fb96fe10c023052ed970f986f19079",
+      "src/views/js/voice/voice-screen-send-policy.js": "f0746ee6c7415f22c3601dd88d413a0db14f5312dd850cc64e9de052fedaac75",
+      "src/views/js/voice/voice-screen-sfu-runtime.js": "1b8630ddca9051213b6eb5057b16310deb16e39822aa25a178af9d275e542425",
+      "src/views/js/voice/voice-session-runtime.js": "6f5a812dc49c9c0042fa0b8fd747110b86eb31a6ea1cf2d76220244fb25f016b",
+      "src/views/js/voice/voice-share-diagnostics.js": "c7d72478788bc748269461b98f2628677e3207c24c821292f87a450c7a0e6fbc",
+      "src/views/js/voice/voice-speaking-runtime.js": "93844c8391ed63c5567d93577216133edc293bd2071b12af4135ba500d6c4aab",
+      "src/views/js/voice/voice-status-view.js": "63d3a96e7fecfa1f03be0cea0bbe5b4f6f1f6314486845a75eb68c5cb040eb7e",
+      "src/views/room/index.ejs": "a8b749fc5b059883770e8abffe3d3958c7de98c1dd650688c6b469e5291872d7",
+      "src/views/styles/base.css": "efcd031879c551c350dc5f41d436e99d9379ea2923883730be50aee9adc8f4cf",
+      "src/views/styles/chat.css": "0a01cebae7005a7e861b87f18fad80173301c987b5c1e3b848089ab86b989e07",
+      "src/views/styles/controls.css": "9e20a4123182cad28f19acf095f300b8f72f313c872cbe0704deb92dd8a27301",
+      "src/views/styles/index.css": "6bbd1353660e5d37dee99889789a573adeaae2ed6846a596f79a1a61bf541891",
+      "src/views/styles/layout.css": "c0463e0f68bd51b7d1eb30e14d71f73784daeecaced1416505a16a9312c43b14",
+      "src/views/styles/media.css": "e967f8a31da37a645fe08ec9b9b7a14468bc96ca1282871e2cd6a22c780dd4d7",
+      "src/views/styles/participants.css": "5eb640cd823aa514093846b6783ddde869873fa3400eef8def52f444dd869a81",
+      "src/views/styles/room.css": "f7eac96babe0a0de58f80fc7c0f3c05ab095f2fa81080be91f13da7ccec4c932",
+      "src/views/styles/stage-layout.css": "5758232dfe0e7544f1de2fb1e16bec3c26b999a2dc7e4ef30a7232251ecb1e0d",
+      "src/views/styles/tokens.css": "db5f33cbc10b596b72592152c0c295b04dda34ed648fbb4ebe9a5871983f4715",
+      "src/views/styles/voice-join.css": "914e7e0db65c6dc883fe0ff8559e3eb0891d926da8e7792e16b3a64396b1aaa4",
+      "src/views/vendor/screen-sfu-client.js": "328e6998073c0d378397e6b7fa2a4fa26ac2e41f0f0ea83c179f01d0894f644c",
+      "src/views/vendor/screen-sfu-client.NOTICES.txt": "f47d2b32be07b787cb3eebfc0c87c7d41e9fefe25ee29b36d337e7ede5bc61f7",
+      "src/views/vendor/web-noise-suppressor.js": "741ef10ab9ea3b3a4f19445b837547f5c60cd036ca0ceefb049b6b819d36d759",
+      "src/views/vendor/fontawesome/LICENSE.txt": "9b914eae88817d63b576eab5aafde7068c7a1abae125d7cdfb034f1da43a9afc",
+      "src/views/vendor/fontawesome/css/fontawesome.min.css": "4c17b497d3e115a551dc3c07980da341b51fd72eb2436d9106024a2a43640b9d",
+      "src/views/vendor/fontawesome/css/regular.min.css": "b191e77bdb6ff3deea87f61386e9b486579c47fc11f13a04917218a0f44061e5",
+      "src/views/vendor/fontawesome/css/solid.min.css": "1136ce38cf54f167da5e0d80916dadf906dda566054403be1c45ceb61f0441b6",
+      "src/views/vendor/fontawesome/webfonts/fa-regular-400.ttf": "54cf6086f7bb21f9d072ad494a19b4681fa516dd0a14cee52da01d3651a913a3",
+      "src/views/vendor/fontawesome/webfonts/fa-regular-400.woff2": "e3456d1283b9d75337a773dfd147bf908fd02c01b4bf48576d8603a69b13cbe5",
+      "src/views/vendor/fontawesome/webfonts/fa-solid-900.ttf": "d2f0593540b0e33ba6de255a54f272d466e31144806956bea8cfdbf7edffc9bd",
+      "src/views/vendor/fontawesome/webfonts/fa-solid-900.woff2": "aa75998623a391e61c6901794ace832e3ecdd288b56d608f21bea0411acc0b8e",
+      "src/views/vendor/morphicons/LICENSE.txt": "6f7d85f2a8fea03ebdc1e7fe976215e3e9f69eccac645789237eca7c0d56b2b9",
+      "src/views/vendor/morphicons/morphicons-dom.min.js": "2599d153bfee46941ca0c9776502d1239d73f80780b78f973ca022035dcdec44",
+      "src/views/vendor/peerjs/LICENSE": "9407807dba7f47a79bfb3ac55759d63d77c9371ebd0616d5a093e97d3e810397",
+      "src/views/vendor/peerjs/peerjs.min.js": "ad5d8870d1e389914f9cba8d35be313c4327c69ee0a221e482e9bf7621136fe5",
+      "src/views/wasm/rnnoise-v2-2025.1.5.wasm": "b3b67c9eae8f0791aad468c708659e0850bb37b0fb9c8a8666f2d7b0b6869bc4",
+      "src/views/wasm/rnnoise-v2.NOTICES.txt": "6fec156233fb8123d2fc26e05012599ffcc6370e1c66633cd3dfe9ac28a9b93c",
+      "src/views/wasm/rnnoise.wasm": "8b60a2ab88fdae2d1a9f940249d0eb072f28ba8e796f7304347b4e07839c8853",
+      "src/views/wasm/rnnoise_simd.wasm": "8b60a2ab88fdae2d1a9f940249d0eb072f28ba8e796f7304347b4e07839c8853",
+      "package.json": "3d29cbd82f1a323777a55f5b06c6f8f351919d0cba4fbcb210d1f76f45cd881c",
+      "package-lock.json": "a4a63d0bb69c39d742ae52164d539a8dfff2ac1fc98c8e8baf498e703d791d44"
+    },
+    "new": {
+      "src/server.js": "5820db45ad8c7b7f49af8c9fc3dade7bdf972270bc4165281e440f79d841ed6d",
+      "src/utils/ChatHistoryStore.js": "7b9ccf39c0a08f3017754d1f45e266632348ff3102856f7be9af4f0f677e94d4",
+      "src/utils/ChatRateLimit.js": "16ee7d087b4d252d867b2edd56092b29bd135278f71e71e7e8064c92ad0d269d",
+      "src/utils/iceServers.js": "b677b3f561376c08ee170a067ad99e52998c2e77b22d9c6ca6d68f49fdbd6a38",
+      "src/utils/Log.js": "698321c936e5ffdb8a6ee1701ade1efb083ddc69a5f72f095153639fdb06d6cc",
+      "src/utils/LogMemoryUsage.js": "878d3a7fdfa06c5d759a486de94c3f3d240155ed9aa249aa0cd58ac208d8ff84",
+      "src/utils/PeerWebSocketServer.js": "2be87c942c0903273db6528cfdb0bce6c1f6ab3806523730202c6f84dd9e6170",
+      "src/utils/ScreenSfuBudget.js": "d1596ab4aab67b4f8317ada9d413a07d120d78054f0847bcc8cf2207412d6ab7",
+      "src/utils/ScreenSfuService.js": "fbfc4515383a1df9e6117bc7f22db2d1007fbbb4c14fa51c2354183a0bc1468e",
+      "src/utils/SocketDisconnectLifecycle.js": "ed2a3a5b846ea13de9f9371da55efdd923617d3c2cf9704dbc075af2e5e19111",
+      "src/utils/SocketPacketValidation.js": "837b611261871af04d36e4cd1a1283b25749c012a1d9ce8a9cc11166650b0eb9",
+      "src/utils/ViewChatRoomLifecycle.js": "38f7308319c1c4ca1550e73f2a3837664358075b18761e8c42234a05af00deff",
+      "src/utils/VoiceCallSignaling.js": "6deb69705dcba8663613d6a43d101af6cdeb72b5b36cd64395d4bcef7abd7e9c",
+      "src/utils/VoiceDiagnosticsRelay.js": "3307d8f2ca60545d383b1b14fbfb1a30dda261c0810264b1d0ce49600711468e",
+      "src/views/index.ejs": "4f4d3826de7c7a7a8f83a2978d87b932c68e1be4ea3939b8fcffd43b34cbd59d",
+      "src/views/script.js": "ca5d517d3affa1ddf4804ab4a9406283fe79da0e61b7542f13a6243a2222886b",
+      "src/views/style.css": "11c6162c7165b247985a8785a3ace1f619b6782556fbec67bab27fda0725280e",
+      "src/views/audio-worklet/passthrough-processor.js": "17acf22bb9f3ffcf5d4f1cd9e692a002412975e6dc4facaa0ab737508f308679",
+      "src/views/audio-worklet/rnnoise-processor.js": "44f72db6a5d402b3ffd8ff8d61968a8d7a53d376f1c49e85cd242aaf8442ed5e",
+      "src/views/audio-worklet/rnnoise-speech-gate.js": "61fdf5e6c3d218e334acb07a563cffae9207e402ad9858d9f1b422b24056f419",
+      "src/views/audio-worklet/rnnoise-v2-wasm.js": "723f4087b2a740d57a11993cc6e864854c7739535bd8c3e518e52cd1f6ab447a",
+      "src/views/js/chat/chat-form-ui.js": "4f6fe56222b89265608e5a6584d7ea62e94701058e713553298ef06e31f3ca6e",
+      "src/views/js/chat/chat-message-ui.js": "2632f9050cab94239918333088b15d01e4465f8a7a72145793a328292449302b",
+      "src/views/js/chat/chat-name-state.js": "6b96b4c86f0d0cc8a94e313d0f468394ec515ccce2076a4e14b40d7407378fcc",
+      "src/views/js/chat/chat-panel-runtime.js": "b5dd143a005dee228f03c6c94ff12aeed054d6edc5135559038dc437333dbb59",
+      "src/views/js/chat/chat-socket-transport.js": "e50b170d1642946c2e0c3af258c12f1444846f4835a709510c8ffe8c8a5f0cb0",
+      "src/views/js/media/audio-processing-view.js": "62e4f7ec636a7ba65990194efc8c1b3fd7e7962d1855f11b58c18474576a4ea8",
+      "src/views/js/media/fullscreen-controls.js": "faaaa0192873dfec6be1c947e62a469ca8c3fc6462428a78d181a5971dfea848",
+      "src/views/js/media/local-screen-share-preview-controller.js": "e842fd72a9c77fe0d3deaa740df4c97187d37b06ce0c09ec9af162bde8161e4b",
+      "src/views/js/media/media-controls-ui.js": "ed3efcfa51a2113838dd0f222b7974c564d939c8ac39c99c8a0310ea03059227",
+      "src/views/js/media/media-dock-adapter.js": "8a09aa8f6632ed5f740f02a889a91b16b73b7c161b491e60bfd42c4ed28bc9f1",
+      "src/views/js/media/media-dock-runtime.js": "cc2d3b1f91cc39ee947d9fbe2507f8f6a3bd02ac0e75d84ca90560a48d3be6d2",
+      "src/views/js/media/noise-settings-ui.js": "3466b9845449caf45896cb337df283168bbf0375c1fa83c6661c925e8bf0641c",
+      "src/views/js/media/output-volume-state.js": "b5da379aa5137cd640a64e6101adb867e65dc50d6381beec6a5a75f7eb6c0121",
+      "src/views/js/media/output-volume-ui.js": "8eff4c87767c1e64f1777d5d00d346668c53243db045b6fcaa1c510633122b8e",
+      "src/views/js/media/peer-volume-ui.js": "74823b34f6b3bfd2e45a274aa188e3637f67973f057c3754ac9ec838d8c20bda",
+      "src/views/js/media/remote-audio-gain.js": "4671a62eb57fa54568da644c823246caae4c45381cfa7d161c6b84b234862280",
+      "src/views/js/media/screen-share-volume-controller.js": "8f99d3d88d748b77ac448ab79553b81a971bb2985ba1a728a20ab8e690667e30",
+      "src/views/js/media/voice-join-overlay-ui.js": "8f5c32c2f6cd803ea073d6b2f10a350cd761627cad082997f75284851f7c029f",
+      "src/views/js/room/channel-sidebar-ui.js": "4124e723152d76f732c3e6bf01b20037f69b6056e49eb213d768510580593b15",
+      "src/views/js/room/cursor-share-ui.js": "e04ba970ae2ad64eba98f0a7e1cd9bda193381297969ba9cb5e970a4bafaef0a",
+      "src/views/js/room/participants-list-ui.js": "ea7fac3df1b82a034d117a5a097e75d1e86a5158cf0f22a1714d4e45b3ccd386",
+      "src/views/js/room/presence-view-model.js": "89622a80e30f397dbf7a346c7b43f175b948f73de15652d7f02df5db793f00c4",
+      "src/views/js/room/room-ui-state.js": "c6810cb29b66d26375a5719f23e5b0dc99fb68f1629e5c5f8d5f7461ae7b8085",
+      "src/views/js/room/stage-layout-runtime.js": "9b13f28f5c056212f85a4572212e99a4df3553aae51f8ef4beb901e458892089",
+      "src/views/js/room/tile-status-ui.js": "65db7feb32c6ac489878f70195357ecdc1ef8f43e22a3600bfab3d53b7d74358",
+      "src/views/js/room/video-tile-structure-ui.js": "bc41a37f02a1207dc324dea378d28e02ea0a86bc982903a7f3b0036740bcbe96",
+      "src/views/js/shared/control-popovers-ui.js": "0a2d69efbfb3eec742adb984bd35fa4522f88dc4b092e74531f8815b441f0cba",
+      "src/views/js/shared/copy-link-ui.js": "ddcf9de0afa34810be1cf87a2ffff7dd4c53498b119934a2c55d50d323ebe2fa",
+      "src/views/js/shared/morph-icon-ui.js": "88b85c544ef31e3807836709d6dd1e9ae5adfda26eadfff08ffaeed1d9fdf1aa",
+      "src/views/js/shared/room-boot.js": "1e38795b69a39397a9476bb75f139f9213bc7c6f51eb6d7a02eddb3e01174674",
+      "src/views/js/shared/view-utils.js": "1afae990b5b243d58b994d458b322225ec62fb51eb0ad3d870342349a0e905ff",
+      "src/views/js/shared/voice-diagnostic-schema.js": "abfbbd39fc5a67a63979108bbff3209ce6ce0967a2d342e61c2e7edbc32ca9e2",
+      "src/views/js/sidebar/sidebar-runtime.js": "c239076e65764645c5b7b52f783f3e83d90ba4d4bd36c9a3bb25aa285375fbd0",
+      "src/views/js/sidebar/sidebar-socket-transport.js": "d21ba887efafbc1edac5e70ae30e09a8e02c196147933ee42efd08c95768fea5",
+      "src/views/js/voice/rnnoise-engine.js": "bddb52ac0df7f75c480397cb4547bf83c7f0d15cc7c70ca72193383614505a51",
+      "src/views/js/voice/voice-audio-processing.js": "9fcc700aa669916dfbebc847d48ef0676ee5e25cf0ce3617d8ab3d43d306f5f3",
+      "src/views/js/voice/voice-audio-recovery.js": "efa4f4cdfc32a6ac1a24859c76d31271cfa53d0cf7ed1907c14e8052384688d9",
+      "src/views/js/voice/voice-audio-settings-controller.js": "39fec29d7b40c0cbb060f157f2704a01d04aeb18c90e0fab0c4d219b7020bed7",
+      "src/views/js/voice/voice-call-diagnostics.js": "b6e46bb1f2c4aed18a59d2cb6f7c39499f4481bcd59b4f3fb5c40ab86689cff4",
+      "src/views/js/voice/voice-call-protocol.js": "c12d9eca0681fc5705b37eade9a582ce11e40a15d01ee1c37d1ca3590fbeb41f",
+      "src/views/js/voice/voice-device-runtime.js": "a48cc4b9647c17ac7fe063a27ec021af3449d54e9f92cf75725f5adc2fd9131d",
+      "src/views/js/voice/voice-media-lifecycle.js": "f16a951be608c66a196eea352cab4fc8da8a1ac80248d7113f246b23eca21bf0",
+      "src/views/js/voice/voice-media-operation-runtime.js": "db60afeab8b37a76f2f7acf0d6f45ba198d3824239777590afc42b8bea0026d0",
+      "src/views/js/voice/voice-media-quality-runtime.js": "67050eda17083c42eabd7e98da9428e3453b49bcbc8d0642f8fccb43eeca1a09",
+      "src/views/js/voice/voice-media-quality-view.js": "a714ce8dda52ff2b50009e5886a2ef45555924079434ab35f7c10e805fbf90a4",
+      "src/views/js/voice/voice-peer-registry.js": "2ca7baeb46bd79cc70b79602b4b4f41d16f7186a9bafb37ffd641e0265c446be",
+      "src/views/js/voice/voice-retry-controller.js": "754e32414977af233b26d02fcde4baa74a82acb7eed211ef9f5083a0109048be",
+      "src/views/js/voice/voice-screen-codecs.js": "4389c4b289e367016fb4b53ad4cb1c1be4fb96fe10c023052ed970f986f19079",
+      "src/views/js/voice/voice-screen-send-policy.js": "f0746ee6c7415f22c3601dd88d413a0db14f5312dd850cc64e9de052fedaac75",
+      "src/views/js/voice/voice-screen-sfu-runtime.js": "f54e3914ab790262957e0551e6c2cae2c47694a6501357f227627076a9616db8",
+      "src/views/js/voice/voice-session-runtime.js": "6f5a812dc49c9c0042fa0b8fd747110b86eb31a6ea1cf2d76220244fb25f016b",
+      "src/views/js/voice/voice-share-diagnostics.js": "c7d72478788bc748269461b98f2628677e3207c24c821292f87a450c7a0e6fbc",
+      "src/views/js/voice/voice-speaking-runtime.js": "93844c8391ed63c5567d93577216133edc293bd2071b12af4135ba500d6c4aab",
+      "src/views/js/voice/voice-status-view.js": "63d3a96e7fecfa1f03be0cea0bbe5b4f6f1f6314486845a75eb68c5cb040eb7e",
+      "src/views/room/index.ejs": "a8b749fc5b059883770e8abffe3d3958c7de98c1dd650688c6b469e5291872d7",
+      "src/views/styles/base.css": "efcd031879c551c350dc5f41d436e99d9379ea2923883730be50aee9adc8f4cf",
+      "src/views/styles/chat.css": "0a01cebae7005a7e861b87f18fad80173301c987b5c1e3b848089ab86b989e07",
+      "src/views/styles/controls.css": "9e20a4123182cad28f19acf095f300b8f72f313c872cbe0704deb92dd8a27301",
+      "src/views/styles/index.css": "6bbd1353660e5d37dee99889789a573adeaae2ed6846a596f79a1a61bf541891",
+      "src/views/styles/layout.css": "c0463e0f68bd51b7d1eb30e14d71f73784daeecaced1416505a16a9312c43b14",
+      "src/views/styles/media.css": "e967f8a31da37a645fe08ec9b9b7a14468bc96ca1282871e2cd6a22c780dd4d7",
+      "src/views/styles/participants.css": "5eb640cd823aa514093846b6783ddde869873fa3400eef8def52f444dd869a81",
+      "src/views/styles/room.css": "f7eac96babe0a0de58f80fc7c0f3c05ab095f2fa81080be91f13da7ccec4c932",
+      "src/views/styles/stage-layout.css": "5758232dfe0e7544f1de2fb1e16bec3c26b999a2dc7e4ef30a7232251ecb1e0d",
+      "src/views/styles/tokens.css": "db5f33cbc10b596b72592152c0c295b04dda34ed648fbb4ebe9a5871983f4715",
+      "src/views/styles/voice-join.css": "914e7e0db65c6dc883fe0ff8559e3eb0891d926da8e7792e16b3a64396b1aaa4",
+      "src/views/vendor/screen-sfu-client.js": "328e6998073c0d378397e6b7fa2a4fa26ac2e41f0f0ea83c179f01d0894f644c",
+      "src/views/vendor/screen-sfu-client.NOTICES.txt": "f47d2b32be07b787cb3eebfc0c87c7d41e9fefe25ee29b36d337e7ede5bc61f7",
+      "src/views/vendor/web-noise-suppressor.js": "741ef10ab9ea3b3a4f19445b837547f5c60cd036ca0ceefb049b6b819d36d759",
+      "src/views/vendor/fontawesome/LICENSE.txt": "9b914eae88817d63b576eab5aafde7068c7a1abae125d7cdfb034f1da43a9afc",
+      "src/views/vendor/fontawesome/css/fontawesome.min.css": "4c17b497d3e115a551dc3c07980da341b51fd72eb2436d9106024a2a43640b9d",
+      "src/views/vendor/fontawesome/css/regular.min.css": "b191e77bdb6ff3deea87f61386e9b486579c47fc11f13a04917218a0f44061e5",
+      "src/views/vendor/fontawesome/css/solid.min.css": "1136ce38cf54f167da5e0d80916dadf906dda566054403be1c45ceb61f0441b6",
+      "src/views/vendor/fontawesome/webfonts/fa-regular-400.ttf": "54cf6086f7bb21f9d072ad494a19b4681fa516dd0a14cee52da01d3651a913a3",
+      "src/views/vendor/fontawesome/webfonts/fa-regular-400.woff2": "e3456d1283b9d75337a773dfd147bf908fd02c01b4bf48576d8603a69b13cbe5",
+      "src/views/vendor/fontawesome/webfonts/fa-solid-900.ttf": "d2f0593540b0e33ba6de255a54f272d466e31144806956bea8cfdbf7edffc9bd",
+      "src/views/vendor/fontawesome/webfonts/fa-solid-900.woff2": "aa75998623a391e61c6901794ace832e3ecdd288b56d608f21bea0411acc0b8e",
+      "src/views/vendor/morphicons/LICENSE.txt": "6f7d85f2a8fea03ebdc1e7fe976215e3e9f69eccac645789237eca7c0d56b2b9",
+      "src/views/vendor/morphicons/morphicons-dom.min.js": "2599d153bfee46941ca0c9776502d1239d73f80780b78f973ca022035dcdec44",
+      "src/views/vendor/peerjs/LICENSE": "9407807dba7f47a79bfb3ac55759d63d77c9371ebd0616d5a093e97d3e810397",
+      "src/views/vendor/peerjs/peerjs.min.js": "ad5d8870d1e389914f9cba8d35be313c4327c69ee0a221e482e9bf7621136fe5",
+      "src/views/wasm/rnnoise-v2-2025.1.5.wasm": "b3b67c9eae8f0791aad468c708659e0850bb37b0fb9c8a8666f2d7b0b6869bc4",
+      "src/views/wasm/rnnoise-v2.NOTICES.txt": "6fec156233fb8123d2fc26e05012599ffcc6370e1c66633cd3dfe9ac28a9b93c",
+      "src/views/wasm/rnnoise.wasm": "8b60a2ab88fdae2d1a9f940249d0eb072f28ba8e796f7304347b4e07839c8853",
+      "src/views/wasm/rnnoise_simd.wasm": "8b60a2ab88fdae2d1a9f940249d0eb072f28ba8e796f7304347b4e07839c8853",
+      "package.json": "3d29cbd82f1a323777a55f5b06c6f8f351919d0cba4fbcb210d1f76f45cd881c",
+      "package-lock.json": "a4a63d0bb69c39d742ae52164d539a8dfff2ac1fc98c8e8baf498e703d791d44"
+    },
+    "changed_files": [
+      "src/server.js",
+      "src/utils/VoiceDiagnosticsRelay.js",
+      "src/views/js/shared/voice-diagnostic-schema.js",
+      "src/views/js/voice/voice-call-diagnostics.js",
+      "src/views/js/voice/voice-screen-sfu-runtime.js",
+      "src/views/script.js"
+    ],
+    "tests": {
+      "node": {
+        "pass": 369,
+        "fail": 0,
+        "skipped": 0
+      },
+      "eslint": "passed",
+      "diff_check": "passed",
+      "synthetic_media_only": true,
+      "p2p_browser": {
+        "status": "passed",
+        "browser": "Edg/155.0.4283.45",
+        "syntheticMediaOnly": true,
+        "serverForwardingEnabled": false,
+        "viewportCases": 22,
+        "memberGridCases": 66,
+        "memberCounts": [
+          1,
+          2,
+          3,
+          4,
+          8,
+          12
+        ],
+        "cssViewports": [
+          [
+            3840,
+            2160,
+            1
+          ],
+          [
+            2560,
+            1440,
+            1
+          ],
+          [
+            1920,
+            1080,
+            1
+          ],
+          [
+            1600,
+            900,
+            1
+          ],
+          [
+            1366,
+            768,
+            1
+          ],
+          [
+            2560,
+            1440,
+            1.5
+          ],
+          [
+            900,
+            700,
+            1
+          ],
+          [
+            640,
+            700,
+            1
+          ],
+          [
+            390,
+            844,
+            3
+          ],
+          [
+            320,
+            640,
+            2
+          ],
+          [
+            844,
+            390,
+            2
+          ]
+        ],
+        "routeChecks": [
+          "P2P",
+          "manual P2P",
+          "per-sharer preference retention"
+        ],
+        "tests": [
+          "empty and occupied channel guides",
+          "central join action",
+          "voice join",
+          "camera",
+          "two voice peers",
+          "synthetic share",
+          "responsive geometry in both modes",
+          "1/2/3/4/8/12 member grid fixtures",
+          "bounded dock icons and member actions",
+          "closing chat expands central stage",
+          "chat draft",
+          "no layout renegotiation/capture",
+          "two shares",
+          "focus retention/fallback",
+          "manual route retention",
+          "preview hide retains capture",
+          "last share end",
+          "member departure"
+        ],
+        "diagnosticChecks": [
+          "compact export",
+          "checkpoint survives peer departure"
+        ],
+        "runtimeErrors": 0,
+        "failedResources": 0
+      },
+      "sfu_browser": {
+        "status": "passed",
+        "browser": "Edg/155.0.4283.45",
+        "syntheticMediaOnly": true,
+        "serverForwardingEnabled": true,
+        "viewportCases": 22,
+        "memberGridCases": 66,
+        "memberCounts": [
+          1,
+          2,
+          3,
+          4,
+          8,
+          12
+        ],
+        "cssViewports": [
+          [
+            3840,
+            2160,
+            1
+          ],
+          [
+            2560,
+            1440,
+            1
+          ],
+          [
+            1920,
+            1080,
+            1
+          ],
+          [
+            1600,
+            900,
+            1
+          ],
+          [
+            1366,
+            768,
+            1
+          ],
+          [
+            2560,
+            1440,
+            1.5
+          ],
+          [
+            900,
+            700,
+            1
+          ],
+          [
+            640,
+            700,
+            1
+          ],
+          [
+            390,
+            844,
+            3
+          ],
+          [
+            320,
+            640,
+            2
+          ],
+          [
+            844,
+            390,
+            2
+          ]
+        ],
+        "routeChecks": [
+          "automatic SFU",
+          "manual P2P",
+          "manual SFU",
+          "per-sharer preference retention"
+        ],
+        "tests": [
+          "empty and occupied channel guides",
+          "central join action",
+          "voice join",
+          "camera",
+          "two voice peers",
+          "synthetic share",
+          "responsive geometry in both modes",
+          "1/2/3/4/8/12 member grid fixtures",
+          "bounded dock icons and member actions",
+          "closing chat expands central stage",
+          "chat draft",
+          "no layout renegotiation/capture",
+          "two shares",
+          "focus retention/fallback",
+          "manual route retention",
+          "preview hide retains capture",
+          "last share end",
+          "member departure"
+        ],
+        "diagnosticChecks": [
+          "compact export",
+          "checkpoint survives peer departure"
+        ],
+        "runtimeErrors": 0,
+        "failedResources": 0
+      }
+    }
+  },
+  "apps_before": [
+    {
+      "name": "voice-room",
+      "id": 0,
+      "pid": 30833,
+      "status": "online",
+      "cwd": "/www/wwwroot/voice.eliyork.com",
+      "exec_path": "/www/wwwroot/voice.eliyork.com/src/server.js",
+      "restarts": 1
+    },
+    {
+      "name": "friend-footprints",
+      "id": 1,
+      "pid": 1389,
+      "status": "online",
+      "cwd": "/www/wwwroot/map.eliyork.com",
+      "exec_path": "/www/wwwroot/map.eliyork.com/server-dist/index.js",
+      "restarts": 0
+    }
+  ],
+  "protected_before": {
+    ".env": "6f919931c13e1e713dfed8d203e6574a8f5aa449acb939099291fea149019a48",
+    "node_modules/mediasoup/package.json": "c92572f29c412c30e8eb30b760197e94acd649762b140cd344c3995e9fa19aea",
+    "package-lock.json": "a4a63d0bb69c39d742ae52164d539a8dfff2ac1fc98c8e8baf498e703d791d44"
+  },
+  "rollback": "/www/backup/voice-deploy/diagnostics-20261018-172311-538/rollback.py",
+  "tests": {
+    "node": {
+      "pass": 369,
+      "fail": 0,
+      "skipped": 0
+    },
+    "eslint": "passed",
+    "diff_check": "passed",
+    "synthetic_media_only": true,
+    "p2p_browser": {
+      "status": "passed",
+      "browser": "Edg/155.0.4283.45",
+      "syntheticMediaOnly": true,
+      "serverForwardingEnabled": false,
+      "viewportCases": 22,
+      "memberGridCases": 66,
+      "memberCounts": [
+        1,
+        2,
+        3,
+        4,
+        8,
+        12
+      ],
+      "cssViewports": [
+        [
+          3840,
+          2160,
+          1
+        ],
+        [
+          2560,
+          1440,
+          1
+        ],
+        [
+          1920,
+          1080,
+          1
+        ],
+        [
+          1600,
+          900,
+          1
+        ],
+        [
+          1366,
+          768,
+          1
+        ],
+        [
+          2560,
+          1440,
+          1.5
+        ],
+        [
+          900,
+          700,
+          1
+        ],
+        [
+          640,
+          700,
+          1
+        ],
+        [
+          390,
+          844,
+          3
+        ],
+        [
+          320,
+          640,
+          2
+        ],
+        [
+          844,
+          390,
+          2
+        ]
+      ],
+      "routeChecks": [
+        "P2P",
+        "manual P2P",
+        "per-sharer preference retention"
+      ],
+      "tests": [
+        "empty and occupied channel guides",
+        "central join action",
+        "voice join",
+        "camera",
+        "two voice peers",
+        "synthetic share",
+        "responsive geometry in both modes",
+        "1/2/3/4/8/12 member grid fixtures",
+        "bounded dock icons and member actions",
+        "closing chat expands central stage",
+        "chat draft",
+        "no layout renegotiation/capture",
+        "two shares",
+        "focus retention/fallback",
+        "manual route retention",
+        "preview hide retains capture",
+        "last share end",
+        "member departure"
+      ],
+      "diagnosticChecks": [
+        "compact export",
+        "checkpoint survives peer departure"
+      ],
+      "runtimeErrors": 0,
+      "failedResources": 0
+    },
+    "sfu_browser": {
+      "status": "passed",
+      "browser": "Edg/155.0.4283.45",
+      "syntheticMediaOnly": true,
+      "serverForwardingEnabled": true,
+      "viewportCases": 22,
+      "memberGridCases": 66,
+      "memberCounts": [
+        1,
+        2,
+        3,
+        4,
+        8,
+        12
+      ],
+      "cssViewports": [
+        [
+          3840,
+          2160,
+          1
+        ],
+        [
+          2560,
+          1440,
+          1
+        ],
+        [
+          1920,
+          1080,
+          1
+        ],
+        [
+          1600,
+          900,
+          1
+        ],
+        [
+          1366,
+          768,
+          1
+        ],
+        [
+          2560,
+          1440,
+          1.5
+        ],
+        [
+          900,
+          700,
+          1
+        ],
+        [
+          640,
+          700,
+          1
+        ],
+        [
+          390,
+          844,
+          3
+        ],
+        [
+          320,
+          640,
+          2
+        ],
+        [
+          844,
+          390,
+          2
+        ]
+      ],
+      "routeChecks": [
+        "automatic SFU",
+        "manual P2P",
+        "manual SFU",
+        "per-sharer preference retention"
+      ],
+      "tests": [
+        "empty and occupied channel guides",
+        "central join action",
+        "voice join",
+        "camera",
+        "two voice peers",
+        "synthetic share",
+        "responsive geometry in both modes",
+        "1/2/3/4/8/12 member grid fixtures",
+        "bounded dock icons and member actions",
+        "closing chat expands central stage",
+        "chat draft",
+        "no layout renegotiation/capture",
+        "two shares",
+        "focus retention/fallback",
+        "manual route retention",
+        "preview hide retains capture",
+        "last share end",
+        "member departure"
+      ],
+      "diagnosticChecks": [
+        "compact export",
+        "checkpoint survives peer departure"
+      ],
+      "runtimeErrors": 0,
+      "failedResources": 0
+    }
+  },
+  "chat_history_before": "3c4d99790aaeec51b5fffcdd7096e75987e6094a8791122d5ec43c541cd648a0",
+  "utc_completed": "2026-10-18T09:23:52.128630+00:00",
+  "apps_after": [
+    {
+      "name": "voice-room",
+      "id": 0,
+      "pid": 32790,
+      "status": "online",
+      "cwd": "/www/wwwroot/voice.eliyork.com",
+      "exec_path": "/www/wwwroot/voice.eliyork.com/src/server.js",
+      "restarts": 1
+    },
+    {
+      "name": "friend-footprints",
+      "id": 1,
+      "pid": 1389,
+      "status": "online",
+      "cwd": "/www/wwwroot/map.eliyork.com",
+      "exec_path": "/www/wwwroot/map.eliyork.com/server-dist/index.js",
+      "restarts": 0
+    }
+  ],
+  "protected_after": {
+    ".env": "6f919931c13e1e713dfed8d203e6574a8f5aa449acb939099291fea149019a48",
+    "node_modules/mediasoup/package.json": "c92572f29c412c30e8eb30b760197e94acd649762b140cd344c3995e9fa19aea",
+    "package-lock.json": "a4a63d0bb69c39d742ae52164d539a8dfff2ac1fc98c8e8baf498e703d791d44"
+  },
+  "local_http": 200,
+  "source_inventory_matches": true,
+  "chat_history_after": "3c4d99790aaeec51b5fffcdd7096e75987e6094a8791122d5ec43c541cd648a0",
+  "public_http": 200,
+  "public_files": [
+    {
+      "file": "src/views/script.js",
+      "status": 200,
+      "sha256": "ca5d517d3affa1ddf4804ab4a9406283fe79da0e61b7542f13a6243a2222886b"
+    },
+    {
+      "file": "src/views/js/shared/voice-diagnostic-schema.js",
+      "status": 200,
+      "sha256": "abfbbd39fc5a67a63979108bbff3209ce6ce0967a2d342e61c2e7edbc32ca9e2"
+    },
+    {
+      "file": "src/views/js/voice/voice-call-diagnostics.js",
+      "status": 200,
+      "sha256": "b6e46bb1f2c4aed18a59d2cb6f7c39499f4481bcd59b4f3fb5c40ab86689cff4"
+    },
+    {
+      "file": "src/views/js/voice/voice-screen-sfu-runtime.js",
+      "status": 200,
+      "sha256": "f54e3914ab790262957e0551e6c2cae2c47694a6501357f227627076a9616db8"
+    }
+  ],
+  "sfu_startup": [
+    "Sunday 18/10/2026 17:23:51.852 INFO  [sfu] ready on UDP/TCP 44444; video=22000000bps total=23000000bps"
+  ],
+  "independent_public_verification": {
+    "checked_utc": "2026-10-18T09:24:30.697765+00:00",
+    "page_http": 200,
+    "html_marker": "stage-voice-20261018",
+    "diagnostic_checkpoint_and_compact_export": true,
+    "static_files": [
+      {
+        "file": "src/views/js/shared/voice-diagnostic-schema.js",
+        "http": 200,
+        "sha256": "abfbbd39fc5a67a63979108bbff3209ce6ce0967a2d342e61c2e7edbc32ca9e2"
+      },
+      {
+        "file": "src/views/js/voice/voice-call-diagnostics.js",
+        "http": 200,
+        "sha256": "b6e46bb1f2c4aed18a59d2cb6f7c39499f4481bcd59b4f3fb5c40ab86689cff4"
+      },
+      {
+        "file": "src/views/js/voice/voice-screen-sfu-runtime.js",
+        "http": 200,
+        "sha256": "f54e3914ab790262957e0551e6c2cae2c47694a6501357f227627076a9616db8"
+      },
+      {
+        "file": "src/views/script.js",
+        "http": 200,
+        "sha256": "ca5d517d3affa1ddf4804ab4a9406283fe79da0e61b7542f13a6243a2222886b"
+      }
+    ],
+    "source": "independent-local-client-public-https"
+  },
+  "preflight": {
+    "baseline_matches": true,
+    "differences": [],
+    "files": 108,
+    "free_bytes": 11727761408,
+    "apps": [
+      {
+        "name": "voice-room",
+        "pid": 30833,
+        "status": "online",
+        "cwd": "/www/wwwroot/voice.eliyork.com",
+        "exec_path": "/www/wwwroot/voice.eliyork.com/src/server.js",
+        "restarts": 1
+      },
+      {
+        "name": "friend-footprints",
+        "pid": 1389,
+        "status": "online",
+        "cwd": "/www/wwwroot/map.eliyork.com",
+        "exec_path": "/www/wwwroot/map.eliyork.com/server-dist/index.js",
+        "restarts": 0
+      }
+    ],
+    "http": 200
+  },
+  "diagnostic_export_comparison": {
+    "original_bytes": 278956,
+    "original_sha256": "f0ace3f2aac6e2110c981348764c9b2988bda010e8a566f81c79584fde5b5f44",
+    "compact_bytes": 73465,
+    "reduction_percent": 74,
+    "missing_viewer_data_reconstructed": false
+  },
+  "git_operations": {
+    "commit": false,
+    "push": false,
+    "tag": false
+  },
+  "client_fps_root_cause": "unresolved; original report contains sender only"
+}

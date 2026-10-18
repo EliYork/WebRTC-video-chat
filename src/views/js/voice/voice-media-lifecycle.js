@@ -40,7 +40,7 @@
         const requestedResolution = options.resolutionPreset;
         return {
             mode: options.mode === 'detail' ? 'detail' : 'game',
-            codecMode: ['h264', 'vp8'].includes(options.codecMode) ? options.codecMode : 'auto',
+            codecMode: ['av1', 'h264', 'vp8'].includes(options.codecMode) ? options.codecMode : 'auto',
             startBitrate: ['1500', '5500'].includes(String(options.startBitrate)) ? String(options.startBitrate) : 'browser',
             frameRate: SCREEN_SHARE_FRAME_RATES.includes(requestedFrameRate)
                 ? requestedFrameRate

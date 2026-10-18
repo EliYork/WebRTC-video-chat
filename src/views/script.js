@@ -72,6 +72,7 @@ let mediaDockRuntime;
 const notifyMediaDock = () => {
     callDiagnostics?.observe();
     mediaDockAdapter?.notify();
+    stageLayout?.sync();
 };
 
 const cursorSharingMedia = window.matchMedia(
@@ -272,6 +273,14 @@ const voicePeerRegistry = voicePeerRegistryApi.createRegistry({
     onOutgoingConnected: ({ peerId }) => {
         if (screenSfuRuntime?.usesServer(peerId)) refreshVoiceCallsForLocalMedia(currentPeer);
     },
+    onCodecFallback: ({ reason, primary }) => {
+        callDiagnostics?.record('共享编码回退', { reason, primary, 路径: 'P2P' });
+        if (currentPeer) refreshVoiceCallsForLocalMedia(currentPeer);
+    },
+    onCodecFeedback: (feedback) => {
+        if (joinedVoiceRoomId && localVoiceSessionGeneration)
+            ensureSocket().emit('screen:codec-feedback', { ...feedback, voiceSessionGeneration: localVoiceSessionGeneration });
+    },
     onWarning: (message, error) => console.warn(message, error || ''),
     removeRemoteTile: ({ peerId, tile }) => removeRemoteTile(peerId, tile),
 });
@@ -279,6 +288,8 @@ screenSfuRuntime = window.VoiceScreenSfuRuntime.createRuntime({
     config: window.voiceScreenSfuConfig || {},
     onRouteEvent: (event) => callDiagnostics?.record('共享路径事件', event),
     onReceiverFailure: (failure) => callDiagnostics?.record('SFU接收回退诊断', failure),
+    onReceiverIssue: (issue) => callDiagnostics?.record('SFU接收异常诊断', issue),
+    onCodecEvent: (event) => callDiagnostics?.record('共享编码回退', event),
     onRoutes: () => {
         updateScreenP2pBudget();
         if (currentPeer) refreshVoiceCallsForLocalMedia(currentPeer);
@@ -325,6 +336,10 @@ const getDiagnosticQualitySource = (peerId) => {
                 captureAudio: voiceMediaLifecycle.describeScreenAudio(currentScreenStream, navigator.mediaDevices?.getSupportedConstraints?.()),
                 shareOptions: currentScreenShareSession?.shareOptions,
                 codecDecision: currentScreenShareSession?.codecDecision,
+                onSample: (snapshot) => screenSfuRuntime.observeSender(snapshot, {
+                    directViewers: [...voiceMediaTargets].filter((id) => !screenSfuRuntime.usesServer(id)).length,
+                    budget: window.voiceScreenSfuConfig?.p2pBudget || 24000000,
+                }),
                 serverHealth: screenSfuRuntime.getSendHealth(),
                 outgoingConnections: [screenSfuRuntime.getSendConnection(), ...voicePeerRegistry.getPeerIds().map((id) => {
                     const call = voicePeerRegistry.getSnapshot(id)?.outgoingCall;
@@ -358,6 +373,7 @@ const getDiagnosticQualitySource = (peerId) => {
             routeControl: {
                 get: () => screenSfuRuntime.getReceiveRoute(peerId),
                 change: (mode) => screenSfuRuntime.setReceiveRoute(peerId, mode),
+                observe: (pc, reports) => { if (!serverSource) screenSfuRuntime.observeP2p(peerId, pc, reports); },
             },
             isScreenSharing: screenSharers.has(peerId),
             stream: playbackStream,
@@ -957,6 +973,7 @@ const publishLocalMediaToPeer = (
             metadata: {
                 ...getVoiceCallMetadata(stream),
                 ...options.metadata,
+                screenVoiceSessionGeneration: localVoiceSessionGeneration,
             },
         },
         peer,
@@ -1382,6 +1399,11 @@ const ensureSocket = () => {
         reconnectionDelayMax: 8000,
     });
     screenSfuRuntime.attachSocket(socket);
+    socket.on('screen:codec-feedback', (payload) => {
+        if (payload?.voiceSessionGeneration === localVoiceSessionGeneration && voiceMediaTargets.has(payload.peerId))
+            voicePeerRegistry.handleCodecFeedback(payload);
+    });
+    socket.on('screen:route-pressure', (payload) => screenSfuRuntime.receivePressure(payload));
 
     socket.on('cursor:move', renderRemoteCursor);
     socket.on('cursor:leave', markRemoteCursorIdle);
@@ -1758,7 +1780,6 @@ const createTileAvatarText = (displayName) => videoTileStructureUI.createTileAva
 const ensureTileStructure = (tile) => {
     const structure = videoTileStructureUI.ensureTileStructure(tile);
     if (!tile.dataset.memberControlsBound) {
-        tile.addEventListener('contextmenu', (event) => showPeerVolumePopover(event, tile));
         const volume = document.createElement('button');
         volume.type = 'button';
         volume.className = 'member-volume-button';
@@ -1781,6 +1802,7 @@ const showPeerVolumePopover = (event, tile) => {
     }
 
     event.preventDefault();
+    event.stopPropagation?.();
     const isScreenShare =
         tile.dataset.tileType === 'screen-share' || screenSharers.has(peerId);
 
@@ -1814,7 +1836,7 @@ const showPeerVolumePopover = (event, tile) => {
             titleText: '屏幕共享音量',
         });
     }
-    remoteVolumeUI.openPopover({ event, controls });
+    return remoteVolumeUI.openPopover({ event, controls });
 };
 
 const updateVideoTileStatus = (tile) => {
@@ -3318,6 +3340,14 @@ callDiagnostics = window.VoiceCallDiagnostics.createRuntime({
     },
 });
 document.querySelector('[data-copy-call-diagnostics]')?.addEventListener('click', (event) => callDiagnostics.copyCombined(event.currentTarget));
+window.VoicePlayerMenu.configure({
+    beforeOpen: () => remoteVolumeUI.closePopover(),
+    showEvents: (tile) => callDiagnostics.showLogs({ shareOrdinal: callDiagnostics.getShareOrdinal(tile), host: tile }),
+    onVolume: showPeerVolumePopover,
+});
+document.addEventListener('voice:share-started', ({ detail }) => callDiagnostics.beginShare(detail.tile, detail.isLocal));
+document.addEventListener('voice:share-ended', ({ detail }) => callDiagnostics.endShare(detail.tile));
+document.addEventListener('voice:share-sample', ({ detail }) => callDiagnostics.observeShare(detail.tile, detail.snapshot));
 mediaDockRoot.querySelector('[data-show-call-logs]')?.addEventListener('click', () => callDiagnostics.showLogs());
 mediaDockRoot.querySelector('[data-clear-call-logs]')?.addEventListener('click', (event) => {
     callDiagnostics.clearLogs();
@@ -3421,7 +3451,11 @@ sidebarRuntime = sidebarRuntimeApi.createSidebarRuntime({
         return changed;
     },
     onRequestVoiceRoom: setVoiceTargetRoom,
-    onPresenceSnapshot: reconcilePresenceState,
+    onPresenceSnapshot: (snapshot) => {
+        reconcilePresenceState(snapshot);
+        // The sidebar normalizes and stores its roster after this callback.
+        queueMicrotask(() => stageLayout?.sync());
+    },
     onCopyRoomLink: ({ url }) => copyLinkUI.writeClipboardText(url),
     getRoomUrl: getChannelUrl,
     isLocalMember: (member) =>
@@ -3521,6 +3555,18 @@ stageLayout = window.VoiceStageLayout.createRuntime({
     getTiles: getVideoTiles,
     getMember: getTileMember,
     getCameraStream: (tile) => tile.id === 'local-video' ? cameraStream : null,
+    getChannelState: () => {
+        const roomId = joinedVoiceRoomId || viewingRoomId;
+        const channel = sidebarRuntime?.getPresenceSnapshot().channels.find((item) => item.slug === roomId);
+        const session = voiceSessionRuntime.getSnapshot();
+        return {
+            joined: Boolean(joinedVoiceRoomId),
+            pending: session.desiredVoiceState === 'joined' && !joinedVoiceRoomId,
+            channelName: getChannelName(roomId),
+            memberCount: channel?.count,
+        };
+    },
+    onJoin: () => joinVoiceChannel(viewingRoomId),
     onVolume: showPeerVolumePopover,
 });
 stageLayout.init();

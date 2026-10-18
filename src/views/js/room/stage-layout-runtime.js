@@ -3,7 +3,7 @@
 
     // Presentation only. The existing tiles continue to own their players,
     // diagnostics, route dialogs and independent audio controls.
-    const createRuntime = ({ root, stage, members, sources, chat, getTiles, getMember, getCameraStream = () => null, onVolume } = {}) => {
+    const createRuntime = ({ root, stage, members, sources, chat, getTiles, getMember, getCameraStream = () => null, getChannelState = () => ({}), onJoin, onVolume } = {}) => {
         const proxies = new Map();
         const choices = new Map();
         const speaking = new Map();
@@ -11,7 +11,7 @@
         const bindings = [];
         let selectedId;
         let activeShares = [];
-        let chatOpen = global.innerWidth > 640;
+        let chatOpen = true;
         let channelsOpen = false;
         let initialized = false;
         let disposed = false;
@@ -53,6 +53,30 @@
             byId('stageChannelsToggle')?.setAttribute('aria-expanded', String(channelsOpen));
             chat.inert = !chatOpen;
             chat.setAttribute('aria-hidden', String(!chatOpen));
+        };
+        const renderChannelState = (tiles) => {
+            const state = getChannelState();
+            const joined = state.joined ?? tiles.length > 0;
+            const count = joined ? tiles.length : state.memberCount;
+            const pending = state.pending === true;
+            root.dataset.voiceState = joined ? 'joined' : pending ? 'joining' : 'not-joined';
+            root.dataset.channelOccupancy = state.memberCount === undefined ? 'unknown' : state.memberCount > 0 ? 'occupied' : 'empty';
+            members.dataset.memberCount = String(tiles.length);
+            const name = byId('stageChannelName');
+            if (name) name.textContent = state.channelName || '语音频道';
+            const status = byId('stageChannelStatus');
+            if (status) status.textContent = joined ? (activeShares.length ? '正在共享 · 下方是全部语音成员' : '语音成员 · 说话时头像亮起') : '语音频道';
+            const counter = byId('member-count');
+            if (counter) counter.textContent = count === undefined ? '同步成员中' : `${count} 人${joined ? '' : '在频道'}`;
+            const empty = byId('members-empty');
+            if (empty) empty.hidden = joined && tiles.length > 0;
+            members.hidden = !joined || tiles.length === 0;
+            const title = byId('stageWelcomeTitle');
+            if (title) title.textContent = joined ? '已加入，等待伙伴到来' : pending ? '正在加入语音…' : state.memberCount > 0 ? `${state.memberCount} 位伙伴在频道里` : state.memberCount === 0 ? '频道还很安静，来做第一个吧' : '加入语音，一起待一会儿';
+            const detail = byId('stageWelcomeDetail');
+            if (detail) detail.textContent = joined ? '成员头像与摄像头将在这里显示。' : pending ? '正在连接，请稍候。' : state.memberCount > 0 ? '加入后即可聊天、观看摄像头与屏幕共享。' : '加入后，成员头像与摄像头会显示在中央；共享屏幕时自动切换到观看舞台。';
+            const join = byId('stageJoinVoice');
+            if (join) { join.hidden = joined; join.disabled = pending; join.textContent = pending ? '正在加入…' : '加入语音'; }
         };
         const setChatOpen = (open) => {
             const next = Boolean(open);
@@ -120,7 +144,6 @@
                     const volume = button('音量', 'member-volume-button');
                     volume.addEventListener('click', (event) => onVolume?.(event, tile));
                     headerActions.append(volume);
-                    proxy.addEventListener('contextmenu', (event) => onVolume?.(event, tile));
                 }
                 proxies.set(tile.id, proxy);
             }
@@ -195,16 +218,14 @@
             if (!shareIds.has(selectedId)) selectedId = activeShares[0]?.id;
             if (selectedId) focusShare(selectedId);
             renderControls();
-            const count = byId('member-count');
-            if (count) count.textContent = `${tiles.length} 人`;
-            const empty = byId('members-empty');
-            if (empty) empty.hidden = tiles.length !== 0;
+            renderChannelState(tiles);
         };
         const init = () => {
             if (initialized || disposed) return;
             initialized = true;
             bind(byId('stageChatToggle'), 'click', () => setChatOpen(!chatOpen));
             bind(byId('stageChannelsToggle'), 'click', () => setChannelsOpen(!channelsOpen));
+            bind(byId('stageJoinVoice'), 'click', () => onJoin?.());
             bind(root.querySelector('.sidebar-channel-tree'), 'click', (event) => {
                 if (event.target.closest('a')) setChannelsOpen(false);
             });

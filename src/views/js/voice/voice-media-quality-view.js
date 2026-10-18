@@ -42,17 +42,19 @@
             label.append(auto, node('span', '', '自动切换'));
             const hint = node('p', 'media-device-hint', '关闭自动后可手动选择，不再按卡顿自动换路。连接断开或服务器限制时仍可能回到直连。设置仅影响你观看这位共享者。');
             const choices = node('div', 'voice-route-choices');
-            const p2p = node('button', '', 'P2P 直连');
+            const p2p = node('button', '', 'P2P（可能经过 TURN）');
+            const first = node('button', '', 'P2P 优先（实验）');
             const sfu = node('button', '', '服务器转发');
             const close = node('button', 'voice-route-close', '关闭');
-            [p2p, sfu, close].forEach((item) => { item.type = 'button'; });
-            choices.append(p2p, sfu);
+            [p2p, first, sfu, close].forEach((item) => { item.type = 'button'; });
+            choices.append(p2p, sfu, first);
+            hint.textContent += ' P2P 优先先尝试直连，TURN、连接失败、收包但不出帧或发送端持续压力时尝试 SFU；SFU 兜底后可再次点 P2P 优先重试。TURN 仍消耗中继带宽。';
             dialog.append(title, status, label, choices, hint, close);
             tile.append(dialog);
             const actions = tile.querySelector('.tile-header-actions');
             if (actions) actions.before(button);
             else quality.parentElement.append(button);
-            state = { button, dialog, status, auto, p2p, sfu, control };
+            state = { button, dialog, status, auto, p2p, sfu, first, control };
             routeControls.set(tile, state);
             const change = async (mode) => {
                 const pending = state.control.change(mode);
@@ -72,20 +74,24 @@
             auto.addEventListener('change', () => change(auto.checked ? 'auto' : state.control.get().route));
             p2p.addEventListener('click', () => change('p2p'));
             sfu.addEventListener('click', () => change('sfu'));
+            first.addEventListener('click', () => change('p2p-first'));
         }
         state.control = control;
         const current = control.get();
-        const route = current.route === 'sfu' ? '服务器转发' : 'P2P 直连';
-        state.button.title = `当前：${route} · ${current.mode === 'auto' ? '自动切换' : '手动'}`;
+        const route = current.route === 'sfu' ? '服务器转发' : current.transport === 'TURN' ? 'P2P · TURN 中继' : current.transport === 'direct' ? 'P2P 直连' : 'P2P · 路径待确认';
+        const mode = current.mode === 'auto' ? '自动' : current.mode === 'p2p-first' ? 'P2P 优先（实验）' : '手动';
+        state.button.title = `当前：${route} · ${mode}`;
         state.status.textContent = current.pending ? '正在切换…' :
-            current.error || `当前：${route}（${current.mode === 'auto' ? '自动' : '手动'}）`;
+            current.error || `当前：${route}（${mode}）`;
         state.auto.checked = current.mode === 'auto';
         state.auto.disabled = current.pending;
+        state.first.disabled = current.pending;
+        state.first.setAttribute('aria-pressed', String(current.mode === 'p2p-first'));
         state.p2p.disabled = current.pending || current.mode === 'auto';
         state.sfu.disabled = current.pending || current.mode === 'auto' || !current.available;
         state.p2p.setAttribute('aria-pressed', String(current.route === 'p2p'));
         state.sfu.setAttribute('aria-pressed', String(current.route === 'sfu'));
-        if (!current.available && !current.pending) state.status.textContent = '当前：P2P 直连；服务器转发未启用或浏览器不支持';
+        if (!current.available && !current.pending) state.status.textContent = `当前：${route}；服务器转发未启用或浏览器不支持`;
     };
 
     const ensureOverlay = (tile) => {

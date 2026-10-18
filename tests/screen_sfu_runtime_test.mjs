@@ -191,14 +191,15 @@ test('manual route choices are isolated by sharer and admission failures retain 
     assert.equal(rt.getReceiveRoute('second').mode, 'auto');
 });
 
-async function publishFixture({ primary = 'h264', startBitrate = 'browser', rejectH264 = false, offered = ['h264', 'vp8'], onRoutes, onUplinkBudget } = {}) {
+async function publishFixture({ primary = 'h264', startBitrate = 'browser', rejectH264 = false, rejectAV1 = false, offered = ['h264', 'vp8'], onRoutes, onUplinkBudget } = {}) {
     const window = { MediaStream: StrictStream, setTimeout, clearTimeout, setInterval, clearInterval };
     for (const file of ['voice-screen-codecs.js', 'voice-screen-send-policy.js', 'voice-screen-sfu-runtime.js'])
         vm.runInNewContext(readFileSync(new URL('../src/views/js/voice/' + file, import.meta.url), 'utf8'), { window });
-    const codecs = offered.map((key) => ({ mimeType: key === 'h264' ? 'video/H264' : 'video/VP8', parameters: key === 'h264' ? { 'packetization-mode': 1 } : {} }));
+    const codecs = offered.map((key) => ({ mimeType: key === 'av1' ? 'video/AV1' : key === 'h264' ? 'video/H264' : 'video/VP8', parameters: key === 'h264' ? { 'packetization-mode': 1 } : {} }));
+    window.RTCRtpSender = { getCapabilities: () => ({ codecs }) };
     const video = new StrictTrack('video', 'screen');
     const audio = new StrictTrack('audio', 'screen-audio');
-    await window.VoiceScreenCodecs.prepare(video, { codecMode: primary === 'vp8' ? 'vp8' : 'auto', frameRate: 60 }, { probe: async () => ({ passed: true, reason: 'passed' }) });
+    await window.VoiceScreenCodecs.prepare(video, { codecMode: primary === 'av1' ? 'av1' : primary === 'vp8' ? 'vp8' : 'auto', frameRate: 60 }, { probe: async () => ({ passed: true, reason: 'passed' }) });
     const attempts = [];
     const producers = [];
     class Device {
@@ -208,7 +209,7 @@ async function publishFixture({ primary = 'h264', startBitrate = 'browser', reje
             return { id: 'send', on() {}, close() {}, getStats: async () => new Map(),
                 produce: async (options) => {
                     attempts.push(options);
-                    if (rejectH264 && options.codec?.mimeType === 'video/H264') {
+                    if ((rejectH264 && options.codec?.mimeType === 'video/H264') || (rejectAV1 && options.codec?.mimeType === 'video/AV1')) {
                         const error = new Error('unsupported-codec'); error.name = 'UnsupportedError'; throw error;
                     }
                     let parameters = { encodings: structuredClone(options.encodings || [{}]) };
@@ -405,4 +406,21 @@ test('app budget callback reapplies existing P2P parameters without replacing tr
     assert.equal(writes, 1, 'identical parameters remain deduplicated');
     callbacks.onRoutes(['viewer']);
     assert.equal(mediaUpdates, 1, 'actual route changes still refresh media');
+});
+
+for (const options of [
+    { primary: 'av1', offered: ['av1', 'h264', 'vp8'], expected: 'video/AV1' },
+    { primary: 'av1', offered: ['av1', 'h264', 'vp8'], rejectAV1: true, expected: 'video/H264' },
+    { primary: 'av1', offered: ['av1', 'h264', 'vp8'], rejectAV1: true, rejectH264: true, expected: 'video/VP8' },
+    { primary: 'av1', offered: ['vp8'], expected: 'video/VP8' },
+]) test(`SFU AV1 explicit producer selection and bounded codec fallback ${JSON.stringify(options)}`, async (t) => {
+    const f = await publishFixture(options);
+    t.after(() => f.runtime.leave());
+    assert.equal(f.runtime.hasUplink(), true);
+    const video = f.attempts.filter((row) => row.track.kind === 'video');
+    assert.equal(video.at(-1).codec.mimeType, options.expected);
+    assert.equal(video.at(-1).encodings[0].scaleResolutionDownBy, 1);
+    assert.equal(video.at(-1).encodings[0].scalabilityMode, options.expected === 'video/AV1' ? 'L1T1' : undefined);
+    assert.equal(f.attempts.at(-1).track.kind, 'audio');
+    assert.ok(video.length <= 3);
 });

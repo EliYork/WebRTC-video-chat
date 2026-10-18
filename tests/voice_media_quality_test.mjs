@@ -226,7 +226,7 @@ test('quality pill mounts in title controls before fullscreen actions', async ()
             .classList.contains('tile-header-actions'),
         true
     );
-    assert.equal(pill.textContent, '接收 1080p · 60fps');
+    assert.equal(pill.textContent, '解码 1080p · 60fps');
 });
 
 test('local share shows selected settings regardless of preview frames and handles stop', async () => {
@@ -258,17 +258,17 @@ test('local share shows selected settings regardless of preview frames and handl
     await runTimers();
     const label = () =>
         tile.querySelector('.voice-media-quality-pill').textContent;
-    assert.equal(label(), '共享设置 1440p · 60fps');
+    assert.equal(label(), '共享目标 1440p · 60fps');
     now += 1000;
     frames = 27;
     await runTimers();
-    assert.equal(label(), '共享设置 1440p · 60fps');
+    assert.equal(label(), '共享目标 1440p · 60fps');
     now += 1000;
     await runTimers();
-    assert.equal(label(), '共享设置 1440p · 60fps');
+    assert.equal(label(), '共享目标 1440p · 60fps');
     source.previewHidden = true;
     await runTimers();
-    assert.equal(label(), '共享设置 1440p · 60fps');
+    assert.equal(label(), '共享目标 1440p · 60fps');
     source.isScreenSharing = false;
     await runTimers();
     assert.equal(rt.getActivePeerCount(), 0);
@@ -284,19 +284,19 @@ test('formats standard and non-standard resolutions', async () => {
                 framesPerSecond: 60,
             })
         ).text,
-        '接收 1080p · 60fps'
+        '解码 1080p · 60fps'
     );
     assert.equal(
         (await sampleLabel({ framesWidth: 2560, framesHeight: 1440 })).text,
-        '接收 1440p · 帧率待采样'
+        '视频 1440p · 帧率不可用/待采样'
     );
     assert.equal(
         (await sampleLabel({ framesWidth: 3840, framesHeight: 2160 })).text,
-        '接收 4K · 帧率待采样'
+        '视频 4K · 帧率不可用/待采样'
     );
     assert.equal(
         (await sampleLabel({ framesWidth: 1600, framesHeight: 900 })).text,
-        '接收 1600×900 · 帧率待采样'
+        '视频 1600×900 · 帧率不可用/待采样'
     );
 });
 
@@ -309,13 +309,13 @@ test('distinguishes measured zero FPS from unavailable FPS', async () => {
                 framesPerSecond: 0,
             })
         ).text,
-        '接收 1080p · 0fps'
+        '解码 1080p · 0fps'
     );
     assert.equal(
         (await sampleLabel({ framesPerSecond: 60 })).text,
-        '接收 60fps'
+        '解码 60fps'
     );
-    assert.equal((await sampleLabel({})).text, '接收 帧率待采样');
+    assert.equal((await sampleLabel({})).text, '视频 帧率不可用/待采样');
 });
 
 test('falls back to element and track dimensions without CSS sizes', async () => {
@@ -326,7 +326,7 @@ test('falls back to element and track dimensions without CSS sizes', async () =>
                 { videoSize: { width: 1920, height: 1080 } }
             )
         ).text,
-        '接收 1080p · 60fps'
+        '解码 1080p · 60fps'
     );
     assert.equal(
         (
@@ -335,7 +335,7 @@ test('falls back to element and track dimensions without CSS sizes', async () =>
                 { videoTrack: track({ width: 1280, height: 720 }) }
             )
         ).text,
-        '接收 720p · 帧率待采样'
+        '视频 720p · 帧率不可用/待采样'
     );
 });
 
@@ -372,7 +372,7 @@ test('calculates and smooths fps from decoded frame deltas', async () => {
     await runTimers();
     assert.equal(
         tile.querySelector('.voice-media-quality-pill').textContent,
-        '接收 1080p · 60fps'
+        '解码 1080p · 60fps'
     );
 });
 
@@ -419,7 +419,7 @@ test('screen-only lifecycle hides camera, ended, audio-only, reject, stale and c
     await runTimers();
     assert.equal(
         tile.querySelector('.voice-media-quality-pill')?.textContent || '',
-        '接收 帧率待采样'
+        '播放计数（非提交） 帧率不可用/待采样'
     );
     assert.equal(rt.getActivePeerCount(), 1);
     let playbackFrames = 10;
@@ -427,12 +427,12 @@ test('screen-only lifecycle hides camera, ended, audio-only, reject, stale and c
     win.performance = { now: () => playbackTime };
     video.videoWidth = 1280;
     video.videoHeight = 720;
-    video.getVideoPlaybackQuality = () => ({ totalVideoFrames: playbackFrames });
+    video.getVideoPlaybackQuality = () => ({ totalVideoFrames: playbackFrames, droppedVideoFrames: 0 });
     await runTimers();
     playbackFrames += 25;
     playbackTime += 1000;
     await runTimers();
-    assert.equal(tile.querySelector('.voice-media-quality-pill').textContent, '接收 720p · 25fps');
+    assert.equal(tile.querySelector('.voice-media-quality-pill').textContent, '播放计数（非提交） 720p · 25fps');
     rt.stop('peer-a', 'leave', { remove: true });
     assert.equal(rt.getActivePeerCount(), 0);
 });
@@ -473,12 +473,12 @@ test('independent peers, call replacement and timer cleanup', async () => {
     assert.equal(
         sources.get('a').tile.querySelector('.voice-media-quality-pill')
             .textContent,
-        '接收 30fps'
+        '解码 30fps'
     );
     assert.equal(
         sources.get('b').tile.querySelector('.voice-media-quality-pill')
             .textContent,
-        '接收 60fps'
+        '解码 60fps'
     );
     const oldTile = sources.get('a').tile;
     const { tile } = tileStructure();
@@ -504,7 +504,7 @@ test('independent peers, call replacement and timer cleanup', async () => {
     await runTimers();
     assert.equal(
         tile.querySelector('.voice-media-quality-pill').textContent,
-        '接收 61fps'
+        '解码 61fps'
     );
     assert.equal(
         oldTile.querySelector('.voice-media-quality-pill')?.textContent || '',
@@ -526,7 +526,7 @@ function qualitySequence() {
     f.win.performance = { now: () => now };
     const source = { tile, stream: s, isScreenSharing: true,
         video: { srcObject: s, videoWidth: 3840, videoHeight: 2160,
-            getVideoPlaybackQuality: () => ({ totalVideoFrames: playbackFrames }) },
+            getVideoPlaybackQuality: () => ({ totalVideoFrames: playbackFrames, droppedVideoFrames: 0 }) },
         pc: { getStats: async () => new Map(rows.map((row) => [row.id, row])) } };
     const rt = f.win.VoiceMediaQualityRuntime.createRuntime({ getQualitySource: () => source, view: f.win.VoiceMediaQualityView });
     rt.syncPeer('viewer');
@@ -548,25 +548,25 @@ test('SFU quality ignores idle byte counters and prefers the playing track over 
         { id: 'playing', trackIdentifier: 'playing-video', framesDecoded: frames },
     ];
     await f.step(reports(100));
-    assert.equal(await f.step(reports(160)), '接收 4K · 60fps');
+    assert.equal(await f.step(reports(160)), '解码 4K · 60fps');
     const withoutIds = [{ id: 'idle', bytesReceived: 9000000 }, { id: 'playing', framesDecoded: 220 }];
-    assert.equal(await f.step(withoutIds), '接收 4K · 60fps');
+    assert.equal(await f.step(withoutIds), '解码 4K · 60fps');
 });
 
 test('FPS falls back to playback even when stats already provide dimensions', async () => {
     const f = qualitySequence();
     const rows = [{ id: 'no-fps', frameWidth: 3840, frameHeight: 2160 }];
-    assert.equal(await f.step(rows), '接收 4K · 帧率待采样');
-    assert.equal(await f.step(rows, 47), '接收 4K · 47fps');
+    assert.equal(await f.step(rows), '视频 4K · 帧率不可用/待采样');
+    assert.equal(await f.step(rows, 47), '播放计数（非提交） 4K · 47fps');
 });
 
 test('zero decoded growth displays a stall immediately and report replacement never mixes counters', async () => {
     const f = qualitySequence();
     await f.step([{ id: 'old', framesDecoded: 100 }]);
-    assert.equal(await f.step([{ id: 'old', framesDecoded: 160 }]), '接收 4K · 60fps');
-    assert.equal(await f.step([{ id: 'old', framesDecoded: 160 }]), '接收 4K · 0fps');
-    assert.equal(await f.step([{ id: 'new', framesDecoded: 9000 }], 25), '接收 4K · 25fps');
-    assert.equal(await f.step([{ id: 'new', framesDecoded: 9030 }]), '接收 4K · 30fps');
+    assert.equal(await f.step([{ id: 'old', framesDecoded: 160 }]), '解码 4K · 60fps');
+    assert.equal(await f.step([{ id: 'old', framesDecoded: 160 }]), '解码 4K · 0fps');
+    assert.equal(await f.step([{ id: 'new', framesDecoded: 9000 }], 25), '播放计数（非提交） 4K · 25fps');
+    assert.equal(await f.step([{ id: 'new', framesDecoded: 9030 }]), '解码 4K · 30fps');
 });
 
 test('route button is adjacent to FPS, binds once, exposes auto/manual choices and cleans up its dialog', async () => {
@@ -594,7 +594,8 @@ test('route button is adjacent to FPS, binds once, exposes auto/manual choices a
     button.listeners.click({ stopPropagation() {} });
     assert.equal(dialog.open, true);
     assert.equal(checkbox.checked, true);
-    assert.ok(choices.children.every((choice) => choice.disabled));
+    assert.ok(choices.children.slice(0, 2).every((choice) => choice.disabled));
+    assert.equal(choices.children[2].disabled, false, 'P2P-first is selectable from legacy auto');
     checkbox.checked = false;
     const manual = checkbox.listeners.change();
     assert.deepEqual(changes, ['sfu'], 'unchecking auto holds the current route');
@@ -611,4 +612,17 @@ test('route button is adjacent to FPS, binds once, exposes auto/manual choices a
     assert.equal(dialog.open, false);
     assert.equal(tile.querySelector('.voice-route-dialog'), undefined);
     assert.equal(tile.querySelector('.voice-route-toggle'), undefined);
+});
+
+test('receiver badge labels complete receive explicitly when no decoder counter exists', async () => {
+    const f = qualitySequence();
+    await f.step([{ id: 'r', framesReceived: 100 }]);
+    assert.equal(await f.step([{ id: 'r', framesReceived: 145 }]), '完整接收 4K · 45fps');
+});
+
+test('repeated RTC timestamps show stale status instead of reusing a healthy FPS badge', async () => {
+    const f = qualitySequence();
+    const row = { id: 'r', timestamp: 1000, framesDecoded: 100, framesPerSecond: 60 };
+    assert.equal(await f.step([row]), '解码 4K · 60fps');
+    assert.equal(await f.step([row]), '视频 4K · 数据过期');
 });

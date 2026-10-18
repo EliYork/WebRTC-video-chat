@@ -1,0 +1,231 @@
+{
+  "scope": "layout-correction-deployed-after-user-authorization",
+  "node_tests": {
+    "pass": 362,
+    "fail": 0,
+    "skipped": 0
+  },
+  "modified_js_eslint": "passed",
+  "diff_check": "passed",
+  "p2p_browser": {
+    "status": "passed",
+    "browser": "Edg/155.0.4283.45",
+    "syntheticMediaOnly": true,
+    "serverForwardingEnabled": false,
+    "viewportCases": 22,
+    "memberGridCases": 66,
+    "memberCounts": [
+      1,
+      2,
+      3,
+      4,
+      8,
+      12
+    ],
+    "cssViewports": [
+      [
+        3840,
+        2160,
+        1
+      ],
+      [
+        2560,
+        1440,
+        1
+      ],
+      [
+        1920,
+        1080,
+        1
+      ],
+      [
+        1600,
+        900,
+        1
+      ],
+      [
+        1366,
+        768,
+        1
+      ],
+      [
+        2560,
+        1440,
+        1.5
+      ],
+      [
+        900,
+        700,
+        1
+      ],
+      [
+        640,
+        700,
+        1
+      ],
+      [
+        390,
+        844,
+        3
+      ],
+      [
+        320,
+        640,
+        2
+      ],
+      [
+        844,
+        390,
+        2
+      ]
+    ],
+    "routeChecks": [
+      "P2P",
+      "manual P2P",
+      "per-sharer preference retention"
+    ],
+    "tests": [
+      "empty and occupied channel guides",
+      "central join action",
+      "voice join",
+      "camera",
+      "two voice peers",
+      "synthetic share",
+      "responsive geometry in both modes",
+      "1/2/3/4/8/12 member grid fixtures",
+      "bounded dock icons and member actions",
+      "closing chat expands central stage",
+      "chat draft",
+      "no layout renegotiation/capture",
+      "two shares",
+      "focus retention/fallback",
+      "manual route retention",
+      "preview hide retains capture",
+      "last share end",
+      "member departure"
+    ],
+    "runtimeErrors": 0,
+    "failedResources": 0
+  },
+  "sfu_browser": {
+    "status": "passed",
+    "browser": "Edg/155.0.4283.45",
+    "syntheticMediaOnly": true,
+    "serverForwardingEnabled": true,
+    "viewportCases": 22,
+    "memberGridCases": 66,
+    "memberCounts": [
+      1,
+      2,
+      3,
+      4,
+      8,
+      12
+    ],
+    "cssViewports": [
+      [
+        3840,
+        2160,
+        1
+      ],
+      [
+        2560,
+        1440,
+        1
+      ],
+      [
+        1920,
+        1080,
+        1
+      ],
+      [
+        1600,
+        900,
+        1
+      ],
+      [
+        1366,
+        768,
+        1
+      ],
+      [
+        2560,
+        1440,
+        1.5
+      ],
+      [
+        900,
+        700,
+        1
+      ],
+      [
+        640,
+        700,
+        1
+      ],
+      [
+        390,
+        844,
+        3
+      ],
+      [
+        320,
+        640,
+        2
+      ],
+      [
+        844,
+        390,
+        2
+      ]
+    ],
+    "routeChecks": [
+      "automatic SFU",
+      "manual P2P",
+      "manual SFU",
+      "per-sharer preference retention"
+    ],
+    "tests": [
+      "empty and occupied channel guides",
+      "central join action",
+      "voice join",
+      "camera",
+      "two voice peers",
+      "synthetic share",
+      "responsive geometry in both modes",
+      "1/2/3/4/8/12 member grid fixtures",
+      "bounded dock icons and member actions",
+      "closing chat expands central stage",
+      "chat draft",
+      "no layout renegotiation/capture",
+      "two shares",
+      "focus retention/fallback",
+      "manual route retention",
+      "preview hide retains capture",
+      "last share end",
+      "member departure"
+    ],
+    "runtimeErrors": 0,
+    "failedResources": 0
+  },
+  "historical_tag_commit": "772dc3f339c030a08679113763aa4b04a2f8a05e",
+  "media_connection_modules_modified": false,
+  "physical_acceptance": "pending-user",
+  "push": false,
+  "deployment": true,
+  "screenshots": {
+    "p2p": "C:\\Users\\EliYork\\AppData\\Local\\Temp\\webrtc-stage-deploy-current-p2p",
+    "sfu": "C:\\Users\\EliYork\\AppData\\Local\\Temp\\webrtc-stage-deploy-current-sfu"
+  },
+  "source_sha256": {
+    "src/views/styles/stage-layout.css": "5758232dfe0e7544f1de2fb1e16bec3c26b999a2dc7e4ef30a7232251ecb1e0d",
+    "src/views/styles/base.css": "efcd031879c551c350dc5f41d436e99d9379ea2923883730be50aee9adc8f4cf",
+    "src/views/room/index.ejs": "a8b749fc5b059883770e8abffe3d3958c7de98c1dd650688c6b469e5291872d7",
+    "src/views/js/room/stage-layout-runtime.js": "9b13f28f5c056212f85a4572212e99a4df3553aae51f8ef4beb901e458892089",
+    "src/views/script.js": "0e0a2aa10855c78bacba11700348cc18d0e3565ccce5e021f5ac94ae7ce1a5a8",
+    "tests/stage_layout_test.mjs": "cd9e47dc763bf0e047336f0cb549531da57a5aa6de0189d204082aee9ecf5bdf",
+    "scripts/test-stage-browser.mjs": "fd87d6f0cba84bf03d3960704c6da320e1e54cdaf886a7e8f669c71cbdaa6338"
+  },
+  "checked_utc": "2026-10-18T08:40:23.489156+00:00",
+  "deployment_receipt": "DEPLOYMENT-2026-10-18-STAGE-CORRECTION.json"
+}
