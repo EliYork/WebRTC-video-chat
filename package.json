@@ -7,6 +7,10 @@
     "scripts": {
         "package:release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-release.ps1",
         "build:sfu": "node scripts/build-sfu-client.mjs",
+        "build:piik": "node scripts/build-piik.mjs",
+        "dev:piik": "node scripts/start-piik-dev.mjs",
+        "test:piik:gateway": "node scripts/test-piik-gateway.mjs",
+        "test:piik:browser": "node scripts/test-piik-browser.mjs",
         "test": "node --test tests/*.mjs",
         "test:stage-browser": "node scripts/test-stage-browser.mjs",
         "start": "node ./src/server.js",

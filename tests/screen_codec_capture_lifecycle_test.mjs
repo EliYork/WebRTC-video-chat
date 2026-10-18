@@ -27,7 +27,7 @@ function fixture() {
             signal.addEventListener('abort', () => resolve({ primary: 'vp8', reason: 'cancelled' }), { once: true });
         });
     } };
-    const context = vm.createContext({ window, AbortController,
+    const context = vm.createContext({ window, AbortController, usingPiik: false,
         console: { warn() {}, info() {} },
         mediaOperationController: controller,
         voiceMediaLifecycle: window.VoiceMediaLifecycle,

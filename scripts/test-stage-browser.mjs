@@ -103,7 +103,7 @@ const checkDock = (result) => {
 
 try {
     await wait(async () => { try { return (await fetch(`http://127.0.0.1:${port}/room/lobby`)).ok; } catch { return false; } }, 'isolated local server');
-    browser = spawn(browserPath, ['--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--remote-debugging-port=0', `--user-data-dir=${join(work, 'profile')}`,
+    browser = spawn(browserPath, ['--headless=new', '--mute-audio', '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--remote-debugging-port=0', `--user-data-dir=${join(work, 'profile')}`,
         '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--autoplay-policy=no-user-gesture-required', 'about:blank'], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     let browserLog = ''; browser.stderr.on('data', (value) => { browserLog += value; });
     const activePortFile = join(work, 'profile', 'DevToolsActivePort');

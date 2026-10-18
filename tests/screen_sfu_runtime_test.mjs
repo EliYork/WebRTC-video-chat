@@ -379,7 +379,7 @@ test('app budget callback reapplies existing P2P parameters without replacing tr
     let dockUpdates = 0;
     const call = { peerConnection: pc };
     const context = {
-        window, currentPeer: {}, screenSfuRuntime: null,
+        window, usingPiik: false, currentPeer: {}, screenSfuRuntime: null,
         voicePeerRegistry: { getPeerIds: () => ['viewer'], getSnapshot: () => ({ outgoingCall: call }) },
         updateScreenP2pBudget() { budgetUpdates++; window.VoiceScreenSendPolicy.register(video, { frameRate: 60, maxBitrate: 6000000 }); },
         refreshVoiceCallsForLocalMedia() { mediaUpdates++; },
@@ -388,7 +388,7 @@ test('app budget callback reapplies existing P2P parameters without replacing tr
     };
     window.VoiceScreenSfuRuntime = { createRuntime: (options) => { callbacks = options; return {}; } };
     const source = readFileSync(new URL('../src/views/script.js', import.meta.url), 'utf8');
-    const start = source.indexOf('screenSfuRuntime = window.VoiceScreenSfuRuntime.createRuntime({');
+    const start = source.indexOf('screenSfuRuntime = (usingPiik');
     vm.runInNewContext(source.slice(start, source.indexOf('const getDiagnosticQualitySource =', start)), context);
     assert.equal(typeof callbacks.onUplinkBudget, 'function');
     callbacks.onUplinkBudget();

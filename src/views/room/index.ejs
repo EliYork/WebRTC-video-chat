@@ -1,4 +1,5 @@
 ﻿<!DOCTYPE html>
+<% const piikPrototype = typeof piikEnabled !== 'undefined' && piikEnabled; %>
 <html lang="zh-CN" data-room-boot="pending">
 <head>
     <meta charset="UTF-8">
@@ -29,6 +30,7 @@
         const ROOM_ID = roomBootstrap.roomId
         const iceServers = roomBootstrap.iceServers
         window.voiceScreenSfuConfig = roomBootstrap.screenSfu || {}
+        window.voiceScreenMediaProvider = roomBootstrap.screenMediaProvider || 'legacy'
     </script>
 </head>
 <body>
@@ -262,13 +264,15 @@
                             <label class="media-select-row">
                                 <span>视频编码器</span>
                                 <select data-screen-share-codec>
-                                    <option value="auto" selected>自动 · 实测 H.264，失败回退 VP8</option>
+                                    <option value="auto" selected><%= piikPrototype ? '自动 · H.264 优先，回退 VP8' : '自动 · 实测 H.264，失败回退 VP8' %></option>
+                                    <% if (!piikPrototype) { %>
                                     <option value="av1">AV1 优先（实验）· 不可用时 H.264 → VP8</option>
+                                    <% } %>
                                     <option value="h264">H.264 优先 · 不兼容时回退 VP8</option>
                                     <option value="vp8">VP8 · 对照测试</option>
                                 </select>
                             </label>
-                            <label class="media-select-row">
+                            <label class="media-select-row" <%= piikPrototype ? 'hidden' : '' %>>
                                 <span>SFU 启动码率</span>
                                 <select data-screen-share-start-bitrate>
                                     <option value="browser" selected>浏览器默认</option>
@@ -277,7 +281,11 @@
                                 </select>
                             </label>
                         </details>
+                        <% if (piikPrototype) { %>
+                        <p class="media-device-hint">Piik P2P · 浏览器采集与编码 · 每路最多 3 人观看 · 目标码率 15 Mbps。实际画质和帧率取决于设备与网络。</p>
+                        <% } else { %>
                         <p class="media-device-hint">带宽不足时优先降低帧率、保留分辨率。自动编码器检测约需 3–6 秒；实际画质和帧率取决于设备与网络。</p>
+                        <% } %>
                         <div class="screen-share-dialog-actions">
                             <button type="button" data-screen-share-cancel>取消</button>
                             <button type="button" data-screen-share-start>开始共享</button>
@@ -322,6 +330,7 @@
     <script src="/js/voice/voice-screen-send-policy.js"></script>
     <script src="/vendor/screen-sfu-client.js"></script>
     <script src="/js/voice/voice-screen-sfu-runtime.js"></script>
+    <% if (typeof piikEnabled !== 'undefined' && piikEnabled) { %><script src="/vendor/piik-client.js"></script><% } %>
     <script src="/js/voice/voice-peer-registry.js"></script>
     <script src="/js/voice/voice-media-lifecycle.js"></script>
     <script src="/js/voice/voice-retry-controller.js"></script>

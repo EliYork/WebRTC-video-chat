@@ -31,6 +31,7 @@ import { createVoiceCallSignaling } from './utils/VoiceCallSignaling.js';
 import { createVoiceDiagnosticsRelay } from './utils/VoiceDiagnosticsRelay.js';
 import { readScreenSfuConfig } from './utils/ScreenSfuBudget.js';
 import { createScreenSfuService } from './utils/ScreenSfuService.js';
+import { createPiikMediaGateway } from './utils/PiikMediaGateway.js';
 import {
     bindSocketDisconnectLifecycle,
     removeOwnedPresenceMember,
@@ -126,6 +127,11 @@ app.use((req, res, next) =>
     })(req, res, next)
 );
 app.use('/peerjs', peerServer);
+if (process.env.PIIK_ENABLED === 'true') {
+    const piikAssets = join(__dirname, '../integrations/piik/.build');
+    app.get('/vendor/piik-client.js', (_, res) => res.sendFile('client.js', { root: piikAssets }));
+    app.get('/vendor/piik-licenses.txt', (_, res) => res.sendFile('third-party-web.txt', { root: piikAssets }));
+}
 
 const CHANNELS = [
     {
@@ -162,9 +168,17 @@ const voiceCallSignaling = createVoiceCallSignaling({
     onScreenShareChange: (event) => syncPresenceScreenSharing(event),
     resolveRoomId: (roomId) => getChannel(roomId)?.slug,
 });
+const piikEnabled = process.env.PIIK_ENABLED === 'true';
+const piikMedia = piikEnabled ? createPiikMediaGateway({
+    io,
+    getVoiceOwner: socket => voiceCallSignaling.getVoiceOwner(socket),
+    protocol: await import('../integrations/piik/.build/protocol.mjs'),
+    baseURL: process.env.PIIK_INTERNAL_URL || 'http://127.0.0.1:17887',
+    onSharing: (socket, sharing, owner) => voiceCallSignaling.updateScreenShare({ sharing, voiceSessionGeneration: owner.voiceSessionGeneration }, socket),
+}) : undefined;
 let screenSfuConfig;
 try {
-    screenSfuConfig = readScreenSfuConfig();
+    screenSfuConfig = readScreenSfuConfig(piikEnabled ? { SFU_ENABLED: 'false' } : process.env);
 } catch (error) {
     Log.error(`[sfu] invalid bandwidth/configuration; using P2P until reviewed: ${error.message}`);
     screenSfuConfig = readScreenSfuConfig({ SFU_ENABLED: 'false' });
@@ -311,10 +325,10 @@ app.set('views', __dirname + '/views');
     )
 );
 app.get('/script.js', (_, res) =>
-    res.sendFile(join(__dirname, 'views', 'script.js'))
+    res.sendFile('script.js', { root: join(__dirname, 'views') })
 );
 app.get('/style.css', (_, res) =>
-    res.sendFile(join(__dirname, 'views', 'style.css'))
+    res.sendFile('style.css', { root: join(__dirname, 'views') })
 );
 
 /** Routes */
@@ -331,7 +345,9 @@ app.get('/room/:channel', (req, res) => {
         channels: CHANNELS,
         roomId: channel.slug,
         channelName: channel.name,
+        piikEnabled,
         roomBootstrap: JSON.stringify({
+            screenMediaProvider: piikEnabled ? 'piik' : 'legacy',
             iceServers: iceServersList,
             screenSfu: { enabled: screenSfuConfig.enabled, videoBitrate: screenSfuConfig.videoBitrate, initialViewerBitrate: screenSfuConfig.initialViewerBitrate, defaultReceiveMode: 'p2p-first', p2pBudget: 24000000 },
             roomId: channel.slug,
@@ -366,7 +382,7 @@ const handleVoiceJoin = async (payload, socket) => {
     const result = await voiceCallSignaling.join(payload, socket);
 
     if (result.ok) {
-        if (previousOwner && (previousOwner.peerId !== socket.data.voicePeerId || previousOwner.voiceSessionGeneration !== result.voiceSessionGeneration)) screenSfu.cleanupSocket(socket);
+        if (previousOwner && (previousOwner.peerId !== socket.data.voicePeerId || previousOwner.voiceSessionGeneration !== result.voiceSessionGeneration)) { screenSfu.cleanupSocket(socket); piikMedia?.cleanupSocket(socket); }
         Log.info(
             `[joinVoice] socket=${socket.id} peerId=${socket.data.voicePeerId} roomId=${socket.data.voiceRoomId}`
         );
@@ -382,11 +398,13 @@ const handleVoiceJoin = async (payload, socket) => {
  * Reads voiceRoomId / voicePeerId from socket.data to avoid stale closured values.
  */
 const handleDisconnectingVoice = (socket) => {
+    piikMedia?.cleanupSocket(socket);
     screenSfu.cleanupSocket(socket);
     return voiceCallSignaling.leave(socket, { reason: 'socket-disconnecting' });
 };
 
 const handleVoicePeerLeft = (socket) => {
+    piikMedia?.cleanupSocket(socket);
     screenSfu.cleanupSocket(socket);
     void voiceCallSignaling.leave(socket, { reason: 'voicePeerLeft' });
 };
@@ -626,6 +644,11 @@ const clearDisconnectedSocketOwners = (socket) => {
 io.on('connection', (socket) => {
     socket.use(validateSocketPacket);
     Log.info(`User with socket.id ${socket.id} has connected.`);
+    if (piikMedia) socket.on('piik:request', (payload, acknowledge) => {
+        if (typeof acknowledge !== 'function') return;
+        void piikMedia.request(socket, payload).then(result => acknowledge({ ok: true, ...result }),
+            error => acknowledge({ ok: false, reason: error?.name === 'ZodError' ? 'invalid-media-message' : error.message }));
+    });
 
     bindSocketDisconnectLifecycle(socket, {
         disconnectingSteps: [
@@ -720,6 +743,7 @@ io.on('connection', (socket) => {
     socket.on('cursor:move', (payload) => handleCursorMove(payload, socket));
     socket.on('cursor:leave', (payload) => handleCursorLeave(payload, socket));
     socket.on('screen:share', (payload) => {
+        if (piikEnabled) return; // Piik publication lifetime owns sharing state.
         const result = voiceCallSignaling.updateScreenShare(payload, socket);
         if (result.ok && payload.sharing === false) screenSfu.stopScreen(socket);
     });

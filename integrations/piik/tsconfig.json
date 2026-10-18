@@ -1,0 +1,11 @@
+{
+    "extends": "./.deps/upstream/src/tsconfig.json",
+    "compilerOptions": {
+        "tsBuildInfoFile": "./.build/adapter.tsbuildinfo",
+        "types": [],
+        "noImplicitAny": false,
+        "noUnusedLocals": false,
+        "noUnusedParameters": false
+    },
+    "include": ["client.ts"]
+}

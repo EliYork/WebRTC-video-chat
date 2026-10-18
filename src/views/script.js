@@ -168,6 +168,7 @@ const localTrackEndedController =
     });
 let voiceMediaQualityRuntime;
 let screenSfuRuntime;
+const usingPiik = window.voiceScreenMediaProvider === 'piik';
 const remoteScreenSfuSources = new Map();
 const remoteP2pTrackRoles = new Map();
 const renderRemoteMedia = (peerId, baseStream, generation) => {
@@ -284,7 +285,8 @@ const voicePeerRegistry = voicePeerRegistryApi.createRegistry({
     onWarning: (message, error) => console.warn(message, error || ''),
     removeRemoteTile: ({ peerId, tile }) => removeRemoteTile(peerId, tile),
 });
-screenSfuRuntime = window.VoiceScreenSfuRuntime.createRuntime({
+screenSfuRuntime = (usingPiik ? window.PiikScreenMedia : window.VoiceScreenSfuRuntime).createRuntime({
+    onPublicationFailure: () => { if (sharingNow) stopScreenShare(currentPeer); },
     config: window.voiceScreenSfuConfig || {},
     onRouteEvent: (event) => callDiagnostics?.record('共享路径事件', event),
     onReceiverFailure: (failure) => callDiagnostics?.record('SFU接收回退诊断', failure),
@@ -369,8 +371,8 @@ const getDiagnosticQualitySource = (peerId) => {
             outputGain: remoteAudioGain.getSnapshot(),
             ...(serverSource ? { pc: serverSource.pc } : {}),
             serverHealth: serverSource?.serverHealth,
-            screenRoute: serverSource ? '服务器转发' : 'P2P',
-            routeControl: {
+            screenRoute: usingPiik ? 'Piik P2P' : serverSource ? '服务器转发' : 'P2P',
+            routeControl: usingPiik ? undefined : {
                 get: () => screenSfuRuntime.getReceiveRoute(peerId),
                 change: (mode) => screenSfuRuntime.setReceiveRoute(peerId, mode),
                 observe: (pc, reports) => { if (!serverSource) screenSfuRuntime.observeP2p(peerId, pc, reports); },
@@ -960,6 +962,7 @@ const publishLocalMediaToPeer = (
     stream,
     { generation = localVoiceMediaGeneration, ...options } = {}
 ) => {
+    if (usingPiik) stream = getPeerMediaStream(peerId, stream);
     if (!voiceMediaTargets.has(peerId)) {
         return undefined;
     }
@@ -2125,11 +2128,12 @@ const getActiveStream = () => {
     return activeStream;
 };
 const getPeerMediaStream = (peerId, stream) => {
-    if (!sharingNow || !screenSfuRuntime.usesServer(peerId)) return stream;
+    if (!sharingNow || (!usingPiik && !screenSfuRuntime.usesServer(peerId))) return stream;
     const screenTracks = new Set(currentScreenStream?.getTracks() || []);
     return new MediaStream((stream?.getTracks() || []).filter((track) => !screenTracks.has(track)));
 };
 const updateScreenP2pBudget = () => {
+    if (usingPiik) return;
     const track = currentScreenStream?.getVideoTracks?.()[0];
     if (!track) return;
     const directViewers = [...voiceMediaTargets].filter((id) => !screenSfuRuntime?.usesServer(id)).length;
@@ -2471,7 +2475,7 @@ const startScreenShare = async (peer, options = {}) => {
                 const cancelled = () => codecAbort.abort();
                 track?.addEventListener('ended', cancelled, { once: true });
                 try {
-                    if (track) codecDecision = await window.VoiceScreenCodecs.prepare(
+                    if (track && !usingPiik) codecDecision = await window.VoiceScreenCodecs.prepare(
                         track, voiceMediaLifecycle.normalizeScreenShareOptions(options), { signal: codecAbort.signal }
                     );
                 } catch (error) {
@@ -2576,9 +2580,18 @@ const startScreenShare = async (peer, options = {}) => {
         console.info('[screen] no screen audio track was provided');
     }
 
+    if (usingPiik) {
+        try { await screenSfuRuntime.publish(shareScreen, screenShareSession.shareOptions); }
+        catch (error) {
+            console.warn('[piik] 共享启动失败', error);
+            stopCurrentScreenStream(); restoreCameraAfterScreenShare(peer);
+            mediaOperationController.setDesired('screen', false);
+            voiceStatusView.setMediaError('screen', 'unknown'); notifyMediaDock(); return false;
+        }
+    }
     emitScreenShareState(true, screenShareSession.voiceSessionGeneration);
     updateScreenP2pBudget();
-    void screenSfuRuntime.publish(shareScreen, screenShareSession.shareOptions);
+    if (!usingPiik) void screenSfuRuntime.publish(shareScreen, screenShareSession.shareOptions);
     emitLocalPresenceUpdate();
     updateLocalUserCard();
     return true;
