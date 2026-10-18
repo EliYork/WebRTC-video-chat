@@ -2286,7 +2286,9 @@ const setMediaOperationError = (type, result) => {
         return;
     }
     if (result?.errorType) {
-        voiceStatusView.setMediaError(type, result.errorType);
+        voiceStatusView.setMediaError(type, result.errorType,
+            type === 'screen' && result.error?.name === 'NativeShareConfigurationError'
+                ? result.error.message : undefined);
         notifyMediaDock();
         voiceMediaDebug.record({
             errorType: result.errorType,

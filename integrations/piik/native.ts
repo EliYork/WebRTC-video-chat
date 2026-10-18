@@ -28,6 +28,45 @@ export function createNativeCapture(
     const status = document.querySelector<HTMLElement>(
         '[data-piik-native-status]'
     );
+    const resolutionSelect = document.querySelector<HTMLSelectElement>(
+        '[data-screen-share-resolution]'
+    );
+    // Keep the validation hint available even if the server has a cached EJS view.
+    if (status && !document.querySelector('[data-piik-native-config-status]')) {
+        const hint = document.createElement('p');
+        hint.className = 'media-device-hint';
+        hint.dataset.piikNativeConfigStatus = '';
+        hint.setAttribute('role', 'status');
+        hint.hidden = true;
+        status.after(hint);
+    }
+    const resolutionMessage =
+        'Piik 原生共享暂不支持“原始分辨率”或“自动”。请选择 720p、1080p、1440p 或 2160p（4K）；不会自动降低分辨率。';
+    const sizes: Record<string, number[]> = {
+        '720p': [1280, 720],
+        '1080p': [1920, 1080],
+        '1440p': [2560, 1440],
+        '2160p': [3840, 2160],
+    };
+    const updateResolutionValidity = () => {
+        const native = provider?.value === 'native';
+        const invalid = native && !sizes[resolutionSelect?.value || ''];
+        resolutionSelect?.setCustomValidity(invalid ? resolutionMessage : '');
+        const hint = document.querySelector<HTMLElement>(
+            '[data-piik-native-config-status]'
+        );
+        if (hint) {
+            hint.hidden = !invalid;
+            hint.textContent = invalid ? resolutionMessage : '';
+        }
+        const routeHint = document.querySelector<HTMLElement>(
+            '[data-piik-provider-hint]'
+        );
+        if (routeHint)
+            routeHint.textContent = `Piik P2P · ${native ? 'App 原生采集 · H.264 硬件编码' : '浏览器采集与编码'} · 每路最多 3 人观看 · 目标码率 15 Mbps。实际画质和帧率取决于设备与网络。`;
+    };
+    resolutionSelect?.addEventListener('change', updateResolutionValidity);
+    updateResolutionValidity();
     const setStatus = (text: string) => {
         if (status) status.textContent = text;
     };
@@ -117,6 +156,7 @@ export function createNativeCapture(
         });
     provider?.addEventListener('change', () => {
         const native = provider.value === 'native';
+        updateResolutionValidity();
         document.querySelector<HTMLElement>(
             '[data-piik-native-options]'
         )!.hidden = !native;
@@ -149,6 +189,13 @@ export function createNativeCapture(
         });
     return {
         async capture(options: any, signal: AbortSignal): Promise<MediaStream> {
+            const size = sizes[options.resolutionPreset];
+            if (!size) {
+                setStatus(resolutionMessage);
+                throw Object.assign(new Error(resolutionMessage), {
+                    name: 'NativeShareConfigurationError',
+                });
+            }
             const next = await prepare();
             await authorize();
             if (signal.aborted || client !== next)
@@ -156,17 +203,6 @@ export function createNativeCapture(
             const token = generation;
             const source = sources[Number(sourceSelect?.value || 0)];
             if (!source || !path) throw new Error('请先选择有效的原生采集源');
-            const dimensions: Record<string, number[]> = {
-                '720p': [1280, 720],
-                '1080p': [1920, 1080],
-                '1440p': [2560, 1440],
-                '2160p': [3840, 2160],
-            };
-            const size = dimensions[options.resolutionPreset];
-            if (!size)
-                throw new Error(
-                    'App 原生模式请选择明确的 720p、1080p、1440p 或 4K 分辨率档位'
-                );
             const [width, height] = size;
             const profile = {
                 resolution: { width, height },

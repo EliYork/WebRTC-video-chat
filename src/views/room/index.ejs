@@ -271,6 +271,7 @@
                                 <label class="media-select-row"><span>显示器 / 窗口</span><select data-piik-native-source><option value="">请连接 App</option></select></label>
                                 <label><input type="checkbox" data-piik-native-audio>共享所选源声音（可能包含通话声音）</label>
                                 <p class="media-device-hint" data-piik-native-status>请先启动 Piik App 并批准此网站。</p>
+                                <p class="media-device-hint" data-piik-native-config-status role="status" hidden></p>
                                 <button type="button" data-piik-native-refresh>重新连接 / 刷新来源</button>
                                 <button type="button" data-piik-native-approve>查找 App 授权入口</button>
                                 <a data-piik-native-approval-link hidden target="_blank" rel="noopener noreferrer">打开 App 授权</a>
@@ -300,7 +301,7 @@
                             </label>
                         </details>
                         <% if (piikPrototype) { %>
-                        <p class="media-device-hint">Piik P2P · 浏览器采集与编码 · 每路最多 3 人观看 · 目标码率 15 Mbps。实际画质和帧率取决于设备与网络。</p>
+                        <p class="media-device-hint" data-piik-provider-hint>Piik P2P · 浏览器采集与编码 · 每路最多 3 人观看 · 目标码率 15 Mbps。实际画质和帧率取决于设备与网络。</p>
                         <% } else { %>
                         <p class="media-device-hint">带宽不足时优先降低帧率、保留分辨率。自动编码器检测约需 3–6 秒；实际画质和帧率取决于设备与网络。</p>
                         <% } %>

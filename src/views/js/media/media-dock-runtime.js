@@ -626,6 +626,7 @@
         const handleScreenStart = () => {
             const snapshot = getCurrentAdapterSnapshot();
             if (!snapshot.mediaControlsAvailable || snapshot.screenSharePending || snapshot.screenShareEnabled) return;
+            if (refs.resolutionSelect.reportValidity?.() === false) return;
             // Call capture directly from this click to preserve browser user activation.
             void runIntent('screen', () => {
                 const started = adapter.startScreenShare({

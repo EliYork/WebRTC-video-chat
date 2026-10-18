@@ -152,12 +152,48 @@ export async function runNativeScenario({
                 'native channel join'
             );
         }
+        let checkedResolutionGuard = false;
         const start = async () => {
             await click(a, '#shareScreen');
             await evaluate(
                 a,
                 `(()=>{for(const [selector,value] of [['[data-screen-share-resolution]','720p'],['[data-screen-share-frame-rate]','30'],['[data-screen-share-provider]','native']]){const el=document.querySelector(selector);el.value=value;el.dispatchEvent(new Event('change',{bubbles:true}));}})()`
             );
+            if (!checkedResolutionGuard) {
+                for (const preset of ['original', 'auto']) {
+                    const state = await evaluate(
+                        a,
+                        `(()=>{const el=document.querySelector('[data-screen-share-resolution]');el.value='${preset}';el.dispatchEvent(new Event('change',{bubbles:true}));return {valid:el.validity.valid,message:el.validationMessage,hint:document.querySelector('[data-piik-native-config-status]').textContent}})()`
+                    );
+                    assert.equal(state.valid, false);
+                    assert.match(state.message, /请选择.*4K/);
+                    assert.equal(state.hint, state.message);
+                    await click(a, '[data-screen-share-start]');
+                    assert.equal(
+                        await evaluate(
+                            a,
+                            `document.querySelector('[data-screen-share-start]').closest('dialog').open`
+                        ),
+                        true
+                    );
+                    assert.equal(
+                        capturePids().length,
+                        0,
+                        'unsupported preset must not start a capture worker'
+                    );
+                }
+                const state = await evaluate(
+                    a,
+                    `(()=>{const provider=document.querySelector('[data-screen-share-provider]');provider.value='web';provider.dispatchEvent(new Event('change',{bubbles:true}));const el=document.querySelector('[data-screen-share-resolution]');const browserValid=el.validity.valid;el.value='720p';el.dispatchEvent(new Event('change',{bubbles:true}));provider.value='native';provider.dispatchEvent(new Event('change',{bubbles:true}));return {browserValid,nativeValid:el.validity.valid}})()`
+                );
+                assert.equal(
+                    state.browserValid,
+                    true,
+                    'browser auto/original remains allowed'
+                );
+                assert.equal(state.nativeValid, true);
+                checkedResolutionGuard = true;
+            }
             try {
                 await wait(
                     () =>
@@ -321,6 +357,7 @@ export async function runNativeScenario({
             browserVideoSenders,
             received,
             checks: [
+                'native original/auto blocked with actionable hint before capture; browser presets retained',
                 'approved site and capability required',
                 'original channel and stage',
                 'native H264 Pion fanout to three viewers',
