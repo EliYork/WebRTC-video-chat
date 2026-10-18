@@ -10,6 +10,7 @@
         "build:piik": "node scripts/build-piik.mjs",
         "build:piik:app": "node scripts/build-piik.mjs --native",
         "dev:piik": "node scripts/start-piik-dev.mjs",
+        "dev:piik:acceptance": "node scripts/start-piik-acceptance.mjs",
         "test:piik:gateway": "node scripts/test-piik-gateway.mjs",
         "test:piik:browser": "node scripts/test-piik-browser.mjs",
         "test:piik:native": "node scripts/test-piik-browser.mjs --native",

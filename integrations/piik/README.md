@@ -1,6 +1,8 @@
 # Piik 融合开发版
 
-代码在 `codex/piik-integration` 分支。第一阶段回退基线已提交为 `378f2b8`。开发入口是现有语音平台；没有挂载 Piik 网站、房间聊天或 iframe。生产配置、原 checkout 的 `native/` AV1 实验均未修改；未 Push、部署或生成发布 ZIP。
+代码在 `codex/piik-integration` 分支。第一阶段回退基线为 `378f2b8`，第二阶段原生融合基线为 `bd1ad99`。开发入口是现有语音平台；没有挂载 Piik 网站、房间聊天或 iframe。生产配置、原 checkout 的 `native/` AV1 实验均未修改；未 Push、部署或生成发布 ZIP。
+
+**现在进入用户实机验收，暂停媒体架构扩展。** 请优先使用 [Windows + Android 验收指南](ACCEPTANCE.md)：一键启动 Node/Go/App、可信 HTTPS、NVIDIA 证据、三观看者/FPS/码率/播放采样、停止和恢复。入口：`npm run dev:piik:acceptance`，不会自动打开浏览器；`q` 回车或 `Ctrl+C` 停止本次服务。
 
 ## 架构决定
 

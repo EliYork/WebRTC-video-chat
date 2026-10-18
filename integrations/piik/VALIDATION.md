@@ -4,6 +4,16 @@
 
 ## 第二阶段 · 2026-10-19
 
+### 实机验收准备
+
+第二阶段已独立提交为 **`bd1ad99`**。随后仅补验收指南及命令行入口，不扩展媒体路由：`npm run dev:piik:acceptance` 启动隔离 Node/Go/App，用户自行打开页面/采集，`q` 或 Ctrl+C 停止本次实例。
+
+启动器使用合成 capture fixture 验证三进程启动与退出、本机 HTTP、HTTPS 固定证书 readiness、LAN HTTP 拒绝、缺证书及 SAN 不匹配拒绝。核对三个 PID 均结束，stdout 不泄露 capability。HTTPS smoke 临时生成未安装信任的证书，测试后删除；没有安装 CA、改防火墙、系统音量或桌面。指南包含由用户执行的可信 HTTPS/Android CA 设置步骤，此部分尚未实机验收。
+
+发现原 Node 只打印 HOST、实际监听所有地址，已改为按 HOST 绑定。真实 server 回归原先未指定 HOST 却请求 127.0.0.1，绑定 localhost 后会落在 IPv6；测试 fixture 已明确 HOST=127.0.0.1。调整后 429/429 通过，gateway、静音网页与原生三观看者链路再次通过。JS ESLint 和 diff 检查通过。没有新增媒体算法、浏览器手动验收或性能数据。
+
+只读 nvidia-smi 确认当前 RTX 5070 Ti / 617.14 支持指南中的 encoder/decoder utilization 查询；此设备信息不能证明实际原生共享使用该硬件。当前没有用户真实屏幕的 FPS/码率结果。测试结束后关闭本任务的服务/合成采集实例；等待用户实测反馈。
+
 实机验收准备前复跑：429/429 单元测试、真实 Go gateway、静音网页及原生三观看者回归、web-only TypeScript/bundle 构建、新增 JS ESLint 和 Go overlay 的 signal/nativehost/mediaedge/loopback 四包测试均通过。复跑日志在 ignored `.build/acceptance-*.log`。原生报告本次一条接收采样累计 95 帧 / 416864 bytes，仍不代表真实硬编或稳定 FPS。上游 tracked 工作区干净。
 
 先复跑第一阶段的 429 个单元测试、gateway 和静音浏览器回归，全部通过后，提交独立回退基线 **`378f2b8`**。未合并 main、Push 或部署。

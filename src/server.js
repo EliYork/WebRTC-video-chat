@@ -754,7 +754,7 @@ io.on('connection', (socket) => {
     socket.on('screen:route-pressure', (payload) => voiceCallSignaling.relayRoutePressure(payload, socket));
 });
 
-httpServer.listen(PORT, () =>
+httpServer.listen(PORT, HOST, () =>
     // eslint-disable-next-line no-console
     console.log(
         `Listening at ${useHttps ? 'https' : 'http'}://${HOST}:${PORT} with PeerJS at /peerjs`

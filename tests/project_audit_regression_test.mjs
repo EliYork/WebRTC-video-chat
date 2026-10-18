@@ -131,7 +131,7 @@ test('real server supports both WebSocket protocols and survives malformed PeerJ
     await new Promise((done) => reservation.close(done));
     const app = spawn(process.execPath, [resolve('src/server.js')], {
         cwd: dir, windowsHide: true,
-        env: { ...process.env, PORT: String(port), USE_HTTPS: 'false', ENV: 'production', SFU_ENABLED: 'false', CHAT_HISTORY_FILE: join(dir, 'history.json') },
+        env: { ...process.env, HOST: '127.0.0.1', PORT: String(port), USE_HTTPS: 'false', ENV: 'production', SFU_ENABLED: 'false', CHAT_HISTORY_FILE: join(dir, 'history.json') },
     });
     let output = '';
     app.stdout.on('data', (chunk) => { output += chunk; });
