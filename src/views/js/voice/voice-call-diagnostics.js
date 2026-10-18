@@ -9,7 +9,7 @@
     const measurement = (state) => ({
         ...pick(state, ['采样时间', '会话', '连接']),
         本机音频: pick(state?.本机音频, ['实际模式', '静音', '轨道静音', '麦克风存活', '输出静音']),
-        共享路径变化: pick(state?.共享路径变化, ['state', 'serverViewers', 'hasUplink']),
+        共享路径变化: pick(state?.共享路径变化, ['state', 'serverViewers', 'hasUplink', 'uplinkStatus']),
         共享: (state?.共享 || []).map((share) => ({
             ...pick(share, ['角色', '观看路径', '采样时间', 'SFU服务器统计', '采集轨道设置', '播放画面']),
             连接: (share.连接 || []).map((connection) => pick(connection,
@@ -64,9 +64,13 @@
     };
     const browserInfo = () => {
         const ua = global.navigator.userAgent || '';
-        const match = ua.match(/(Edg)\/([0-9]+)/) || ua.match(/(Firefox|Chrome|Version)\/([0-9]+)/);
+        const match = ua.match(/(EdgA|EdgiOS|Edg)\/([0-9]+)/) || ua.match(/(Firefox|FxiOS)\/([0-9]+)/) ||
+            ua.match(/(SamsungBrowser)\/([0-9]+)/) || ua.match(/(Chrome|CriOS)\/([0-9]+)/) ||
+            (!/Android/.test(ua) && /Safari\//.test(ua) ? ua.match(/(Version)\/([0-9]+)/) : null);
         return {
-            浏览器: match ? ({ Edg: 'Edge', Version: 'Safari' }[match[1]] || match[1]) : '其他',
+            浏览器: match ? ({ Edg: 'Edge', EdgA: 'Edge', EdgiOS: 'Edge', FxiOS: 'Firefox', CriOS: 'Chrome',
+                SamsungBrowser: 'Samsung Internet', Version: 'Safari' }[match[1]] ||
+                (match[1] === 'Chrome' && /Android/.test(ua) && /; wv\)/.test(ua) ? 'Android WebView' : match[1])) : '其他',
             浏览器主版本: match ? Number(match[2]) : null,
             平台: /Windows/.test(ua) ? 'Windows' : /Android/.test(ua) ? 'Android' : /iPhone|iPad/.test(ua) ? 'iOS' : /Mac/.test(ua) ? 'macOS' : '其他',
             安全上下文: Boolean(global.isSecureContext),
@@ -154,10 +158,14 @@
                 state.config.set(key, value);
                 scopedRecord(type, content);
             };
+            if (snapshot.编码器选择?.reason === 'manual-av1-below-target') changed('av1-experiment', snapshot.编码器选择.reason,
+                '共享编码回退', { primary: 'av1', reason: snapshot.编码器选择.reason });
             for (const connection of snapshot.连接 || []) {
                 const key = `${connection.路径}:${connection.序号}`;
                 changed(`connection:${key}`, connection.连接状态 || connection.状态, '共享连接状态', { 路径: connection.路径, 状态: connection.连接状态 || connection.状态 });
-                changed(`transport:${key}`, connection.实际传输路径, '观看路径切换', { 路径: connection.实际传输路径 });
+                const uplinkStatus = state.role === '共享者' && connection.路径 === 'SFU' ? snapshot.共享路径变化?.uplinkStatus : undefined;
+                changed(`transport:${key}`, `${connection.实际传输路径 || 'unknown'}:${uplinkStatus || ''}`, '观看路径切换',
+                    { 路径: connection.实际传输路径, uplinkStatus });
                 if (connection.编码协商?.reason) changed(`codec-reason:${key}`, connection.编码协商.reason, '共享编码回退', { 路径: connection.路径, reason: connection.编码协商.reason, primary: connection.编码协商.primary });
                 for (const row of connection.视频流 || []) {
                     if (row.统计状态 === '数据过期') continue;

@@ -555,7 +555,10 @@ test('AV1 PeerJS offers negotiate per viewer, fallback rebuilds keep audio, stal
     const a = createFixture('A', network, { onCodecFallback: (event) => fallbacks.push(event) });
     createFixture('B', network);
     const screen = video('av1-screen');
-    await api.prepare(screen, { codecMode: 'av1' }, { probe: async () => ({ passed: true }) });
+    const window = { captureFps: 60, encodeFps: 55, actualCodec: 'video/AV1', width: 1920, height: 1080, resolutionReduced: false };
+    const decision = await api.prepare(screen, { codecMode: 'av1' }, { probe: async () => ({ passed: false, reason: 'encoder-slow', windows: [window, window] }) });
+    assert.equal(decision.reason, 'manual-av1-below-target');
+    assert.equal(decision.probe.passed, false);
     const media = stream(audio('mic'), screen);
     const first = publish(a, 'B', 1, media);
     first.peerConnection.getSenders().find((sender) => sender.track.kind === 'video').track = screen;

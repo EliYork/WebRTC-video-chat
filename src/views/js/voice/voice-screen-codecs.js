@@ -218,15 +218,20 @@
             } else try { result = await (probe || codecs[candidate].probe)(target, { signal, primary: candidate }); }
             catch { result = { passed: false, reason: 'probe-failed', windows: [] }; }
             trials.push({ primary: candidate, ...result });
-            const av1Trial = result.passed || (result.reason === 'probe-source-slow' && result.windows?.length === 2 &&
-                result.windows.every((row) => row.encodeFps > 0 && row.actualCodec === 'video/AV1' && !row.resolutionReduced));
+            // Explicit AV1 experiments may miss the requested cadence while
+            // still encoding valid full-size video. Keep the measured failure
+            // visible; actual offer/answer and frame startup remain mandatory.
+            const av1Trial = result.passed || (['probe-source-slow', 'encoder-slow'].includes(result.reason) && result.windows?.length === 2 &&
+                result.windows.every((row) => row.captureFps > 0 && row.encodeFps > 0 && row.actualCodec === 'video/AV1' &&
+                    row.width === target.width && row.height === target.height && row.resolutionReduced === false));
             if (mode === 'auto' ? result.passed : capabilities().some(codecs[candidate].matches) && (candidate === 'av1' ? av1Trial : true)) {
                 primary = candidate;
                 break;
             }
         }
         const decision = { mode, primary, target, probe: result, trials, support: support(), hardwareAcceleration: 'unknown', preparationMs: Date.now() - startedAt,
-            reason: mode !== 'auto' && primary === mode && codecs[mode].probe ? 'manual-preference' : result.reason };
+            reason: mode === 'av1' && primary === 'av1' && !result.passed ? 'manual-av1-below-target' :
+                mode !== 'auto' && primary === mode && codecs[mode].probe ? 'manual-preference' : result.reason };
         if (!signal?.aborted && track.readyState !== 'ended') decisions.set(track, decision);
         return decision;
     };
@@ -314,7 +319,8 @@
         const mime = rows.find((row) => row.id === output?.codecId)?.mimeType;
         state.negotiated = negotiatedCodec(pc, state.sending);
         const remoteVideo = pc.remoteDescription?.sdp?.split(/(?=^m=)/m).find((item) => item.startsWith('m=video ') && !item.startsWith('m=video 0 '));
-        state.remoteAV1 = remoteVideo ? /^a=rtpmap:\d+ AV1\/90000\s*$/im.test(remoteVideo) : null;
+        // SDP reflects this negotiation, not the peer's complete decoder capabilities.
+        state.remoteSdpAV1 = remoteVideo ? /^a=rtpmap:\d+ AV1\/90000\s*$/im.test(remoteVideo) : null;
         state.actual = /^video\/(AV1|H264|VP8)$/i.test(mime || '') ? mime : null;
         if (!state.fallbackReason && state.primary === 'av1' && state.actual && !/^video\/AV1$/i.test(state.actual)) state.reason = 'remote-codec-fallback';
         const count = output?.[state.sending ? 'framesEncoded' : 'framesDecoded'];
@@ -326,7 +332,7 @@
     const getConnectionState = (pc) => {
         const state = connections.get(pc);
         return state ? { requested: state.requested, primary: state.primary, negotiated: state.negotiated || null,
-            actual: state.actual || null, remoteAV1: state.remoteAV1 ?? null, status: state.status, reason: state.reason, hardwareAcceleration: 'unknown' } : null;
+            actual: state.actual || null, remoteSdpAV1: state.remoteSdpAV1 ?? null, status: state.status, reason: state.reason, hardwareAcceleration: 'unknown' } : null;
     };
     const retireConnection = (pc) => { const state = connections.get(pc); if (state) state.retired = true; };
     global.VoiceScreenCodecs = { codecs, normalizeMode, candidates, findCodec, prepare, support,

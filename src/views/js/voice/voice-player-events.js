@@ -1,7 +1,7 @@
 (function exposePlayerEvents(global) {
     'use strict';
     const routeEvents = {
-        p2p: '当前使用 P2P 直连', connecting: '正在连接服务器转发', sfu: '服务器转发已连接',
+        p2p: '当前使用 P2P 路径（直连或 TURN 以连接统计为准）', connecting: '正在连接服务器共享上传', sfu: '服务器共享上传已连接（观看路径另见连接统计）',
         'sender-routes-changed': '共享发送路径已更新', 'subscription-ready': '服务器共享订阅已就绪',
         'subscribe-failed': '服务器共享订阅失败', 'subscription-closed': '服务器共享订阅已关闭',
         'receiver-release': '服务器接收连接已释放', fallback: '服务器共享异常，开始回退',
@@ -19,6 +19,7 @@
         'producer-codec-failed': '服务器发布编码不可用', 'router-codec-fallback': '服务器能力匹配后使用兼容编码',
         'p2p-connection-failed': 'P2P 连接不可用，尝试服务器兜底', 'p2p-video-stalled': 'P2P 持续收包但未解码出画面',
         'turn-relay': 'P2P 实际经过 TURN 中继', 'sender-encoder-pressure': '多观看者下发送端持续编码受限',
+        'manual-av1-below-target': 'AV1 预检未达目标 FPS，按实验选项继续尝试；实际编码以连接统计为准',
         'sender-uplink-pressure': '多观看者下发送端持续接近上行预算', 'producer-created': '服务器视频发布已创建（待实际帧验证）',
     };
     const describe = (event) => {
@@ -32,7 +33,8 @@
         else if (type === '共享分辨率变化') { category = '配置'; text = `视频分辨率：${content.宽} × ${content.高}`; }
         else if (type === '共享连接状态') { category = '路径'; text = `共享连接状态：${({ connected: '已连接', connecting: '连接中', disconnected: '已断开', failed: '失败', closed: '已关闭', '已采样': '已取得视频统计' }[content.状态] || '统计暂不可用')}`; }
         else if (type === '共享路径事件') { category = /failed|fallback/.test(content.event) ? '异常与恢复' : '路径'; text = routeEvents[content.event] || '共享传输状态变化'; }
-        else if (type === '观看路径切换') { category = '路径'; text = `观看路径切换：${({ direct: 'P2P 直连', TURN: 'P2P · TURN 中继', unknown: '路径待确认', SFU: '服务器转发' }[content.路径] || content.路径 || '等待确认')}`; }
+        else if (type === '观看路径切换') { category = '路径'; text = content.角色 === '共享者' && content.uplinkStatus === 'idle' ? 'SFU 备用上传（无服务器观看者）' :
+            `${content.角色 === '共享者' ? '发送连接路径' : '观看路径切换'}：${({ direct: 'P2P 直连', TURN: 'P2P · TURN 中继', unknown: '路径待确认', SFU: '服务器转发' }[content.路径] || content.路径 || '等待确认')}`; }
         else if (type === '共享卡顿记录') { category = '异常与恢复'; text = `浏览器报告新增画面停滞 ${content.区间卡顿次数} 次（观测时间，非停滞起点）`; }
         else if (/SFU接收|共享播放异常|共享播放恢复/.test(type)) {
             category = '异常与恢复';

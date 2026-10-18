@@ -900,6 +900,23 @@ test('screen options persist, rapid clicks start once, cancellation recovers, an
     assert.equal(fixture.refs.frameRateSelect.disabled, false);
 });
 
+test('4K30 AV1 settings reach capture adapter and idle SFU publication is labeled as standby', async () => {
+    const fixture = createFixture(); const { runtimeApi } = loadApis(fixture); const stub = createAdapterStub();
+    const runtime = runtimeApi.createMediaDockRuntime({ root: fixture.root, adapter: stub.adapter }); runtime.init();
+    fixture.refs.resolutionSelect.value = '2160p'; fixture.refs.resolutionSelect.dispatchEvent(new FakeEvent('change'));
+    fixture.refs.frameRateSelect.value = '30'; fixture.refs.frameRateSelect.dispatchEvent(new FakeEvent('change'));
+    fixture.refs.codecSelect.value = 'av1'; fixture.refs.codecSelect.dispatchEvent(new FakeEvent('change'));
+    fixture.refs.screenStartButton.click(); await flush();
+    assert.equal(stub.calls.get('startScreenShare')[0][0].resolutionPreset, '2160p');
+    assert.equal(stub.calls.get('startScreenShare')[0][0].frameRate, 30);
+    assert.equal(stub.calls.get('startScreenShare')[0][0].codecMode, 'av1');
+    stub.emit({ screenShareEnabled: true, screenShareRoute: { hasUplink: true, serverViewers: 0 } });
+    assert.match(fixture.refs.screenStatus.textContent, /无服务器观看者（SFU 备用）/);
+    stub.emit({ screenShareEnabled: true, screenShareRoute: { hasUplink: true, serverViewers: 1 } });
+    assert.match(fixture.refs.screenStatus.textContent, /服务器转发 1 人/);
+    runtime.destroy();
+});
+
 test('layout moves and recovery preserve root identity, selections and listener ownership', async () => {
     const fixture = createFixture();
     const { runtimeApi } = loadApis(fixture);

@@ -6,6 +6,7 @@
         '720p',
         '1080p',
         '1440p',
+        '2160p',
         'original',
     ]);
     const FRAME_RATES = Object.freeze([15, 30, 60]);
@@ -535,7 +536,7 @@
                 const select = root.querySelector(selector);
                 if (select) { select.value = value; select.disabled = screenSelectDisabled; }
             }
-            setText(refs.screenStatus, sharing ? (route?.hasUplink ? `共享中 · 服务器转发 ${route.serverViewers} 人` : '共享中 · 直连') : '');
+            setText(refs.screenStatus, sharing ? (route?.hasUplink ? (route.serverViewers > 0 ? `共享中 · 服务器转发 ${route.serverViewers} 人` : '共享中 · 无服务器观看者（SFU 备用）') : '共享中 · 直连') : '');
             setText(
                 refs.screenSettingsStatus,
                 sharing

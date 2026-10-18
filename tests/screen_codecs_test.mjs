@@ -84,7 +84,7 @@ test('P2P offer preserves audio, feedback, mids and matching RTX; H264 includes 
 });
 
 const flush = async () => { for (let index = 0; index < 100; index++) await Promise.resolve(); };
-function probeFixture({ stall = false, encodeRate = 60, scale = false, primary = 'h264' } = {}) {
+function probeFixture({ stall = false, encodeRate = 60, scale = false, primary = 'h264', frameRate = 60 } = {}) {
     let now = 0;
     let nextId = 0;
     const timers = new Map();
@@ -114,7 +114,7 @@ function probeFixture({ stall = false, encodeRate = 60, scale = false, primary =
         async addIceCandidate() {}
         async getStats() { return new Map([
             ['out', { type: 'outbound-rtp', kind: 'video', id: 'out', timestamp: now, codecId: 'codec', mediaSourceId: 'input',
-                framesEncoded: Math.floor(frames * encodeRate / 60), frameWidth: scale ? 1280 : canvas.width, frameHeight: canvas.height }],
+                framesEncoded: Math.floor(frames * encodeRate / frameRate), frameWidth: scale ? 1280 : canvas.width, frameHeight: canvas.height }],
             ['input', { id: 'input', type: 'media-source', frames }], ['codec', { id: 'codec', mimeType: primary === 'av1' ? 'video/AV1' : 'video/H264' }],
         ]); }
     }
@@ -202,14 +202,18 @@ test('timeouts never populate the measured trial cache', async () => {
     assert.equal(f.timers.size, 0);
 });
 
-for (const settings of [{}, { encodeRate: 35 }, { scale: true }, { stall: true }]) {
+for (const settings of [{}, { encodeRate: 35 }, { encodeRate: 0 }, { scale: true }, { stall: true }]) {
     test(`AV1 loopback uses real orchestration, measured format/dimensions and bounded cleanup ${JSON.stringify(settings)}`, async () => {
         const f = probeFixture({ ...settings, primary: 'av1' });
         const pending = f.api.prepare(track(), { codecMode: 'av1', frameRate: 60 });
         await f.advance(settings.stall ? 6600 : 3000);
         const result = await pending;
-        assert.equal(result.primary, Object.keys(settings).length ? 'h264' : 'av1');
-        assert.equal(result.trials[0].reason, settings.stall ? 'timeout' : settings.scale ? 'resolution-reduced' : settings.encodeRate ? 'encoder-slow' : 'passed');
+        assert.equal(result.primary, settings.scale || settings.stall || settings.encodeRate === 0 ? 'h264' : 'av1');
+        assert.equal(result.trials[0].reason, settings.stall ? 'timeout' : settings.scale ? 'resolution-reduced' : settings.encodeRate !== undefined ? 'encoder-slow' : 'passed');
+        if (settings.encodeRate === 35) {
+            assert.equal(result.probe.passed, false);
+            assert.equal(result.reason, 'manual-av1-below-target');
+        }
         if (!settings.stall) assert.equal(result.trials[0].windows[0].actualCodec, 'video/AV1');
         assert.ok(f.peers.every((pc) => pc.closed));
         assert.equal(f.stops(), 1);
@@ -265,6 +269,8 @@ test('AV1 runtime observes existing samples, detects zero startup frames, reject
     assert.equal(api.getConnectionState(pc).actual, 'video/VP8');
     assert.equal(api.getConnectionState(pc).reason, 'remote-codec-fallback');
     assert.equal(api.getConnectionState(pc).status, 'frames-verified');
+    assert.equal(api.getConnectionState(pc).remoteSdpAV1, false, 'only describes the current SDP, not decoder support');
+    assert.equal(api.getConnectionState(pc).remoteAV1, undefined);
     current = false;
     assert.equal(api.failConnection(pc, 'negotiation-failed'), false);
     current = true;
@@ -295,4 +301,50 @@ test('an AV1 decoder capability rejection is distinct from encoding throughput',
     assert.equal(decision.primary, 'h264');
     assert.equal(f.support().av1Receive, false);
     assert.equal(f.support().av1Send, true);
+});
+
+for (const preset of [{ width: 2560, height: 1440, frameRate: 60 }, { width: 3840, height: 2160, frameRate: 30 }]) {
+    test(`AV1 measured probe and actual send/receive observation at ${preset.width}x${preset.height}@${preset.frameRate}`, async () => {
+        const f = probeFixture({ primary: 'av1', frameRate: preset.frameRate, encodeRate: preset.frameRate });
+        const input = { ...track(), getSettings: () => preset };
+        const pending = f.api.prepare(input, { codecMode: 'av1', frameRate: preset.frameRate });
+        await f.advance(3000);
+        const result = await pending;
+        assert.equal(result.primary, 'av1');
+        assert.equal(result.probe.passed, true);
+        assert.deepEqual(JSON.parse(JSON.stringify(result.target)), preset);
+        for (const row of result.probe.windows) {
+            assert.equal(row.width, preset.width); assert.equal(row.height, preset.height);
+            assert.ok(Math.abs(row.captureFps - preset.frameRate) <= 1);
+            assert.ok(Math.abs(row.encodeFps - preset.frameRate) <= 1);
+        }
+        // Synthetic RTC reports exercise the production observer on both ends;
+        // they are not evidence of real browser/device throughput.
+        const sdp = f.api.transformOffer(offer, result.primary);
+        for (const sending of [true, false]) {
+            const pc = { connectionState: 'connected', remoteDescription: { sdp }, localDescription: { sdp } };
+            f.api.registerConnection(pc, { sending, primary: result.primary, requested: 'av1', isCurrent: () => true });
+            f.api.observeConnection(pc, [{ type: sending ? 'outbound-rtp' : 'inbound-rtp', kind: 'video', framesEncoded: 60, framesDecoded: 60, codecId: 'codec' }, { id: 'codec', mimeType: 'video/AV1' }]);
+            const state = f.api.getConnectionState(pc);
+            assert.equal(state.actual, 'video/AV1'); assert.equal(state.negotiated, 'video/AV1');
+            assert.equal(state.status, 'frames-verified'); assert.equal(state.remoteSdpAV1, true);
+        }
+        assert.equal(f.timers.size, 0); assert.ok(f.peers.every((pc) => pc.closed));
+    });
+}
+
+test('manual AV1 below-target trial requires two verified full-size positive windows and preserves source-vs-encoder evidence', async () => {
+    const api = load({ RTCRtpSender: { getCapabilities: () => ({ codecs: [...available, { mimeType: 'video/AV1' }] }) } });
+    const valid = { captureFps: 35, encodeFps: 34, actualCodec: 'video/AV1', width: 1920, height: 1080, resolutionReduced: false };
+    for (const reason of ['probe-source-slow', 'encoder-slow']) {
+        const input = track();
+        const result = await api.prepare(input, { codecMode: 'av1' }, { probe: async () => ({ passed: false, reason, windows: [valid, valid] }) });
+        assert.equal(result.primary, 'av1'); assert.equal(result.probe.reason, reason); assert.equal(result.probe.passed, false);
+        assert.equal(result.reason, 'manual-av1-below-target'); assert.equal(api.getDecision(input), result);
+    }
+    for (const windows of [[], [valid], [valid, { ...valid, encodeFps: 0 }], [valid, { ...valid, captureFps: null }],
+        [valid, { ...valid, actualCodec: 'video/H264' }], [valid, { ...valid, width: 1280 }], [valid, { ...valid, resolutionReduced: true }]]) {
+        const result = await api.prepare(track(), { codecMode: 'av1' }, { probe: async () => ({ passed: false, reason: 'encoder-slow', windows }) });
+        assert.equal(result.primary, 'h264');
+    }
 });

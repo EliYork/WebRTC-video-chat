@@ -12,6 +12,7 @@
         '720p': { height: 720, width: 1280 },
         '1080p': { height: 1080, width: 1920 },
         '1440p': { height: 1440, width: 2560 },
+        '2160p': { height: 2160, width: 3840 },
     });
     const SCREEN_SHARE_RESOLUTION_PRESETS = Object.freeze([
         'auto',

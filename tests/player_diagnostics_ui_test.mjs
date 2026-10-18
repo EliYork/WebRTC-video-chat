@@ -49,6 +49,27 @@ test('sender targets are explicitly settings; paths and per-connection measureme
     view.remove(); assert.equal(f.body.children.length, 0);
 });
 
+test('AV1 experiment warns about cadence, SDP absence is not unsupported, and idle SFU is not the active viewer path', () => {
+    const f = fixture(); const data = snapshot(); data.角色 = '共享者';
+    data.共享路径变化 = { hasUplink: true, serverViewers: 0, uplinkStatus: 'idle' };
+    data.编码器选择 = { mode: 'av1', primary: 'av1', reason: 'manual-av1-below-target', probe: { passed: false } };
+    data.连接[0].编码协商 = { remoteSdpAV1: false, actual: 'video/H264', negotiated: 'video/H264', status: 'frames-verified' };
+    data.连接.push({ 序号: 2, 路径: 'P2P', 实际传输路径: 'direct', 视频流: [{ 方向: '发送', 编码: 'video/AV1', 区间编码帧率: 55 }] });
+    const model = f.api.model(data); let text = JSON.stringify(model);
+    assert.match(text, /未达目标 FPS，继续实验/); assert.match(text, /未包含（不代表不支持）/);
+    assert.match(model.groups[1].title, /SFU 备用上传（无观看者）/);
+    assert.match(model.groups[2].title, /P2P 直连/); assert.match(text, /video\/AV1/);
+    data.共享路径变化.serverViewers = 1;
+    assert.match(f.api.model(data).groups[1].title, /服务器转发/);
+    data.角色 = '观看者'; data.共享路径变化.serverViewers = 0;
+    assert.match(f.api.model(data).groups[1].title, /服务器转发/);
+    delete data.连接[0].编码协商.remoteSdpAV1;
+    text = JSON.stringify(f.api.model(data)); assert.match(text, /当前远端 SDP 含 AV1","未知/);
+    vm.runInNewContext(read('voice-player-events'), { window: f.window });
+    const eventText = f.window.VoicePlayerEvents.describe({ 类型: '观看路径切换', 内容: { 角色: '共享者', 路径: 'SFU', uplinkStatus: 'idle' } }).text;
+    assert.equal(eventText, 'SFU 备用上传（无服务器观看者）');
+});
+
 test('event timeline defaults to the current call, filters category/scope, sorts precise times and preserves raw details', () => {
     const f = fixture(); vm.runInNewContext(read('voice-player-events'), { window: f.window });
     const sessions = [

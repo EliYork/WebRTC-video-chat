@@ -1043,6 +1043,7 @@
                 state,
                 serverViewers: routes.size,
                 hasUplink: Boolean(publicationId),
+                uplinkStatus: publicationId ? (routes.size ? 'forwarding' : 'idle') : 'none',
                 routeHistory: routeHistory.map((row) => ({ ...row })),
             }),
         };

@@ -142,6 +142,7 @@ test('screen capture constraints prefer the entire screen for defaults and every
         '720p': { height: 720, width: 1280 },
         '1080p': { height: 1080, width: 1920 },
         '1440p': { height: 1440, width: 2560 },
+        '2160p': { height: 2160, width: 3840 },
     };
     Object.entries(expectedResolutions).forEach(
         ([resolutionPreset, resolution]) => {

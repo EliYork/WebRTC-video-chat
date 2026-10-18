@@ -26,6 +26,46 @@ function fixture({ storage, connections = [], shares = [], getReceiverHealth } =
 }
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
+test('browser family detection prioritizes Chromium/Edge/Firefox over Android Version/4.0 and keeps Safari on Apple only', async () => {
+    const cases = [
+        ['Mozilla/5.0 (Linux; Android 15; Phone) AppleWebKit/537.36 Version/4.0 Chrome/130.0 Mobile Safari/537.36', 'Chrome', 130, 'Android'],
+        ['Mozilla/5.0 (Linux; Android 15; Phone; wv) AppleWebKit/537.36 Version/4.0 Chrome/130.0 Mobile Safari/537.36', 'Android WebView', 130, 'Android'],
+        ['Mozilla/5.0 (Linux; Android 15) Chrome/130.0 Mobile Safari/537.36 EdgA/130.0', 'Edge', 130, 'Android'],
+        ['Mozilla/5.0 (Linux; Android 15) Chrome/130.0 Mobile Safari/537.36 SamsungBrowser/28.0', 'Samsung Internet', 28, 'Android'],
+        ['Mozilla/5.0 (iPhone) AppleWebKit/605.1 Version/18.0 Mobile Safari/604.1', 'Safari', 18, 'iOS'],
+        ['Mozilla/5.0 (iPhone) AppleWebKit/605.1 CriOS/130.0 Mobile Safari/604.1', 'Chrome', 130, 'iOS'],
+        ['Mozilla/5.0 (Windows) Gecko/20100101 Firefox/130.0', 'Firefox', 130, 'Windows'],
+        ['Mozilla/5.0 (Linux; Android 15) Version/4.0 Safari/537.36', '其他', null, 'Android'],
+    ];
+    for (const [ua, name, version, platform] of cases) {
+        const f = fixture(); f.window.navigator.userAgent = ua;
+        f.runtime.start(); await flush();
+        const report = await f.runtime.report();
+        const browser = report.当前状态.浏览器;
+        assert.equal(browser.浏览器, name); assert.equal(browser.浏览器主版本, version); assert.equal(browser.平台, platform);
+        assert.doesNotMatch(JSON.stringify(report), /Phone|Mozilla|userAgent/);
+        f.runtime.destroy();
+    }
+});
+
+test('below-target AV1 and idle-to-forwarding SFU changes reuse bounded call events without sample spam', async () => {
+    const f = fixture(); f.runtime.start(); await flush();
+    const tile = {}; const snapshot = { 角色: '共享者', 编码器选择: { primary: 'av1', reason: 'manual-av1-below-target' },
+        共享路径变化: { hasUplink: true, serverViewers: 0, uplinkStatus: 'idle' },
+        连接: [{ 序号: 1, 路径: 'SFU', 实际传输路径: 'SFU', 连接状态: 'connected', 视频流: [] }] };
+    f.runtime.observeShare(tile, snapshot); f.runtime.observeShare(tile, snapshot);
+    let events = (await f.runtime.report()).当前会话.事件;
+    assert.equal(events.filter((event) => event.内容?.reason === 'manual-av1-below-target').length, 1);
+    assert.equal(events.filter((event) => event.类型 === '观看路径切换').length, 1);
+    assert.equal(events.find((event) => event.类型 === '观看路径切换').内容.uplinkStatus, 'idle');
+    snapshot.共享路径变化 = { hasUplink: true, serverViewers: 1, uplinkStatus: 'forwarding' };
+    f.runtime.observeShare(tile, snapshot); f.runtime.observeShare(tile, snapshot);
+    events = (await f.runtime.report()).当前会话.事件;
+    assert.equal(events.filter((event) => event.类型 === '观看路径切换').length, 2);
+    assert.equal(events.filter((event) => event.类型 === '观看路径切换').at(-1).内容.uplinkStatus, 'forwarding');
+    f.runtime.destroy();
+});
+
 test('per-call logs persist bounded history, preserve startup samples, and omit IDs', async () => {
     const { runtime, saved, state } = fixture();
     runtime.start();

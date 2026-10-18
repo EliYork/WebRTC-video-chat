@@ -25,17 +25,20 @@
             groups[0].rows.push(['请求编码', ({ auto: '自动', av1: 'AV1 优先（实验）', h264: 'H.264 优先', vp8: 'VP8' }[decision.mode] || '未知')],
                 ['本机预选（非实际编码）', decision.primary?.toUpperCase() || '未选定'], ['硬件加速', '状态未知']);
             groups[0].details.push(['AV1 编码能力声明', decision.support?.av1Send === true ? '支持（仍需实测）' : decision.support?.av1Send === false ? '未声明支持' : '未知']);
+            if (decision.reason === 'manual-av1-below-target') groups[0].rows.push(['AV1 预检', '未达目标 FPS，继续实验；实际编码见连接统计']);
             for (const trial of decision.trials || []) {
                 groups[0].details.push([`${trial.primary?.toUpperCase()} 预检测`, trial.reason || '未完成']);
                 for (const row of trial.windows || []) groups[0].details.push(['预检测采集 / 编码 FPS', `${row.captureFps ?? '不可用'} / ${row.encodeFps ?? '不可用'} · ${row.actualCodec || '未确认'} · ${row.width || '?'}×${row.height || '?'}`]);
             }
         }
         for (const connection of snapshot.连接 || []) {
-            const path = connection.路径 === 'SFU' ? '服务器转发' : connection.实际传输路径 === 'TURN' ? 'P2P · TURN 中继' : connection.实际传输路径 === 'direct' ? 'P2P 直连' : 'P2P · 路径未确认';
+            const idleUplink = snapshot.角色 === '共享者' && connection.路径 === 'SFU' &&
+                snapshot.共享路径变化?.hasUplink === true && snapshot.共享路径变化?.serverViewers === 0;
+            const path = connection.路径 === 'SFU' ? (idleUplink ? 'SFU 备用上传（无观看者）' : '服务器转发') : connection.实际传输路径 === 'TURN' ? 'P2P · TURN 中继' : connection.实际传输路径 === 'direct' ? 'P2P 直连' : 'P2P · 路径未确认';
             const group = { title: `连接 ${connection.序号} · ${path}`, rows: [], details: [] };
             if (connection.编码协商) group.details.push(['协商编码（SDP）', stale ? '数据过期' : connection.编码协商.negotiated || '未确认'],
                 ['编码启动验证', stale ? '数据过期' : connection.编码协商.status], ['兼容回退原因', connection.编码协商.reason || '无'], ['硬件加速', '状态未知']);
-            if (connection.编码协商) group.details.push(['对端 SDP 声明 AV1', stale ? '数据过期' : connection.编码协商.remoteAV1 === true ? '是（解码仍需实测）' : connection.编码协商.remoteAV1 === false ? '否' : '未知']);
+            if (connection.编码协商) group.details.push(['当前远端 SDP 含 AV1', stale ? '数据过期' : connection.编码协商.remoteSdpAV1 === true ? '是（解码仍需实测）' : connection.编码协商.remoteSdpAV1 === false ? '未包含（不代表不支持）' : '未知']);
             if (!connection.视频流?.length) group.rows.push(['状态', stale ? '数据过期' : connection.状态 || '等待视频统计']);
             for (const row of connection.视频流 || []) {
                 group.rows.push(['编码', stale || row.统计状态 === '数据过期' ? '数据过期' : row.编码 || '不可用'],
