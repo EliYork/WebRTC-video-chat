@@ -63,6 +63,12 @@ def backup():
         if source.exists():
             if source.is_dir(): shutil.copytree(source, directory / name)
             else: shutil.copy2(source, directory / name)
+    for name in ['.env.example', 'LICENSE', 'docs/RELEASE.md']:
+        source = ROOT / name
+        if source.is_file():
+            dest = directory / 'supporting-code' / name
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, dest)
     nginx = Path('/www/server/panel/vhost/nginx')
     with tarfile.open(directory / 'nginx-backup.tar.gz', 'w:gz') as archive:
         for source in [nginx / 'voice.eliyork.com.conf',
@@ -118,7 +124,7 @@ def prepare(directory, archive_path, expected):
             dest = stage / member.name
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(content)
-    assert digest(stage / 'package-lock.json') == digest(ROOT / 'package-lock.json'), 'dependencies changed; review required'
+    assert json.loads((stage / 'package-lock.json').read_text()) == json.loads((ROOT / 'package-lock.json').read_text()), 'dependencies changed; review required'
     (stage / 'node_modules').symlink_to(ROOT / 'node_modules', target_is_directory=True)
     binary = stage / 'integrations/piik/.build/piik-server'
     binary.chmod(0o700)
