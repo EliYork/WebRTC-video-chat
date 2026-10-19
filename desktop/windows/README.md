@@ -1,0 +1,35 @@
+# EliYork Voice · Windows x64
+
+下载 **EliYork-Voice-Setup-0.1.1-x64.exe** 并双击，为当前用户安装（不需要管理员权限）。之后双击桌面 **EliYork Voice**。客户端打开独立窗口，默认连接 **https://voice.eliyork.com/room/lobby**，与普通浏览器共享频道、成员、聊天与语音。
+
+不需要 Node、Go 或 PowerShell。旧 0.1.0 ZIP 需要先退出，再手动安装一次新版；旧目录可以保留。用户配置继续保存在 AppData。发布 ZIP 内包含安装包及更新元数据，不再是解压即用的便携目录。客户端内置 Electron/Chromium 与 Piik App/WGC 原生组件；网页无 Node 权限。麦克风/摄像头首次使用需授权，设备仍通过原频道界面选择。
+
+## 原生共享
+
+加入原语音频道 → 共享屏幕 → “Piik App 原生屏幕共享 · H.264” → 显示器/窗口 → 明确分辨率/FPS → 开始。组件会自动启动，无需打开 Piik 独立房间。首次驱动探测可能需等待数秒，再点刷新来源。共享源声音默认关闭；勾选后可能把通话声音一起回送，建议耳机。
+
+选择“网页屏幕共享”时由客户端弹出画面选择窗口；勾选系统声音会捕获整个系统声音，而非单一窗口音频。取消不采集。真实麦克风、设备切换、系统声音和 4K60 体验仍需实机验收，自动化通过不代表画质/FPS 保证。
+
+原生固定 H.264 硬件路径，自动选择首个可用硬件适配器；不保证一定选择 NVIDIA。当前不是原生 AV1。兼容观看者复用输出，不同网络需求可派生多个输出；每路最多三个直连观看者。P2P/STUN 对对称 NAT 或禁 UDP 网络没有全覆盖保证，TURN/SFU/多级转发未接入。
+
+## 退出、诊断与更新
+
+关闭窗口或菜单退出：先结束媒体，再释放本次 App/采集进程。无需关闭日常浏览器。原生组件崩溃时语音聊天仍可用，重启客户端后重新开始原生共享；刷新/掉线后不自动恢复已结束采集。
+
+F12 打开诊断工具。页面“复制诊断”提供摘要；原生日志位于 `%APPDATA%\EliYork Voice\native\logs\client.log`，客户端生命周期日志在同目录上级 `desktop.log`。日志可含故障/网络信息，分享前核对。不要分享 App 配置/本机 capability。
+
+查看 NVIDIA 硬编：对应共享的 capture-state 应有 hardware=true、codec=h264、NVIDIA adapterName/encoderName，并与接收 video/H264、GPU Video Encode 负载对照；不能仅凭显卡存在或 H.264 文案确认。详细测试步骤见项目 `integrations/piik/ACCEPTANCE.md`。
+
+## 在线更新（0.1.1 起）
+
+菜单 **EliYork Voice → 检查客户端更新**。启动 15 秒后及每 6 小时静默检查，只在菜单标记新版本。你选择“下载更新”后才下载，任务栏显示进度；完成后选择“退出并更新”或“稍后”。不会自动中断通话，不会在普通退出时偷偷安装；下次可再次通过菜单安装。安装前停止本次原生 App/采集进程。
+
+更新源固定为 `https://voice.eliyork.com/downloads/windows/`，使用 electron-updater 6.8.10 / NSIS，每用户安装、HTTPS 与 SHA512 完整性验证。当前没有代码签名证书，HTTPS 和摘要不能代替发布者签名；SmartScreen 仍可能提示。更新失败仍可使用旧版本。新版不强制降级；撤回坏版时先停止发布，再以更高版本号发布修复，或用户手动安装保留的旧版。
+
+更新包约 150 MB，服务器会限制下载速度与并发，下载可能需要约 10 分钟；网络忙时可稍后重试。网站界面更新仍通过刷新获得；更新客户端用于 Electron/Piik/桌面权限等本机代码。卸载使用 Windows“已安装的应用”，默认保留 AppData 设置。
+
+本构建未使用代码签名证书，Windows SmartScreen 可能显示未知发布者/拦截。核对提供方和 ZIP SHA256 后自行决定是否运行；不会自动绕过 SmartScreen。
+
+## 来源和许可证
+
+Piik 上游固定版本见 `build.json`，原 MIT 声明在 `resources/native/LICENSE-Piik.txt`，Go/Pion/WebRTC 等声明在 `resources/native/THIRD-PARTY-NOTICES.txt`。Electron LICENSE、LICENSES.chromium.html 随运行库保留。EliYork 项目 LICENSE 同包保留，不把第三方许可笼统归为项目 ISC。

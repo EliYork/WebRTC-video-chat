@@ -32,7 +32,7 @@ function load() {
         clearTimeout,
     };
     vm.runInNewContext(source, { window });
-    return { api: window.VoiceShareDiagnostics };
+    return { api: window.VoiceShareDiagnostics, window };
 }
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
@@ -68,7 +68,7 @@ test('presentation callback is sampled separately and cancelled when panel is re
     api.sync(input);
     await flush();
     const snapshot = JSON.parse(tile.children[0].children[2].textContent);
-    assert.equal(snapshot.诊断格式, 4);
+    assert.equal(snapshot.诊断格式, 5);
     assert.equal(snapshot.播放画面.提交合成器帧率, null);
     api.remove(tile);
     assert.equal(cancelled, 1);
@@ -277,4 +277,104 @@ test('call log samples a collapsed share and keeps compositor callbacks alive un
     assert.equal(cancelled, 0);
     api.remove(tile);
     assert.equal(cancelled, 1);
+});
+
+test('cached stats are invalidated on source replacement; late reads cannot revive the previous path', async () => {
+    const { api } = load(); const tile = new Element(); let finish;
+    const old = { tile, isScreenSharing: true, stream: {}, pc: { getStats: () => new Promise((resolve) => { finish = resolve; }) } };
+    const pending = api.sync(old, { force: true }); await flush();
+    const next = { ...old, stream: {}, pc: { screenRoute: 'SFU', getStats: async () => new Map() } };
+    api.sync(next, { force: true });
+    assert.equal(api.getCached(tile), undefined);
+    finish(new Map()); assert.equal(await pending, undefined);
+    await api.sync(next, { force: true });
+    assert.equal(api.getCached(tile).连接[0].路径, 'SFU');
+    api.remove(tile); assert.equal(api.getCached(tile), undefined);
+});
+
+test('metric availability distinguishes a first interval, unsupported counters, measured zero and repeated timestamps', () => {
+    const { api } = load(); const row = { id: 'r', type: 'inbound-rtp', timestamp: 1000, framesDecoded: 3 };
+    const first = api.summarize([], row);
+    assert.equal(first.指标状态.区间解码帧率, '未采样'); assert.equal(first.指标状态.区间完整接收帧率, '未提供');
+    const zero = api.summarize([], { ...row, timestamp: 2000 }, row);
+    assert.equal(zero.区间解码帧率, 0); assert.equal(zero.指标状态.区间解码帧率, '已采样');
+    assert.equal(api.summarize([], row, row).统计状态, '数据过期');
+});
+
+test('presentation callback stopped by a hidden panel can rearm on forced sampling for the same video', async () => {
+    const { api } = load();
+    const tile = new Element();
+    let callback;
+    let scheduled = 0;
+    const video = { requestVideoFrameCallback(fn) { callback = fn; return ++scheduled; }, cancelVideoFrameCallback() {} };
+    const input = { tile, video, isScreenSharing: true };
+    api.sync(input);
+    tile.children[0].open = true;
+    await api.sync(input);
+    tile.children[0].open = false;
+    callback(0, { presentedFrames: 1 });
+    assert.equal(scheduled, 1);
+    await api.sync(input, { force: true });
+    assert.equal(scheduled, 2);
+    callback(0, { presentedFrames: 2 });
+    assert.equal(scheduled, 3);
+    api.remove(tile);
+});
+
+for (const [width, height, fps] of [[1920, 1080, 60], [2560, 1440, 60], [3840, 2160, 60], [1920, 1080, 30]]) {
+    test(`AV1 metrics preserve actual dimensions and distinct capture/encode/send cadence ${width}x${height}@${fps}`, () => {
+        const { api } = load();
+        const before = { id: 'out', timestamp: 1000, framesEncoded: 100, framesSent: 100, bytesSent: 1000 };
+        const after = { ...before, timestamp: 2000, type: 'outbound-rtp', kind: 'video', framesEncoded: 100 + fps - 5, framesSent: 100 + fps - 10, bytesSent: 1001000, frameWidth: width, frameHeight: height, codecId: 'av1', mediaSourceId: 'capture' };
+        const captureBefore = { id: 'capture', timestamp: 1000, frames: 100 };
+        const capture = { ...captureBefore, timestamp: 2000, frames: 100 + fps };
+        const sample = api.summarize([{ id: 'av1', mimeType: 'video/AV1' }, capture], after, before, captureBefore);
+        assert.equal(sample.编码, 'video/AV1');
+        assert.equal(sample.宽, width); assert.equal(sample.高, height);
+        assert.equal(sample.区间采集帧率, fps);
+        assert.equal(sample.区间编码帧率, fps - 5);
+        assert.equal(sample.区间发送帧率, fps - 10);
+        assert.equal(sample.码率_Mbps, 8);
+    });
+}
+
+test('presentation uses callback timestamps across independent collection clocks and visibility epochs', async () => {
+    const { api, window } = load();
+    const listeners = new Map();
+    window.document.addEventListener = (name, fn) => listeners.set(name, fn);
+    window.document.removeEventListener = (name, fn) => { assert.equal(listeners.get(name), fn); listeners.delete(name); };
+    let now = 0, callback;
+    window.performance = { now: () => now };
+    const video = { requestVideoFrameCallback(fn) { callback = fn; return 1; }, cancelVideoFrameCallback() {} };
+    const input = { tile: new Element(), video, isScreenSharing: true };
+    const read = () => api.sync(input, { force: true });
+    await read();
+    callback(1000, { presentedFrames: 60 }); now = 1300;
+    assert.equal((await read()).播放画面.提交合成器帧率, null);
+    callback(2000, { presentedFrames: 120 }); now = 2010;
+    assert.equal((await read()).播放画面.提交合成器帧率, 60, 'collector interval is only 710 ms');
+    assert.equal((await read()).播放画面.提交合成器帧率, null, 'no new callback is not a measured zero');
+    window.document.hidden = true; listeners.get('visibilitychange')();
+    callback(2100, { presentedFrames: 125 }); now = 2200;
+    assert.equal((await read()).播放指标状态, '后台不测量');
+    window.document.hidden = false; listeners.get('visibilitychange')();
+    callback(30000, { presentedFrames: 1800 }); now = 30001;
+    assert.equal((await read()).播放画面.提交合成器帧率, null, 'discard background catch-up');
+    callback(31000, { presentedFrames: 1860 }); now = 31001;
+    assert.equal((await read()).播放画面.提交合成器帧率, 60);
+    now = 35000;
+    assert.equal((await read()).播放画面.提交合成器帧率, null, 'stale callback cannot imply current playback');
+    input.stream = {};
+    callback(35001, { presentedFrames: 2100 }); now = 35002;
+    assert.equal((await read()).播放画面.提交合成器帧率, null, 'new stream resets the baseline');
+    api.remove(input.tile);
+    assert.equal(listeners.size, 0);
+});
+
+test('Piik derived connections replace unrelated PeerJS stats without collecting another media path', async () => {
+    const { api } = load();
+    const piikConnections = [{ 序号: 1, 状态: '已采样', 统计来源: 'Piik WebRTC stats', 视频流: [{ 编码: 'video/H264', 区间解码帧率: 60 }] }];
+    const result = await api.sync({ tile: new Element(), isScreenSharing: true,
+        piikConnections, pc: { getStats() { assert.fail('must not query voice connection'); } } }, { force: true });
+    assert.equal(result.连接, piikConnections);
 });

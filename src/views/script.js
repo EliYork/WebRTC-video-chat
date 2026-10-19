@@ -2,7 +2,7 @@ import '/js/shared/morph-icon-ui.js';
 import { sanitizeVoiceDiagnostic } from '/js/shared/voice-diagnostic-schema.js';
 
 /* eslint-disable no-console */
-console.info('[page-layout] script boot v2 ' + new Date().toISOString());
+console.info('[stage-layout] script boot ' + new Date().toISOString());
 let socket;
 let callDiagnostics;
 
@@ -18,10 +18,6 @@ const mediaDockRoot = byId('buttons');
 const chatPanelRoot = byId('chat-panel');
 const sidebarRoot = byId('channel-sidebar');
 const chatTitle = byId('chatTitle');
-const mobileBackToChannelsBtn = byId('mobileBackToChannels');
-const mobilePrevTileBtn = byId('mobilePrevTile');
-const mobileNextTileBtn = byId('mobileNextTile');
-const mobileTileCount = byId('mobileTileCount');
 const noiseSettingsUI = window.VoiceNoiseSettingsUI;
 const remoteVolumeUI = window.VoiceRemoteVolumeUI;
 const copyLinkUI = window.VoiceCopyLinkUI;
@@ -33,22 +29,7 @@ const fullscreenControls = window.VoiceFullscreenControls;
 const localScreenSharePreviewControllerApi =
     window.VoiceLocalScreenSharePreviewController;
 const voiceJoinOverlayUI = window.VoiceJoinOverlayUI;
-const layoutInteractionUI = window.PageLayoutInteractionUI;
-const layoutToolbarUI = window.PageLayoutToolbarUI;
-const layoutComponentMenuUI = window.PageLayoutComponentMenuUI;
-const layoutRecoveryUI = window.PageLayoutRecoveryUI;
-const layoutSnapUtils = window.PageLayoutSnapUtils;
-const layoutResizeUtils = window.PageLayoutResizeUtils;
-const layoutStorage = window.PageLayoutStorage;
-const layoutConfig = window.PageLayoutConfig;
-const layoutComponents = window.PageLayoutComponents;
-const layoutPlacementUtils = window.PageLayoutPlacementUtils;
-const layoutWindowManagerRuntime = window.PageLayoutWindowManagerRuntime;
-const layoutComponentRuntime = window.PageLayoutComponentRuntime;
-const layoutStoreRuntime = window.PageLayoutStoreRuntime;
-const morphIconUI = window.VoiceMorphIconUI;
 const roomUIState = window.VoiceRoomUIState;
-const mobileRoomState = window.VoiceMobileRoomState;
 const presenceViewModel = window.VoicePresenceViewModel;
 const participantsListUI = window.VoiceParticipantsListUI;
 const tileStatusUI = window.VoiceTileStatusUI;
@@ -74,26 +55,6 @@ const voiceMediaQualityView = window.VoiceMediaQualityView;
 const voiceMediaQualityRuntimeApi = window.VoiceMediaQualityRuntime;
 const { getMemberMicStatus, getMemberStatusIcons, getMemberTileText } =
     presenceViewModel;
-const {
-    PAGE_COMPONENT_TYPES,
-    LAYOUT_ITEM_TYPES,
-    LEGACY_LAYOUT_ITEM_TYPES,
-    AUTO_LAYOUT_GRID_SIZES,
-    PANEL_COLLAPSED_HEIGHT,
-    getDefaultComponentConfig,
-    normalizeComponentConfig,
-    getDefaultLayoutPreferences,
-    normalizeLayoutPreferences,
-    getLayoutPreferenceValue,
-    getPanelRegistry,
-    getPanelConfig,
-} = layoutConfig;
-const layoutIds = window.PageLayoutIds;
-const {
-    getDefaultLayoutItems,
-    getLayoutComponentId,
-    renderLayoutComponentTile: renderLayoutComponentTileContent,
-} = layoutComponents;
 const getCameraConstraints = () =>
     selectedCameraDeviceId && selectedCameraDeviceId !== 'default'
         ? { deviceId: { exact: selectedCameraDeviceId } }
@@ -102,46 +63,7 @@ const getCameraConstraints = () =>
 const CURSOR_THROTTLE_MS = 40;
 const CURSOR_IDLE_MS = 700;
 const MOBILE_BREAKPOINT = 768;
-const TILE_MIN_WIDTH = 180;
-const TILE_MIN_HEIGHT = 120;
-const TILE_BASE_Z_INDEX = 2;
-const TILE_RESIZE_DIRECTIONS = ['n', 'e', 's', 'w', 'ne', 'nw', 'se', 'sw'];
-const LAYOUT_RESIZE_HOVER_CLASSES = [
-    'is-layout-resize-hover',
-    ...TILE_RESIZE_DIRECTIONS.map((direction) => `resize-hover-${direction}`),
-];
-const TILE_RESIZE_CURSORS = {
-    n: 'ns-resize',
-    s: 'ns-resize',
-    e: 'ew-resize',
-    w: 'ew-resize',
-    nw: 'nwse-resize',
-    se: 'nwse-resize',
-    ne: 'nesw-resize',
-    sw: 'nesw-resize',
-};
-const TILE_RESIZE_EDGE_INSET_PX = 8;
-const TILE_RESIZE_EDGE_OUTSET_PX = 8;
-const TILE_RESIZE_CORNER_SIZE_PX = 24;
-const LAYOUT_MIN_GRID_W = 3;
-const LAYOUT_MIN_GRID_H = 2;
-const PAGE_GRID_COLUMNS = 32;
-const PAGE_GRID_ROWS = 18;
-const PAGE_STORAGE_VERSION = 2;
-const LEGACY_PAGE_STORAGE_VERSIONS = [1];
-const PAGE_LAYOUT_STORAGE_KEY_PREFIX = 'voicePageLayout:v4';
-const MEDIA_DOCK_LAYOUT_ITEM_ID = 'page-mediaControlsPanel';
-const MEDIA_DOCK_DEFAULT_GRID = Object.freeze({ x: 1, y: 12, w: 7, h: 5 });
-const PINNED_TILE_Z_INDEX_BASE = 10000;
-const PAGE_SINGLETON_TYPES = new Set(
-    getPanelRegistry().map((panel) => panel.id)
-);
-const REAL_DOM_PAGE_TYPES = PAGE_SINGLETON_TYPES;
-const PAGE_TILE_MIN_WIDTH = 160;
-const PAGE_TILE_MIN_HEIGHT = 80;
-let pageLayoutBoard;
-let pageLayoutRuntime;
-let pageLayoutStoreRuntime;
+let stageLayout;
 let chatPanelRuntime;
 let sidebarRuntime;
 let mediaDockAdapter;
@@ -150,10 +72,9 @@ let mediaDockRuntime;
 const notifyMediaDock = () => {
     callDiagnostics?.observe();
     mediaDockAdapter?.notify();
+    stageLayout?.sync();
 };
 
-const getLayoutPreference = (key) =>
-    pageLayoutStoreRuntime?.getLayoutPreference(key);
 const cursorSharingMedia = window.matchMedia(
     `(max-width: ${MOBILE_BREAKPOINT}px), (pointer: coarse)`
 );
@@ -247,6 +168,7 @@ const localTrackEndedController =
     });
 let voiceMediaQualityRuntime;
 let screenSfuRuntime;
+const usingPiik = window.voiceScreenMediaProvider === 'piik';
 const remoteScreenSfuSources = new Map();
 const remoteP2pTrackRoles = new Map();
 const renderRemoteMedia = (peerId, baseStream, generation) => {
@@ -352,13 +274,24 @@ const voicePeerRegistry = voicePeerRegistryApi.createRegistry({
     onOutgoingConnected: ({ peerId }) => {
         if (screenSfuRuntime?.usesServer(peerId)) refreshVoiceCallsForLocalMedia(currentPeer);
     },
+    onCodecFallback: ({ reason, primary }) => {
+        callDiagnostics?.record('共享编码回退', { reason, primary, 路径: 'P2P' });
+        if (currentPeer) refreshVoiceCallsForLocalMedia(currentPeer);
+    },
+    onCodecFeedback: (feedback) => {
+        if (joinedVoiceRoomId && localVoiceSessionGeneration)
+            ensureSocket().emit('screen:codec-feedback', { ...feedback, voiceSessionGeneration: localVoiceSessionGeneration });
+    },
     onWarning: (message, error) => console.warn(message, error || ''),
     removeRemoteTile: ({ peerId, tile }) => removeRemoteTile(peerId, tile),
 });
-screenSfuRuntime = window.VoiceScreenSfuRuntime.createRuntime({
+screenSfuRuntime = (usingPiik ? window.PiikScreenMedia : window.VoiceScreenSfuRuntime).createRuntime({
+    onPublicationFailure: () => { if (sharingNow || screenShareRequestPending) stopScreenShare(currentPeer); },
     config: window.voiceScreenSfuConfig || {},
     onRouteEvent: (event) => callDiagnostics?.record('共享路径事件', event),
     onReceiverFailure: (failure) => callDiagnostics?.record('SFU接收回退诊断', failure),
+    onReceiverIssue: (issue) => callDiagnostics?.record('SFU接收异常诊断', issue),
+    onCodecEvent: (event) => callDiagnostics?.record('共享编码回退', event),
     onRoutes: () => {
         updateScreenP2pBudget();
         if (currentPeer) refreshVoiceCallsForLocalMedia(currentPeer);
@@ -405,7 +338,12 @@ const getDiagnosticQualitySource = (peerId) => {
                 captureAudio: voiceMediaLifecycle.describeScreenAudio(currentScreenStream, navigator.mediaDevices?.getSupportedConstraints?.()),
                 shareOptions: currentScreenShareSession?.shareOptions,
                 codecDecision: currentScreenShareSession?.codecDecision,
+                onSample: (snapshot) => screenSfuRuntime.observeSender(snapshot, {
+                    directViewers: [...voiceMediaTargets].filter((id) => !screenSfuRuntime.usesServer(id)).length,
+                    budget: window.voiceScreenSfuConfig?.p2pBudget || 24000000,
+                }),
                 serverHealth: screenSfuRuntime.getSendHealth(),
+                piikConnections: usingPiik ? screenSfuRuntime.getDiagnosticConnections?.() : undefined,
                 outgoingConnections: [screenSfuRuntime.getSendConnection(), ...voicePeerRegistry.getPeerIds().map((id) => {
                     const call = voicePeerRegistry.getSnapshot(id)?.outgoingCall;
                     return call?.peerConnection || call?._pc;
@@ -431,13 +369,15 @@ const getDiagnosticQualitySource = (peerId) => {
                 microphoneGain: noiseSettingsUI.getMicGain(),
             },
             routeStatus: screenSfuRuntime.snapshot(),
+            piikConnections: usingPiik ? screenSfuRuntime.getDiagnosticConnections?.(peerId) : undefined,
             outputGain: remoteAudioGain.getSnapshot(),
             ...(serverSource ? { pc: serverSource.pc } : {}),
             serverHealth: serverSource?.serverHealth,
-            screenRoute: serverSource ? '服务器转发' : 'P2P',
-            routeControl: {
+            screenRoute: usingPiik ? 'Piik P2P' : serverSource ? '服务器转发' : 'P2P',
+            routeControl: usingPiik ? undefined : {
                 get: () => screenSfuRuntime.getReceiveRoute(peerId),
                 change: (mode) => screenSfuRuntime.setReceiveRoute(peerId, mode),
+                observe: (pc, reports) => { if (!serverSource) screenSfuRuntime.observeP2p(peerId, pc, reports); },
             },
             isScreenSharing: screenSharers.has(peerId),
             stream: playbackStream,
@@ -451,11 +391,6 @@ voiceMediaQualityRuntime = voiceMediaQualityRuntimeApi.createRuntime({
     view: voiceMediaQualityView,
 });
 window.exportVoiceMediaDebug = () => voiceMediaDebug.export();
-let tileLayoutZIndex = TILE_BASE_Z_INDEX;
-let pageLayoutWindowManagerRuntime;
-let pageLayoutComponentRuntime;
-const layoutResizeBoundBoards = new WeakSet();
-const activeLayoutInteractionCancels = new Set();
 // eslint-disable-next-line no-unused-vars
 let noiseProcessorActive = false;
 let noiseRawStream = null;
@@ -513,52 +448,9 @@ selectedVoiceRoomId = ROOM_ID;
 
 const isMobileLayout = () => window.innerWidth <= MOBILE_BREAKPOINT;
 
-const getVideoTiles = () =>
-    Array.from((pageLayoutBoard || videoGrid).querySelectorAll('.video-tile'));
-
-const mobileRoomController = mobileRoomState.createMobileRoomState({
-    refs: {
-        count: mobileTileCount,
-        mainLayout,
-        nextButton: mobileNextTileBtn,
-        previousButton: mobilePrevTileBtn,
-    },
-    getTiles: getVideoTiles,
-    getLocalTileId: () => 'local-video',
-    getRemotePeerOrder: () => remotePeerOrder,
-    isScreenSharingPeer: (peerId) => screenSharers.has(peerId),
-    isMobileLayout,
-    renderMobileTileNav: roomUIState.renderMobileTileNav,
-    toggleRoomClass: roomUIState.toggleClass,
-});
-
-const CORE_PAGE_TYPES = getPanelRegistry().map((panel) => panel.id);
-
-const getPagePanelLabel = (type) =>
-    pageLayoutRuntime?.getPagePanelLabel(type) || type;
-
-const syncLayoutGridMetadata = () => {
-    pageLayoutRuntime?.syncLayoutGridMetadata();
-};
-
-const restoreOriginalStaticLayout = () => {
-    pageLayoutRuntime?.restoreOriginalStaticLayout();
-};
-
-const ensureWindowManagerToolbar = () =>
-    pageLayoutWindowManagerRuntime?.bindToolbarEvents().settingsToggle;
-
-const syncWindowManagerUI = () =>
-    pageLayoutWindowManagerRuntime?.syncWindowManagerUI();
-
-const updateMobileTileView = () => mobileRoomController.updateTileView();
-
-const setMobileRoomView = (isInRoom) =>
-    mobileRoomController.setRoomView(isInRoom);
-
-const updateMobileRoomState = () => {
-    mobileRoomController.updateRoomState(Boolean(joinedVoiceRoomId));
-};
+const getVideoTiles = () => Array.from(mainLayout.querySelectorAll('.video-tile'));
+const updateMobileTileView = () => stageLayout?.sync();
+const updateMobileRoomState = () => stageLayout?.sync();
 
 const updateCallDuration = () => {
     if (!callStartedAt) {
@@ -613,6 +505,7 @@ const getLocalPresenceMember = () => ({
     senderName: getChatName(),
     joinedVoice: Boolean(joinedVoiceRoomId),
     ...getLocalPresenceState(),
+    outputMuted,
 });
 
 const emitLocalPresenceUpdate = () => {
@@ -725,6 +618,8 @@ const getMediaDockSnapshot = () => {
         outputSelectionUnsupported: !canSelectAudioOutput(),
         outputVolume,
         screenShareEnabled: Boolean(sharingNow),
+        screenShareOptions: currentScreenShareSession?.shareOptions,
+        screenShareAudioActive: Boolean(currentScreenStream?.getAudioTracks().some(track => track.readyState === 'live')),
         screenShareError: mediaErrors.screen,
         screenSharePending:
             screenShareRequestPending || Boolean(screenOperation.promise),
@@ -1037,6 +932,13 @@ const syncRoomCompositionState = () => {
         refs: { chatTitle },
         channelName: viewingName,
     });
+    const viewedChannel = Array.from(sidebarRoot.querySelectorAll('[data-channel-room]'))
+        .find((channel) => channel.dataset.channelRoom === viewingRoomId);
+    const description = byId('chatDescription');
+    if (description) {
+        description.textContent = viewedChannel?.dataset.channelDescription || '';
+        description.hidden = !description.textContent;
+    }
 
     updateLocalUserCard();
     updateMobileRoomState();
@@ -1064,6 +966,7 @@ const publishLocalMediaToPeer = (
     stream,
     { generation = localVoiceMediaGeneration, ...options } = {}
 ) => {
+    if (usingPiik) stream = getPeerMediaStream(peerId, stream);
     if (!voiceMediaTargets.has(peerId)) {
         return undefined;
     }
@@ -1077,6 +980,7 @@ const publishLocalMediaToPeer = (
             metadata: {
                 ...getVoiceCallMetadata(stream),
                 ...options.metadata,
+                screenVoiceSessionGeneration: localVoiceSessionGeneration,
             },
         },
         peer,
@@ -1254,44 +1158,15 @@ const bindVoiceSocketHandlers = (activeSocket) => {
 const getChatName = () =>
     chatPanelRuntime?.getDisplayName() || chatNameState.getStoredChatName();
 
-const getMemberTileToggle = (member) => {
-    const memberPeerId = member.peerId;
-
-    if (!memberPeerId) {
-        return undefined;
-    }
-
-    if (memberPeerId === localPeerId) {
-        const localTile = document.getElementById('local-video');
-        const layoutItem = localTile?.dataset.layoutItemId
-            ? getTileLayoutItem(localTile.dataset.layoutItemId)
-            : null;
-        const isVisible =
-            layoutItem?.visible !== false &&
-            (!localTile || !localTile.classList.contains('is-layout-hidden'));
-
-        return {
-            icon: isVisible ? 'fas fa-eye' : 'fas fa-eye-slash',
-            label: '显示/隐藏我的语音组件',
-            onClick: () => toggleLocalPeerTileVisibility(),
-        };
-    }
-
-    const tileForPeer = document.getElementById(memberPeerId);
-    const layoutItemId =
-        tileForPeer?.dataset.layoutItemId ||
-        getRemoteLayoutItemId(memberPeerId, member);
-    const layoutItem = getTileLayoutItem(layoutItemId);
-    const isVisible =
-        layoutItem?.visible !== false &&
-        (!tileForPeer || !tileForPeer.classList.contains('is-layout-hidden'));
-
-    return {
-        icon: isVisible ? 'fas fa-eye' : 'fas fa-eye-slash',
-        label: '显示/隐藏组件',
-        onClick: () => toggleMemberTileVisibility(memberPeerId),
-    };
-};
+const getMemberTileToggle = (member) => member.peerId ? {
+    icon: 'fas fa-volume-up',
+    label: member.peerId === localPeerId ? '查看我的成员卡片' : '成员音量',
+    onClick: (event) => {
+        const tile = document.getElementById(member.peerId === localPeerId ? 'local-video' : member.peerId);
+        if (tile && member.peerId !== localPeerId) showPeerVolumePopover(event, tile);
+        else tile?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    },
+} : undefined;
 
 const reconcilePresenceState = ({
     channels = [],
@@ -1531,6 +1406,11 @@ const ensureSocket = () => {
         reconnectionDelayMax: 8000,
     });
     screenSfuRuntime.attachSocket(socket);
+    socket.on('screen:codec-feedback', (payload) => {
+        if (payload?.voiceSessionGeneration === localVoiceSessionGeneration && voiceMediaTargets.has(payload.peerId))
+            voicePeerRegistry.handleCodecFeedback(payload);
+    });
+    socket.on('screen:route-pressure', (payload) => screenSfuRuntime.receivePressure(payload));
 
     socket.on('cursor:move', renderRemoteCursor);
     socket.on('cursor:leave', markRemoteCursorIdle);
@@ -1550,21 +1430,12 @@ const ensureSocket = () => {
                 return;
             }
 
+            const member = presenceMembersByPeerId.get(peerId);
+            if (member) member.screenSharing = sharing;
             if (sharing) {
                 screenSharers.add(peerId);
             } else {
                 screenSharers.delete(peerId);
-            }
-            if (sharing && getLayoutPreference('autoShowScreenShare')) {
-                const tile = document.getElementById(peerId);
-                if (tile && tile.classList.contains('is-layout-hidden')) {
-                    setTileLayoutItemVisibility(
-                        tile.dataset.layoutItemId,
-                        true
-                    );
-                    tile.classList.remove('is-layout-hidden');
-                    bringTileLayoutToFront(tile);
-                }
             }
             updateAllVideoTileStatus();
             voiceMediaQualityRuntime?.syncPeer(peerId);
@@ -1847,8 +1718,6 @@ const adoptAudioPipeline = (stream) => {
     return stream;
 };
 
-const getFullscreenElement = () => fullscreenControls.getFullscreenElement();
-
 const updateFullscreenButtonStates = () => {
     fullscreenControls.updateButtonStates();
 };
@@ -1914,1505 +1783,33 @@ const getTileType = (tile, hasVideo, member) => {
     return hasVideo ? 'remote-video' : 'remote-audio';
 };
 
-const sanitizeLayoutIdPart = layoutIds.sanitizeLayoutIdPart;
-
-const getRemoteMemberForPeerId = (peerId) =>
-    peerId ? presenceMembersByPeerId.get(peerId) || null : null;
-
-const getRemoteLayoutItemId = (
-    peerId,
-    member = getRemoteMemberForPeerId(peerId)
-) =>
-    layoutIds.getRemoteLayoutItemId(peerId, member, {
-        roomId: joinedVoiceRoomId,
-    });
-
-const getLegacyRemoteLayoutPeerId = layoutIds.getLegacyRemoteLayoutPeerId;
-
-const normalizeRemotePeerLayoutId = (id, peerId, member) => {
-    return layoutIds.normalizeRemotePeerLayoutId(id, peerId, member, {
-        roomId: joinedVoiceRoomId,
-    });
-};
-
-const getRemoteLayoutAliasIds = (peerId, member, preferredId) => {
-    return layoutIds.getRemoteLayoutAliasIds(peerId, member, preferredId, {
-        roomId: joinedVoiceRoomId,
-    });
-};
-
-const getTileLayoutId = (tile, member) => {
-    if (tile.dataset.pageLayoutType) {
-        return `page-${sanitizeLayoutIdPart(tile.dataset.pageLayoutType)}`;
-    }
-
-    if (tile.dataset.layoutComponentType) {
-        return `component-${sanitizeLayoutIdPart(
-            tile.dataset.layoutComponentType
-        )}`;
-    }
-
-    const peerId = tile.dataset.peerId;
-
-    if (tile.dataset.tileType === 'screen-share' && peerId) {
-        return `screen-${sanitizeLayoutIdPart(peerId)}`;
-    }
-
-    if (tile.id === 'local-video') {
-        return `local-${sanitizeLayoutIdPart(localPeerId || socket?.id || 'me')}`;
-    }
-
-    if (peerId) {
-        return getRemoteLayoutItemId(
-            peerId,
-            member || getRemoteMemberForPeerId(peerId)
-        );
-    }
-
-    return `peer-${sanitizeLayoutIdPart(tile.id)}`;
-};
-
-const getTileLayoutItemId = (tile) =>
-    tile.dataset.layoutItemId || tile.dataset.layoutId || getTileLayoutId(tile);
-
-const isPanelTilePinned = (tile) => {
-    if (!tile) {
-        return false;
-    }
-
-    return (
-        tile.classList.contains('is-panel-pinned') ||
-        getTileLayoutItem(tile.dataset.layoutItemId)?.config?.pinned === true
-    );
-};
-
-const normalizeTileLayoutZIndex = (value, { pinned = false } = {}) => {
-    const zIndex = Number(value);
-    const baseZIndex = pinned ? PINNED_TILE_Z_INDEX_BASE : TILE_BASE_Z_INDEX;
-
-    return Number.isFinite(zIndex) && zIndex >= baseZIndex
-        ? Math.round(zIndex)
-        : baseZIndex;
-};
-
-const getTileLayoutZIndex = (tile) =>
-    normalizeTileLayoutZIndex(
-        tile.style.zIndex || window.getComputedStyle(tile).zIndex,
-        { pinned: isPanelTilePinned(tile) }
-    );
-
-const applyTileLayoutZIndex = (tile, zIndex) => {
-    tile.style.zIndex = String(
-        normalizeTileLayoutZIndex(zIndex, {
-            pinned: isPanelTilePinned(tile),
-        })
-    );
-};
-
-const getNextTileLayoutZIndexForBand = (pinned = false) => {
-    const baseZIndex = pinned ? PINNED_TILE_Z_INDEX_BASE : TILE_BASE_Z_INDEX;
-    const highestTileZIndex = getVideoTiles().reduce((highest, candidate) => {
-        const candidateZIndex = getTileLayoutZIndex(candidate);
-
-        if (pinned) {
-            return isPanelTilePinned(candidate)
-                ? Math.max(highest, candidateZIndex)
-                : highest;
-        }
-
-        return candidateZIndex < PINNED_TILE_Z_INDEX_BASE
-            ? Math.max(highest, candidateZIndex)
-            : highest;
-    }, baseZIndex);
-
-    tileLayoutZIndex = Math.max(tileLayoutZIndex, highestTileZIndex) + 1;
-
-    return tileLayoutZIndex;
-};
-
-const getNextTileLayoutZIndex = (tile) =>
-    getNextTileLayoutZIndexForBand(isPanelTilePinned(tile));
-
-const getWindowStackBandTiles = (pinned) =>
-    getVideoTiles()
-        .filter(
-            (candidate) => !candidate.classList.contains('is-layout-hidden')
-        )
-        .filter((candidate) => isPanelTilePinned(candidate) === pinned)
-        .sort((a, b) => {
-            const zDifference = getTileLayoutZIndex(a) - getTileLayoutZIndex(b);
-            if (zDifference !== 0) {
-                return zDifference;
-            }
-            return getVideoTiles().indexOf(a) - getVideoTiles().indexOf(b);
-        });
-
-const getLayoutBoardForTile = (tile) => {
-    if (tile && !tile.dataset.pageLayoutType && videoGrid?.contains(tile)) {
-        return videoGrid;
-    }
-
-    return pageLayoutBoard || videoGrid;
-};
-
-const getPanelCollapsedHeight = () => {
-    const boardHeight =
-        getLayoutBoardForTile()?.getBoundingClientRect?.().height ||
-        window.innerHeight ||
-        PANEL_COLLAPSED_HEIGHT;
-
-    return boardHeight / PAGE_GRID_ROWS;
-};
-
-const getTileMinimumSize = (tile) => {
-    const panelConfig = getPanelConfig(tile?.dataset?.pageLayoutType);
-    const collapsed =
-        tile?.classList?.contains('is-panel-collapsed') ||
-        tile?.dataset?.panelCollapsing === 'true';
-
-    return {
-        width: panelConfig?.minWidth || PAGE_TILE_MIN_WIDTH,
-        height: collapsed
-            ? getPanelCollapsedHeight()
-            : panelConfig?.minHeight || PAGE_TILE_MIN_HEIGHT,
-    };
-};
-
-const bringTileLayoutToFront = (tile) => {
-    if (
-        !tile ||
-        isMobileLayout() ||
-        fullscreenControls.isTileLayoutWriteBlocked(tile)
-    ) {
-        return;
-    }
-
-    const pinned = isPanelTilePinned(tile);
-    const baseZIndex = pinned ? PINNED_TILE_Z_INDEX_BASE : TILE_BASE_Z_INDEX;
-    const stack = getWindowStackBandTiles(pinned).filter(
-        (candidate) => candidate !== tile
-    );
-    stack.push(tile);
-
-    let changed = false;
-    stack.forEach((candidate, index) => {
-        const nextZIndex = baseZIndex + index;
-        if (getTileLayoutZIndex(candidate) !== nextZIndex) {
-            changed = true;
-            applyTileLayoutZIndex(candidate, nextZIndex);
-            syncTileLayoutItemFromElement(candidate, {
-                layout: {
-                    ...getCurrentTileLayout(candidate),
-                    zIndex: nextZIndex,
-                },
-            });
-        }
-    });
-
-    tileLayoutZIndex = Math.max(
-        TILE_BASE_Z_INDEX,
-        baseZIndex + stack.length - 1
-    );
-    if (changed) {
-        saveLayoutToStorage('窗口已置顶');
-    }
-};
-
-const getLayoutSnapContext = (tile) => {
-    const minimumSize = getTileMinimumSize(tile);
-
-    return {
-        board: getLayoutBoardForTile(tile),
-        // Mobile is a flowing view of the same widgets, not a smaller desktop.
-        // Keep grid normalization independent of its narrow, scrolling bounds.
-        boundsOverride: isMobileLayout()
-            ? { width: 1280, height: 720 }
-            : undefined,
-        columns: PAGE_GRID_COLUMNS,
-        rows: PAGE_GRID_ROWS,
-        minGridW: LAYOUT_MIN_GRID_W,
-        minGridH:
-            tile?.classList?.contains('is-panel-collapsed') ||
-            tile?.dataset?.panelCollapsing === 'true'
-                ? 1
-                : LAYOUT_MIN_GRID_H,
-        minTileWidth: minimumSize.width,
-        minTileHeight: minimumSize.height,
-        normalizeZIndex: normalizeTileLayoutZIndex,
-        findTileForLayoutItem,
-        getCurrentTileLayout,
-        applyTileLayout,
-        applyTileLayoutItemToElement,
-        setLayoutItem: setTileLayoutItem,
-        getContextForTile: getLayoutSnapContext,
-    };
-};
-
-const getTileBounds = (tile) =>
-    layoutSnapUtils.getTileBounds(getLayoutSnapContext(tile));
-
-const clampGridLayout = (layout) =>
-    layoutSnapUtils.clampGridLayout(layout, getLayoutSnapContext());
-
-const convertTileLayoutToGrid = (layout) =>
-    layoutSnapUtils.convertTileLayoutToGrid(layout, getLayoutSnapContext());
-
-const convertGridLayoutToPixels = (layout) =>
-    layoutSnapUtils.convertGridLayoutToPixels(layout, getLayoutSnapContext());
-
-const getLayoutPlacementContext = () => ({
-    autoLayoutGridSizes: AUTO_LAYOUT_GRID_SIZES,
-    columns: PAGE_GRID_COLUMNS,
-    rows: PAGE_GRID_ROWS,
-    minGridW: LAYOUT_MIN_GRID_W,
-    minGridH: LAYOUT_MIN_GRID_H,
-    clampGridLayout,
-    convertTileLayoutToGrid,
-});
-
-const isAutoPlacedLayoutType = (type) =>
-    layoutPlacementUtils.isAutoPlacedLayoutType(
-        type,
-        getLayoutPlacementContext()
-    );
-
-const normalizeLayoutItemType = (type) =>
-    LEGACY_LAYOUT_ITEM_TYPES[type] || type;
-
-const getAutoLayoutGridSize = (type) =>
-    layoutPlacementUtils.getAutoLayoutGridSize(
-        type,
-        getLayoutPlacementContext()
-    );
-
-const normalizeAutoLayoutGrid = (type, grid = {}) =>
-    layoutPlacementUtils.normalizeAutoLayoutGrid(
-        type,
-        grid,
-        getLayoutPlacementContext()
-    );
-
-const isLegacyMediaDockGrid = (item = {}) => {
-    const width = Number(item.w);
-    const height = Number(item.h);
-
-    return (
-        Number.isFinite(width) &&
-        Number.isFinite(height) &&
-        (width >= 8 || height <= 3)
-    );
-};
-
-const migrateLoadedLayoutItem = ({
-    item,
-    itemId,
-    payloadVersion,
-    type,
-} = {}) => {
-    if (type === PAGE_COMPONENT_TYPES.MEDIA_CONTROLS_PANEL &&
-        itemId === MEDIA_DOCK_LAYOUT_ITEM_ID &&
-        Number(item.x) === 1 && Number(item.y) === 13 &&
-        Number(item.w) === 8 && Number(item.h) === 4 &&
-        item.config?.collapsed !== true) {
-        return { ...item, y: 12, h: 5 };
-    }
-    if (
-        Number(payloadVersion) >= PAGE_STORAGE_VERSION ||
-        type !== PAGE_COMPONENT_TYPES.MEDIA_CONTROLS_PANEL ||
-        itemId !== MEDIA_DOCK_LAYOUT_ITEM_ID ||
-        !isLegacyMediaDockGrid(item)
-    ) {
-        return item;
-    }
-
-    return {
-        ...item,
-        ...MEDIA_DOCK_DEFAULT_GRID,
-        visible: true,
-    };
-};
-
-const getFallbackTileLayoutForType = (type, layout = {}) =>
-    layoutPlacementUtils.getFallbackTileLayoutForType(
-        type,
-        layout,
-        getLayoutPlacementContext()
-    );
-
-const isRectWithinGrid = (rect) =>
-    layoutPlacementUtils.isRectWithinGrid(rect, getLayoutPlacementContext());
-
-const getOccupiedLayoutRects = (excludeId) => {
-    const rects = [];
-
-    forEachTileLayoutItem((item) => {
-        if (!item?.id || item.id === excludeId || item.visible === false) {
-            return;
-        }
-
-        const grid = clampGridLayout(item.grid || item.layout || {});
-        if (isRectWithinGrid(grid)) {
-            rects.push({
-                id: item.id,
-                type: item.type,
-                ...grid,
-            });
-        }
-    });
-
-    return rects;
-};
-
-const findAvailableLayoutSlot = (type, preferredSize, options = {}) =>
-    layoutPlacementUtils.findAvailableLayoutSlot(type, preferredSize, {
-        ...getLayoutPlacementContext(),
-        ...options,
-        occupiedRects: getOccupiedLayoutRects(options.excludeId),
-    });
-
-const findTileForLayoutItem = (item) =>
-    item?.elementId
-        ? document.getElementById(item.elementId)
-        : getVideoTiles().find(
-              (tile) =>
-                  tile.dataset.layoutItemId === item?.id ||
-                  tile.dataset.layoutId === item?.id
-          );
-
-const showSnapPreview = (tile, layout) => {
-    if (!tile || !layout) {
-        return;
-    }
-
-    const snappedLayout = layoutSnapUtils.snapTileLayoutToGrid(
-        layout,
-        getLayoutSnapContext(tile)
-    );
-
-    layoutInteractionUI.showSnapPreview({
-        board: getLayoutBoardForTile(tile),
-        tile,
-        layout: snappedLayout,
-    });
-};
-
-const hideSnapPreview = () => layoutInteractionUI.hideSnapPreview();
-
-const getLayoutStorageKey = () =>
-    layoutStorage.getLayoutStorageKey({
-        prefix: PAGE_LAYOUT_STORAGE_KEY_PREFIX,
-        roomId: viewingRoomId || selectedVoiceRoomId || 'default',
-    });
-
-const serializeLayoutItems = () => pageLayoutStoreRuntime?.serialize() || [];
-
-const loadLayoutFromStorage = () =>
-    pageLayoutStoreRuntime?.loadLayoutFromStorage() || [];
-
-const getSavedLayoutItemPreference = (itemId) =>
-    pageLayoutStoreRuntime?.getSavedItem(itemId);
-
-const getSavedRemoteLayoutItemPreference = (peerId, member, preferredId) =>
-    pageLayoutStoreRuntime?.getSavedRemoteItem(peerId, member, preferredId);
-
-const showLayoutSaveStatus = (message) =>
-    pageLayoutWindowManagerRuntime?.showSaveStatus(message);
-
-const saveLayoutToStorage = (message = '已保存') => {
-    pageLayoutStoreRuntime?.saveLayoutToStorage(message);
-};
-
-const clearSavedLayout = () => {
-    pageLayoutStoreRuntime?.clearSavedLayout();
-};
-
-const clampTileLayout = (layout) =>
-    layoutSnapUtils.clampTileLayout(layout, getLayoutSnapContext());
-
-const clampTileLayoutForTile = (tile, layout) =>
-    layoutSnapUtils.clampTileLayout(layout, getLayoutSnapContext(tile));
-
-const normalizeTileLayout = (layout = {}) => {
-    if (layout.grid && !Number.isFinite(Number(layout.x))) {
-        return convertGridLayoutToPixels({
-            ...layout.grid,
-            zIndex: layout.zIndex,
-        });
-    }
-
-    return clampTileLayout({
-        x: Number(layout.x) || 0,
-        y: Number(layout.y) || 0,
-        width: Number(layout.width) || TILE_MIN_WIDTH,
-        height: Number(layout.height) || TILE_MIN_HEIGHT,
-        zIndex: layout.zIndex,
-    });
-};
-
-const hasTileMediaTracks = (tile) => {
-    const mediaElement = tile.querySelector('video, audio');
-
-    return (
-        voiceMediaLifecycle.getLiveTracks(mediaElement?.srcObject).length > 0
-    );
-};
-
-const getLayoutItemTypeForTile = (tile, tileType) => {
-    if (tile.dataset.pageLayoutType) {
-        return tile.dataset.pageLayoutType;
-    }
-
-    if (tile.dataset.layoutComponentType) {
-        return tile.dataset.layoutComponentType;
-    }
-
-    if (tileType === 'screen-share') {
-        return LAYOUT_ITEM_TYPES.SCREEN_SHARE;
-    }
-
-    if (tile.id === 'local-video') {
-        return LAYOUT_ITEM_TYPES.LOCAL_PEER;
-    }
-
-    if (tile.dataset.peerId) {
-        return LAYOUT_ITEM_TYPES.REMOTE_PEER;
-    }
-
-    if (!hasTileMediaTracks(tile)) {
-        return LAYOUT_ITEM_TYPES.PLACEHOLDER;
-    }
-
-    return LAYOUT_ITEM_TYPES.REMOTE_PEER;
-};
-
-const getTileLayoutItem = (itemId) => pageLayoutStoreRuntime?.getItem(itemId);
-
-const setTileLayoutItem = (item) => pageLayoutStoreRuntime?.setItem(item);
-
-const forEachTileLayoutItem = (callback) => {
-    pageLayoutStoreRuntime?.forEachItem(callback);
-};
-
-const upsertTileLayoutItem = (tile, updates = {}) =>
-    pageLayoutStoreRuntime?.upsertTileLayoutItem(tile, updates);
-
-const applyTileLayoutItemToElement = (
-    tile,
-    item,
-    { applyPosition = item.positioned } = {}
-) => {
-    tile.dataset.layoutItemId = item.id;
-    tile.dataset.layoutItemType = item.type;
-    tile.dataset.layoutVisible = String(item.visible);
-    tile.dataset.layoutGridX = String(item.grid.x);
-    tile.dataset.layoutGridY = String(item.grid.y);
-    tile.dataset.layoutGridW = String(item.grid.w);
-    tile.dataset.layoutGridH = String(item.grid.h);
-    tile.classList.toggle('is-layout-hidden', !item.visible);
-    tile.classList.toggle(
-        'is-panel-collapsed',
-        item.config?.collapsed === true
-    );
-    tile.classList.toggle('is-panel-pinned', item.config?.pinned === true);
-    tile.dataset.panelCollapsed = String(item.config?.collapsed === true);
-    tile.dataset.panelPinned = String(item.config?.pinned === true);
-
-    if (applyPosition) {
-        applyTileLayout(
-            tile,
-            item.config?.collapsed === true
-                ? { ...item.layout, height: getPanelCollapsedHeight() }
-                : item.layout,
-            { syncItem: false }
-        );
-    } else {
-        applyTileLayoutZIndex(tile, item.layout.zIndex);
-    }
-
-    pageLayoutRuntime?.syncPanelActions(tile);
-};
-
-const syncTileLayoutItemFromElement = (tile, updates = {}) =>
-    pageLayoutStoreRuntime?.syncTileLayoutItemFromElement(tile, updates);
-
-const setTileLayoutItemVisibility = (
-    itemId,
-    visible,
-    { syncElement = true } = {}
-) => {
-    pageLayoutStoreRuntime?.setItemVisibility(itemId, visible, {
-        syncElement,
-    });
-};
-
-const isRemoteLayoutAliasForTile = (tile, itemId, nextItemId) => {
-    const peerId = tile?.dataset.peerId;
-
-    if (!peerId || !itemId || !nextItemId || itemId === nextItemId) {
-        return false;
-    }
-
-    return (
-        normalizeRemotePeerLayoutId(
-            itemId,
-            peerId,
-            getRemoteMemberForPeerId(peerId)
-        ) === nextItemId
-    );
-};
-
-const retirePreviousTileLayoutItem = (tile, nextItemId) => {
-    pageLayoutStoreRuntime?.retirePreviousTileLayoutItem(tile, nextItemId);
-};
-
-const applyTileLayout = (tile, layout, { syncItem = true } = {}) => {
-    const next = clampTileLayoutForTile(tile, layout);
-
-    tile.classList.add('is-positioned');
-    tile.style.left = `${next.x}px`;
-    tile.style.top = `${next.y}px`;
-    tile.style.width = `${next.width}px`;
-    tile.style.height = `${next.height}px`;
-    if (getPanelConfig(tile.dataset.pageLayoutType)) {
-        tile.style.minHeight = `${getTileMinimumSize(tile).height}px`;
-    }
-    applyTileLayoutZIndex(tile, next.zIndex);
-
-    if (syncItem) {
-        syncTileLayoutItemFromElement(tile, {
-            layout: next,
-            positioned: true,
-        });
-    }
-};
-
-const getCurrentTileLayout = (tile) => {
-    if (isMobileLayout() && tile.classList.contains('is-positioned')) {
-        return {
-            x: parseFloat(tile.style.left) || 0,
-            y: parseFloat(tile.style.top) || 0,
-            width: parseFloat(tile.style.width) || PAGE_TILE_MIN_WIDTH,
-            height: parseFloat(tile.style.height) || PAGE_TILE_MIN_HEIGHT,
-            zIndex: getTileLayoutZIndex(tile),
-        };
-    }
-    const board = getLayoutBoardForTile(tile);
-    const tileRect = tile.getBoundingClientRect();
-    const boardRect = board.getBoundingClientRect();
-
-    return clampTileLayoutForTile(tile, {
-        x: tileRect.left - boardRect.left + board.scrollLeft,
-        y: tileRect.top - boardRect.top + board.scrollTop,
-        width: tileRect.width,
-        height: tileRect.height,
-        zIndex: getTileLayoutZIndex(tile),
-    });
-};
-
-const snapTileLayoutToGridForTile = (tile) => {
-    return layoutSnapUtils.snapTileLayoutToGridForTile(
-        tile,
-        getLayoutSnapContext(tile)
-    );
-};
-
-const markTileLayoutUserPlaced = (tile) => {
-    const item = getLayoutItemForTile(tile);
-
-    if (!item || !isAutoPlacedLayoutType(item.type)) {
-        return;
-    }
-
-    item.config = normalizeComponentConfig(item.type, {
-        ...item.config,
-        userPlaced: true,
-    });
-    setTileLayoutItem(item);
-    applyTileLayoutItemToElement(tile, item, {
-        applyPosition: false,
-    });
-};
-
-const finalizeLayoutItemDrag = (tile) => {
-    if (!tile) {
-        hideSnapPreview();
-        return;
-    }
-
-    snapTileLayoutToGridForTile(tile);
-    markTileLayoutUserPlaced(tile);
-    saveLayoutToStorage('布局已吸附');
-    hideSnapPreview();
-};
-
-const finishTileLayoutInteraction = (tile) => {
-    resetLayoutResizeCursor();
-    finalizeLayoutItemDrag(tile);
-};
-
-const clampPositionedTileLayouts = () => {
-    if (isMobileLayout()) {
-        return;
-    }
-
-    getVideoTiles().forEach((tile) => {
-        if (
-            tile.classList.contains('is-positioned') &&
-            !fullscreenControls.isTileLayoutWriteBlocked(tile)
-        ) {
-            applyTileLayout(tile, getCurrentTileLayout(tile));
-        }
-    });
-};
-
-const getPreferredTileLayoutItem = (layoutId, type, options = {}) => {
-    const savedItem =
-        type === LAYOUT_ITEM_TYPES.REMOTE_PEER
-            ? getSavedRemoteLayoutItemPreference(
-                  options.peerId,
-                  options.member,
-                  layoutId
-              )
-            : getSavedLayoutItemPreference(layoutId);
-    const defaultItem = getDefaultLayoutItems().find(
-        (candidate) => candidate.type === type
-    );
-    const generatedGrid =
-        !savedItem && isAutoPlacedLayoutType(type)
-            ? findAvailableLayoutSlot(type, getAutoLayoutGridSize(type), {
-                  excludeId: options.excludeId || layoutId,
-              })
-            : null;
-
-    return (
-        savedItem ||
-        (isAutoPlacedLayoutType(type) ? null : defaultItem) ||
-        (generatedGrid
-            ? {
-                  grid: generatedGrid,
-                  z: getNextTileLayoutZIndex(),
-                  visible: true,
-                  config: getDefaultComponentConfig(type),
-              }
-            : null)
-    );
-};
-
-const getInitialTileLayoutForSync = (tile, layoutId, tileType, member) => {
-    if (!tile || tile.classList.contains('is-positioned')) {
-        return null;
-    }
-
-    const type = getLayoutItemTypeForTile(tile, tileType);
-    const peerId = tile.dataset.peerId;
-    const remoteMember = member || getRemoteMemberForPeerId(peerId);
-    const layoutItem = getPreferredTileLayoutItem(layoutId, type, {
-        excludeId: layoutId,
-        peerId,
-        member: remoteMember,
-    });
-
-    if (!layoutItem?.grid) {
-        return null;
-    }
-
-    return convertGridLayoutToPixels({
-        ...layoutItem.grid,
-        zIndex: layoutItem.z || getTileLayoutZIndex(tile),
-    });
-};
-
-const applySavedTileLayout = (tile) => {
-    if (isMobileLayout() || !tile.dataset.layoutId) {
-        return;
-    }
-
-    const item = getTileLayoutItem(tile.dataset.layoutItemId);
-    const type =
-        item?.type || getLayoutItemTypeForTile(tile, tile.dataset.tileType);
-    const peerId = tile.dataset.peerId;
-    const member = getRemoteMemberForPeerId(peerId);
-    const savedItem =
-        type === LAYOUT_ITEM_TYPES.REMOTE_PEER
-            ? getSavedRemoteLayoutItemPreference(
-                  peerId,
-                  member,
-                  tile.dataset.layoutId
-              )
-            : getSavedLayoutItemPreference(tile.dataset.layoutId);
-    const defaultItem = getDefaultLayoutItems().find(
-        (candidate) => candidate.type === type
-    );
-    const generatedGrid =
-        !savedItem && isAutoPlacedLayoutType(type)
-            ? findAvailableLayoutSlot(type, getAutoLayoutGridSize(type), {
-                  excludeId:
-                      item?.id ||
-                      tile.dataset.layoutItemId ||
-                      tile.dataset.layoutId,
-              })
-            : null;
-    const layoutItem =
-        savedItem ||
-        (isAutoPlacedLayoutType(type) ? null : defaultItem) ||
-        (generatedGrid
-            ? {
-                  grid: generatedGrid,
-                  z: getNextTileLayoutZIndex(),
-                  visible: true,
-                  config: getDefaultComponentConfig(type),
-              }
-            : null);
-
-    if (layoutItem) {
-        const nextLayout = convertGridLayoutToPixels({
-            ...layoutItem.grid,
-            zIndex: layoutItem.z || getNextTileLayoutZIndex(),
-        });
-
-        applyTileLayout(tile, nextLayout);
-        const syncedItem = upsertTileLayoutItem(tile, {
-            layout: nextLayout,
-            visible: layoutItem.visible,
-            positioned: true,
-            config: layoutItem.config,
-        });
-        applyTileLayoutItemToElement(tile, syncedItem, {
-            applyPosition: false,
-        });
-        setTileLayoutItemVisibility(
-            tile.dataset.layoutItemId,
-            layoutItem.visible
-        );
-        tile.classList.toggle('is-layout-hidden', !layoutItem.visible);
-    }
-};
-
-const getLayoutComponentDisplayContext = (type) => {
-    if (type === LAYOUT_ITEM_TYPES.ROOM) {
-        const channelName = getChannelName(viewingRoomId || joinedVoiceRoomId);
-        const memberCount =
-            sidebarRuntime?.getRoomMemberCount(
-                viewingRoomId || joinedVoiceRoomId
-            ) || 0;
-
-        return {
-            channelName,
-            joinedVoiceRoomId,
-            memberCount,
-        };
-    }
-
-    if (type === LAYOUT_ITEM_TYPES.CHAT) {
-        return {
-            chatMessages: chatPanelRuntime?.getMessagePreviews(3) || [],
-        };
-    }
-
-    return {
-        joinedVoiceRoomId,
-    };
-};
-
-const renderLayoutComponentTile = (tile) => {
-    const type = tile.dataset.layoutComponentType;
-    if (REAL_DOM_PAGE_TYPES.has(type)) {
-        const itemId = tile.dataset.layoutItemId || tile.dataset.layoutId;
-        const item = getTileLayoutItem(itemId);
-        const savedItem = getSavedLayoutItemPreference(itemId || '');
-        const nextLayoutId = getTileLayoutId(tile);
-        const config = normalizeComponentConfig(
-            type,
-            item?.config || savedItem?.config
-        );
-
-        tile.dataset.tileType = type;
-        tile.dataset.peerLabel = getPagePanelLabel(type);
-        tile.classList.add('layout-component-tile');
-        tile.dataset.layoutId = nextLayoutId;
-        const syncedItem = syncTileLayoutItemFromElement(tile, {
-            id: nextLayoutId,
-            type,
-            visible: item?.visible !== false,
-            positioned: tile.classList.contains('is-positioned'),
-            config,
-        });
-        applyTileLayoutItemToElement(tile, syncedItem, {
-            applyPosition: false,
-        });
-
-        return;
-    }
-
-    const itemId = tile.dataset.layoutItemId || tile.dataset.layoutId;
-    const item = getTileLayoutItem(itemId);
-    const savedItem = getSavedLayoutItemPreference(itemId || '');
-    const config = normalizeComponentConfig(
-        type,
-        item?.config || savedItem?.config
-    );
-    const syncRequest = renderLayoutComponentTileContent(tile, {
-        bindCopyButton: copyLinkUI.bindCopyButton,
-        config,
-        createTileAvatarText,
-        displayContext: getLayoutComponentDisplayContext(type),
-        ensureTileStructure,
-        getCopyLink: () => getChannelUrl(getCopyRoomId()),
-        getTileLayoutId,
-        type,
-    });
-
-    if (syncRequest) {
-        syncTileLayoutItemFromElement(tile, syncRequest);
-    }
-};
-
-const getExistingLayoutComponentTile = (type) =>
-    pageLayoutComponentRuntime?.getExistingLayoutComponentTile(type);
-
-const addLayoutComponent = (type) =>
-    pageLayoutComponentRuntime?.addLayoutComponent(type);
-
-const hideLayoutComponent = (tile) => {
-    const panelConfig = getPanelConfig(tile?.dataset?.pageLayoutType);
-
-    if (panelConfig?.canHide === false) {
-        return;
-    }
-
-    pageLayoutComponentRuntime?.hideLayoutComponent(tile);
-};
-
-const applyDefaultLayout = () =>
-    pageLayoutComponentRuntime?.applyDefaultLayout();
-
-const initializeLayoutFromStorage = () =>
-    pageLayoutComponentRuntime?.initializeLayoutFromStorage();
-
-const renderLayoutComponentMenu = () =>
-    pageLayoutWindowManagerRuntime?.renderWindowMenu();
-
-const getLayoutItemForTile = (tile) =>
-    getTileLayoutItem(tile?.dataset.layoutItemId || tile?.dataset.layoutId);
-
-const isRegisteredPanelItem = (item) => PAGE_SINGLETON_TYPES.has(item?.type);
-
-const getPanelConfigForTile = (tile) =>
-    getPanelConfig(tile?.dataset?.pageLayoutType);
-
-const savePanelItemState = (tile, { config, layout, message } = {}) => {
-    const item = getLayoutItemForTile(tile);
-
-    if (!tile || !item) {
-        return null;
-    }
-
-    const nextLayout = layout || getCurrentTileLayout(tile);
-    const nextConfig = normalizeComponentConfig(item.type, {
-        ...item.config,
-        ...config,
-    });
-    const nextItem = upsertTileLayoutItem(tile, {
-        layout: nextLayout,
-        visible: item.visible !== false,
-        positioned: true,
-        config: nextConfig,
-    });
-
-    applyTileLayoutItemToElement(tile, nextItem, {
-        applyPosition: false,
-    });
-    saveLayoutToStorage(message || '布局已更新');
-    return nextItem;
-};
-
-const togglePanelCollapse = (tile) => {
-    const panelConfig = getPanelConfigForTile(tile);
-    const item = getLayoutItemForTile(tile);
-
-    if (!panelConfig || panelConfig.canCollapse === false || !item) {
-        return;
-    }
-
-    const currentLayout = getCurrentTileLayout(tile);
-    const collapsed = item.config?.collapsed === true;
-    const expandedHeight = Math.max(
-        panelConfig.minHeight || PAGE_TILE_MIN_HEIGHT,
-        Number(item.config?.expandedHeight) || currentLayout.height
-    );
-    const nextLayout = collapsed
-        ? { ...currentLayout, height: expandedHeight }
-        : { ...currentLayout, height: getPanelCollapsedHeight() };
-
-    tile.dataset.panelCollapsing = String(!collapsed);
-    applyTileLayout(tile, nextLayout, { syncItem: false });
-    savePanelItemState(tile, {
-        layout: nextLayout,
-        config: {
-            collapsed: !collapsed,
-            expandedHeight: collapsed ? expandedHeight : currentLayout.height,
-        },
-        message: collapsed ? '面板已展开' : '面板已收起',
-    });
-    delete tile.dataset.panelCollapsing;
-};
-
-const togglePanelPin = (tile) => {
-    const panelConfig = getPanelConfigForTile(tile);
-    const item = getLayoutItemForTile(tile);
-
-    if (panelConfig?.canPin === false || !item || fullscreenControls.isTileLayoutWriteBlocked(tile)) {
-        return;
-    }
-
-    const pinned = item.config?.pinned === true;
-    const nextPinned = !pinned;
-    const nextConfig = { pinned: nextPinned };
-    const currentLayout = item.layout || getCurrentTileLayout(tile);
-    const nextLayout = {
-        ...currentLayout,
-        zIndex: getNextTileLayoutZIndexForBand(nextPinned),
-    };
-
-    savePanelItemState(tile, {
-        layout: nextLayout,
-        config: nextConfig,
-        message: pinned ? '已取消固定' : '已固定置顶',
-    });
-};
-
-const canDragLayoutItem = (item) => {
-    return (
-        Boolean(item) &&
-        (!isRegisteredPanelItem(item) ||
-            getPanelConfig(item.type)?.canDrag !== false)
-    );
-};
-
-const canResizeLayoutItem = (item) => {
-    return (
-        Boolean(item) &&
-        (!isRegisteredPanelItem(item) ||
-            getPanelConfig(item.type)?.canResize !== false)
-    );
-};
-
-const shouldIgnoreLayoutDragTarget = (target) =>
-    !target?.closest?.('.window-drag-handle') && Boolean(
-        target?.closest?.(
-            [
-                'input',
-                'textarea',
-                'button',
-                'select',
-                'a',
-                'form',
-                'label',
-                '[contenteditable]',
-                '.no-drag',
-                '.chat-form',
-                '.chat-input',
-                '.page-chat-form',
-                '.channel-button',
-                '[data-channel-room]',
-                '.window-controls',
-                '.panel-shell-actions',
-                '.panel-action-button',
-                '.fullscreen-btn',
-            ].join(', ')
-        )
-    );
-
-const isLayoutDragHandleTarget = (event, tile) => {
-    const handle = event.target?.closest?.('[data-drag-handle="true"]');
-
-    if (!handle || !tile?.contains?.(handle)) {
-        return false;
-    }
-
-    return handle.closest?.('.video-tile') === tile;
-};
-
-const createTileAvatarText = (displayName) =>
-    videoTileStructureUI.createTileAvatarText(displayName);
-
+const createTileAvatarText = (displayName) => videoTileStructureUI.createTileAvatarText(displayName);
 const ensureTileStructure = (tile) => {
-    const structure = videoTileStructureUI.ensureTileStructure(tile, {
-        resizeDirections: TILE_RESIZE_DIRECTIONS,
-    });
-
-    bindTileLayoutControls(tile);
-    if (!tile.dataset.pageLayoutType && !tile.querySelector('.panel-shell-actions')) {
-        pageLayoutRuntime?.ensurePanelShellActions(tile);
+    const structure = videoTileStructureUI.ensureTileStructure(tile);
+    if (!tile.dataset.memberControlsBound) {
+        const volume = document.createElement('button');
+        volume.type = 'button';
+        volume.className = 'member-volume-button';
+        volume.textContent = '音量';
+        volume.setAttribute('aria-label', '调整此成员的独立音量');
+        volume.addEventListener('click', (event) => showPeerVolumePopover(event, tile));
+        structure.headerActions.append(volume);
+        tile.dataset.memberControlsBound = 'true';
     }
-    bindLayoutResizeBoardControls();
-
+    const volume = tile.querySelector('.member-volume-button');
+    if (volume) volume.hidden = tile.id === 'local-video';
     return structure;
 };
-
-const detectTileResizeDirection = (event, tile) => {
-    if (
-        !tile ||
-        isMobileLayout() ||
-        getFullscreenElement() ||
-        !canResizeLayoutItem(getLayoutItemForTile(tile))
-    ) {
-        return null;
-    }
-
-    const rect = tile.getBoundingClientRect();
-    if (!rect.width || !rect.height) {
-        return null;
-    }
-
-    return layoutResizeUtils.detectTileResizeDirection({
-        cornerSizePx: TILE_RESIZE_CORNER_SIZE_PX,
-        edgeInsetPx: TILE_RESIZE_EDGE_INSET_PX,
-        edgeOutsetPx: TILE_RESIZE_EDGE_OUTSET_PX,
-        point: {
-            x: event.clientX - rect.left,
-            y: event.clientY - rect.top,
-        },
-        size: {
-            height: rect.height,
-            width: rect.width,
-        },
-    });
-};
-
-const resetLayoutResizeCursor = (board = pageLayoutBoard || videoGrid) =>
-    layoutInteractionUI.resetResizeCursor({
-        board,
-        hoverClasses: LAYOUT_RESIZE_HOVER_CLASSES,
-    });
-
-const setLayoutResizeCursor = (hit, board = pageLayoutBoard || videoGrid) => {
-    layoutInteractionUI.setResizeCursor({
-        hit,
-        board,
-        cursors: TILE_RESIZE_CURSORS,
-        hoverClasses: LAYOUT_RESIZE_HOVER_CLASSES,
-    });
-};
-
-const updateTileResizeCursor = (event, tile) => {
-    if (!tile || shouldIgnoreLayoutDragTarget(event.target)) {
-        resetLayoutResizeCursor();
-        return;
-    }
-
-    const resizeDirection = detectTileResizeDirection(event, tile);
-    setLayoutResizeCursor(
-        resizeDirection ? { tile, direction: resizeDirection } : null
-    );
-};
-
-const getResizeTileAtPoint = (event) => {
-    if (shouldIgnoreLayoutDragTarget(event.target)) {
-        return null;
-    }
-
-    return getVideoTiles()
-        .filter((tile) => !tile.classList.contains('is-layout-hidden'))
-        .sort((a, b) => getTileLayoutZIndex(b) - getTileLayoutZIndex(a))
-        .map((tile) => ({
-            tile,
-            direction: detectTileResizeDirection(event, tile),
-        }))
-        .find((candidate) => candidate.direction);
-};
-
-const bindLayoutResizeBoardControls = () => {
-    const board = pageLayoutBoard || videoGrid;
-
-    if (!board || layoutResizeBoundBoards.has(board)) {
-        return;
-    }
-
-    board.addEventListener('pointermove', (event) => {
-        const hit = getResizeTileAtPoint(event);
-        setLayoutResizeCursor(hit, board);
-    });
-    board.addEventListener('pointerleave', () =>
-        resetLayoutResizeCursor(board)
-    );
-    board.addEventListener('pointerdown', (event) => {
-        if (event.button !== 0) {
-            return;
-        }
-
-        const hit = getResizeTileAtPoint(event);
-
-        if (!hit) {
-            return;
-        }
-
-        startTileResize(event, hit.tile, hit.direction);
-    });
-    layoutResizeBoundBoards.add(board);
-};
-
-const isTilePointerDisabled = (event) =>
-    isMobileLayout() ||
-    getFullscreenElement() ||
-    event.button !== 0 ||
-    event.target.closest('.tile-resize-handle') ||
-    shouldIgnoreLayoutDragTarget(event.target);
-
-const startTileDrag = (event, tile) => {
-    if (
-        fullscreenControls.isTileLayoutWriteBlocked(tile) ||
-        isTilePointerDisabled(event) ||
-        !isLayoutDragHandleTarget(event, tile) ||
-        !canDragLayoutItem(getLayoutItemForTile(tile))
-    ) {
-        return;
-    }
-
-    resetLayoutResizeCursor();
-    bringTileLayoutToFront(tile);
-    const startLayout = getCurrentTileLayout(tile);
-    applyTileLayout(tile, startLayout);
-    tile.classList.add('is-dragging');
-    tile.setPointerCapture(event.pointerId);
-    event.preventDefault();
-    event.stopPropagation();
-
-    const startX = event.clientX;
-    const startY = event.clientY;
-    showSnapPreview(tile, startLayout);
-    let finished = false;
-
-    const onMove = (moveEvent) => {
-        const nextLayout = {
-            ...startLayout,
-            x: startLayout.x + moveEvent.clientX - startX,
-            y: startLayout.y + moveEvent.clientY - startY,
-        };
-        applyTileLayout(tile, nextLayout);
-        showSnapPreview(tile, nextLayout);
-    };
-
-    const finishInteraction = (persist = true) => {
-        if (finished) {
-            return;
-        }
-
-        finished = true;
-        if (tile.hasPointerCapture?.(event.pointerId)) {
-            tile.releasePointerCapture(event.pointerId);
-        }
-        tile.classList.remove('is-dragging');
-        if (persist) {
-            finishTileLayoutInteraction(tile);
-        } else {
-            hideSnapPreview();
-            resetLayoutResizeCursor();
-        }
-        window.removeEventListener('pointermove', onMove);
-        window.removeEventListener('pointerup', onEnd);
-        window.removeEventListener('pointercancel', onEnd);
-        activeLayoutInteractionCancels.delete(cancelInteraction);
-    };
-    const onEnd = () => finishInteraction(true);
-    const cancelInteraction = () => finishInteraction(false);
-
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onEnd);
-    window.addEventListener('pointercancel', onEnd);
-    activeLayoutInteractionCancels.add(cancelInteraction);
-};
-
-const resolveTileResizeLayout = (
-    tile,
-    startLayout,
-    direction,
-    deltaX,
-    deltaY
-) => {
-    const minimumSize = getTileMinimumSize(tile);
-    const nextLayout = layoutResizeUtils.resolveTileResizeLayout({
-        bounds: getTileBounds(tile),
-        deltaX,
-        deltaY,
-        direction,
-        minHeight: minimumSize.height,
-        minWidth: minimumSize.width,
-        startLayout,
-    });
-
-    return clampTileLayoutForTile(tile, nextLayout);
-};
-
-const startTileResize = (event, tile, direction = 'se') => {
-    if (fullscreenControls.isTileLayoutWriteBlocked(tile)) return;
-    if (
-        isMobileLayout() ||
-        getFullscreenElement() ||
-        event.button !== 0 ||
-        shouldIgnoreLayoutDragTarget(event.target) ||
-        !canResizeLayoutItem(getLayoutItemForTile(tile))
-    ) {
-        return;
-    }
-
-    bringTileLayoutToFront(tile);
-    const startLayout = getCurrentTileLayout(tile);
-    applyTileLayout(tile, startLayout);
-    tile.classList.add('is-resizing');
-    setLayoutResizeCursor({ tile, direction });
-    tile.setPointerCapture(event.pointerId);
-    event.preventDefault();
-    event.stopPropagation();
-
-    const startX = event.clientX;
-    const startY = event.clientY;
-    showSnapPreview(tile, startLayout);
-    let finished = false;
-
-    const onMove = (moveEvent) => {
-        const nextLayout = resolveTileResizeLayout(
-            tile,
-            startLayout,
-            direction,
-            moveEvent.clientX - startX,
-            moveEvent.clientY - startY
-        );
-        applyTileLayout(tile, nextLayout);
-        showSnapPreview(tile, nextLayout);
-    };
-
-    const finishInteraction = (persist = true) => {
-        if (finished) {
-            return;
-        }
-
-        finished = true;
-        if (tile.hasPointerCapture?.(event.pointerId)) {
-            tile.releasePointerCapture(event.pointerId);
-        }
-        tile.classList.remove('is-resizing');
-        resetLayoutResizeCursor();
-        if (persist) {
-            finishTileLayoutInteraction(tile);
-        } else {
-            hideSnapPreview();
-        }
-        window.removeEventListener('pointermove', onMove);
-        window.removeEventListener('pointerup', onEnd);
-        window.removeEventListener('pointercancel', onEnd);
-        activeLayoutInteractionCancels.delete(cancelInteraction);
-    };
-    const onEnd = () => finishInteraction(true);
-    const cancelInteraction = () => finishInteraction(false);
-
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onEnd);
-    window.addEventListener('pointercancel', onEnd);
-    activeLayoutInteractionCancels.add(cancelInteraction);
-};
-
-const cancelActiveLayoutInteractions = () => {
-    Array.from(activeLayoutInteractionCancels).forEach((cancel) => cancel());
-};
-
-const bindTileLayoutControls = (tile) => {
-    if (!tile.dataset.layoutBound) {
-        tile.addEventListener('pointermove', (event) =>
-            updateTileResizeCursor(event, tile)
-        );
-        tile.addEventListener('pointerleave', () => resetLayoutResizeCursor());
-        tile.addEventListener(
-            'pointerdown',
-            (event) => {
-                const shouldIgnoreTarget = shouldIgnoreLayoutDragTarget(
-                    event.target
-                ) && !event.target?.closest?.('.window-drag-handle');
-                const resizeDirection = shouldIgnoreTarget
-                    ? null
-                    : detectTileResizeDirection(event, tile);
-
-                if (resizeDirection) {
-                    startTileResize(event, tile, resizeDirection);
-                    return;
-                }
-
-                bringTileLayoutToFront(tile);
-                if (
-                    !shouldIgnoreTarget &&
-                    isLayoutDragHandleTarget(event, tile) &&
-                    canDragLayoutItem(getLayoutItemForTile(tile))
-                ) {
-                    startTileDrag(event, tile);
-                }
-            },
-            true
-        );
-        tile.addEventListener('click', () => {
-            bringTileLayoutToFront(tile);
-        });
-        tile.addEventListener('contextmenu', (event) =>
-            showPeerVolumePopover(event, tile)
-        );
-        tile.dataset.layoutBound = 'true';
-    }
-
-    tile.querySelectorAll('.tile-resize-handle').forEach((resizeHandle) => {
-        if (resizeHandle.dataset.resizeBound) {
-            return;
-        }
-
-        resizeHandle.addEventListener('pointerdown', (event) =>
-            startTileResize(event, tile, resizeHandle.dataset.resizeDirection)
-        );
-        resizeHandle.dataset.resizeBound = 'true';
-    });
-};
-
-pageLayoutStoreRuntime = layoutStoreRuntime.createRuntime({
-    shouldPersist: () => !isMobileLayout(),
-    document,
-    logger: console,
-    layoutStorage,
-    version: PAGE_STORAGE_VERSION,
-    columns: PAGE_GRID_COLUMNS,
-    rows: PAGE_GRID_ROWS,
-    layoutItemTypes: LAYOUT_ITEM_TYPES,
-    pageComponentTypes: PAGE_COMPONENT_TYPES,
-    supportedStorageVersions: LEGACY_PAGE_STORAGE_VERSIONS,
-    getSingletonTypes: () => PAGE_SINGLETON_TYPES,
-    getLayoutStorageKey,
-    getDefaultLayoutPreferences,
-    normalizeLayoutPreferences,
-    getLayoutPreferenceValue,
-    clampGridLayout,
-    normalizeZIndex: normalizeTileLayoutZIndex,
-    normalizeComponentConfig,
-    normalizeLayoutItemType,
-    getLegacyRemoteLayoutPeerId,
-    normalizeRemotePeerLayoutId,
-    normalizeAutoLayoutGrid,
-    getRemoteLayoutAliasIds,
-    getFallbackTileLayoutForType,
-    migrateLoadedLayoutItem,
-    normalizeTileLayout,
-    convertTileLayoutToGrid,
-    getTileLayoutItemId,
-    getCurrentTileLayout,
-    applyTileLayoutItemToElement,
-    isRemoteLayoutAliasForTile,
-    showLayoutSaveStatus,
-});
-
-pageLayoutComponentRuntime = layoutComponentRuntime.createComponentRuntime({
-    document,
-    logger: console,
-    localPeerType: LAYOUT_ITEM_TYPES.LOCAL_PEER,
-    getSingletonTypes: () => PAGE_SINGLETON_TYPES,
-    getCorePageTypes: () => CORE_PAGE_TYPES,
-    getDefaultLayoutItems,
-    getLayoutComponentId,
-    getTileLayoutId,
-    getSavedLayoutItemPreference,
-    getSavedLayoutItems: () => pageLayoutStoreRuntime?.getSavedItems() || [],
-    isLayoutStorageHydrating: () =>
-        pageLayoutStoreRuntime?.isHydrating() || false,
-    setLayoutStorageHydrating: (hydrating) =>
-        pageLayoutStoreRuntime?.setHydrating(hydrating),
-    getVideoTiles,
-    applyTileLayout,
-    convertGridLayoutToPixels,
-    getNextTileLayoutZIndex,
-    setTileLayoutItemVisibility,
-    bringTileLayoutToFront,
-    clearSavedLayout,
-    saveLayoutToStorage,
-    upsertTileLayoutItem,
-    applyTileLayoutItemToElement,
-    renderLayoutComponentMenu,
-    updateMobileTileView,
-});
-
-pageLayoutWindowManagerRuntime = layoutWindowManagerRuntime.createRuntime({
-    refs: {
-        mainLayout,
-    },
-    layoutToolbarUI,
-    layoutComponentMenuUI,
-    morphIconUI,
-    getCorePageTypes: () => CORE_PAGE_TYPES,
-    getExistingLayoutComponentTile,
-    getTileLayoutItem,
-    getPagePanelLabel,
-    onShowWindow: addLayoutComponent,
-    onHideWindow: hideLayoutComponent,
-    onApplyDefaultLayout: applyDefaultLayout,
-});
-
-pageLayoutRuntime = window.PageLayoutRuntime.createRuntime({
-    document,
-    logger: console,
-    refs: {
-        mainLayout,
-        videoGrid,
-    },
-    layoutRecoveryUI,
-    morphIconUI,
-    pageComponentTypes: PAGE_COMPONENT_TYPES,
-    getPanelRegistry,
-    getPanelConfig,
-    pageGridColumns: PAGE_GRID_COLUMNS,
-    pageGridRows: PAGE_GRID_ROWS,
-    getDefaultLayoutItems,
-    ensureTileStructure,
-    createTileAvatarText,
-    sanitizeLayoutIdPart,
-    syncTileLayoutItemFromElement,
-    applyTileLayout,
-    convertGridLayoutToPixels,
-    getNextTileLayoutZIndex,
-    setTileLayoutItemVisibility,
-    saveLayoutToStorage,
-    onHidePanel: hideLayoutComponent,
-    onTogglePanelCollapse: togglePanelCollapse,
-    onTogglePanelPin: togglePanelPin,
-    loadLayoutFromStorage,
-    clearSavedLayout,
-    initializeLayoutFromStorage,
-    ensureWindowManagerToolbar,
-    syncWindowManagerUI,
-    getVideoTiles,
-    serializeLayoutItems,
-    cancelLayoutInteractions: cancelActiveLayoutInteractions,
-    onBoardChange: (board) => {
-        pageLayoutBoard = board;
-    },
-    reload: () => {
-        window.location.reload();
-    },
-});
-
-pageLayoutRuntime.bootstrapRecoveryToolbar();
-
-try {
-    pageLayoutRuntime.bootstrap();
-    pageLayoutBoard = pageLayoutRuntime.getBoard();
-    pageLayoutWindowManagerRuntime.bindToolbarEvents();
-    syncWindowManagerUI();
-} catch (err) {
-    console.error('[page-layout] critical init failure', err);
-    restoreOriginalStaticLayout();
-    pageLayoutRuntime.bootstrapRecoveryToolbar({ visible: true });
-}
 
 const showPeerVolumePopover = (event, tile) => {
     const peerId = tile.dataset.peerId;
 
-    if (isMobileLayout() || tile.id === 'local-video' || !peerId) {
+    if (tile.id === 'local-video' || !peerId) {
         return;
     }
 
     event.preventDefault();
+    event.stopPropagation?.();
     const isScreenShare =
         tile.dataset.tileType === 'screen-share' || screenSharers.has(peerId);
 
@@ -3446,16 +1843,11 @@ const showPeerVolumePopover = (event, tile) => {
             titleText: '屏幕共享音量',
         });
     }
-    remoteVolumeUI.openPopover({ event, controls });
+    return remoteVolumeUI.openPopover({ event, controls });
 };
 
 const updateVideoTileStatus = (tile) => {
     if (!tile) {
-        return;
-    }
-
-    if (tile.dataset.layoutComponentType) {
-        renderLayoutComponentTile(tile);
         return;
     }
 
@@ -3472,66 +1864,12 @@ const updateVideoTileStatus = (tile) => {
     const displayName = member.senderName || (isLocal ? getChatName() : 'Peer');
     ensureTileStructure(tile);
     const tileType = getTileType(tile, hasVideo, member);
-    const peerId = tile.dataset.peerId;
-    const previousLayoutItem = getLayoutItemForTile(tile);
-
     tile.dataset.peerLabel = isLocal ? `${displayName}（我）` : displayName;
     tile.dataset.tileType = tileType;
-    const nextLayoutId = getTileLayoutId(tile, member);
-    const layoutChanged = tile.dataset.layoutId !== nextLayoutId;
-    retirePreviousTileLayoutItem(tile, nextLayoutId);
-    tile.dataset.layoutId = nextLayoutId;
-    const layoutItemType = getLayoutItemTypeForTile(tile, tileType);
-    const initialLayout = getInitialTileLayoutForSync(
-        tile,
-        nextLayoutId,
-        tileType,
-        member
-    );
-    const layoutItem = syncTileLayoutItemFromElement(tile, {
-        id: nextLayoutId,
-        type: layoutItemType,
-        layout: initialLayout,
-        visible: true,
-        positioned: tile.classList.contains('is-positioned'),
-    });
-    const hasSavedRemoteLayout =
-        layoutItemType === LAYOUT_ITEM_TYPES.REMOTE_PEER &&
-        Boolean(
-            getSavedRemoteLayoutItemPreference(peerId, member, nextLayoutId)
-        );
-    const canReplaceTemporaryRemoteLayout =
-        hasSavedRemoteLayout && previousLayoutItem?.config?.userPlaced !== true;
-
-    if (
-        layoutChanged &&
-        (!tile.classList.contains('is-positioned') ||
-            canReplaceTemporaryRemoteLayout)
-    ) {
-        applySavedTileLayout(tile);
-    } else {
-        applyTileLayoutItemToElement(tile, layoutItem, {
-            applyPosition: false,
-        });
-    }
     if (member.socketId) {
         tile.dataset.socketId = member.socketId;
     } else {
         delete tile.dataset.socketId;
-    }
-
-    const remoteConfigItem = getTileLayoutItem(tile.dataset.layoutItemId);
-    let showPeerName = true;
-    if (
-        remoteConfigItem &&
-        remoteConfigItem.type === LAYOUT_ITEM_TYPES.REMOTE_PEER
-    ) {
-        const remoteConfig = normalizeComponentConfig(
-            LAYOUT_ITEM_TYPES.REMOTE_PEER,
-            remoteConfigItem.config
-        );
-
-        showPeerName = remoteConfig.showPeerName;
     }
 
     const isScreenShare = member.screenSharing === true;
@@ -3548,7 +1886,7 @@ const updateVideoTileStatus = (tile) => {
         avatarText: createTileAvatarText(displayName),
         hasVideo,
         isScreenShare,
-        showNameLabel: isScreenShare || showPeerName,
+        showNameLabel: true,
         statuses: getMemberStatusIcons(member),
         statusText,
         titleText,
@@ -3556,97 +1894,14 @@ const updateVideoTileStatus = (tile) => {
 };
 
 const updateAllVideoTileStatus = () => {
-    document.querySelectorAll('.video-tile').forEach(updateVideoTileStatus);
+    getVideoTiles().forEach(updateVideoTileStatus);
+    stageLayout?.sync();
 };
 
-const toggleMemberTileVisibility = (peerId) => {
-    if (!peerId) {
-        return;
-    }
-
-    const tile = document.getElementById(peerId);
-    if (!tile) {
-        return;
-    }
-
-    const isCurrentlyVisible = !tile.classList.contains('is-layout-hidden');
-
-    if (isCurrentlyVisible) {
-        hideLayoutComponent(tile);
-    } else {
-        const itemId = tile.dataset.layoutItemId;
-        setTileLayoutItemVisibility(itemId, true);
-        tile.classList.remove('is-layout-hidden');
-        bringTileLayoutToFront(tile);
-        saveLayoutToStorage('布局已更新');
-        renderLayoutComponentMenu();
-        updateMobileTileView();
-    }
-};
-
-const toggleLocalPeerTileVisibility = () => {
-    const tile = document.getElementById('local-video');
-    if (!tile) {
-        return;
-    }
-
-    const isCurrentlyVisible = !tile.classList.contains('is-layout-hidden');
-
-    if (isCurrentlyVisible) {
-        hideLayoutComponent(tile);
-    } else {
-        const itemId = tile.dataset.layoutItemId;
-        setTileLayoutItemVisibility(itemId, true);
-        tile.classList.remove('is-layout-hidden');
-        bringTileLayoutToFront(tile);
-        saveLayoutToStorage('布局已更新');
-        renderLayoutComponentMenu();
-        updateMobileTileView();
-    }
-};
-
-const ensurePresenceTileForPeer = (
-    peerId,
-    member = getRemoteMemberForPeerId(peerId)
-) => {
-    if (!peerId || peerId === localPeerId) {
-        return;
-    }
-
-    const existingTile = document.getElementById(peerId);
-    const autoShowRemotePeers = getLayoutPreference('autoShowRemotePeers');
-    const keepHidden = getLayoutPreference('keepHiddenRemotePeers');
-    const layoutItemId = getRemoteLayoutItemId(peerId, member);
-
-    if (!existingTile) {
-        console.info('[tile] create presence tile', { peerId });
-
-        let shouldAutoShow = autoShowRemotePeers;
-
-        if (keepHidden) {
-            const savedItem = getSavedRemoteLayoutItemPreference(
-                peerId,
-                member,
-                layoutItemId
-            );
-            if (savedItem && savedItem.visible === false) {
-                shouldAutoShow = false;
-            }
-        }
-
-        voicePeerRegistry.ensurePeerTile(peerId);
-
-        if (!shouldAutoShow) {
-            const tile = document.getElementById(peerId);
-            if (tile) {
-                tile.classList.add('is-layout-hidden');
-                setTileLayoutItemVisibility(tile.dataset.layoutItemId, false);
-            }
-        }
-    } else {
-        voicePeerRegistry.ensurePeerTile(peerId);
-        updateVideoTileStatus(existingTile);
-    }
+const ensurePresenceTileForPeer = (peerId) => {
+    if (!peerId || peerId === localPeerId) return;
+    const tile = voicePeerRegistry.ensurePeerTile(peerId);
+    if (tile) updateVideoTileStatus(tile);
 };
 
 const syncPresenceTilesForJoinedRoom = (channels = []) => {
@@ -3699,16 +1954,7 @@ const addVideoStream = (
         tile = document.createElement('div');
         tile.id = tileId;
         tile.className = 'video-tile';
-        if (videoId) {
-            const localTile = document.getElementById('local-video');
-            if (localTile) {
-                videoGrid.insertBefore(tile, localTile);
-            } else {
-                videoGrid.append(tile);
-            }
-        } else {
-            videoGrid.append(tile);
-        }
+        videoGrid.append(tile);
     }
 
     if (videoId) {
@@ -3819,15 +2065,12 @@ const addVideoStream = (
     updateFullscreenButtonStates();
     console.info('[tile] add/update', {
         peerId: tile.dataset.peerId,
-        layoutId: tile.dataset.layoutId,
         hasVideo,
     });
-    resetAutoTileLayoutHeights();
     updateMobileTileView();
     return tile;
 };
 
-initializeLayoutFromStorage();
 
 const mergeRemoteStream = (
     peerId,
@@ -3889,11 +2132,12 @@ const getActiveStream = () => {
     return activeStream;
 };
 const getPeerMediaStream = (peerId, stream) => {
-    if (!sharingNow || !screenSfuRuntime.usesServer(peerId)) return stream;
+    if (!sharingNow || (!usingPiik && !screenSfuRuntime.usesServer(peerId))) return stream;
     const screenTracks = new Set(currentScreenStream?.getTracks() || []);
     return new MediaStream((stream?.getTracks() || []).filter((track) => !screenTracks.has(track)));
 };
 const updateScreenP2pBudget = () => {
+    if (usingPiik) return;
     const track = currentScreenStream?.getVideoTracks?.()[0];
     if (!track) return;
     const directViewers = [...voiceMediaTargets].filter((id) => !screenSfuRuntime?.usesServer(id)).length;
@@ -4046,7 +2290,9 @@ const setMediaOperationError = (type, result) => {
         return;
     }
     if (result?.errorType) {
-        voiceStatusView.setMediaError(type, result.errorType);
+        voiceStatusView.setMediaError(type, result.errorType,
+            type === 'screen' && result.error?.name === 'NativeShareConfigurationError'
+                ? result.error.message : undefined);
         notifyMediaDock();
         voiceMediaDebug.record({
             errorType: result.errorType,
@@ -4165,6 +2411,7 @@ const unbindScreenTrackEnded = (session = currentScreenShareSession) => {
 const stopCurrentScreenStream = () => {
     screenCodecAbort?.abort();
     screenCodecAbort = undefined;
+    setScreenShareRequestPending(false);
     screenSfuRuntime?.stopPublishing();
     voiceMediaQualityRuntime?.stop('local-video', 'screen-stopped');
     const screenStream = currentScreenStream;
@@ -4212,20 +2459,30 @@ const requestDisplayMedia = navigator.mediaDevices?.getDisplayMedia?.bind(
     navigator.mediaDevices
 );
 
-const startScreenShare = async (peer, options = {}) => {
+const startScreenShare = async (peer, options = {}, preparedStream) => {
     if (screenShareRequestPending || sharingNow) {
+        localMediaTrackStopper.stopStream(preparedStream);
         return false;
     }
 
+    options = voiceMediaLifecycle.normalizeScreenShareOptions(options);
     mediaOperationController.setDesired('screen', true);
     setScreenShareRequestPending(true);
     const codecAbort = new AbortController();
     screenCodecAbort = codecAbort;
+    const finishRequest = () => {
+        if (screenCodecAbort === codecAbort) {
+            screenCodecAbort = undefined;
+            setScreenShareRequestPending(false);
+        }
+    };
     let codecDecision;
     const capture = await mediaOperationController.run(
         'screen',
         async () => {
-            const result = await voiceMediaLifecycle.requestScreenCapture({
+            const result = preparedStream ? { ok: true, stream: preparedStream } : usingPiik && options.provider === 'native'
+                ? { ok: true, stream: await screenSfuRuntime.captureNative(voiceMediaLifecycle.normalizeScreenShareOptions(options), codecAbort.signal) }
+                : await voiceMediaLifecycle.requestScreenCapture({
                 getDisplayMedia: requestDisplayMedia,
                 supportedConstraints: navigator.mediaDevices?.getSupportedConstraints?.(),
                 options,
@@ -4235,7 +2492,7 @@ const startScreenShare = async (peer, options = {}) => {
                 const cancelled = () => codecAbort.abort();
                 track?.addEventListener('ended', cancelled, { once: true });
                 try {
-                    if (track) codecDecision = await window.VoiceScreenCodecs.prepare(
+                    if (track && !usingPiik) codecDecision = await window.VoiceScreenCodecs.prepare(
                         track, voiceMediaLifecycle.normalizeScreenShareOptions(options), { signal: codecAbort.signal }
                     );
                 } catch (error) {
@@ -4263,20 +2520,27 @@ const startScreenShare = async (peer, options = {}) => {
         {
             epoch: voiceSessionRuntime.getSnapshot().epoch,
             state: 'requesting',
-            surviveEpochChange: true,
+            surviveEpochChange: false,
         }
     );
-    if (screenCodecAbort === codecAbort) screenCodecAbort = undefined;
-    setScreenShareRequestPending(false);
     if (!capture.ok) {
+        const ownsRequest = screenCodecAbort === codecAbort;
+        finishRequest();
+        if (!ownsRequest || codecAbort.signal.aborted) return false;
+        if (usingPiik) screenSfuRuntime.stopPublishing();
         mediaOperationController.setDesired('screen', false);
         setMediaOperationError('screen', capture);
+        if (usingPiik && options.provider === 'native' && capture.error?.message && !capture.cancelled) {
+            voiceStatusView.setMediaError('screen', 'unknown', capture.error.message);
+            notifyMediaDock();
+        }
         return false;
     }
 
     if (mediaOperationController.getSnapshot('screen').token !== capture.token ||
         !mediaOperationController.getSnapshot('screen').desired) {
         localMediaTrackStopper.stopStream(capture.value);
+        finishRequest();
         return false;
     }
 
@@ -4290,6 +2554,7 @@ const startScreenShare = async (peer, options = {}) => {
         mediaOperationController.invalidate('screen', { stopValue: true });
         voiceStatusView.setMediaError('screen', 'unknown');
         notifyMediaDock();
+        finishRequest();
         return false;
     }
 
@@ -4325,6 +2590,7 @@ const startScreenShare = async (peer, options = {}) => {
         mediaOperationController.setDesired('screen', false);
         mediaOperationController.invalidate('screen');
         emitScreenShareState(false, screenShareSession.voiceSessionGeneration);
+        stopCurrentScreenStream();
         restoreCameraAfterScreenShare(peer);
         emitLocalPresenceUpdate();
     };
@@ -4340,16 +2606,28 @@ const startScreenShare = async (peer, options = {}) => {
         console.info('[screen] no screen audio track was provided');
     }
 
+    if (usingPiik) {
+        try { await screenSfuRuntime.publish(shareScreen, screenShareSession.shareOptions); }
+        catch (error) {
+            if (currentScreenShareSession !== screenShareSession) { finishRequest(); return false; }
+            console.warn('[piik] 共享启动失败', error);
+            stopCurrentScreenStream(); restoreCameraAfterScreenShare(peer);
+            mediaOperationController.setDesired('screen', false);
+            voiceStatusView.setMediaError('screen', 'unknown', error.message); finishRequest(); notifyMediaDock(); return false;
+        }
+    }
+    if (codecAbort.signal.aborted || currentScreenShareSession !== screenShareSession || !sharingNow) { finishRequest(); return false; }
     emitScreenShareState(true, screenShareSession.voiceSessionGeneration);
     updateScreenP2pBudget();
-    void screenSfuRuntime.publish(shareScreen, screenShareSession.shareOptions);
+    if (!usingPiik) void screenSfuRuntime.publish(shareScreen, screenShareSession.shareOptions);
     emitLocalPresenceUpdate();
     updateLocalUserCard();
+    finishRequest();
     return true;
 };
 
 const stopScreenShare = (peer) => {
-    if (screenShareRequestPending || !sharingNow) {
+    if (!screenShareRequestPending && !sharingNow) {
         return false;
     }
 
@@ -4357,10 +2635,66 @@ const stopScreenShare = (peer) => {
     mediaOperationController.invalidate('screen');
     const screenShareSession = currentScreenShareSession;
     stopCurrentScreenStream();
+    setScreenShareRequestPending(false);
     emitScreenShareState(false, screenShareSession?.voiceSessionGeneration);
     restoreCameraAfterScreenShare(peer);
     emitLocalPresenceUpdate();
     return true;
+};
+
+// Source replacement has a single publication owner. Browser permission is
+// obtained before retiring the old stream, so cancelling keeps it running.
+const updateScreenShare = async (peer, options, change = 'quality') => {
+    const session = currentScreenShareSession;
+    if (!session || screenShareRequestPending) return false;
+    const next = voiceMediaLifecycle.normalizeScreenShareOptions(options);
+    const old = session.shareOptions;
+    const inPlace = usingPiik && next.provider === old.provider && next.shareAudio === old.shareAudio &&
+        (next.provider === 'native' || (change === 'quality' && next.codecMode === old.codecMode &&
+            !(next.resolutionPreset === 'original' && old.resolutionPreset !== 'original')));
+    const controller = new AbortController();
+    screenCodecAbort = controller;
+    setScreenShareRequestPending(true);
+    try {
+        if (inPlace) {
+            if (next.provider === 'native') await screenSfuRuntime.updateNative(session.stream, next, change === 'source');
+            else await screenSfuRuntime.updateWeb(session.stream, next);
+            if (controller.signal.aborted || currentScreenShareSession !== session) return false;
+            session.shareOptions = next;
+            if (next.provider === 'web') window.VoiceScreenSendPolicy?.register(session.track, next);
+            voiceStatusView.clearMediaError?.('screen');
+            notifyMediaDock();
+            return true;
+        }
+        // A native audio/provider change needs a new negotiated session. The
+        // dialog explicitly labels this as restarting, never as a live change.
+        let candidate;
+        if (next.provider === 'web') {
+            const result = await voiceMediaLifecycle.requestScreenCapture({ getDisplayMedia: requestDisplayMedia,
+                supportedConstraints: navigator.mediaDevices?.getSupportedConstraints?.(), options: next });
+            if (!result.ok) return false;
+            candidate = result.stream;
+        }
+        if (controller.signal.aborted || currentScreenShareSession !== session) {
+            localMediaTrackStopper.stopStream(candidate);
+            return false;
+        }
+        screenCodecAbort = undefined;
+        setScreenShareRequestPending(false);
+        stopScreenShare(peer);
+        return await startScreenShare(peer, next, candidate);
+    } catch (error) {
+        if (!controller.signal.aborted) {
+            console.warn('[screen] 修改共享失败', error);
+            voiceStatusView.setMediaError('screen', 'unknown', error.message || '修改共享失败，请重试');
+        }
+        return false;
+    } finally {
+        if (screenCodecAbort === controller) {
+            screenCodecAbort = undefined;
+            setScreenShareRequestPending(false);
+        }
+    }
 };
 
 // ----------------------------------------------------------------------------------------
@@ -4500,14 +2834,6 @@ const restartLocalMicrophone = async (
         event: recovery ? 'microphone-recovered' : 'microphone-started',
     });
     return true;
-};
-
-const resetAutoTileLayoutHeights = () => {
-    getVideoTiles().forEach((tile) => {
-        if (!tile.classList.contains('is-positioned')) {
-            tile.style.height = '';
-        }
-    });
 };
 
 const recoverProcessingFailure = ({ context, stream, rawStream }) => {
@@ -4945,12 +3271,10 @@ const leaveVoiceSession = (reason = 'user-leave') => {
     localVoiceSessionGeneration = 0;
     resetLocalVoiceState();
 
-    forEachTileLayoutItem((item) => {
-        if (!PAGE_SINGLETON_TYPES.has(item.type)) {
-            setTileLayoutItemVisibility(item.id, false);
-        }
+    getVideoTiles().forEach((tile) => {
+        fullscreenControls.detachTile(tile);
+        tile.remove();
     });
-    videoGrid.replaceChildren();
     updateMobileTileView();
     updateMobileRoomState();
     notifyMediaDock();
@@ -5009,9 +3333,7 @@ function removeRemoteTile(peerId, ownedTile) {
             mediaElement.onloadedmetadata = null;
             mediaElement.srcObject = null;
         }
-        setTileLayoutItemVisibility(vidElement.dataset.layoutItemId, false);
         vidElement.remove();
-        resetAutoTileLayoutHeights();
         updateMobileTileView();
     }
 }
@@ -5116,6 +3438,14 @@ callDiagnostics = window.VoiceCallDiagnostics.createRuntime({
     },
 });
 document.querySelector('[data-copy-call-diagnostics]')?.addEventListener('click', (event) => callDiagnostics.copyCombined(event.currentTarget));
+window.VoicePlayerMenu.configure({
+    beforeOpen: () => remoteVolumeUI.closePopover(),
+    showEvents: (tile) => callDiagnostics.showLogs({ shareOrdinal: callDiagnostics.getShareOrdinal(tile), host: tile }),
+    onVolume: showPeerVolumePopover,
+});
+document.addEventListener('voice:share-started', ({ detail }) => callDiagnostics.beginShare(detail.tile, detail.isLocal));
+document.addEventListener('voice:share-ended', ({ detail }) => callDiagnostics.endShare(detail.tile));
+document.addEventListener('voice:share-sample', ({ detail }) => callDiagnostics.observeShare(detail.tile, detail.snapshot));
 mediaDockRoot.querySelector('[data-show-call-logs]')?.addEventListener('click', () => callDiagnostics.showLogs());
 mediaDockRoot.querySelector('[data-clear-call-logs]')?.addEventListener('click', (event) => {
     callDiagnostics.clearLogs();
@@ -5125,30 +3455,9 @@ remoteVolumeUI.init();
 
 fullscreenControls.bindFullscreenChange();
 
-mobileBackToChannelsBtn?.addEventListener('click', () => {
-    if (currentPeer && !currentPeer.destroyed) {
-        mediaDockAdapter?.hangUp();
-    }
-
-    setMobileRoomView(false);
-});
-
-mobilePrevTileBtn?.addEventListener('click', () => {
-    mobileRoomController.goPrevious();
-});
-
-mobileNextTileBtn?.addEventListener('click', () => {
-    mobileRoomController.goNext();
-});
-
 window.addEventListener('resize', () => {
-    syncLayoutGridMetadata();
-    updateMobileRoomState();
-    updateMobileTileView();
-    if (!isMobileLayout()) {
-        initializeLayoutFromStorage();
-    }
-    clampPositionedTileLayouts();
+    // CSS owns size changes; no media, routing or storage operations here.
+    stageLayout?.syncViewport();
 });
 
 const handleNetworkOffline = () => {
@@ -5240,7 +3549,11 @@ sidebarRuntime = sidebarRuntimeApi.createSidebarRuntime({
         return changed;
     },
     onRequestVoiceRoom: setVoiceTargetRoom,
-    onPresenceSnapshot: reconcilePresenceState,
+    onPresenceSnapshot: (snapshot) => {
+        reconcilePresenceState(snapshot);
+        // The sidebar normalizes and stores its roster after this callback.
+        queueMicrotask(() => stageLayout?.sync());
+    },
     onCopyRoomLink: ({ url }) => copyLinkUI.writeClipboardText(url),
     getRoomUrl: getChannelUrl,
     isLocalMember: (member) =>
@@ -5289,6 +3602,7 @@ mediaDockAdapter = mediaDockAdapterApi.createMediaDockAdapter({
         setOutputMuted: (muted) => {
             outputMuted = Boolean(muted);
             notifyMediaDock();
+            updateAllVideoTileStatus();
             return applyOutputSettingsToRemoteMedia();
         },
         setOutputVolume: (volume) => {
@@ -5297,6 +3611,7 @@ mediaDockAdapter = mediaDockAdapterApi.createMediaDockAdapter({
             return applyOutputSettingsToRemoteMedia();
         },
         startScreenShare: (options) => startScreenShare(currentPeer, options),
+        updateScreenShare: (options, change) => updateScreenShare(currentPeer, options, change),
         stopScreenShare: () => stopScreenShare(currentPeer),
         selectNoiseMode: (mode) => audioSettingsController.select({ mode: window.VoiceAudioProcessing.normalizeMode(mode) }),
         setRnnoiseSpeechGate: (enabled) => {
@@ -5330,6 +3645,40 @@ navigator.mediaDevices?.addEventListener?.(
 );
 void refreshMediaDeviceLists();
 
+stageLayout = window.VoiceStageLayout.createRuntime({
+    root: mainLayout,
+    stage: videoGrid,
+    members: byId('member-cards'),
+    sources: byId('share-sources'),
+    chat: chatPanelRoot,
+    getTiles: getVideoTiles,
+    getMember: getTileMember,
+    getCameraStream: (tile) => tile.id === 'local-video' ? cameraStream : null,
+    getChannelState: () => {
+        const roomId = joinedVoiceRoomId || viewingRoomId;
+        const channel = sidebarRuntime?.getPresenceSnapshot().channels.find((item) => item.slug === roomId);
+        const session = voiceSessionRuntime.getSnapshot();
+        return {
+            joined: Boolean(joinedVoiceRoomId),
+            pending: session.desiredVoiceState === 'joined' && !joinedVoiceRoomId,
+            channelName: getChannelName(roomId),
+            memberCount: channel?.count,
+        };
+    },
+    onJoin: () => joinVoiceChannel(viewingRoomId),
+    onVolume: showPeerVolumePopover,
+});
+stageLayout.init();
+const speakingRuntime = window.VoiceSpeakingRuntime.createRuntime({
+    getSources: () => getVideoTiles().map((tile) => ({
+        id: tile.id,
+        stream: tile.id === 'local-video' ? myVideoStream : getPrimaryTileMediaElement(tile)?.srcObject,
+        enabled: getTileMember(tile).hasMic && !getTileMember(tile).muted,
+    })),
+    onSpeaking: (id, speaking) => stageLayout.setSpeaking(id, speaking),
+});
+speakingRuntime.start();
+window.addEventListener('pagehide', (event) => { if (!event.persisted) speakingRuntime.destroy(); });
 syncRoomCompositionState();
 enablePageCursorSharing();
-window.VoiceRoomBoot?.finish(pageLayoutBoard ? 'ready' : 'fallback');
+window.VoiceRoomBoot?.finish('ready');

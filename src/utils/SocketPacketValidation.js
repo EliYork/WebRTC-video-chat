@@ -28,6 +28,8 @@ const fieldsByEvent = {
     },
     'cursor:leave': { roomId: 'string' },
     'screen:share': { sharing: 'boolean', voiceSessionGeneration: 'number' },
+    'screen:codec-feedback': { peerId: 'string', generation: 'number', reason: 'string', voiceSessionGeneration: 'number', targetSessionGeneration: 'number' },
+    'screen:route-pressure': { reason: 'string', voiceSessionGeneration: 'number' },
 };
 
 // Socket middleware runs before business listeners. Reject malformed packets

@@ -7,7 +7,7 @@ import { sanitizeVoiceDiagnostic } from '../src/views/js/shared/voice-diagnostic
 import { createVoiceDiagnosticsRelay } from '../src/utils/VoiceDiagnosticsRelay.js';
 /* eslint-disable no-await-in-loop -- Advance the real receiver monitor one scheduled check at a time. */
 
-async function fixture({ onReceiverFailure, waitForMedia = async () => {} } = {}) {
+async function fixture({ onReceiverFailure, onReceiverIssue, waitForMedia = async () => {} } = {}) {
     let now = 1000000;
     let timerId = 0;
     const timers = new Map();
@@ -47,6 +47,7 @@ async function fixture({ onReceiverFailure, waitForMedia = async () => {} } = {}
         } };
     const runtime = window.VoiceScreenSfuRuntime.createRuntime({ config: { enabled: true }, Device,
         waitForMedia, onRemoteStream: ({ stream }) => streams.push(stream),
+        onReceiverIssue,
         onReceiverFailure: (value) => { failures.push(value); onReceiverFailure?.(value); } });
     const flush = async () => { for (let i = 0; i < 80; i++) await Promise.resolve(); };
     runtime.attachSocket(socket);
@@ -143,6 +144,40 @@ test('manual SFU retains low-FPS health evidence without automatic fallback; aut
     await f.step({ decoded: 0 });
     assert.equal(f.runtime.getReceiveRoute('secret-peer').route, 'p2p');
     assert.equal(f.runtime.getReceiverHealth().最近回退[0].reason, 'receiver-video-stalled');
+});
+
+test('manual SFU pins its failure window before switching routes, without changing fallback behavior', async (t) => {
+    const issues = [];
+    const f = await fixture({ onReceiverIssue: (issue) => issues.push(issue) });
+    t.after(() => f.runtime.leave());
+    await f.runtime.setReceiveRoute('secret-peer', 'sfu');
+    for (let i = 0; i < 8; i++) await f.step();
+    for (let i = 0; i < 4; i++) await f.step({ decoded: 0 });
+    assert.equal(issues.length, 1, 'sustained stall does not spam duplicate windows');
+    assert.equal(f.actions.filter((action) => action === 'unsubscribe').length, 0);
+    await f.runtime.setReceiveRoute('secret-peer', 'p2p');
+    const health = f.runtime.getReceiverHealth();
+    assert.equal(health.活跃接收.length, 0);
+    assert.equal(health.最近回退.length, 0, 'manual observation is not called a fallback');
+    assert.equal(health.最近异常[0].健康采样.length, 8);
+    assert.equal(health.最近异常[0].健康采样.at(-1).解码帧增长, 0);
+    assert.deepEqual(JSON.parse(JSON.stringify(sanitizeVoiceDiagnostic(health))), JSON.parse(JSON.stringify(health)));
+    assert.doesNotMatch(JSON.stringify(health), /secret/);
+});
+
+test('first-frame timeout retains pre-attach receive and decode evidence', async (t) => {
+    const issues = [];
+    const f = await fixture({ onReceiverIssue: (issue) => issues.push(issue), waitForMedia: async (_, transport, observe) => {
+        observe(new Map([['video', { id: 'secret', type: 'inbound-rtp', kind: 'video', timestamp: 1000,
+            bytesReceived: 9000, framesReceived: 0, framesDecoded: 0 }]]));
+        throw new Error('sfu-video-not-arriving');
+    } });
+    t.after(() => f.runtime.leave());
+    assert.equal(f.streams.some(Boolean), false);
+    assert.equal(issues.length, 1);
+    assert.equal(issues[0].reason, 'receiver-ready-failed');
+    assert.equal(issues[0].健康采样[0].解码帧数, 0);
+    assert.doesNotMatch(JSON.stringify(f.runtime.getReceiverHealth()), /secret/);
 });
 
 test('explicit SFU retry bypasses only the receiver cooldown and route stats honor the selected consumer', async (t) => {
@@ -348,10 +383,13 @@ test('actual monitor releases reach persisted logs and JSON collected by either 
         owner: { roomId: 'test', peerId: 'secret-owner-' + index, voiceSessionGeneration: 1 },
         timeout() { return this; }, emit(event, payload, ack) { void log.handlers[event](payload, (reply) => ack(null, reply)); } }));
     let time = 10000;
-    const relay = createVoiceDiagnosticsRelay({ io: { in: () => ({ fetchSockets: async () => peers }) },
+    const relay = createVoiceDiagnosticsRelay({ io: { in: () => ({ fetchSockets: async () => peers }) }, getMembers: () => peers,
         getVoiceOwner: (peer) => peer.owner, now: () => time });
     for (const peer of peers) {
-        peer.log.socket.emit = (_, ack) => { void relay.collect(peer).then((result) => ack(null, result)); };
+        peer.log.socket.emit = (event, payload) => {
+            if (event === 'voice:diagnostics:checkpoint') relay.checkpoint(peer, payload);
+            else void relay.collect(peer).then((result) => payload(null, result));
+        };
         const combined = JSON.parse(JSON.stringify(await peer.log.runtime.collectCombined()));
         const receiver = peer.log === viewer ? combined.本机 : combined.对端[0].数据;
         assert.deepEqual(receiver.SFU接收健康, expected, 'all eight samples survive every sanitizing/relay step');

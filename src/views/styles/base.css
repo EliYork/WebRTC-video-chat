@@ -27,6 +27,16 @@ input {
     font: inherit;
 }
 
+/* These icons are also used by active media and fullscreen controls. */
+.morph-icon {
+    display: block;
+    width: 20px;
+    height: 20px;
+    max-width: 100%;
+    flex: 0 0 auto;
+    pointer-events: none;
+}
+
 .red {
     color: var(--danger) !important;
 }

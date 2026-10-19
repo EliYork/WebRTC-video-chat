@@ -25,7 +25,7 @@ vm.runInNewContext(protocolSource, {
 vm.runInNewContext(registrySource, { window: registryWindow });
 const { createRegistry } = registryWindow.VoicePeerRegistry;
 
-const createFixture = (id, network) => {
+const createFixture = (id, network, callbacks = {}) => {
     const attachments = [];
     const cleanups = [];
     const debug = [];
@@ -56,6 +56,7 @@ const createFixture = (id, network) => {
         onDebug: (event) => debug.push(event),
         onPeerCleanup: (event) => cleanups.push(event),
         removeRemoteTile: ({ peerId }) => tiles.delete(peerId),
+        ...callbacks,
     });
     peer.onCall = (call) => registry.answerCall({ call });
     return { attachments, cleanups, debug, peer, registry, tiles };
@@ -542,4 +543,50 @@ test('screen P2P codec offer composes existing transform and camera/codec transi
     await registryWindow.VoiceScreenCodecs.prepare(vp8Screen, { codecMode: 'vp8' });
     assert.equal((await a.registry.replaceOutgoingTracks({ generation: 4, peerId: 'B', stream: stream(audio('mic'), vp8Screen) })).reason, 'renegotiation-required');
     assert.equal(screen.readyState, 'live');
+});
+
+test('AV1 PeerJS offers negotiate per viewer, fallback rebuilds keep audio, stale feedback cannot affect a new share', async (t) => {
+    registryWindow.RTCRtpSender = { getCapabilities: () => ({ codecs: [{ mimeType: 'video/AV1' }, { mimeType: 'video/H264', sdpFmtpLine: 'packetization-mode=1' }, { mimeType: 'video/VP8' }] }) };
+    vm.runInNewContext(readFileSync(new URL('../src/views/js/voice/voice-screen-codecs.js', import.meta.url), 'utf8'), { window: registryWindow });
+    t.after(() => { delete registryWindow.VoiceScreenCodecs; delete registryWindow.RTCRtpSender; });
+    const api = registryWindow.VoiceScreenCodecs;
+    const network = new StrictMediaNetwork();
+    const fallbacks = [];
+    const a = createFixture('A', network, { onCodecFallback: (event) => fallbacks.push(event) });
+    createFixture('B', network);
+    const screen = video('av1-screen');
+    const window = { captureFps: 60, encodeFps: 55, actualCodec: 'video/AV1', width: 1920, height: 1080, resolutionReduced: false };
+    const decision = await api.prepare(screen, { codecMode: 'av1' }, { probe: async () => ({ passed: false, reason: 'encoder-slow', windows: [window, window] }) });
+    assert.equal(decision.reason, 'manual-av1-below-target');
+    assert.equal(decision.probe.passed, false);
+    const media = stream(audio('mic'), screen);
+    const first = publish(a, 'B', 1, media);
+    first.peerConnection.getSenders().find((sender) => sender.track.kind === 'video').track = screen;
+    network.flush();
+    assert.equal(first.metadata.screenVideoCodec, 'av1');
+    assert.equal(first.metadata.screenVideoMode, 'av1');
+    assert.equal(a.registry.handleCodecFeedback({ peerId: 'B', generation: 0, reason: 'decoder-start-failed' }), false);
+    assert.equal(a.registry.handleCodecFeedback({ peerId: 'B', generation: 1, reason: 'decoder-start-failed' }), true);
+    assert.equal(fallbacks[0].primary, 'h264');
+    const second = publish(a, 'B', 2, media);
+    second.peerConnection.getSenders().find((sender) => sender.track.kind === 'video').track = screen;
+    network.flush();
+    assert.equal(second.metadata.screenVideoCodec, 'h264');
+    assert.equal(first.closeCount, 1);
+    assert.equal(a.registry.handleCodecFeedback({ peerId: 'B', generation: 1, reason: 'decoder-start-failed' }), false);
+    assert.equal(a.registry.handleCodecFeedback({ peerId: 'B', generation: 2, reason: 'decoder-start-failed' }), true);
+    const third = publish(a, 'B', 3, media);
+    network.flush();
+    assert.equal(third.metadata.screenVideoCodec, 'vp8');
+    assert.equal(third.peerConnection.getSenders().filter((sender) => sender.track?.kind === 'audio').length, 1);
+    const restart = video('new-screen');
+    await api.prepare(restart, { codecMode: 'av1' }, { probe: async () => ({ passed: true }) });
+    assert.equal((await a.registry.replaceOutgoingTracks({ generation: 4, peerId: 'B', stream: stream(audio('mic'), restart) })).reason, 'renegotiation-required');
+    const fresh = publish(a, 'B', 4, stream(audio('mic'), restart));
+    network.flush();
+    assert.equal(fresh.metadata.screenVideoCodec, 'av1');
+    assert.equal(api.failConnection(first.peerConnection, 'encoder-start-failed'), false);
+    a.registry.teardown();
+    assert.equal(screen.readyState, 'live');
+    assert.equal(restart.readyState, 'live');
 });

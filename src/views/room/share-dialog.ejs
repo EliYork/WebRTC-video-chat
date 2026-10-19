@@ -1,0 +1,52 @@
+<dialog class="media-device-popover screen-share-settings-popover" data-control-panel="screen" data-device-popover="screen" aria-modal="true" aria-labelledby="share-dialog-title">
+    <header class="share-dialog-header">
+        <div><h2 id="share-dialog-title" data-share-dialog-title>选择共享内容</h2><p data-screen-share-settings-status>选择来源，再确认画质</p></div>
+        <button type="button" data-screen-share-cancel aria-label="关闭共享设置" class="share-dialog-close">×</button>
+    </header>
+    <div class="share-dialog-body">
+        <% if (piikPrototype) { %>
+        <label class="share-provider-row"><span>共享方式</span><select data-screen-share-provider><option value="web">网页共享</option><option value="native">客户端原生共享</option></select></label>
+        <% } %>
+        <section data-share-source-section aria-label="选择共享来源">
+            <div class="share-browser-source" data-share-browser-source>
+                <span aria-hidden="true">▣</span><h3>使用浏览器选择屏幕或窗口</h3>
+                <p>点击“选择来源并共享”后，将打开浏览器的来源选择器；选中画面后确认共享。</p>
+            </div>
+            <% if (piikPrototype) { %>
+            <div data-piik-native-options hidden>
+                <div class="share-source-toolbar"><strong>选择要分享的画面</strong><button type="button" data-piik-native-refresh>刷新来源</button></div>
+                <p class="media-device-hint" data-piik-native-status role="status">正在连接客户端…</p>
+                <div data-piik-native-gallery></div>
+                <select data-piik-native-source hidden aria-hidden="true" tabindex="-1"><option value="">请选择来源</option></select>
+                <details class="share-connect-help"><summary>无法连接客户端？</summary>
+                    <p>请先打开 EliYork Voice。首次从网页使用时，需在客户端批准当前网站的连接。</p>
+                    <button type="button" data-piik-native-approve>查找授权入口</button>
+                    <a data-piik-native-approval-link hidden target="_blank" rel="noopener noreferrer">打开客户端授权</a>
+                </details>
+                <p class="media-device-hint" data-piik-native-config-status role="status" hidden></p>
+            </div>
+            <% } %>
+        </section>
+        <section class="share-quality-section" aria-label="画质设置">
+            <h3>画质</h3>
+            <div class="share-quality-controls">
+                <label><span>分辨率</span><select id="screenShareResolution" data-screen-share-resolution>
+                    <option value="auto">自动</option><option value="720p">720p</option><option value="1080p" selected>1080p</option><option value="1440p">1440p（2K）</option><option value="2160p">2160p（4K）</option><option value="original">原始分辨率</option>
+                </select></label>
+                <label><span>流畅度</span><select id="screenShareFrameRate" data-screen-share-frame-rate><option value="15">15 帧/秒</option><option value="30">30 帧/秒</option><option value="60" selected>60 帧/秒</option></select></label>
+            </div>
+        </section>
+        <label class="share-audio-choice"><input type="checkbox" data-screen-share-audio data-piik-native-audio><span>共享来源的声音<small data-share-audio-hint>默认关闭，语音通话不受影响。整屏声音可能包含通话，请优先选择独立窗口或标签页。</small></span></label>
+        <details class="share-advanced"><summary>高级设置</summary>
+            <label class="media-select-row" data-share-mode-row><span>画面偏好</span><select data-screen-share-mode><option value="game" selected>流畅优先</option><option value="detail">文字清晰优先</option></select></label>
+            <% if (piikPrototype) { %>
+            <label class="media-select-row"><span>目标码率上限</span><select data-screen-share-bitrate><option value="3000000">3 Mbps</option><option value="6000000">6 Mbps</option><option value="10000000">10 Mbps</option><option value="15000000" selected>15 Mbps</option></select></label>
+            <% } %>
+            <label class="media-select-row" data-share-web-only><span>视频编码</span><select data-screen-share-codec><option value="auto" selected>自动</option><% if (!piikPrototype) { %><option value="av1">AV1（实验）</option><% } %><option value="h264">H.264 优先</option><option value="vp8">VP8</option></select></label>
+            <label class="media-select-row" <%= piikPrototype ? 'hidden' : '' %>><span>服务器启动码率</span><select data-screen-share-start-bitrate><option value="browser" selected>默认</option><option value="1500">1.5 Mbps</option><option value="5500">5.5 Mbps</option></select></label>
+            <% if (piikPrototype) { %><p class="media-device-hint" data-piik-provider-hint>原生共享使用 H.264；最多三位观看者。实际帧率取决于设备和网络。</p><% } %>
+        </details>
+        <p class="share-dialog-feedback" data-share-dialog-feedback role="status" aria-live="polite"></p>
+    </div>
+    <footer class="screen-share-dialog-actions"><button type="button" data-share-action="stop" class="share-stop-action" hidden>停止共享</button><span></span><button type="button" data-screen-share-cancel>取消</button><button type="button" data-screen-share-start class="share-primary-action">选择来源并共享</button></footer>
+</dialog>

@@ -76,8 +76,8 @@ const fixture = () => {
         let micPermissionDenied = false, selectedInputDeviceId = 'default';
         const audioPipelines = audioProcessingRuntime.pipelines;
         let activeAudioPipelineStream = null;
-        ${section('const createAudioPipeline =', 'const getFullscreenElement =')}
-        ${section('const restartLocalMicrophone =', 'const resetAutoTileLayoutHeights =')}
+        ${section('const createAudioPipeline =', 'const updateFullscreenButtonStates =')}
+        ${section('const restartLocalMicrophone =', 'const recoverProcessingFailure =')}
     `, context);
     const read = (code) => vm.runInContext(code, context);
     return {

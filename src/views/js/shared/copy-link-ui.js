@@ -14,7 +14,9 @@
     };
 
     const writeClipboardText = (text) =>
-        global.navigator.clipboard.writeText(String(text));
+        global.EliYorkDesktop?.writeClipboardText
+            ? global.EliYorkDesktop.writeClipboardText(String(text))
+            : global.navigator.clipboard.writeText(String(text));
 
     const getVisibleText = (button) => button?.textContent.trim() || '';
 

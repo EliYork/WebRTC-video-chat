@@ -1,0 +1,22 @@
+{
+    "name": "eliyork-voice-desktop",
+    "productName": "EliYork Voice",
+    "version": "0.1.1",
+    "private": true,
+    "description": "EliYork Voice Windows client with Piik native sharing",
+    "author": "EliYork",
+    "license": "ISC",
+    "main": "main.cjs",
+    "scripts": {
+        "start": "electron .",
+        "package": "node package.mjs",
+        "test:updates": "electron test-updates.cjs"
+    },
+    "devDependencies": {
+        "electron": "44.9.0",
+        "electron-builder": "26.17.0"
+    },
+    "dependencies": {
+        "electron-updater": "6.8.10"
+    }
+}

@@ -12,6 +12,7 @@
         '720p': { height: 720, width: 1280 },
         '1080p': { height: 1080, width: 1920 },
         '1440p': { height: 1440, width: 2560 },
+        '2160p': { height: 2160, width: 3840 },
     });
     const SCREEN_SHARE_RESOLUTION_PRESETS = Object.freeze([
         'auto',
@@ -39,8 +40,12 @@
         const requestedFrameRate = Number(options.frameRate);
         const requestedResolution = options.resolutionPreset;
         return {
+            provider: options.provider === 'native' ? 'native' : 'web',
+            nativeSourceKey: typeof options.nativeSourceKey === 'string' ? options.nativeSourceKey : '',
+            shareAudio: options.shareAudio === true,
+            maxBitrate: [3000000, 6000000, 10000000, 15000000].includes(Number(options.maxBitrate)) ? Number(options.maxBitrate) : 15000000,
             mode: options.mode === 'detail' ? 'detail' : 'game',
-            codecMode: ['h264', 'vp8'].includes(options.codecMode) ? options.codecMode : 'auto',
+            codecMode: ['av1', 'h264', 'vp8'].includes(options.codecMode) ? options.codecMode : 'auto',
             startBitrate: ['1500', '5500'].includes(String(options.startBitrate)) ? String(options.startBitrate) : 'browser',
             frameRate: SCREEN_SHARE_FRAME_RATES.includes(requestedFrameRate)
                 ? requestedFrameRate
@@ -54,7 +59,7 @@
     };
 
     const buildScreenCaptureConstraints = (options = {}, supportedConstraints = {}) => {
-        const { frameRate, resolutionPreset } =
+        const { frameRate, resolutionPreset, shareAudio } =
             normalizeScreenShareOptions(options);
         const frameRateConstraint = {
             ideal: frameRate,
@@ -63,7 +68,7 @@
         // Best effort only: unsupported browsers ignore picker hints. Never
         // disable game audio or local playback to hide a conference echo.
         const audioOptions = {
-            audio: supportedConstraints.restrictOwnAudio === true ? { restrictOwnAudio: true } : true,
+            audio: shareAudio ? (supportedConstraints.restrictOwnAudio === true ? { restrictOwnAudio: true } : true) : false,
             audioSelection: 'preferred',
             selfBrowserSurface: 'exclude',
             windowAudio: 'window',

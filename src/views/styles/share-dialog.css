@@ -1,0 +1,50 @@
+.local-share-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-left: auto; flex: 0 0 auto; }
+.local-share-controls[hidden] { display: none; }
+.local-share-controls > span { color: var(--accent-strong); font-weight: 650; }
+.local-share-controls button, :is(#buttons, body) .screen-share-settings-popover button { display: inline-flex; align-items: center; justify-content: center; width: auto; height: auto; min-height: 38px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); color: var(--text); padding: 7px 12px; font: inherit; cursor: pointer; }
+.local-share-controls [data-share-action='stop'], :is(#buttons, body) .screen-share-settings-popover .share-stop-action { color: #aa355b; border-color: #eab7c6; }
+dialog.screen-share-settings-popover[data-device-popover='screen'] { position: fixed; inset: 0; margin: auto; transform: none; width: min(880px, calc(100vw - 32px)); height: fit-content; max-height: calc(100dvh - 32px); padding: 0; overflow: hidden; border-radius: 18px; background: var(--panel); color: var(--text); font-size: 14px; box-shadow: 0 24px 90px #69324833; }
+dialog.screen-share-settings-popover.is-open { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }
+.screen-share-settings-popover::backdrop, .media-modal-fallback-backdrop { background: #32222c66; backdrop-filter: blur(4px); }
+.media-modal-fallback-backdrop { position: fixed; inset: 0; z-index: 14999; }
+.share-dialog-header { display: flex; justify-content: space-between; align-items: start; gap: 16px; padding: 22px 24px 16px; border-bottom: 1px solid var(--line-soft); }
+.share-dialog-header h2 { margin: 0; font-size: 21px; color: var(--text); }
+.share-dialog-header p { margin: 6px 0 0; color: var(--muted); line-height: 1.5; }
+:is(#buttons, body) .screen-share-settings-popover .share-dialog-close { padding: 0; width: 38px; font-size: 24px; flex: 0 0 38px; }
+.share-dialog-body { display: grid; gap: 18px; overflow: auto; overscroll-behavior: contain; padding: 20px 24px; min-height: 0; }
+.screen-share-settings-popover select { font: inherit; width: 100%; min-width: 0; min-height: 42px; padding: 8px 10px; border-radius: 9px; border: 1px solid var(--line); background: var(--panel); color: var(--text); }
+.share-provider-row { display: grid; grid-template-columns: auto minmax(0, 250px); align-items: center; gap: 20px; justify-content: space-between; }
+.share-browser-source { text-align: center; padding: 28px 20px; border: 1px dashed var(--line); border-radius: 12px; background: var(--page); }
+.share-browser-source > span { font-size: 38px; color: var(--accent); }
+.share-browser-source h3 { font-size: 16px; margin: 8px 0; }
+.share-browser-source p { color: var(--muted); margin: 0 auto; max-width: 480px; line-height: 1.7; }
+.share-quality-section h3 { margin: 0 0 10px; font-size: 14px; }
+.share-quality-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.share-quality-controls label { display: grid; gap: 7px; }
+.share-audio-choice { display: flex; gap: 10px; align-items: start; }
+.share-audio-choice input { accent-color: var(--accent); margin-top: 3px; }
+.share-audio-choice small { display: block; color: var(--muted); font-size: 12px; line-height: 1.6; margin-top: 4px; }
+.share-advanced, .share-connect-help { border-top: 1px solid var(--line-soft); padding-top: 12px; }
+.share-advanced summary, .share-connect-help summary { cursor: pointer; color: var(--muted); }
+.share-advanced .media-select-row { margin-top: 12px; }
+.screen-share-dialog-actions { display: flex; align-items: center; gap: 10px; padding: 16px 24px; border-top: 1px solid var(--line-soft); background: var(--page); }
+.screen-share-dialog-actions > span { flex: 1; }
+:is(#buttons, body) .screen-share-dialog-actions .share-primary-action { background: var(--accent); border-color: var(--accent); color: white; font-weight: 650; }
+.screen-share-settings-popover button:disabled { opacity: .5; cursor: default; }
+.share-dialog-feedback:empty { display: none; }
+.share-dialog-feedback { margin: 0; color: #a13757; line-height: 1.6; }
+.share-source-toolbar, .share-source-group-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.share-source-group-heading { margin: 16px 0 9px; }
+.share-source-group-heading h3 { font-size: 14px; margin: 0; }
+:is(#buttons, body) .share-source-group-heading button { min-height: 30px; padding: 3px 10px; }
+.share-source-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+[data-piik-native-gallery] { max-height: min(340px, 38dvh); overflow: auto; scrollbar-gutter: stable; padding: 2px; }
+:is(#buttons, body) .screen-share-settings-popover .share-source-card { display: grid; width: 100%; height: auto; padding: 5px; text-align: left; min-width: 0; gap: 5px; border: 2px solid var(--line-soft); border-radius: 10px; overflow: hidden; }
+:is(#buttons, body) .screen-share-settings-popover .share-source-card[aria-pressed='true'] { border-color: var(--accent); background: var(--accent-soft); }
+.share-source-card img, .share-source-preview-status { display: grid; place-items: center; width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: #f6edf2; border-radius: 5px; font-size: 12px; color: var(--muted); text-align: center; }
+.share-source-card img[hidden], .share-source-preview-status[hidden], :is(#buttons, body) .screen-share-settings-popover [hidden] { display: none; }
+.share-source-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; padding: 4px; }
+.share-source-card:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+@media (max-width: 1000px) { .share-stage-header { flex-wrap: wrap; } .local-share-controls { font-size: 11px; } }
+@media (max-width: 600px) { .share-source-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .share-dialog-header, .share-dialog-body, .screen-share-dialog-actions { padding: 14px; } .screen-share-dialog-actions { flex-wrap: wrap; } }
+@media (max-width: 380px) { .share-provider-row { grid-template-columns: 1fr; gap: 6px; } .screen-share-dialog-actions button { padding: 6px 8px; } }

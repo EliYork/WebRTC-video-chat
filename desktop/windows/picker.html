@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-CN">
+    <meta charset="utf-8" />
+    <meta
+        http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src data:"
+    />
+    <title>选择网页共享画面</title
+    ><style>
+        body {
+            font: 16px system-ui;
+            background: #151923;
+            color: #eee;
+            padding: 20px;
+        }
+        #sources {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+        }
+        button {
+            background: #252c3a;
+            border: 1px solid #52617a;
+            color: inherit;
+            padding: 10px;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+        button:focus {
+            outline: 2px solid #9bbaff;
+        }
+        img {
+            width: 100%;
+            height: 140px;
+            object-fit: contain;
+        }
+        span {
+            display: block;
+            overflow-wrap: anywhere;
+        }
+        header {
+            margin-bottom: 16px;
+        }
+        label {
+            display: block;
+            margin: 12px 0;
+        }
+    </style>
+    <header>
+        <h2>选择网页共享画面</h2>
+        <p>原生共享请返回频道，选择“Piik App 原生屏幕共享”。</p>
+        <label
+            ><input
+                id="audio"
+                type="checkbox"
+            />同时共享系统声音（包含其他应用和通话声音）</label
+        ><button id="cancel">取消</button>
+    </header>
+    <div id="sources"></div>
+    <script src="picker.cjs"></script>
+</html>

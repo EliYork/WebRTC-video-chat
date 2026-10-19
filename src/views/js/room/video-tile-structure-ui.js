@@ -16,12 +16,6 @@
             tile.prepend(header);
         }
 
-        // Every tile uses the same visible title bar as its drag handle.
-        // Set these attributes for existing headers too, so restored or
-        // server-rendered tiles receive the same behavior as new tiles.
-        header.setAttribute('data-drag-handle', 'true');
-        header.removeAttribute('title');
-
         const ensureHeaderChild = (parent, selector, className) => {
             let child = header.querySelector(selector);
             if (!child) {
@@ -63,40 +57,6 @@
             controls.append(actions);
         }
 
-        let dragHandle = controls.querySelector('.window-drag-handle');
-        if (!dragHandle) {
-            dragHandle = global.document.createElement('span');
-            dragHandle.className = 'window-drag-handle';
-            dragHandle.setAttribute('aria-hidden', 'true');
-            const icon = global.document.createElementNS(
-                'http://www.w3.org/2000/svg',
-                'svg'
-            );
-            icon.setAttribute('viewBox', '0 0 12 18');
-            icon.setAttribute('focusable', 'false');
-            [
-                [3, 4],
-                [9, 4],
-                [3, 9],
-                [9, 9],
-                [3, 14],
-                [9, 14],
-            ].forEach(([cx, cy]) => {
-                const dot = global.document.createElementNS(
-                    'http://www.w3.org/2000/svg',
-                    'circle'
-                );
-                dot.setAttribute('cx', String(cx));
-                dot.setAttribute('cy', String(cy));
-                dot.setAttribute('r', '1');
-                icon.append(dot);
-            });
-            dragHandle.append(icon);
-        }
-        dragHandle.setAttribute('data-drag-handle', 'true');
-        dragHandle.title = '拖动窗口';
-        controls.insertBefore(dragHandle, actions);
-
         return header;
     };
 
@@ -112,23 +72,7 @@
         return child;
     };
 
-    const ensureResizeHandles = (tile, resizeDirections = []) => {
-        resizeDirections.forEach((direction) => {
-            let resizeHandle = tile.querySelector(
-                `.tile-resize-handle[data-resize-direction="${direction}"]`
-            );
-
-            if (!resizeHandle) {
-                resizeHandle = global.document.createElement('div');
-                resizeHandle.className = `tile-resize-handle tile-resize-handle--${direction}`;
-                resizeHandle.dataset.resizeDirection = direction;
-                resizeHandle.setAttribute('aria-hidden', 'true');
-                tile.append(resizeHandle);
-            }
-        });
-    };
-
-    const ensureTileStructure = (tile, { resizeDirections = [] } = {}) => {
+    const ensureTileStructure = (tile) => {
         const header = ensureHeader(tile);
         const headerActions = header.querySelector('.tile-header-actions');
         const body = ensureChild(tile, '.tile-body', 'tile-body');
@@ -136,7 +80,6 @@
         const footer = ensureChild(tile, '.tile-footer', 'tile-footer');
         const actions = ensureChild(tile, '.tile-actions', 'tile-actions');
 
-        ensureResizeHandles(tile, resizeDirections);
 
         return { actions, body, footer, header, headerActions, overlay };
     };

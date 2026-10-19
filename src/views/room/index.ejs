@@ -1,4 +1,5 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
+<% const piikPrototype = typeof piikEnabled !== 'undefined' && piikEnabled; %>
 <html lang="zh-CN" data-room-boot="pending">
 <head>
     <meta charset="UTF-8">
@@ -16,7 +17,7 @@
     </style>
     <noscript><style>html[data-room-boot='pending'] #main, html[data-room-boot='pending'] .workspace-topbar { visibility: visible; } .room-boot-status { display: none !important; }</style></noscript>
     <script src="/js/shared/room-boot.js"></script>
-    <link rel="stylesheet" href="/style.css?v=ui-20261012">
+    <link rel="stylesheet" href="/style.css?v=stage-voice-20261018">
     <link rel="stylesheet" href="/vendor/fontawesome/css/fontawesome.min.css">
     <link rel="stylesheet" href="/vendor/fontawesome/css/solid.min.css">
     <link rel="stylesheet" href="/vendor/fontawesome/css/regular.min.css">
@@ -28,7 +29,9 @@
         const roomBootstrap = <%- roomBootstrap %>
         const ROOM_ID = roomBootstrap.roomId
         const iceServers = roomBootstrap.iceServers
+        window.voiceBuildInfo = roomBootstrap.buildInfo || {}
         window.voiceScreenSfuConfig = roomBootstrap.screenSfu || {}
+        window.voiceScreenMediaProvider = roomBootstrap.screenMediaProvider || 'legacy'
     </script>
 </head>
 <body>
@@ -39,11 +42,15 @@
             <strong>语音据点</strong>
         </div>
         <div class="workspace-actions">
+            <button type="button" id="stageChannelsToggle" aria-controls="stage-channels" aria-expanded="false">频道</button>
+            <button type="button" id="stageChatToggle" aria-controls="chat-panel" aria-expanded="true">聊天</button>
             <button type="button" class="workspace-copy-diagnostics" data-copy-call-diagnostics aria-live="polite" aria-atomic="true">复制诊断</button>
         </div>
     </header>
-    <div id="main" class="room-layout">
-        <aside class="room-sidebar" aria-label="频道列表">
+    <div id="main" class="room-layout stage-layout" data-stage-mode="voice">
+        <aside id="stage-channels" class="room-sidebar" aria-label="频道列表">
+            <nav class="server-navigation" aria-label="服务器导航"><a href="/" title="返回频道首页" aria-label="频道首页">◖◗</a><strong>语音据点</strong></nav>
+            <h2 class="channel-section-title">语音频道</h2>
             <nav id="channel-sidebar" class="sidebar-channel-tree">
                 <% channels.forEach((channel) => { %>
                     <div
@@ -70,7 +77,35 @@
                     </div>
                 <% }) %>
             </nav>
+        </aside>
 
+        <main class="room-stage" aria-label="屏幕共享舞台">
+            <header class="share-stage-header"><strong>正在观看</strong><nav id="share-sources" aria-label="选择共享源"></nav>
+                <div class="local-share-controls" data-local-share-controls hidden><span data-local-share-state>正在共享</span><button type="button" data-share-action="source">更换画面</button><button type="button" data-share-action="quality">画质</button><button type="button" data-share-action="stop">停止共享</button></div>
+            </header>
+            <section id="canvas" class="stage-canvas" aria-label="共享画面"><div id="video-grid"></div></section>
+        </main>
+        <section class="stage-members" aria-label="语音成员舞台">
+            <header class="members-heading"><div><strong id="stageChannelName"><%= channelName %></strong><span id="stageChannelStatus">语音成员舞台</span></div><span id="member-count">0 人</span></header>
+            <div id="members-empty" class="members-empty" role="status">
+                <div class="stage-welcome-mark" aria-hidden="true">◖◗</div>
+                <h1 id="stageWelcomeTitle">加入语音，一起待一会儿</h1>
+                <p id="stageWelcomeDetail">加入后，成员头像与摄像头会显示在中央；共享屏幕时自动切换到观看舞台。</p>
+                <button id="stageJoinVoice" type="button">加入语音</button>
+            </div>
+            <div id="member-cards" role="list" aria-label="成员卡片"></div>
+        </section>
+
+        <aside id="chat-panel" class="chat-panel" aria-label="频道聊天">
+            <header class="stage-chat-heading"><h2 id="chatTitle">频道聊天</h2><p id="chatDescription" hidden></p></header>
+            <input id="chatName" type="hidden" maxlength="32" autocomplete="nickname">
+            <ol id="chatMessages" class="chat-messages"></ol>
+            <form id="chatForm" class="chat-form">
+                <textarea id="chatInput" maxlength="500" rows="2" placeholder="发送消息"></textarea>
+                <button type="submit">发送</button>
+            </form>
+        </aside>
+        <footer class="stage-dock">
             <section class="local-user-card" aria-label="本地用户控制">
                 <div id="buttons" class="hidden media-dock" aria-label="通话控制">
                     <div class="media-dock-header">
@@ -196,85 +231,10 @@
                             <strong id="outputVolumeValue">100%</strong>
                         </label>
                     </section>
-                    <dialog class="media-device-popover screen-share-settings-popover" data-control-panel="screen" data-device-popover="screen" role="dialog" aria-modal="true" aria-label="屏幕共享设置">
-                        <div class="media-device-popover-header">
-                            <strong>屏幕共享</strong>
-                            <span data-screen-share-settings-status>开始共享时生效</span>
-                        </div>
-                        <label class="media-select-row">
-                            <span>共享内容</span>
-                            <select data-screen-share-mode>
-                                <option value="game" selected>游戏画面 · 60fps 目标</option>
-                                <option value="detail">桌面文字 · 清晰优先</option>
-                            </select>
-                        </label>
-                        <label class="media-select-row">
-                            <span>分辨率</span>
-                            <select id="screenShareResolution" data-screen-share-resolution>
-                                <option value="auto">自动</option>
-                                <option value="720p">720p</option>
-                                <option value="1080p" selected>1080p</option>
-                                <option value="1440p">1440p</option>
-                                <option value="original">原始分辨率</option>
-                            </select>
-                        </label>
-                        <label class="media-select-row">
-                            <span>帧率</span>
-                            <select id="screenShareFrameRate" data-screen-share-frame-rate>
-                                <option value="15">15 fps</option>
-                                <option value="30">30 fps</option>
-                                <option value="60" selected>60 fps</option>
-                            </select>
-                        </label>
-                        <details>
-                            <summary>高级设置</summary>
-                            <label class="media-select-row">
-                                <span>视频编码器</span>
-                                <select data-screen-share-codec>
-                                    <option value="auto" selected>自动 · 实测 H.264，失败回退 VP8</option>
-                                    <option value="h264">H.264 优先 · 不兼容时回退 VP8</option>
-                                    <option value="vp8">VP8 · 对照测试</option>
-                                </select>
-                            </label>
-                            <label class="media-select-row">
-                                <span>SFU 启动码率</span>
-                                <select data-screen-share-start-bitrate>
-                                    <option value="browser" selected>浏览器默认</option>
-                                    <option value="1500">1.5 Mbps · 原设置对照</option>
-                                    <option value="5500">5.5 Mbps · 对照</option>
-                                </select>
-                            </label>
-                        </details>
-                        <p class="media-device-hint">带宽不足时优先降低帧率、保留分辨率。自动编码器检测约需 3–6 秒；实际画质和帧率取决于设备与网络。</p>
-                        <div class="screen-share-dialog-actions">
-                            <button type="button" data-screen-share-cancel>取消</button>
-                            <button type="button" data-screen-share-start>开始共享</button>
-                        </div>
-                    </dialog>
+                    <%- include('share-dialog', { piikPrototype }) %>
                 </div>
             </section>
-        </aside>
-
-        <main class="room-stage" aria-label="活动区">
-            <button id="mobileBackToChannels" class="mobile-back-button" type="button">返回</button>
-            <div class="mobile-tile-nav" aria-label="玩家窗口切换">
-                <button id="mobilePrevTile" type="button" aria-label="上一个窗口">‹</button>
-                <span id="mobileTileCount">0 / 0</span>
-                <button id="mobileNextTile" type="button" aria-label="下一个窗口">›</button>
-            </div>
-            <section id="canvas" class="stage-canvas" aria-label="玩家窗口区">
-                <div id="video-grid"></div>
-            </section>
-        </main>
-
-        <aside id="chat-panel" class="chat-panel" aria-label="频道聊天">
-            <input id="chatName" type="hidden" maxlength="32" autocomplete="nickname">
-            <ol id="chatMessages" class="chat-messages"></ol>
-            <form id="chatForm" class="chat-form">
-                <textarea id="chatInput" maxlength="500" rows="2" placeholder="发送消息"></textarea>
-                <button type="submit">发送</button>
-            </form>
-        </aside>
+        </footer>
     </div> 
     <script src="/js/shared/view-utils.js"></script>
     <script src="/js/chat/chat-name-state.js"></script>
@@ -293,23 +253,7 @@
     <script src="/js/media/fullscreen-controls.js"></script>
     <script src="/js/media/local-screen-share-preview-controller.js"></script>
     <script src="/js/media/voice-join-overlay-ui.js"></script>
-    <script src="/js/layout/page-layout-snap-utils.js"></script>
-    <script src="/js/layout/page-layout-resize-utils.js"></script>
-    <script src="/js/layout/page-layout-interaction-ui.js"></script>
-    <script src="/js/layout/page-layout-storage.js"></script>
-    <script src="/js/layout/page-layout-config.js"></script>
-    <script src="/js/layout/page-layout-ids.js"></script>
-    <script src="/js/layout/page-layout-placement-utils.js"></script>
-    <script src="/js/layout/page-layout-components.js"></script>
-    <script src="/js/layout/page-layout-toolbar-ui.js"></script>
-    <script src="/js/layout/page-layout-component-menu-ui.js"></script>
-    <script src="/js/layout/page-layout-recovery-ui.js"></script>
-    <script src="/js/layout/page-layout-runtime.js"></script>
-    <script src="/js/layout/page-layout-window-manager-runtime.js"></script>
-    <script src="/js/layout/page-layout-component-runtime.js"></script>
-    <script src="/js/layout/page-layout-store-runtime.js"></script>
     <script src="/js/room/room-ui-state.js"></script>
-    <script src="/js/room/mobile-room-state.js"></script>
     <script src="/js/room/presence-view-model.js"></script>
     <script src="/js/room/participants-list-ui.js"></script>
     <script src="/js/room/tile-status-ui.js"></script>
@@ -327,6 +271,7 @@
     <script src="/js/voice/voice-screen-send-policy.js"></script>
     <script src="/vendor/screen-sfu-client.js"></script>
     <script src="/js/voice/voice-screen-sfu-runtime.js"></script>
+    <% if (typeof piikEnabled !== 'undefined' && piikEnabled) { %><script src="/vendor/piik-client.js"></script><% } %>
     <script src="/js/voice/voice-peer-registry.js"></script>
     <script src="/js/voice/voice-media-lifecycle.js"></script>
     <script src="/js/voice/voice-retry-controller.js"></script>
@@ -338,9 +283,14 @@
     <script src="/js/voice/voice-audio-settings-controller.js"></script>
     <script src="/js/voice/voice-status-view.js"></script>
     <script src="/js/voice/voice-media-quality-view.js"></script>
+    <script src="/js/voice/voice-share-stats-view.js"></script>
+    <script src="/js/voice/voice-player-menu.js"></script>
     <script src="/js/voice/voice-share-diagnostics.js"></script>
+    <script src="/js/voice/voice-player-events.js"></script>
     <script src="/js/voice/voice-call-diagnostics.js"></script>
     <script src="/js/voice/voice-media-quality-runtime.js"></script>
+    <script src="/js/room/stage-layout-runtime.js"></script>
+    <script src="/js/voice/voice-speaking-runtime.js"></script>
     <script type="module" src="/script.js"></script> <!-- So we defined the static files of the server so we can use it here-->
 </body>
 </html>

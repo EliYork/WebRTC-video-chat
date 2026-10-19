@@ -26,6 +26,66 @@ function fixture({ storage, connections = [], shares = [], getReceiverHealth } =
 }
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
+test('diagnostics distinguish website, desktop and schema versions without exporting raw user agents', async () => {
+    const f = fixture();
+    f.window.voiceBuildInfo = { webVersion: '1.0.5', webRevision: 'd4ca9c9' };
+    f.window.navigator.userAgent = 'Mozilla Windows eliyork-voice-desktop/0.1.1 Chrome/152.0 Electron/44.9.0 Safari';
+    const report = await f.runtime.report();
+    assert.equal(report.网页版本, '1.0.5');
+    assert.equal(report.网页构建, 'd4ca9c9');
+    assert.equal(report.客户端版本, '0.1.1');
+    assert.equal(report.Electron版本, '44.9.0');
+    assert.equal(report.诊断格式, 5);
+    assert.equal(report.版本, undefined);
+    const safe = sanitizeVoiceDiagnostic(report);
+    assert.equal(safe.客户端版本, '0.1.1');
+    assert.doesNotMatch(JSON.stringify(report), /Mozilla|userAgent/);
+    f.window.navigator.userAgent = 'Mozilla Windows Chrome/155.0';
+    assert.equal((await f.runtime.report()).客户端版本, null);
+    assert.equal((await f.runtime.report()).客户端类型, '浏览器');
+    f.runtime.destroy();
+});
+
+test('browser family detection prioritizes Chromium/Edge/Firefox over Android Version/4.0 and keeps Safari on Apple only', async () => {
+    const cases = [
+        ['Mozilla/5.0 (Linux; Android 15; Phone) AppleWebKit/537.36 Version/4.0 Chrome/130.0 Mobile Safari/537.36', 'Chrome', 130, 'Android'],
+        ['Mozilla/5.0 (Linux; Android 15; Phone; wv) AppleWebKit/537.36 Version/4.0 Chrome/130.0 Mobile Safari/537.36', 'Android WebView', 130, 'Android'],
+        ['Mozilla/5.0 (Linux; Android 15) Chrome/130.0 Mobile Safari/537.36 EdgA/130.0', 'Edge', 130, 'Android'],
+        ['Mozilla/5.0 (Linux; Android 15) Chrome/130.0 Mobile Safari/537.36 SamsungBrowser/28.0', 'Samsung Internet', 28, 'Android'],
+        ['Mozilla/5.0 (iPhone) AppleWebKit/605.1 Version/18.0 Mobile Safari/604.1', 'Safari', 18, 'iOS'],
+        ['Mozilla/5.0 (iPhone) AppleWebKit/605.1 CriOS/130.0 Mobile Safari/604.1', 'Chrome', 130, 'iOS'],
+        ['Mozilla/5.0 (Windows) Gecko/20100101 Firefox/130.0', 'Firefox', 130, 'Windows'],
+        ['Mozilla/5.0 (Linux; Android 15) Version/4.0 Safari/537.36', '其他', null, 'Android'],
+    ];
+    for (const [ua, name, version, platform] of cases) {
+        const f = fixture(); f.window.navigator.userAgent = ua;
+        f.runtime.start(); await flush();
+        const report = await f.runtime.report();
+        const browser = report.当前状态.浏览器;
+        assert.equal(browser.浏览器, name); assert.equal(browser.浏览器主版本, version); assert.equal(browser.平台, platform);
+        assert.doesNotMatch(JSON.stringify(report), /Phone|Mozilla|userAgent/);
+        f.runtime.destroy();
+    }
+});
+
+test('below-target AV1 and idle-to-forwarding SFU changes reuse bounded call events without sample spam', async () => {
+    const f = fixture(); f.runtime.start(); await flush();
+    const tile = {}; const snapshot = { 角色: '共享者', 编码器选择: { primary: 'av1', reason: 'manual-av1-below-target' },
+        共享路径变化: { hasUplink: true, serverViewers: 0, uplinkStatus: 'idle' },
+        连接: [{ 序号: 1, 路径: 'SFU', 实际传输路径: 'SFU', 连接状态: 'connected', 视频流: [] }] };
+    f.runtime.observeShare(tile, snapshot); f.runtime.observeShare(tile, snapshot);
+    let events = (await f.runtime.report()).当前会话.事件;
+    assert.equal(events.filter((event) => event.内容?.reason === 'manual-av1-below-target').length, 1);
+    assert.equal(events.filter((event) => event.类型 === '观看路径切换').length, 1);
+    assert.equal(events.find((event) => event.类型 === '观看路径切换').内容.uplinkStatus, 'idle');
+    snapshot.共享路径变化 = { hasUplink: true, serverViewers: 1, uplinkStatus: 'forwarding' };
+    f.runtime.observeShare(tile, snapshot); f.runtime.observeShare(tile, snapshot);
+    events = (await f.runtime.report()).当前会话.事件;
+    assert.equal(events.filter((event) => event.类型 === '观看路径切换').length, 2);
+    assert.equal(events.filter((event) => event.类型 === '观看路径切换').at(-1).内容.uplinkStatus, 'forwarding');
+    f.runtime.destroy();
+});
+
 test('per-call logs persist bounded history, preserve startup samples, and omit IDs', async () => {
     const { runtime, saved, state } = fixture();
     runtime.start();
@@ -106,9 +166,30 @@ test('both-side collection marks peer failure and does not export past sessions'
     runtime.attachSocket(socket);
     const data = await runtime.collectCombined();
     assert.equal(data.对端[0].状态, '未响应');
-    assert.equal(data.本机.诊断格式, 4);
+    assert.equal(data.本机.诊断格式, 5);
     assert.ok(data.本机.当前会话);
     assert.equal(data.本机.通话, undefined);
+    runtime.destroy();
+});
+
+test('critical receiver evidence is checkpointed before leaving and never includes raw identifiers', async () => {
+    const health = { 最近异常: [{ reason: 'receiver-video-stalled', 健康采样: [{ 接收字节增长: 100, 解码帧增长: 0 }] }] };
+    const { runtime } = fixture({ getReceiverHealth: () => health });
+    const sent = [];
+    runtime.attachSocket({ connected: true, on() {}, off() {}, emit: (event, payload) => sent.push({ event, payload }) });
+    runtime.start();
+    await flush();
+    assert.equal(sent[0].event, 'voice:diagnostics:checkpoint');
+    runtime.record('SFU接收异常诊断', { reason: 'receiver-video-stalled' });
+    runtime.end();
+    const last = sent.at(-1).payload;
+    assert.equal(last.critical, true);
+    assert.equal(last.voiceSessionGeneration, 1);
+    assert.equal(last.report.SFU接收健康.最近异常[0].健康采样[0].解码帧增长, 0);
+    assert.equal(last.report.当前会话.当前状态, undefined);
+    assert.equal(last.report.当前会话.历史采样.length, 0);
+    assert.equal(last.report.当前会话.事件.at(-1).类型, '通话结束');
+    assert.doesNotMatch(JSON.stringify(sent), /secret/);
     runtime.destroy();
 });
 
@@ -197,4 +278,53 @@ test('full receiver windows survive the shared node budget before oversized hist
     assert.deepEqual(safe.SFU接收健康, health);
     assert.deepEqual(sanitizeVoiceDiagnostic(safe).SFU接收健康, health);
     assert.ok(Buffer.byteLength(JSON.stringify(safe.SFU接收健康)) < 128 * 1024);
+});
+
+test('share observations add bounded transition events to the existing log without per-sample spam', async () => {
+    const { runtime } = fixture();
+    runtime.start(); await flush();
+    const tile = {};
+    const make = (fps = 30) => ({ 角色: '观看者', 播放画面: { 页面后台: false, 暂停: false }, 连接: [{ 序号: 1, 路径: 'SFU', 连接状态: 'connected', 视频流: [{ 方向: '接收', 编码: 'video/VP8', 宽: 3840, 高: 2160, 区间解码帧率: fps }] }] });
+    runtime.observeShare(tile, make());
+    let events = runtime.getLogs().sessions.at(-1).事件;
+    const count = events.length;
+    for (let i = 0; i < 20; i++) runtime.observeShare(tile, make());
+    assert.equal(runtime.getLogs().sessions.at(-1).事件.length, count);
+    for (let i = 0; i < 5; i++) runtime.observeShare(tile, make(0));
+    runtime.observeShare(tile, make(40));
+    const changed = make(40); changed.连接[0].视频流[0].编码 = 'video/H264';
+    runtime.observeShare(tile, changed);
+    runtime.endShare(tile); runtime.endShare(tile);
+    events = runtime.getLogs().sessions.at(-1).事件;
+    for (const type of ['共享开始', '共享停止']) assert.equal(events.filter((event) => event.类型 === type).length, 1);
+    assert.equal(events.filter((event) => event.类型 === '共享编码变化').length, 2);
+    assert.equal(events.some((event) => event.类型 === '共享播放异常'), false, 'FPS samples must not create a second health detector');
+    assert.equal(events.find((event) => event.类型 === '共享开始').内容.视频序号, 1);
+    runtime.record('共享路径事件', { event: 'subscribe-failed', reason: 'subscription-timeout' });
+    assert.equal(runtime.getLogs().sessions.at(-1).事件.at(-1).内容.视频序号, undefined, 'unattributed path events stay call-wide');
+    runtime.destroy();
+});
+
+test('background, paused, unavailable and stale share metrics do not manufacture stall/recovery events', async () => {
+    const { runtime } = fixture(); runtime.start(); await flush(); const tile = {};
+    for (const flag of ['background', 'paused', 'stale', 'missing']) {
+        for (let i = 0; i < 4; i++) runtime.observeShare(tile, { 角色: '观看者', 播放画面: { 页面后台: flag === 'background', 暂停: flag === 'paused' }, 连接: [{ 序号: 1, 路径: 'SFU', 视频流: [{ 方向: '接收', 统计状态: flag === 'stale' ? '数据过期' : '已采样', 区间解码帧率: flag === 'missing' ? null : 0 }] }] });
+    }
+    assert.equal(runtime.getLogs().sessions.at(-1).事件.some((event) => event.类型 === '共享播放异常'), false);
+    runtime.destroy();
+});
+
+
+test('SFU recovery events reuse the original health decision without attributing an unknown video', async () => {
+    const health = { 活跃接收: [] };
+    const { runtime } = fixture({ getReceiverHealth: () => health }); runtime.start(); await flush();
+    runtime.record('SFU接收异常诊断', { 序号: 9, reason: 'receiver-video-stalled' });
+    health.活跃接收 = [{ 序号: 9, 健康采样: [{ 判定有效: false, 判定解码帧率: 30 }] }];
+    await runtime.sample();
+    assert.equal(runtime.getLogs().sessions.at(-1).事件.some((event) => event.类型 === 'SFU接收恢复诊断'), false);
+    health.活跃接收[0].健康采样[0] = { 判定有效: true, 判定解码帧率: 30, 采样时间_ms: Date.now() };
+    await runtime.sample(); await runtime.sample();
+    const recovered = runtime.getLogs().sessions.at(-1).事件.filter((event) => event.类型 === 'SFU接收恢复诊断');
+    assert.equal(recovered.length, 1); assert.equal(recovered[0].内容.视频序号, undefined);
+    assert.equal(recovered[0].内容.序号, 9); runtime.destroy();
 });

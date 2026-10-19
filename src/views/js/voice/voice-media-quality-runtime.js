@@ -87,10 +87,20 @@
             getReportValue(report, ['framesHeight', 'frameHeight']) ||
             roundPositive(video?.videoHeight) ||
             roundPositive(track?.getSettings?.().height);
+        const timestamp = Number(report?.timestamp);
+        if (report && Number.isFinite(timestamp)) {
+            const last = state.reportTime;
+            state.reportTime = { id: report.id, timestamp };
+            if (last && last.id === report.id && timestamp <= last.timestamp) {
+                state.baseline = null;
+                state.fpsSamples = [];
+                return { height, width, status: '数据过期', fpsSource: '视频' };
+            }
+        }
         let fps = getCounter(report, 'framesPerSecond');
         const frameKey = getCounter(report, 'framesDecoded') !== undefined ? 'framesDecoded' : 'framesReceived';
+        const fpsSource = fps !== undefined || frameKey === 'framesDecoded' ? '解码' : '完整接收';
         const frames = getCounter(report, frameKey);
-        const timestamp = Number(report?.timestamp);
         const sameReport = state.baseline?.id === report?.id && state.baseline?.frameKey === frameKey;
         if (!sameReport || (frames !== undefined && frames < state.baseline?.frames)) state.fpsSamples = [];
         if (
@@ -123,7 +133,7 @@
                 state.fpsSamples.reduce((sum, value) => sum + value, 0) /
                 state.fpsSamples.length;
         }
-        return { fps, height, width };
+        return { fps, height, width, fpsSource: fps === undefined ? '视频' : fpsSource };
     };
 
     const createRuntime = ({
@@ -135,7 +145,10 @@
         const states = new Map();
         const getPlaybackSample = (state, source) => {
             const video = source.video;
-            const frames = video?.getVideoPlaybackQuality?.().totalVideoFrames;
+            const quality = video?.getVideoPlaybackQuality?.();
+            // totalVideoFrames includes dropped frames: never call it playback FPS.
+            const frames = Number.isFinite(quality?.totalVideoFrames) && Number.isFinite(quality?.droppedVideoFrames)
+                ? quality.totalVideoFrames - quality.droppedVideoFrames : undefined;
             const timestamp = global.performance?.now?.() ?? Date.now();
             const previous = state.playbackBaseline;
             let fps;
@@ -143,10 +156,11 @@
                 fps = Math.round((frames - previous.frames) * 1000 / (timestamp - previous.timestamp));
             }
             state.playbackBaseline = Number.isFinite(frames) ? { frames, timestamp } : null;
-            return { fps, width: video?.videoWidth, height: video?.videoHeight };
+            return { fps, width: video?.videoWidth, height: video?.videoHeight, fpsSource: '播放' };
         };
         const renderSample = (state, sample) => {
-            view?.render?.(state.tile, [formatLabel(sample), sample.fps === undefined ? '帧率待采样' : ''].filter(Boolean).join(' · '));
+            const label = view?.render?.(state.tile, [formatLabel(sample), sample.status || (sample.fps === undefined ? '帧率不可用/待采样' : '')].filter(Boolean).join(' · '), sample.fpsSource || '视频');
+            if (label) label.title = `${sample.fpsSource || '视频'}帧率；RTC 帧率为最近至多 3 次有效采样的均值。播放为播放计数回退，扣除丢帧，不等同于合成器提交。各阶段实测值请打开视频统计。`;
         };
         const renderPlaybackSample = (state, source) => {
             renderSample(state, getPlaybackSample(state, source));
@@ -162,7 +176,7 @@
             if (!state) return;
             if (state.timer) global.clearTimeout(state.timer);
             state.generation += 1;
-            global.VoiceShareDiagnostics?.remove(state.tile);
+            global.VoiceShareDiagnostics?.remove(state.tile, { ended: reason !== 'source-replaced' });
             view?.hide?.(state.tile);
             if (reason !== 'source-replaced') view?.removeRoute?.(state.tile);
             if (remove) view?.remove?.(state.tile);
@@ -180,6 +194,7 @@
             const state = states.get(peerId);
             if (!state || state.generation !== generation) return;
             const source = getQualitySource?.(peerId);
+            if (source?.isScreenSharing && !source.isLocal) source.routeControl?.observe?.(source.pc);
             if (!source?.isLocal) view?.renderRoute?.(state.tile, source?.routeControl);
             const track = getLiveVideoTrack(source?.stream);
             if (source?.isScreenSharing && track &&
@@ -212,7 +227,7 @@
                 ]
                     .filter(Boolean)
                     .join(' · ');
-                view?.render?.(state.tile, label, '共享设置');
+                view?.render?.(state.tile, label, '共享目标');
                 schedule(peerId, state);
                 return;
             }
@@ -235,8 +250,13 @@
                     return;
                 }
                 const report = selectInboundVideoReport(stats, track);
+                source.routeControl?.observe?.(source.pc, stats);
+                global.VoiceScreenCodecs?.observeConnection?.(source.pc, stats);
                 const quality = buildSample({ report, state, track, video: source.video });
-                if (quality.fps === undefined) quality.fps = playback.fps;
+                if (!quality.status && quality.fps === undefined && playback.fps !== undefined) {
+                    quality.fps = playback.fps;
+                    quality.fpsSource = playback.fpsSource;
+                }
                 renderSample(state, quality);
                 if (quality.fps !== undefined) {
                     logOnce(state, { event: 'first-valid-quality-sample' });
