@@ -10,6 +10,23 @@ const { createServer } = require('node:http');
 const { createHash } = require('node:crypto');
 const assert = require('node:assert/strict');
 const work = mkdtempSync(join(tmpdir(), 'voice-update-test-'));
+// A GUI Electron process may outlive the launching PowerShell output pipe.
+// Fail the test silently and save the error, rather than opening Electron's
+// default uncaught-exception dialog on the user's desktop.
+const fail = (error) => {
+    writeFileSync(
+        process.env.ELIYORK_UPDATE_TEST_FAILURE_FILE ||
+            join(work, 'failure.json'),
+        JSON.stringify({
+            code: error.code,
+            message: error.message,
+            stack: error.stack,
+        })
+    );
+    app.exit(1);
+};
+process.stdout.on('error', fail);
+process.stderr.on('error', fail);
 app.setPath('userData', work);
 app.commandLine.appendSwitch('mute-audio');
 app.disableHardwareAcceleration();
@@ -149,8 +166,4 @@ app.whenReady()
         }
     })
     .then(() => app.quit())
-    .catch((error) => {
-        process.stderr.write(`${error.stack}\n`);
-        server.close();
-        app.exit(1);
-    });
+    .catch(fail);
