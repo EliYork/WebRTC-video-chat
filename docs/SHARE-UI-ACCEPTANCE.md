@@ -1,6 +1,6 @@
 # 共享交互修复与本地验收
 
-日期：2026-10-19；分支：`codex/piik-integration`。本轮修改未发布、未部署、未合并或 Push；已安装客户端连接的线上页面不会因此自动改变。未改 Piik 上游固定版本 `9925486cec9910c0a76e47208b29b6f39942e096`。
+日期：2026-10-19；分支：`codex/piik-integration`。用户随后授权上线，源码 `6b2540b` 已部署到生产网页；未合并或 Push。已安装客户端刷新后使用新页面，无需重装；见 [部署记录和回滚](DEPLOYMENT-2026-10-19-SHARE-UI.md)。未改 Piik 上游固定版本 `9925486cec9910c0a76e47208b29b6f39942e096`。
 
 ## 修复依据
 
@@ -66,7 +66,7 @@ npm run dev:piik:acceptance
 - `npm run test:stage-browser`：11 组尺寸/DPR、语音与共享 22 组布局、66 组成员布局；同一 Dock/dialog 身份、居中弹窗和可用页脚；无额外采集/协商、无未处理运行错误/资源失败。
 - `npm run test:desktop`：隐藏、隔离、静音的 Electron 页面加载与原生 App 生命周期回归。
 
-报告和合成页面截图在 ignored `integrations/piik/artifacts/`、`integrations/piik/.build/ui-stage/`。这些不是真实桌面截图或 GPU/4K60 性能证据。没有生产服务或已安装客户端的验收声明。
+报告和合成页面截图在 ignored `integrations/piik/artifacts/`、`integrations/piik/.build/ui-stage/`。这些不是真实桌面截图或 GPU/4K60 性能证据。部署后的服务检查单独记录，不代表已安装客户端及真实设备操作验收。
 
 ## 修改范围
 
