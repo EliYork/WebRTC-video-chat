@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import socket
 import subprocess
 import tarfile
 import time
@@ -24,6 +25,36 @@ def run(*args, **kwargs):
 
 def digest(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def unused_port():
+    with socket.socket() as listener:
+        listener.bind(('127.0.0.1', 0))
+        return listener.getsockname()[1]
+
+
+def saved_app(directory, name):
+    return next((p['pm2_env'] for p in json.loads((directory / 'pm2-before.json').read_text())
+                 if p['name'] == name), None)
+
+
+def app_environment(app):
+    # PM2 stores the effective environment both in env and on pm2_env.
+    return {**{k: v for k, v in app.get('env', {}).items() if isinstance(v, str)},
+            **{k: v for k, v in app.items() if k.isupper() and isinstance(v, str)}}
+
+
+def restore_go(directory, app):
+    assert Path(app['pm_cwd']) == ROOT
+    definition = {'name': 'voice-piik', 'cwd': app['pm_cwd'],
+                  'script': app['pm_exec_path'], 'interpreter': app.get('exec_interpreter', 'none'),
+                  'env': app_environment(app)}
+    for key in ['autorestart', 'restart_delay', 'max_memory_restart', 'min_uptime', 'max_restarts', 'kill_timeout']:
+        if key in app: definition[key] = app[key]
+    config = directory / 'restore-piik.config.json'
+    config.write_text(json.dumps({'apps': [definition]}))
+    run('pm2', 'start', str(config), '--only', 'voice-piik')
+    if app.get('status') != 'online': run('pm2', 'stop', 'voice-piik')
 
 
 def health(url, revision=None):
@@ -129,34 +160,45 @@ def prepare(directory, archive_path, expected):
     binary = stage / 'integrations/piik/.build/piik-server'
     binary.chmod(0o700)
     config = json.loads(run('node', '-e', 'console.log(JSON.stringify(require(process.argv[1]).apps[0]))', str(stage / 'scripts/piik-production.config.cjs')))
-    go_env = {**os.environ, **config['env']}
-    children = []
+    # Candidate Go must not bind production HTTP/STUN or test live rooms.
+    go_url = f'http://127.0.0.1:{unused_port()}'
+    go_env = {**os.environ, **config['env'], 'PORT': go_url.rsplit(':', 1)[1],
+              'LISTEN_HOST': '127.0.0.1', 'ALLOWED_ORIGINS': go_url,
+              'STUN_URLS': '', 'NAT_PREDICTION_ENABLED': 'false', 'ROOM_DATABASE_PATH': ':memory:'}
+    children, logs = [], []
     try:
         go_log = open(directory / 'candidate-go.log', 'w')
+        logs.append(go_log)
         go = subprocess.Popen([str(binary)], cwd=stage, env=go_env, stdout=go_log, stderr=subprocess.STDOUT)
         children.append(go)
         # Upstream health uses status=ok; Node checks the HTTP status.
         for _ in range(60):
             if go.poll() is not None: raise RuntimeError('candidate Go exited; see candidate-go.log')
             try:
-                urllib.request.urlopen('http://127.0.0.1:17887/healthz', timeout=2).close()
+                urllib.request.urlopen(go_url + '/healthz', timeout=2).close()
+                if go.poll() is not None: raise RuntimeError('candidate Go exited')
                 break
             except Exception: time.sleep(.25)
         else: raise RuntimeError('candidate Go health failed')
-        node_env = {**os.environ, 'PORT': '17888', 'HOST': '127.0.0.1', 'USE_HTTPS': 'false',
-                    'PIIK_ENABLED': 'true', 'PIIK_INTERNAL_URL': 'http://127.0.0.1:17887',
+        node_url = f'http://127.0.0.1:{unused_port()}'
+        shutil.copy2(ROOT / '.env', stage / '.env')
+        node_env = {**os.environ, **app_environment(saved_app(directory, 'voice-room')),
+                    'PORT': node_url.rsplit(':', 1)[1], 'HOST': '127.0.0.1', 'USE_HTTPS': 'false',
+                    'PIIK_ENABLED': 'true', 'PIIK_INTERNAL_URL': go_url,
                     'VOICE_BUILD_ID': manifest['revision'], 'CHAT_HISTORY_FILE': str(directory / 'candidate-chat.json')}
         node_log = open(directory / 'candidate-node.log', 'w')
+        logs.append(node_log)
         node = subprocess.Popen(['node', str(stage / 'src/server.js')], cwd=stage, env=node_env, stdout=node_log, stderr=subprocess.STDOUT)
         children.append(node)
-        result = health('http://127.0.0.1:17888/healthz', manifest['revision'])
+        result = health(node_url + '/healthz', manifest['revision'])
         # Uploaded unmodified gateway suite is adapted only to the running candidate Go.
         gateway = directory / 'gateway-test.mjs'
-        text = gateway.read_text().replace("const piik = await startPiikLocal();", "const piik = {baseURL:'http://127.0.0.1:17887',close(){}};")
+        text = gateway.read_text().replace("const piik = await startPiikLocal();", f"const piik = {{baseURL:'{go_url}',close(){{}}}};")
         text = text.replace("import { startPiikLocal } from './piik-local-service.mjs';", '')
         test = stage / 'scripts/candidate-gateway.mjs'
         test.write_text(text)
         print(run('node', str(test), cwd=stage).strip())
+        assert go.poll() is None and node.poll() is None, 'candidate process exited'
         usage = {}
         for name, child in [('go', go), ('node', node)]:
             usage[name] = run('ps', '-p', str(child.pid), '-o', 'rss=,%cpu=').strip()
@@ -166,10 +208,13 @@ def prepare(directory, archive_path, expected):
         (directory / 'candidate-result.json').write_text(json.dumps(report, indent=2))
         print(json.dumps(report))
     finally:
-        for child in reversed(children):
-            child.terminate()
-            try: child.wait(timeout=8)
-            except subprocess.TimeoutExpired: child.kill(); child.wait()
+        try:
+            for child in reversed(children):
+                child.terminate()
+                try: child.wait(timeout=8)
+                except subprocess.TimeoutExpired: child.kill(); child.wait()
+        finally:
+            for log in logs: log.close()
 
 
 def restore(directory):
@@ -177,6 +222,10 @@ def restore(directory):
     info = json.loads((directory / 'backup.json').read_text())
     for relative, expected in info['runtimeHashes'].items():
         assert digest(directory / 'runtime' / relative) == expected, 'backup damaged'
+    original_node = saved_app(directory, 'voice-room')
+    original_go = saved_app(directory, 'voice-piik')
+    assert original_node, 'missing original Node configuration'
+    original_env = app_environment(original_node)
     run('pm2', 'stop', 'voice-room')
     state = json.loads(run('pm2', 'jlist'))
     if any(p['name'] == 'voice-piik' for p in state): run('pm2', 'delete', 'voice-piik')
@@ -189,7 +238,12 @@ def restore(directory):
             dest.parent.mkdir(parents=True, exist_ok=True)
             if source.is_dir(): shutil.copytree(source, dest)
             else: shutil.copy2(source, dest)
-    env = {**os.environ, 'PIIK_ENABLED': 'false', 'HOST': '0.0.0.0', 'VOICE_BUILD_ID': '56d344d06be97f7cbb1c7c87a975724844df1187'}
+    if original_go: restore_go(directory, original_go)
+    env = {**os.environ, **original_env,
+           'PIIK_ENABLED': original_env.get('PIIK_ENABLED', 'false'),
+           'PIIK_INTERNAL_URL': original_env.get('PIIK_INTERNAL_URL', 'http://127.0.0.1:17887'),
+           'HOST': original_env.get('HOST', 'localhost'),
+           'VOICE_BUILD_ID': original_env.get('VOICE_BUILD_ID', '')}
     run('pm2', 'restart', 'voice-room', '--update-env', env=env)
     for _ in range(60):
         try:
@@ -197,6 +251,8 @@ def restore(directory):
             break
         except Exception: time.sleep(.25)
     else: raise RuntimeError('rollback Node health failed')
+    if env['PIIK_ENABLED'] == 'true':
+        health('http://127.0.0.1:3000/healthz', env['VOICE_BUILD_ID'])
     assert digest(ROOT / '.env') == info['envHash']
     run('pm2', 'save')
     print('Rolled back code; live chat and .env preserved.')
@@ -213,6 +269,9 @@ def activate(directory):
     started = time.time()
     try:
         run('pm2', 'stop', 'voice-room')
+        # An already registered Go process would otherwise keep the old binary.
+        state = json.loads(run('pm2', 'jlist'))
+        if any(p['name'] == 'voice-piik' for p in state): run('pm2', 'delete', 'voice-piik')
         for relative in TARGETS:
             if relative == 'voice-build-manifest.json': source = stage / 'manifest.json'
             else: source = stage / relative

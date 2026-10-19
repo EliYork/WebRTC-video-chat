@@ -43,6 +43,12 @@ function createRuntime({
         diagnosticConnection(snapshot, sending, native, observeDiagnostic(owner, snapshot));
     const request = (input: any): Promise<any> =>
         new Promise((resolve, reject) => {
+            // Never let cleanup/publication commands from an old owner sit in
+            // Socket.IO's reconnect buffer and execute in a later voice session.
+            if (!socket?.connected) {
+                reject(new Error('Piik 连接已断开，请重新加入语音后重试'));
+                return;
+            }
             socket
                 .timeout(8000)
                 .emit('piik:request', input, (error: any, result: any) => {
@@ -468,7 +474,7 @@ function createRuntime({
                     void request({
                         action: 'close',
                         sessionId: result.sessionId,
-                    });
+                    }).catch(() => {});
                     continue;
                 }
                 watchers.set(share.id, viewerEdge(result.sessionId, share));
@@ -582,7 +588,7 @@ function createRuntime({
             };
             const result = await request({ action: 'publish', quality });
             if (token !== epoch || version !== publicationVersion) {
-                void request({ action: 'close', sessionId: result.sessionId });
+                void request({ action: 'close', sessionId: result.sessionId }).catch(() => {});
                 throw new Error('Piik 分享已取消');
             }
             local = hostEdge(
