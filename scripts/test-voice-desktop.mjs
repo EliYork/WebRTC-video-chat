@@ -92,6 +92,13 @@ try {
     assert.equal(data.clipboardReadDenied, true);
     assert.equal(data.updaterLoaded, true);
     assert.equal(data.qualityLabelFits, true);
+    assert.equal(data.windowTitle, '语音据点');
+    assert.equal(data.menuHidden, true);
+    assert.equal(data.settingsEntry, true);
+    assert.equal(data.aboutDialog, true);
+    assert.equal(data.refreshCancelled, true);
+    assert.equal(data.refreshKeptNative, true);
+    assert.equal(data.chromeCases.length, 5);
     assert.throws(
         () => process.kill(data.nativePid, 0),
         'native App must exit with client'
@@ -99,8 +106,9 @@ try {
     const artifacts = resolve('integrations/piik/artifacts');
     mkdirSync(artifacts, { recursive: true });
     copyFileSync(report, join(artifacts, 'desktop-smoke.json'));
+    copyFileSync(join(work, 'desktop-chrome.png'), join(artifacts, 'desktop-chrome.png'));
     process.stdout.write(
-        `PASS hidden Electron: sandbox, original room, real diagnostics clipboard write/readback, clipboard read denial, updater load, fake media, muted output and App cleanup. Logs ${work}\n`
+        `PASS hidden Electron: single overlay title bar, guarded refresh/Ctrl+R, retained native PID, sandbox, diagnostics clipboard, updater, fake media, muted output and App cleanup. Logs ${work}\n`
     );
 } finally {
     desktop?.kill();

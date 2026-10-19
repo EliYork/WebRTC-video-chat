@@ -85,7 +85,8 @@ const share = async (session) => {
 const geometry = (session) => evaluate(session, `(() => {
     const rect = (selector) => { const node = document.querySelector(selector); const r = node.getBoundingClientRect(); const css = getComputedStyle(node); return {x:r.x,y:r.y,w:r.width,h:r.height,display:css.display,cols:css.gridTemplateColumns}; };
     const result = { viewport:[innerWidth,innerHeight,devicePixelRatio], overflow:document.documentElement.scrollWidth > innerWidth, mode:document.querySelector('#main').dataset.stageMode,
-        stage:rect('.room-stage'), members:rect('.stage-members'), chat:rect('#chat-panel'), dock:rect('.stage-dock'), nav:rect('.room-sidebar'), main:rect('#main'),
+        stage:rect('.room-stage'), members:rect('.stage-members'), chat:rect('#chat-panel'), dock:rect('.stage-dock'), sidebar:rect('.stage-sidebar-column'), nav:rect('.room-sidebar'), main:rect('#main'),
+        dockCount:document.querySelectorAll('#buttons').length, sidebarBrand:document.querySelector('.server-navigation')!==null,
         cards:[...document.querySelectorAll('#member-cards > *')].map((n) => { const r=n.getBoundingClientRect(); return {x:r.x,y:r.y,w:r.width,h:r.height}; }),
         icons:[...document.querySelectorAll('.stage-dock svg, .stage-dock button > i')].filter(n=>n.getBoundingClientRect().width>0).map(n=>{const r=n.getBoundingClientRect(),b=n.closest('button').getBoundingClientRect();return {w:r.width,h:r.height,inside:r.x>=b.x && r.y>=b.y && r.right<=b.right+.5 && r.bottom<=b.bottom+.5};}),
         controls:[...document.querySelectorAll('.media-dock-actions button, #destroyPeer, #copyRoomLink')].map(n=>{const r=n.getBoundingClientRect();return {w:r.width,h:r.height,x:r.x,right:r.right};}),
@@ -96,6 +97,16 @@ const geometry = (session) => evaluate(session, `(() => {
 const checkDock = (result) => {
     const [width,height] = result.viewport;
     assert.ok(result.dock.y + result.dock.h <= height + 1, `dock within viewport ${width}x${height}`);
+    assert.equal(result.dockCount, 1, 'only the real Dock');
+    assert.equal(result.sidebarBrand, false, 'sidebar starts with channels, not a second brand');
+    assert.ok(result.dock.w <= 320 && result.dock.x === result.sidebar.x, 'Dock parent bounded to the left column');
+    if (width > 640) {
+        assert.ok(Math.abs(result.sidebar.y + result.sidebar.h - height) <= 1, 'left column reaches bottom');
+        assert.ok(result.nav.y + result.nav.h <= result.dock.y + 1, 'channel list never overlaps Dock');
+        assert.ok(result.members.x >= result.dock.x + result.dock.w, 'Dock never overlaps central stage');
+        if(result.chat.display !== 'none') assert.ok(result.chat.y + result.chat.h >= height - 1, 'no footer row below right chat');
+        if(result.mode === 'voice') assert.ok(result.members.y + result.members.h >= height - 1, 'no footer row below voice stage');
+    }
     assert.ok(result.icons.length >= 4 && result.icons.every(i=>i.w<=24 && i.h<=24 && i.inside), `bounded icons ${width}x${height}: ${JSON.stringify(result.icons)}`);
     assert.ok(result.controls.every(b=>b.h===44 && b.x>=0 && b.right<=width+1), `aligned controls ${width}: ${JSON.stringify(result.controls)}`);
     assert.ok(result.cardActions.every(Boolean), `member actions contained ${width}x${height}`);
@@ -140,7 +151,7 @@ try {
     await share(a);
     await wait(() => evaluate(b, `document.querySelector('#main').dataset.stageMode === 'sharing' && document.querySelector('#video-grid > .is-stage-focus video')?.videoWidth > 0`), 'remote screen reception');
     await delay(1800); // Let initial microphone/camera/share negotiations settle.
-    const viewports = [[3840,2160,1], [2560,1440,1], [1920,1080,1], [1600,900,1], [1366,768,1], [2560,1440,1.5], [900,700,1], [640,700,1], [390,844,3], [320,640,2], [844,390,2]];
+    const viewports = [[3840,2160,1], [2560,1440,1], [1920,1080,1], [1600,900,1], [1366,768,1], [2560,1440,1.5], [900,700,1], [800,600,1.5], [640,700,1], [390,844,3], [320,640,2], [844,390,2]];
     await evaluate(a, `window.__realDock=document.querySelector('#buttons');window.__realShareDialog=document.querySelector('[data-device-popover="screen"]');`);
     for (const [width,height,dpr] of viewports) {
         await send('Emulation.setDeviceMetricsOverride', { width,height,deviceScaleFactor:dpr,mobile:false }, a);
@@ -168,7 +179,7 @@ try {
         assert.ok(result.stage.w > 0 && result.stage.h > 0, `visible stage ${width}`);
         checkDock(result);
         assert.ok(result.stage.y + result.stage.h <= result.members.y + 1, 'stage above member strip');
-        if (width > 900) {
+        if (width > 640) {
             assert.ok(result.dock.w <= 320 && result.dock.x < result.stage.x, 'real dock remains in left column');
             assert.ok(result.chat.y + result.chat.h >= height - 1, 'chat uses released bottom space');
         } else assert.ok(result.members.y + result.members.h <= result.dock.y + 1, 'compact viewport member strip above dock');
@@ -291,7 +302,7 @@ try {
     assert.deepEqual(errors, [], 'no unhandled browser runtime errors');
     assert.deepEqual(requests, [], 'no failed runtime resources');
     const report = { status:'passed', browser: (await send('Browser.getVersion')).product, syntheticMediaOnly:true, serverForwardingEnabled:useSfu,
-        shareUiChecks: ['centered dialog with visible footer at eleven viewport/DPR cases', 'same Dock and dialog DOM throughout resize', 'compact left Dock with full-height desktop chat'],
+        shareUiChecks: ['centered dialog with visible footer at twelve viewport/DPR cases', 'same Dock and dialog DOM throughout resize', 'compact left Dock parent with full-height desktop chat'],
         viewportCases: layouts.length + voiceLayouts.length, memberGridCases:memberGrids.length, memberCounts:[1,2,3,4,8,12], cssViewports:layouts.map((row)=>row.viewport),
         routeChecks:useSfu ? ['automatic SFU','manual P2P','manual SFU','per-sharer preference retention'] : ['P2P','manual P2P','per-sharer preference retention'],
         tests:['empty and occupied channel guides','central join action','voice join','camera','two voice peers','synthetic share','responsive geometry in both modes','1/2/3/4/8/12 member grid fixtures','bounded dock icons and member actions','closing chat expands central stage','chat draft','no layout renegotiation/capture','two shares','focus retention/fallback','manual route retention','preview hide retains capture','last share end','member departure'],

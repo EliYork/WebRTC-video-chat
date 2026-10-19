@@ -12,11 +12,19 @@ const {
 } = require('electron');
 const { spawn } = require('node:child_process');
 const { join } = require('node:path');
-const { mkdirSync, appendFileSync, writeFileSync } = require('node:fs');
+const { mkdirSync, appendFileSync, writeFileSync, readFileSync } = require('node:fs');
+const { createRefresh, isRefreshKey } = require('./refresh.cjs');
+const { createAbout } = require('./about.cjs');
 const smoke = process.argv.includes('--smoke-test');
+// Explicit development preview only; installed clients keep the fixed origin.
+const previewArg = !app.isPackaged && process.argv.find(arg => arg.startsWith('--preview-origin='));
+const preview = previewArg && new URL(previewArg.slice('--preview-origin='.length));
+if (preview && (preview.protocol !== 'http:' || preview.hostname !== '127.0.0.1' || preview.username || preview.password || preview.pathname !== '/' || preview.search || preview.hash))
+    throw Error('Preview requires a plain loopback HTTP origin');
 const origin = smoke
     ? new URL(process.env.ELIYORK_TEST_ORIGIN || 'http://127.0.0.1:3300').origin
-    : 'https://voice.eliyork.com';
+    : preview ? preview.origin : 'https://voice.eliyork.com';
+if (preview) app.setPath('userData', process.env.ELIYORK_PREVIEW_USER_DATA || join(app.getPath('appData'), 'EliYork Voice UI Preview'));
 if (smoke) {
     app.commandLine.appendSwitch('mute-audio');
     app.commandLine.appendSwitch('use-fake-device-for-media-stream');
@@ -263,7 +271,10 @@ else {
                 }
             );
             mainWindow = new BrowserWindow({
-                title: 'EliYork Voice',
+                title: '语音据点',
+                titleBarStyle: 'hidden',
+                titleBarOverlay: { color: '#f4ebf0', symbolColor: '#49333f', height: 40 },
+                autoHideMenuBar: true,
                 width: 1440,
                 height: 940,
                 minWidth: 800,
@@ -278,9 +289,48 @@ else {
                 },
             });
             mainWindow.webContents.setAudioMuted(smoke);
+            const refreshPage = createRefresh({
+                window: () => mainWindow,
+                blocked: () => quitting || Boolean(picker),
+                confirm: async (win) => (await dialog.showMessageBox(win, {
+                    type: 'question',
+                    message: '刷新频道页面？',
+                    detail: '刷新会断开当前语音并结束共享。页面加载后需要重新加入语音或开始共享。',
+                    buttons: ['取消', '刷新页面'],
+                    defaultId: 0,
+                    cancelId: 0,
+                    noLink: true,
+                })).response === 1,
+            });
+            const showAbout = createAbout({ app, dialog, window: () => mainWindow,
+                updates: () => updates, origin });
+            const allowedFrame = (event) =>
+                owned(event.sender, event.senderFrame?.url) &&
+                event.senderFrame === mainWindow.webContents.mainFrame;
+            ipcMain.handle('voice:refresh', (event) => {
+                if (!allowedFrame(event)) throw Error('Refresh denied');
+                return refreshPage();
+            });
+            ipcMain.handle('voice:menu', (event) => {
+                if (!allowedFrame(event)) throw Error('Menu denied');
+                Menu.getApplicationMenu()?.items[0]?.submenu?.popup({ window: mainWindow });
+            });
+            mainWindow.webContents.on('dom-ready', () => {
+                if (trusted(mainWindow.webContents.getURL()))
+                    void mainWindow.webContents.insertCSS(readFileSync(join(__dirname, 'titlebar.css'), 'utf8'));
+            });
+            mainWindow.webContents.on('before-input-event', (event, input) => {
+                if (isRefreshKey(input)) {
+                    event.preventDefault();
+                    void refreshPage().catch((error) => log(`refresh-error ${error.message}`));
+                } else if (input.type === 'keyDown' && input.key === 'F12') {
+                    event.preventDefault();
+                    mainWindow.webContents.toggleDevTools();
+                }
+            });
             mainWindow.webContents.on('page-title-updated', (event) => {
                 event.preventDefault();
-                mainWindow.setTitle('EliYork Voice');
+                mainWindow.setTitle('语音据点');
             });
             mainWindow.webContents.setWindowOpenHandler(() => ({
                 action: 'deny',
@@ -296,19 +346,20 @@ else {
                 picker?.close();
                 await stopNative();
             };
-            const buildMenu = () =>
+            const buildMenu = () => {
                 Menu.setApplicationMenu(
                     Menu.buildFromTemplate([
                         {
-                            label: 'EliYork Voice',
+                            label: '应用',
                             submenu: [
                                 {
-                                    label: `客户端版本 ${app.getVersion()}`,
-                                    enabled: false,
+                                    label: '关于与更新…',
+                                    click: () => void showAbout().catch(error => log(`about-error ${error.message}`)),
                                 },
                                 {
                                     label:
-                                        updates?.label() || '检查客户端更新…',
+                                        updates?.label() || '检查更新（开发预览不可用）',
+                                    enabled: Boolean(updates),
                                     click: () => void updates?.check(),
                                 },
                                 { type: 'separator' },
@@ -316,7 +367,7 @@ else {
                                     label: '刷新频道页面',
                                     accelerator: 'CmdOrCtrl+R',
                                     click: () =>
-                                        mainWindow.webContents.reload(),
+                                        void refreshPage().catch((error) => log(`refresh-error ${error.message}`)),
                                 },
                                 {
                                     label: '诊断工具',
@@ -330,6 +381,9 @@ else {
                         },
                     ])
                 );
+                // Keep the menu available via ⋯ without another native row.
+                mainWindow.removeMenu();
+            };
             if (!smoke && app.isPackaged) {
                 updates = require('./updater.cjs').createUpdates({
                     updater: require('electron-updater').autoUpdater,
@@ -384,6 +438,68 @@ else {
                         await mainWindow.webContents.executeJavaScript(
                             `fetch('http://127.0.0.1:${nativePort}/health').then(r=>r.status)`
                         );
+                    const chromeGeometry = () => mainWindow.webContents.executeJavaScript(`(() => {
+                        const r = document.querySelector('.desktop-refresh').getBoundingClientRect();
+                        const h = document.querySelector('.workspace-topbar').getBoundingClientRect();
+                        const a = navigator.windowControlsOverlay.getTitlebarAreaRect();
+                        return { overlay: navigator.windowControlsOverlay.visible, area: {x:a.x,y:a.y,width:a.width,height:a.height},
+                            refresh: {x:r.x,y:r.y,width:r.width,height:r.height,right:r.right},
+                            header: {x:h.x,y:h.y,width:h.width,height:h.height},
+                            drag: getComputedStyle(document.querySelector('.workspace-topbar')).webkitAppRegion,
+                            noDrag: getComputedStyle(document.querySelector('.desktop-refresh')).webkitAppRegion,
+                            titleCount: [...document.querySelectorAll('.workspace-brand strong, .server-navigation strong')].filter(n=>n.getBoundingClientRect().width>0).map(n=>n.textContent) };
+                    })()`);
+                    result.chromeCases = [];
+                    for (const size of [[1440,940,1], [800,600,1], [1920,1080,1.25], [2560,1440,1.5], [3840,2160,2]]) {
+                        mainWindow.setSize(size[0], size[1]);
+                        mainWindow.webContents.setZoomFactor(size[2]);
+                        // eslint-disable-next-line no-await-in-loop -- Wait for this hidden window's geometry.
+                        await new Promise(done => setTimeout(done, 150));
+                        // eslint-disable-next-line no-await-in-loop -- Measure each size/zoom.
+                        const geometry = await chromeGeometry();
+                        if (!geometry.overlay || geometry.header.x !== 0 || geometry.header.y !== 0 ||
+                            Math.abs(geometry.refresh.right - geometry.area.width) > 2 ||
+                            geometry.drag !== 'drag' || geometry.noDrag !== 'no-drag' ||
+                            geometry.titleCount.join() !== '语音据点') throw Error(JSON.stringify(geometry));
+                        result.chromeCases.push({ size, geometry });
+                    }
+                    mainWindow.setSize(1440, 940);
+                    mainWindow.webContents.setZoomFactor(1);
+                    result.windowTitle = mainWindow.getTitle();
+                    result.menuHidden = !mainWindow.isMenuBarVisible();
+                    result.settingsEntry = await mainWindow.webContents.executeJavaScript(`document.querySelector('.desktop-menu')?.textContent.includes('设置')`);
+                    const settingsDialog = dialog.showMessageBox;
+                    try {
+                        dialog.showMessageBox = async (_, options) => {
+                            result.aboutDialog = options.title === '关于与更新' &&
+                                options.detail.includes('客户端版本：') && options.detail.includes('网页版本：');
+                            return {response: options.cancelId};
+                        };
+                        await showAbout();
+                    } finally { dialog.showMessageBox = settingsDialog; }
+                    await mainWindow.webContents.executeJavaScript(`document.querySelector('#stageJoinVoice').click()`);
+                    await mainWindow.webContents.executeJavaScript(`new Promise((resolve,reject)=>{const end=Date.now()+10000;const poll=()=>{if(document.querySelector('#destroyPeer').dataset.sessionAction==='hangup')resolve();else if(Date.now()>end)reject(Error('fake voice join failed'));else setTimeout(poll,50)};poll()})`);
+                    const originalConfirm = dialog.showMessageBox;
+                    let confirmations = 0;
+                    const originalPid = native.pid;
+                    try {
+                        dialog.showMessageBox = async () => { confirmations++; return {response:0}; };
+                        await mainWindow.webContents.executeJavaScript(`window.__refreshMarker='preserved';document.querySelector('.desktop-refresh').click()`);
+                        await new Promise(done => setTimeout(done, 150));
+                        result.refreshCancelled = confirmations === 1 && await mainWindow.webContents.executeJavaScript(`window.__refreshMarker==='preserved' && document.querySelector('#destroyPeer').dataset.sessionAction==='hangup'`);
+                        dialog.showMessageBox = async () => { confirmations++; return {response:1}; };
+                        const reloaded = new Promise(resolve => mainWindow.webContents.once('did-finish-load', resolve));
+                        // sendInputEvent targets this hidden test window only.
+                        mainWindow.webContents.sendInputEvent({type:'keyDown',keyCode:'R',modifiers:['control']});
+                        mainWindow.webContents.sendInputEvent({type:'keyUp',keyCode:'R',modifiers:['control']});
+                        await reloaded;
+                        await mainWindow.webContents.executeJavaScript(`new Promise((resolve,reject)=>{const end=Date.now()+10000;const poll=()=>{if(document.documentElement.dataset.roomBoot==='ready')resolve();else if(Date.now()>end)reject(Error('reload boot failed'));else setTimeout(poll,50)};poll()})`);
+                        result.refreshKeptNative = confirmations === 2 && native.pid === originalPid && await mainWindow.webContents.executeJavaScript(`fetch('http://127.0.0.1:${nativePort}/health').then(r=>r.ok)`);
+                    } finally {
+                        dialog.showMessageBox = originalConfirm;
+                    }
+                    if (!result.refreshCancelled || !result.refreshKeptNative || !result.menuHidden || result.windowTitle !== '语音据点') throw Error(JSON.stringify(result));
+                    writeFileSync(join(app.getPath('userData'), 'desktop-chrome.png'), (await mainWindow.webContents.capturePage()).toPNG());
                     // Verify real renderer -> OS clipboard, without exposing or
                     // losing the user's clipboard. Do not restore over a new copy.
                     const previousClipboard = await Promise.all(

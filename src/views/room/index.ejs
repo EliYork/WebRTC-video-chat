@@ -48,8 +48,8 @@
         </div>
     </header>
     <div id="main" class="room-layout stage-layout" data-stage-mode="voice">
+        <div class="stage-sidebar-column">
         <aside id="stage-channels" class="room-sidebar" aria-label="频道列表">
-            <nav class="server-navigation" aria-label="服务器导航"><a href="/" title="返回频道首页" aria-label="频道首页">◖◗</a><strong>语音据点</strong></nav>
             <h2 class="channel-section-title">语音频道</h2>
             <nav id="channel-sidebar" class="sidebar-channel-tree">
                 <% channels.forEach((channel) => { %>
@@ -77,33 +77,6 @@
                     </div>
                 <% }) %>
             </nav>
-        </aside>
-
-        <main class="room-stage" aria-label="屏幕共享舞台">
-            <header class="share-stage-header"><strong>正在观看</strong><nav id="share-sources" aria-label="选择共享源"></nav>
-                <div class="local-share-controls" data-local-share-controls hidden><span data-local-share-state>正在共享</span><button type="button" data-share-action="source">更换画面</button><button type="button" data-share-action="quality">画质</button><button type="button" data-share-action="stop">停止共享</button></div>
-            </header>
-            <section id="canvas" class="stage-canvas" aria-label="共享画面"><div id="video-grid"></div></section>
-        </main>
-        <section class="stage-members" aria-label="语音成员舞台">
-            <header class="members-heading"><div><strong id="stageChannelName"><%= channelName %></strong><span id="stageChannelStatus">语音成员舞台</span></div><span id="member-count">0 人</span></header>
-            <div id="members-empty" class="members-empty" role="status">
-                <div class="stage-welcome-mark" aria-hidden="true">◖◗</div>
-                <h1 id="stageWelcomeTitle">加入语音，一起待一会儿</h1>
-                <p id="stageWelcomeDetail">加入后，成员头像与摄像头会显示在中央；共享屏幕时自动切换到观看舞台。</p>
-                <button id="stageJoinVoice" type="button">加入语音</button>
-            </div>
-            <div id="member-cards" role="list" aria-label="成员卡片"></div>
-        </section>
-
-        <aside id="chat-panel" class="chat-panel" aria-label="频道聊天">
-            <header class="stage-chat-heading"><h2 id="chatTitle">频道聊天</h2><p id="chatDescription" hidden></p></header>
-            <input id="chatName" type="hidden" maxlength="32" autocomplete="nickname">
-            <ol id="chatMessages" class="chat-messages"></ol>
-            <form id="chatForm" class="chat-form">
-                <textarea id="chatInput" maxlength="500" rows="2" placeholder="发送消息"></textarea>
-                <button type="submit">发送</button>
-            </form>
         </aside>
         <footer class="stage-dock">
             <section class="local-user-card" aria-label="本地用户控制">
@@ -235,6 +208,34 @@
                 </div>
             </section>
         </footer>
+        </div>
+        <main class="room-stage" aria-label="屏幕共享舞台">
+            <header class="share-stage-header"><strong>正在观看</strong><nav id="share-sources" aria-label="选择共享源"></nav>
+                <div class="local-share-controls" data-local-share-controls hidden><span data-local-share-state>正在共享</span><button type="button" data-share-action="source">更换画面</button><button type="button" data-share-action="quality">画质</button><button type="button" data-share-action="stop">停止共享</button></div>
+            </header>
+            <section id="canvas" class="stage-canvas" aria-label="共享画面"><div id="video-grid"></div></section>
+        </main>
+        <section class="stage-members" aria-label="语音成员舞台">
+            <header class="members-heading"><div><strong id="stageChannelName"><%= channelName %></strong><span id="stageChannelStatus">语音成员舞台</span></div><span id="member-count">0 人</span></header>
+            <div id="members-empty" class="members-empty" role="status">
+                <div class="stage-welcome-mark" aria-hidden="true">◖◗</div>
+                <h1 id="stageWelcomeTitle">加入语音，一起待一会儿</h1>
+                <p id="stageWelcomeDetail">加入后，成员头像与摄像头会显示在中央；共享屏幕时自动切换到观看舞台。</p>
+                <button id="stageJoinVoice" type="button">加入语音</button>
+            </div>
+            <div id="member-cards" role="list" aria-label="成员卡片"></div>
+        </section>
+
+        <aside id="chat-panel" class="chat-panel" aria-label="频道聊天">
+            <header class="stage-chat-heading"><h2 id="chatTitle">频道聊天</h2><p id="chatDescription" hidden></p></header>
+            <input id="chatName" type="hidden" maxlength="32" autocomplete="nickname">
+            <ol id="chatMessages" class="chat-messages"></ol>
+            <form id="chatForm" class="chat-form">
+                <textarea id="chatInput" maxlength="500" rows="2" placeholder="发送消息"></textarea>
+                <button type="submit">发送</button>
+            </form>
+        </aside>
+
     </div> 
     <script src="/js/shared/view-utils.js"></script>
     <script src="/js/chat/chat-name-state.js"></script>
