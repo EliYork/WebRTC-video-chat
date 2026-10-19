@@ -86,6 +86,9 @@ try {
     assert.equal(data.nativeHealth, 200);
     assert.equal(data.clipboardWrite, true);
     assert.equal(data.diagnosticsCopied, true);
+    assert.equal(data.diagnosticVersions.web, JSON.parse(readFileSync('package.json', 'utf8')).version);
+    assert.equal(data.diagnosticVersions.desktop, JSON.parse(readFileSync('desktop/windows/package.json', 'utf8')).version);
+    assert.equal(data.diagnosticVersions.schema, 5);
     assert.equal(data.clipboardReadDenied, true);
     assert.equal(data.updaterLoaded, true);
     assert.equal(data.qualityLabelFits, true);

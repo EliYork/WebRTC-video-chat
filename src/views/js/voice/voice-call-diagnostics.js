@@ -3,6 +3,20 @@
     const STORAGE_KEY = 'voice-call-diagnostics-v1';
     const limits = { sessions: 5, events: 200, samples: 24 };
     const copyLimits = { events: 40, samples: 10 };
+    const versionInfo = () => {
+        const ua = global.navigator?.userAgent || '';
+        const desktop = ua.match(/(?:eliyork-voice-desktop|EliYorkVoice|EliYork Voice)\/([0-9]+\.[0-9]+\.[0-9]+)(?=\s|$)/i);
+        const electron = ua.match(/Electron\/([0-9]+\.[0-9]+\.[0-9]+)(?=\s|$)/);
+        const build = global.voiceBuildInfo || {};
+        return {
+            网页版本: /^[0-9]+\.[0-9]+\.[0-9]+$/.test(build.webVersion) ? build.webVersion : null,
+            网页构建: /^[a-f0-9]{7,40}$/.test(build.webRevision) ? build.webRevision : null,
+            客户端类型: desktop || global.EliYorkDesktop ? 'EliYork Voice' : electron ? 'Electron' : '浏览器',
+            客户端版本: desktop?.[1] || null,
+            Electron版本: electron?.[1] || null,
+            诊断格式: 5,
+        };
+    };
     const pick = (value, names) => Object.fromEntries(names.filter((key) => value?.[key] !== undefined).map((key) => [key, value[key]]));
     // Full settings belong in the current snapshot. History keeps measurements,
     // not repeated codec probes, send-policy requests and route-history arrays.
@@ -11,9 +25,9 @@
         本机音频: pick(state?.本机音频, ['实际模式', '静音', '轨道静音', '麦克风存活', '输出静音']),
         共享路径变化: pick(state?.共享路径变化, ['state', 'serverViewers', 'hasUplink', 'uplinkStatus']),
         共享: (state?.共享 || []).map((share) => ({
-            ...pick(share, ['角色', '观看路径', '采样时间', 'SFU服务器统计', '采集轨道设置', '播放画面']),
+            ...pick(share, ['角色', '观看路径', '采样时间', 'SFU服务器统计', '采集轨道设置', '播放画面', '播放指标状态']),
             连接: (share.连接 || []).map((connection) => pick(connection,
-                ['序号', '路径', '实际传输路径', '编码协商', '连接状态', 'ICE状态', '状态', '视频流', '音频流'])),
+                ['序号', '路径', '实际传输路径', '编码协商', '连接状态', 'ICE状态', '状态', '统计来源', '统计年龄_ms', '视频流', '音频流'])),
         })),
     });
     const compactReport = (report) => {
@@ -294,7 +308,7 @@
         const report = async () => {
             const state = await sample();
             return {
-                版本: '1.0.5', 诊断格式: 4,
+                ...versionInfo(),
                 // Keep failure evidence ahead of large histories in the relay's
                 // bounded allowlist traversal; do not duplicate it per snapshot.
                 ...(getReceiverHealth ? { SFU接收健康: sanitize(getReceiverHealth()) } : {}),
@@ -313,7 +327,7 @@
             if (!generation) return;
             try {
                 const value = compactReport({
-                    版本: '1.0.5', 诊断格式: 4,
+                    ...versionInfo(),
                     SFU接收健康: sanitize(getReceiverHealth?.() || {}),
                     当前状态: current.当前状态, 当前会话: current,
                 });
@@ -343,7 +357,7 @@
             });
             const [local, remote] = await Promise.all([localPromise, remotePromise]);
             if (current !== owned || getState()?.会话?.generation !== generation) throw new Error('session-changed');
-            return { 版本: '1.0.5', 诊断格式: 4, 收集开始时间: remote?.requestedAt || null,
+            return { ...versionInfo(), 收集开始时间: remote?.requestedAt || null,
                 说明: '各端非严格同步；缓存对端会标注时间，不代表当前状态。无原始设备ID、地址、用户名或音频内容。', 本机: compactReport(local),
                 对端: remote?.ok ? remote.results.map((row) => row.数据 ? { ...row, 数据: compactReport(row.数据) } : row) : [],
                 未响应原因: remote?.ok ? null : remote?.reason || 'collection-failed', 未收集人数: remote?.omitted || 0 };
@@ -408,12 +422,12 @@
             showLogs: (options = {}) => global.VoicePlayerEvents?.show({
                 getLogs: () => ({ sessions: sessions.map(sanitize), currentIndex: sessions.indexOf(current), storageState }),
                 subscribe(listener) { logListeners.add(listener); return () => logListeners.delete(listener); },
-                showRaw: () => showText(JSON.stringify({ 版本: '1.0.5', 诊断格式: 4, 存储状态: storageState, 通话: sessions.map(sanitize) }, null, 2)),
+                showRaw: () => showText(JSON.stringify({ ...versionInfo(), 存储状态: storageState, 通话: sessions.map(sanitize) }, null, 2)),
                 ...options,
             }),
             clearLogs() { sessions = current ? [current] : []; persist(); notifyLogs(); },
             destroy() { end('页面关闭'); global.clearTimeout(copyFeedbackTimer); socket?.off?.('voice:diagnostics:sample', handleRequest); },
         };
     };
-    global.VoiceCallDiagnostics = { createRuntime, audioSummary, compactReport };
+    global.VoiceCallDiagnostics = { createRuntime, audioSummary, compactReport, versionInfo };
 })(window);

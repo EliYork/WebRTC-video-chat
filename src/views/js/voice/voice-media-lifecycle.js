@@ -40,6 +40,10 @@
         const requestedFrameRate = Number(options.frameRate);
         const requestedResolution = options.resolutionPreset;
         return {
+            provider: options.provider === 'native' ? 'native' : 'web',
+            nativeSourceKey: typeof options.nativeSourceKey === 'string' ? options.nativeSourceKey : '',
+            shareAudio: options.shareAudio === true,
+            maxBitrate: [3000000, 6000000, 10000000, 15000000].includes(Number(options.maxBitrate)) ? Number(options.maxBitrate) : 15000000,
             mode: options.mode === 'detail' ? 'detail' : 'game',
             codecMode: ['av1', 'h264', 'vp8'].includes(options.codecMode) ? options.codecMode : 'auto',
             startBitrate: ['1500', '5500'].includes(String(options.startBitrate)) ? String(options.startBitrate) : 'browser',
@@ -55,7 +59,7 @@
     };
 
     const buildScreenCaptureConstraints = (options = {}, supportedConstraints = {}) => {
-        const { frameRate, resolutionPreset } =
+        const { frameRate, resolutionPreset, shareAudio } =
             normalizeScreenShareOptions(options);
         const frameRateConstraint = {
             ideal: frameRate,
@@ -64,7 +68,7 @@
         // Best effort only: unsupported browsers ignore picker hints. Never
         // disable game audio or local playback to hide a conference echo.
         const audioOptions = {
-            audio: supportedConstraints.restrictOwnAudio === true ? { restrictOwnAudio: true } : true,
+            audio: shareAudio ? (supportedConstraints.restrictOwnAudio === true ? { restrictOwnAudio: true } : true) : false,
             audioSelection: 'preferred',
             selfBrowserSurface: 'exclude',
             windowAudio: 'window',

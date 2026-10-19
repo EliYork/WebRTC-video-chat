@@ -5,7 +5,11 @@ import {
     discoverNativeConnect,
 } from './.deps/upstream/src/client/native/client';
 import { NativeMediaBridge } from './.deps/upstream/src/client/native/media-bridge';
-import { defaultNativeCapturePath } from './.deps/upstream/src/client/native/capture-selection';
+import {
+    defaultNativeCapturePath,
+    nativeCaptureTargetKey,
+} from './.deps/upstream/src/client/native/capture-selection';
+import { createNativeSourcePicker } from './source-picker';
 import type { NativeCaptureTarget } from './.deps/upstream/src/client/native/wire';
 
 export function createNativeCapture(
@@ -22,9 +26,9 @@ export function createNativeCapture(
     const provider = document.querySelector<HTMLSelectElement>(
         '[data-screen-share-provider]'
     );
-    const sourceSelect = document.querySelector<HTMLSelectElement>(
-        '[data-piik-native-source]'
-    );
+    const picker = createNativeSourcePicker(authorize);
+    let pickerVisible = false;
+    let editingQuality = false;
     const status = document.querySelector<HTMLElement>(
         '[data-piik-native-status]'
     );
@@ -126,15 +130,6 @@ export function createNativeCapture(
                 );
                 if (!sources.length)
                     throw new Error('Piik App 没有可用的显示器或窗口');
-                if (sourceSelect) {
-                    sourceSelect.replaceChildren(
-                        ...sources.map(
-                            (source, index) =>
-                                new Option(source.title, String(index))
-                        )
-                    );
-                }
-                setStatus('App 已连接 · H.264 硬件路径 · 请选择显示器或窗口');
                 return next;
             } catch (error) {
                 if (client === next) stop();
@@ -149,21 +144,38 @@ export function createNativeCapture(
     document
         .querySelector('[data-piik-native-refresh]')
         ?.addEventListener('click', () => {
-            if (active) return;
-            stop();
-            setStatus('正在连接 Piik App…');
-            void prepare().catch((error) => setStatus(error.message));
+            if (pickerVisible && provider?.value === 'native')
+                void picker.open();
         });
-    provider?.addEventListener('change', () => {
-        const native = provider.value === 'native';
+    const syncPicker = () => {
+        const native = provider?.value === 'native';
         updateResolutionValidity();
-        document.querySelector<HTMLElement>(
+        if (!native) {
+            const hint = document.querySelector<HTMLElement>(
+                '[data-share-audio-hint]'
+            );
+            if (hint)
+                hint.textContent =
+                    '默认关闭，语音通话不受影响。声音来源由浏览器选择器决定，请优先选独立窗口或标签页。';
+        }
+        const nativeOptions = document.querySelector<HTMLElement>(
             '[data-piik-native-options]'
-        )!.hidden = !native;
-        if (native) {
-            setStatus('正在连接 Piik App…');
-            void prepare().catch((error) => setStatus(error.message));
-        } else if (!active) stop();
+        );
+        if (nativeOptions) nativeOptions.hidden = !native;
+        if (native && pickerVisible && !editingQuality) void picker.open();
+        else picker.close();
+    };
+    provider?.addEventListener('change', syncPicker);
+    document.addEventListener('voice-share-dialog-open', (event) => {
+        pickerVisible = true;
+        editingQuality = (event as CustomEvent).detail?.mode === 'quality';
+        const key = (event as CustomEvent).detail?.nativeSourceKey;
+        if (typeof key === 'string') picker.setSelected(key);
+        syncPicker();
+    });
+    document.addEventListener('voice-share-dialog-close', () => {
+        pickerVisible = false;
+        picker.close();
     });
     // This link is followed only by the user. Discovery grants no control;
     // approval stays in Piik's existing capability-protected local launcher.
@@ -187,6 +199,17 @@ export function createNativeCapture(
                 setStatus(error.message);
             }
         });
+    const profileFor = (options: any) => {
+        const size = sizes[options.resolutionPreset];
+        if (!size) throw new Error(resolutionMessage);
+        return {
+            resolution: { width: size[0], height: size[1] },
+            maxFramerate: options.frameRate || 60,
+            maxBitrate: options.maxBitrate || 15000000,
+            maxAudioBitrate: 128000,
+            degradationPreference: 'maintain-resolution' as const,
+        };
+    };
     return {
         async capture(options: any, signal: AbortSignal): Promise<MediaStream> {
             const size = sizes[options.resolutionPreset];
@@ -201,16 +224,20 @@ export function createNativeCapture(
             if (signal.aborted || client !== next)
                 throw new Error('原生共享请求已取消');
             const token = generation;
-            const source = sources[Number(sourceSelect?.value || 0)];
+            const source = sources.find(
+                (s) => nativeCaptureTargetKey(s) === options.nativeSourceKey
+            );
             if (!source || !path) throw new Error('请先选择有效的原生采集源');
-            const [width, height] = size;
-            const profile = {
-                resolution: { width, height },
-                maxFramerate: options.frameRate || 60,
-                maxBitrate: 15000000,
-                maxAudioBitrate: 128000,
-                degradationPreference: 'maintain-resolution' as const,
-            };
+            if (
+                options.shareAudio &&
+                !(source.kind === 'window'
+                    ? next.health.nativeMedia.processAudio
+                    : next.health.nativeMedia.systemAudio)
+            )
+                throw new Error(
+                    '当前客户端不支持此来源的声音，请关闭声音共享后重试'
+                );
+            const profile = profileFor(options);
             const shareId = crypto.randomUUID();
             const bridge = new NativeMediaBridge(shareId, next, fail);
             const owner: any = {
@@ -218,6 +245,9 @@ export function createNativeCapture(
                 shareId,
                 bridge,
                 profile,
+                source,
+                audio: options.shareAudio === true,
+                path,
                 codec: 'h264',
                 stream: null,
             };
@@ -236,10 +266,7 @@ export function createNativeCapture(
                     shareId,
                     source,
                     ...path,
-                    audio:
-                        document.querySelector<HTMLInputElement>(
-                            '[data-piik-native-audio]'
-                        )?.checked || false,
+                    audio: owner.audio,
                     showCaptureBorder: true,
                     edgeCapacity: 3,
                     profile,
@@ -251,6 +278,7 @@ export function createNativeCapture(
                     );
                 if (token !== generation) throw new Error('原生共享请求已取消');
                 owner.stream = await bridge.start(result.audio);
+                owner.actualAudio = result.audio;
                 if (token !== generation) throw new Error('原生共享请求已取消');
                 setStatus('App 原生 H.264 共享中');
                 return owner.stream;
@@ -261,9 +289,56 @@ export function createNativeCapture(
                 signal.removeEventListener('abort', abort);
             }
         },
+        async update(stream: MediaStream, options: any, changeSource: boolean) {
+            const owner = active;
+            if (!owner || owner.stream !== stream)
+                throw new Error('共享已结束，请重新开始');
+            await authorize();
+            if (active !== owner) throw new Error('共享已结束');
+            const nextProfile = profileFor(options);
+            const available = changeSource ? await owner.client.sources() : [];
+            const source = changeSource
+                ? available.find(
+                      (s: NativeCaptureTarget) =>
+                          nativeCaptureTargetKey(s) === options.nativeSourceKey
+                  )
+                : owner.source;
+            if (!source) throw new Error('所选窗口或屏幕已不可用，请刷新来源');
+            if (options.shareAudio !== owner.audio)
+                throw new Error('更改声音来源需要重新开始共享');
+            const previousProfile = owner.profile;
+            await owner.client.updateShare(owner.shareId, nextProfile);
+            try {
+                if (changeSource)
+                    await owner.client.replaceShareSource(
+                        owner.shareId,
+                        source,
+                        owner.audio,
+                        owner.path,
+                        true
+                    );
+            } catch (error) {
+                try {
+                    await owner.client.updateShare(
+                        owner.shareId,
+                        previousProfile
+                    );
+                } catch {
+                    if (active === owner) fail();
+                }
+                throw error;
+            }
+            if (active !== owner) throw new Error('共享已结束');
+            owner.profile = nextProfile;
+            owner.source = source;
+            return nextProfile;
+        },
         get: (stream: MediaStream) =>
             active?.stream === stream ? active : null,
         isActive: () => !!active,
-        stop,
+        stop: () => {
+            picker.close();
+            stop();
+        },
     };
 }

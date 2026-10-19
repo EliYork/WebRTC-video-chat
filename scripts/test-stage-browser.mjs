@@ -21,7 +21,7 @@ const useSfu = process.env.STAGE_TEST_SFU === 'true';
 const sfuReservation = createServer(); sfuReservation.listen(0, '127.0.0.1'); await once(sfuReservation, 'listening');
 const sfuPort = sfuReservation.address().port; await new Promise((done) => sfuReservation.close(done));
 const app = spawn(process.execPath, [resolve('src/server.js')], { cwd: work, windowsHide: true,
-    env: { ...process.env, PORT: String(port), USE_HTTPS: 'false', SFU_ENABLED: String(useSfu), SFU_ANNOUNCED_ADDRESS:'127.0.0.1', SFU_LISTEN_IP:'127.0.0.1', SFU_PORT:String(sfuPort), ENV: 'production', CHAT_HISTORY_FILE: join(work, 'history.json') }, stdio: 'pipe' });
+    env: { ...process.env, HOST: '127.0.0.1', PORT: String(port), USE_HTTPS: 'false', SCREEN_MEDIA_PROVIDER: 'legacy', SFU_ENABLED: String(useSfu), SFU_ANNOUNCED_ADDRESS:'127.0.0.1', SFU_LISTEN_IP:'127.0.0.1', SFU_PORT:String(sfuPort), ENV: 'production', CHAT_HISTORY_FILE: join(work, 'history.json') }, stdio: 'pipe' });
 let appLog = ''; app.stdout.on('data', (value) => { appLog += value; }); app.stderr.on('data', (value) => { appLog += value; });
 let browser; let ws; let counter = 0;
 const pending = new Map(); const errors = []; const requests = []; const warnings = [];
@@ -141,6 +141,19 @@ try {
     await wait(() => evaluate(b, `document.querySelector('#main').dataset.stageMode === 'sharing' && document.querySelector('#video-grid > .is-stage-focus video')?.videoWidth > 0`), 'remote screen reception');
     await delay(1800); // Let initial microphone/camera/share negotiations settle.
     const viewports = [[3840,2160,1], [2560,1440,1], [1920,1080,1], [1600,900,1], [1366,768,1], [2560,1440,1.5], [900,700,1], [640,700,1], [390,844,3], [320,640,2], [844,390,2]];
+    await evaluate(a, `window.__realDock=document.querySelector('#buttons');window.__realShareDialog=document.querySelector('[data-device-popover="screen"]');`);
+    for (const [width,height,dpr] of viewports) {
+        await send('Emulation.setDeviceMetricsOverride', { width,height,deviceScaleFactor:dpr,mobile:false }, a);
+        await click(a, '[data-local-share-controls] [data-share-action="quality"]');
+        const dialog = await evaluate(a, `(()=>{const d=document.querySelector('[data-device-popover="screen"]'), r=d.getBoundingClientRect(), f=d.querySelector('footer').getBoundingClientRect();return {x:r.x,y:r.y,w:r.width,h:r.height,bottom:r.bottom,footerBottom:f.bottom,sameDock:__realDock===document.querySelector('#buttons'),sameDialog:__realShareDialog===d};})()`);
+        assert.ok(Math.abs(dialog.x + dialog.w/2-width/2)<2 && Math.abs(dialog.y + dialog.h/2-height/2)<2, `centered dialog ${width}x${height}: ${JSON.stringify(dialog)}`);
+        assert.ok(dialog.y>=0 && dialog.bottom<=height && dialog.footerBottom<=height, 'dialog footer stays usable');
+        assert.ok(dialog.sameDock && dialog.sameDialog, 'one real Dock and dialog across layouts');
+        if (width === 1920) await screenshot(a, 'sharing-quality-dialog');
+        await click(a, '[data-screen-share-cancel]');
+    }
+    await send('Emulation.setDeviceMetricsOverride', { width:1920,height:1080,deviceScaleFactor:1,mobile:false }, a);
+    await screenshot(a, 'sharing-local-controls');
     const layouts = [];
     const counters = await evaluate(b, `({offers:__stageProbe.offers,replaceTracks:__stageProbe.replaceTracks,captures:__stageProbe.captures})`);
     // Save real DOM identities; resize/chat/focus must leave players attached.
@@ -155,7 +168,10 @@ try {
         assert.ok(result.stage.w > 0 && result.stage.h > 0, `visible stage ${width}`);
         checkDock(result);
         assert.ok(result.stage.y + result.stage.h <= result.members.y + 1, 'stage above member strip');
-        assert.ok(result.members.y + result.members.h <= result.dock.y + 1, 'member strip above dock');
+        if (width > 900) {
+            assert.ok(result.dock.w <= 320 && result.dock.x < result.stage.x, 'real dock remains in left column');
+            assert.ok(result.chat.y + result.chat.h >= height - 1, 'chat uses released bottom space');
+        } else assert.ok(result.members.y + result.members.h <= result.dock.y + 1, 'compact viewport member strip above dock');
         assert.equal(result.fit, 'contain');
         assert.ok(result.cards.every((card) => card.w <= 320 && card.h <= 210), 'bounded member cards');
         layouts.push(result);
@@ -174,9 +190,9 @@ try {
     if (routeTile !== 'local-video') {
         await wait(() => evaluate(routeSession, `Boolean(document.getElementById('${routeTile}').querySelector('.voice-route-toggle'))`), 'remote route control');
         await click(routeSession, `[id="${routeTile}"] .voice-route-toggle`);
-        assert.equal(await evaluate(routeSession, `document.querySelector('[id="${routeTile}"] .voice-route-auto input').checked`), true);
+        assert.equal(await evaluate(routeSession, `document.querySelector('[id="${routeTile}"] .voice-route-auto input').checked`), useSfu);
         if (useSfu) await wait(() => evaluate(routeSession, `document.querySelector('[id="${routeTile}"] .voice-route-toggle').title.includes('服务器转发')`), 'automatic SFU route');
-        await click(routeSession, `[id="${routeTile}"] .voice-route-auto input`);
+        if (useSfu) await click(routeSession, `[id="${routeTile}"] .voice-route-auto input`);
         await wait(() => evaluate(routeSession, `!document.querySelector('[id="${routeTile}"] .voice-route-choices button').disabled`), 'manual P2P entry');
         await click(routeSession, `[id="${routeTile}"] .voice-route-choices button`);
         await wait(() => evaluate(routeSession, `document.querySelector('[id="${routeTile}"] .voice-route-toggle').title.includes('P2P') && !document.querySelector('[id="${routeTile}"] .voice-route-auto input').disabled`), 'manual P2P route');
@@ -275,6 +291,7 @@ try {
     assert.deepEqual(errors, [], 'no unhandled browser runtime errors');
     assert.deepEqual(requests, [], 'no failed runtime resources');
     const report = { status:'passed', browser: (await send('Browser.getVersion')).product, syntheticMediaOnly:true, serverForwardingEnabled:useSfu,
+        shareUiChecks: ['centered dialog with visible footer at eleven viewport/DPR cases', 'same Dock and dialog DOM throughout resize', 'compact left Dock with full-height desktop chat'],
         viewportCases: layouts.length + voiceLayouts.length, memberGridCases:memberGrids.length, memberCounts:[1,2,3,4,8,12], cssViewports:layouts.map((row)=>row.viewport),
         routeChecks:useSfu ? ['automatic SFU','manual P2P','manual SFU','per-sharer preference retention'] : ['P2P','manual P2P','per-sharer preference retention'],
         tests:['empty and occupied channel guides','central join action','voice join','camera','two voice peers','synthetic share','responsive geometry in both modes','1/2/3/4/8/12 member grid fixtures','bounded dock icons and member actions','closing chat expands central stage','chat draft','no layout renegotiation/capture','two shares','focus retention/fallback','manual route retention','preview hide retains capture','last share end','member departure'],

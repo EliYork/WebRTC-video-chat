@@ -126,7 +126,7 @@ test('successful picker completion releases pending before follow-up media work'
 test('screen capture constraints prefer the entire screen for defaults and every resolution preset without exact', () => {
     const defaults = plain(lifecycle.buildScreenCaptureConstraints());
     assert.deepEqual(defaults, {
-        audio: true,
+        audio: false,
         audioSelection: 'preferred',
         selfBrowserSurface: 'exclude',
         windowAudio: 'window',
@@ -178,7 +178,7 @@ test('screen capture constraints prefer the entire screen for defaults and every
     [automatic, original].forEach((constraints) => {
         assert.equal(constraints.video.displaySurface, 'monitor');
         assert.equal(constraints.audioSelection, 'preferred');
-        assert.equal(constraints.audio, true);
+        assert.equal(constraints.audio, false);
     });
     assert.equal(Object.hasOwn(original.video, 'height'), false);
     assert.equal(Object.hasOwn(original.video, 'width'), false);
@@ -198,7 +198,7 @@ test('supported own audio exclusion is requested without silencing game playback
     };
     let requested;
     const support = { restrictOwnAudio: true };
-    const result = await api.requestScreenCapture({ supportedConstraints: support, getDisplayMedia: async (constraints) => { requested = plain(constraints); return stream; } });
+    const result = await api.requestScreenCapture({ options: { shareAudio: true }, supportedConstraints: support, getDisplayMedia: async (constraints) => { requested = plain(constraints); return stream; } });
     assert.equal(result.stream, stream);
     assert.deepEqual(requested.audio, { restrictOwnAudio: true });
     assert.equal(requested.audioSelection, 'preferred');
@@ -210,7 +210,8 @@ test('supported own audio exclusion is requested without silencing game playback
     stream.getAudioTracks = () => [{ readyState: 'live', getSettings: () => ({}) }];
     assert.equal(api.describeScreenAudio(stream).实际排除通话声音, null);
     assert.match(api.describeScreenAudio(stream).共享音频状态, /未确认/);
-    assert.equal(api.buildScreenCaptureConstraints().audio, true);
+    assert.equal(api.buildScreenCaptureConstraints().audio, false);
+    assert.equal(api.buildScreenCaptureConstraints({ shareAudio: true }).audio, true);
     assert.equal(api.describeScreenAudio(stream).请求排除通话声音, false);
     stream.getAudioTracks = () => [];
     assert.equal(api.describeScreenAudio(stream).共享音频状态, '未共享声音');
@@ -234,7 +235,7 @@ test('screen capture constraints accept 15 30 and 60 fps targets and normalize i
                 resolutionPreset: '8k',
             })
         ),
-        { frameRate: 60, resolutionPreset: '1080p', mode: 'game', codecMode: 'auto', startBitrate: 'browser' }
+        { frameRate: 60, resolutionPreset: '1080p', mode: 'game', codecMode: 'auto', startBitrate: 'browser', provider: 'web', nativeSourceKey: '', shareAudio: false, maxBitrate: 15000000 }
     );
 });
 

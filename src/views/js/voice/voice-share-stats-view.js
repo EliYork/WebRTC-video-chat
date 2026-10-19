@@ -44,6 +44,7 @@
                 group.rows.push(['编码', stale || row.统计状态 === '数据过期' ? '数据过期' : row.编码 || '不可用'],
                     ['RTP 画面尺寸', stale || row.统计状态 === '数据过期' ? '数据过期' : dimensions(row)]);
                 const sending = row.方向 === '发送';
+                if (sending && finite(row.原生输出帧率) !== null) group.rows.push(['原生输出 FPS', metric(row, '原生输出帧率')]);
                 for (const [label, key] of sending ? [['采集 FPS', '区间采集帧率'], ['编码 FPS', '区间编码帧率'], ['发送 FPS', '区间发送帧率']]
                     : [['完整接收 FPS', '区间完整接收帧率'], ['解码 FPS', '区间解码帧率']]) {
                     const reportedKey = key === '区间采集帧率' ? '采集实际帧率' : ['区间编码帧率', '区间解码帧率'].includes(key) ? '浏览器报告帧率' : null;
@@ -53,7 +54,7 @@
                 }
                 // Browser-reported instantaneous values stay separate from interval measurements.
                 if (sending && finite(row.采集实际帧率) !== null) group.details.push(['采集 FPS（浏览器报告）', metric(row, '采集实际帧率')]);
-                group.rows.push([sending ? '发送码率' : '接收码率', metric(row, '码率_Mbps', ' Mbps')]);
+                group.rows.push([sending ? row.码率口径 === '音视频合计' ? '发送码率（音视频）' : '发送码率' : '接收码率', metric(row, '码率_Mbps', ' Mbps')]);
                 for (const [label, key, unit] of [['RTT', '往返延迟_ms', ' ms'], ['抖动', '抖动_ms', ' ms'], ['丢包率', '区间丢包率_%', ' %'], ['编解码耗时/帧', '每帧编解码_ms', ' ms'], ['缓冲等待/帧', '每帧抖动缓冲等待_ms', ' ms'], ['NACK', '区间NACK次数', ''], ['PLI', '区间PLI次数', ''], ['播放停滞次数', '区间卡顿次数', ''], ['统计区间', '采样间隔_ms', ' ms']]) {
                     group.details.push([label, metric(row, key, unit)]);
                 }

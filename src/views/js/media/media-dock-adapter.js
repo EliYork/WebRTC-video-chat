@@ -17,6 +17,7 @@
     ]);
 
     const OPTIONAL_ACTIONS = Object.freeze([
+        'updateScreenShare',
         'copyRoomLink',
         'refreshDevices',
         'recoverAudio',

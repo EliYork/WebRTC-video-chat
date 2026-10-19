@@ -39,6 +39,13 @@ import {
 // import { getMemoryUsageMessage, getCpuUsageMessage } from "./utils/LogMemoryUsage.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const webVersion = JSON.parse(fs.readFileSync(join(__dirname, '../package.json'), 'utf8')).version;
+let webRevision = null;
+try {
+    const build = JSON.parse(fs.readFileSync(join(__dirname, '../voice-build-manifest.json'), 'utf8'));
+    const revision = build.frontendRevision || build.revision;
+    if (/^[a-f0-9]{7,40}$/.test(revision)) webRevision = revision;
+} catch { /* Local development need not have a deployment manifest. */ }
 
 const HOST = process.env.HOST || 'localhost';
 const PORT = process.env.PORT || 443;
@@ -359,6 +366,7 @@ app.get('/room/:channel', (req, res) => {
         channelName: channel.name,
         piikEnabled,
         roomBootstrap: JSON.stringify({
+            buildInfo: { webVersion, webRevision },
             screenMediaProvider: piikEnabled ? 'piik' : 'legacy',
             iceServers: iceServersList,
             screenSfu: { enabled: screenSfuConfig.enabled, videoBitrate: screenSfuConfig.videoBitrate, initialViewerBitrate: screenSfuConfig.initialViewerBitrate, defaultReceiveMode: 'p2p-first', p2pBudget: 24000000 },

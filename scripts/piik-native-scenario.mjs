@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { join, resolve } from 'node:path';
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, unlinkSync } from 'node:fs';
 
 export async function runNativeScenario({
     open,
@@ -12,6 +12,7 @@ export async function runNativeScenario({
     mediaRequest,
     port,
     work,
+    screenshot,
 }) {
     const a = await open(),
         b = await open(),
@@ -35,6 +36,9 @@ export async function runNativeScenario({
     );
     const clipsPath = join(work, 'clips.json'),
         launches = join(work, 'capture-launches.txt');
+    const operations = join(work, 'capture-operations.jsonl');
+    const windowGone = join(work, 'window-gone');
+    const captureOperations = () => existsSync(operations) ? readFileSync(operations, 'utf8').trim().split(/\r?\n/).map(line => JSON.parse(line)) : [];
     writeFileSync(clipsPath, JSON.stringify(clips));
     const build = resolve('integrations/piik/.build');
     const fixture = join(build, 'synthetic-capture.exe');
@@ -67,6 +71,8 @@ export async function runNativeScenario({
                 PIIK_CLIENT_GATE_NO_BROWSER: 'true',
                 PIIK_SYNTHETIC_CLIPS: clipsPath,
                 PIIK_SYNTHETIC_LAUNCHES: launches,
+                PIIK_SYNTHETIC_OPERATIONS: operations,
+                PIIK_SYNTHETIC_WINDOW_GONE: windowGone,
             },
         }
     );
@@ -199,7 +205,7 @@ export async function runNativeScenario({
                     () =>
                         evaluate(
                             a,
-                            `document.querySelector('[data-piik-native-source]').options[0]?.textContent.includes('Synthetic motion')`
+                            `document.querySelectorAll('[data-native-source-key]').length===2 && document.querySelector('[data-source-group="display"] img')?.naturalWidth===320`
                         ),
                     'native App sources'
                 );
@@ -208,6 +214,11 @@ export async function runNativeScenario({
                     `${error.message}\n${await evaluate(a, `document.querySelector('[data-piik-native-status]').textContent`)}`
                 );
             }
+            await click(a, '[data-source-group="display"] [data-native-source-key]');
+            assert.equal(await evaluate(a, `document.querySelector('[data-source-group="display"] [data-native-source-key]').getAttribute('aria-pressed')`), 'true');
+            assert.equal(await evaluate(a, `document.querySelector('dialog [data-share-action="stop"]').getBoundingClientRect().height`), 0, 'stop action is hidden before publication');
+            assert.equal(await evaluate(a, `document.querySelector('[data-source-group="display"] img').getBoundingClientRect().height>100`), true, 'real thumbnail is not squeezed by Dock button CSS');
+            await screenshot(a, 'native-source-dialog');
             await click(a, '[data-screen-share-start]');
         };
         const decoded = async (s) =>
@@ -231,6 +242,9 @@ export async function runNativeScenario({
         await start();
         await wait(() => decoded(b), 'native H264 in original viewer stage');
         await wait(() => decoded(d), 'second native viewer');
+        await wait(() => evaluate(a, `VoiceShareDiagnostics.getCached(document.getElementById('local-video'))?.连接.some(c =>
+            c.统计来源==='Piik 原生 edge-quality' && c.视频流.some(v=>v.编码==='video/H264' && v.原生输出帧率>0))`),
+            'native H264 output statistics in original diagnostics');
         const listed = await mediaRequest(b, { action: 'list' });
         assert.equal(
             (
@@ -260,6 +274,35 @@ export async function runNativeScenario({
             0,
             'native preview is never encoded again by browser or PeerJS'
         );
+        const originalShareId = (await mediaRequest(b, { action: 'list' })).shares[0].id;
+        await screenshot(a, 'native-sharing-controls');
+        await click(a, '[data-local-share-controls] [data-share-action="source"]');
+        await wait(() => evaluate(a, `document.querySelector('[data-source-group="window"] img')?.naturalWidth===320`), 'window thumbnail');
+        await click(a, '[data-source-group="window"] [data-native-source-key]');
+        await click(a, '[data-screen-share-start]');
+        await wait(() => evaluate(a, `!document.querySelector('dialog[data-device-popover="screen"]').open`), 'source replacement ack');
+        assert.equal((await mediaRequest(b, { action: 'list' })).shares[0].id, originalShareId, 'source change preserves publication');
+        assert.deepEqual(captureOperations().at(-1).args.slice(0, 5), ['--capture-video', 'window', '2', '42', '100']);
+        await wait(() => capturePids().filter(alive).length === 1, 'old source worker retired');
+        await click(a, '[data-local-share-controls] [data-share-action="quality"]');
+        await evaluate(a, `(()=>{const fps=document.querySelector('[data-screen-share-frame-rate]');fps.value='15';fps.dispatchEvent(new Event('change',{bubbles:true}));const bitrate=document.querySelector('[data-screen-share-bitrate]');bitrate.value='6000000';bitrate.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+        await click(a, '[data-screen-share-start]');
+        await wait(() => evaluate(a, `!document.querySelector('dialog[data-device-popover="screen"]').open`), 'quality update ack');
+        assert.equal((await mediaRequest(b, { action: 'list' })).shares[0].id, originalShareId, 'quality change preserves publication');
+        assert.ok(captureOperations().at(-1).outputs.some(o => o.fps === 15 && o.bitrate === 6000000), 'new profile reaches actual capture process');
+        await wait(() => capturePids().filter(alive).length === 1, 'profile worker replacement cleanup');
+        const beforeUpdateFrames = (await evaluate(d, '__mediaStats()')).filter(r => r.kind === 'video').reduce((n, r) => n + (r.framesDecoded || 0), 0);
+        await wait(async () => (await evaluate(d, '__mediaStats()')).filter(r => r.kind === 'video').reduce((n, r) => n + (r.framesDecoded || 0), 0) > beforeUpdateFrames + 5, 'receiver continues decoding after source/profile updates');
+        await click(a, '[data-local-share-controls] [data-share-action="source"]');
+        await wait(() => evaluate(a, `document.querySelector('[data-piik-native-source]').value.startsWith('window:')`), 'selected window restored');
+        writeFileSync(windowGone, 'synthetic enumeration change');
+        await click(a, '[data-piik-native-refresh]');
+        await wait(() => evaluate(a, `document.querySelector('[data-piik-native-status]').textContent.includes('已不可用')`), 'vanished source explained');
+        assert.equal(await evaluate(a, `document.querySelector('[data-screen-share-start]').disabled`), true, 'vanished selection cannot be submitted');
+        await click(a, '[data-screen-share-cancel]');
+        assert.equal(await evaluate(a, `document.querySelector('[data-piik-native-gallery]').children.length`), 0, 'closing picker releases thumbnails');
+        assert.equal((await mediaRequest(b, { action: 'list' })).shares[0].id, originalShareId, 'cancelled source edit retains publication');
+        unlinkSync(windowGone);
         for (const s of [a, b])
             await wait(
                 async () =>
@@ -323,7 +366,7 @@ export async function runNativeScenario({
             'original chat with native fanout'
         );
         const received = await evaluate(d, '__mediaStats()');
-        await click(a, '#shareScreen');
+        await click(a, '[data-local-share-controls] [data-share-action="stop"]');
         await wait(
             async () =>
                 (await mediaRequest(d, { action: 'list' })).shares.length === 0,
@@ -333,6 +376,9 @@ export async function runNativeScenario({
             () => capturePids().every((pid) => !alive(pid)),
             'native capture process cleanup'
         );
+        assert.equal(await evaluate(a, `document.querySelector('#destroyPeer').dataset.sessionAction`), 'hangup', 'stage stop preserves voice');
+        const voiceBytes = (await evaluate(b, '__mediaStats()')).filter(r => r.kind === 'audio' && r.type === 'inbound-rtp').reduce((n, r) => n + (r.bytesReceived || 0), 0);
+        await wait(async () => (await evaluate(b, '__mediaStats()')).filter(r => r.kind === 'audio' && r.type === 'inbound-rtp').reduce((n, r) => n + (r.bytesReceived || 0), 0) > voiceBytes, 'voice RTP continues after stage stop');
         await start();
         await wait(() => decoded(d), 'native stop/start');
         app.kill();
@@ -357,10 +403,17 @@ export async function runNativeScenario({
             browserVideoSenders,
             received,
             checks: [
+                'real upstream BMP previews grouped as display and window',
+                'native source replacement preserves publication and retires old worker',
+                'quality update reaches capture worker with no extra viewer encoder',
+                'receiver decodes after both updates',
+                'refresh clears vanished source selection and close releases thumbnails',
+                'stage stop cleans native resources while voice stays joined',
                 'native original/auto blocked with actionable hint before capture; browser presets retained',
                 'approved site and capability required',
                 'original channel and stage',
                 'native H264 Pion fanout to three viewers',
+                'native output statistics reach original diagnostics without claiming hardware or capture timing',
                 'single capture worker',
                 'no browser re-encoding',
                 'same-channel authority',

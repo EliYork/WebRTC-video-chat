@@ -94,11 +94,16 @@ const evaluate = async (s, expression) => {
 };
 const click = (s, selector) =>
     evaluate(s, `document.querySelector(${JSON.stringify(selector)}).click()`);
+const screenshot = async (s, name) => {
+    const { data } = await send('Page.captureScreenshot', { format: 'png' }, s);
+    writeFileSync(join(artifacts, name + '.png'), Buffer.from(data, 'base64'));
+};
 const probe = `(() => {
+    Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{window.__diagnosticsCopy=text;}}});
     window.__pcs=[]; const Original=RTCPeerConnection;
     window.RTCPeerConnection=new Proxy(Original,{construct(T,args){const pc=new T(...args);__pcs.push(pc);return pc;}});
     let factory; Object.defineProperty(window,'io',{configurable:true,get(){return factory;},set(value){factory=new Proxy(value,{apply(T,self,args){const socket=Reflect.apply(T,self,args);window.__socket=socket;socket.on('piik:message',({message})=>{(window.__piikMessages??=[]).push({type:message.type,phase:message.phase,revision:message.revision});});return socket;}});}});
-    navigator.mediaDevices.getDisplayMedia=async()=>{const c=document.createElement('canvas');c.width=1280;c.height=720;const x=c.getContext('2d');let f=0;const t=setInterval(()=>{x.fillStyle='hsl('+(f++%360)+',75%,45%)';x.fillRect(0,0,c.width,c.height);x.fillStyle='white';x.fillRect((f*17)%1200,120,80,440);},16);const s=c.captureStream(30);s.getVideoTracks()[0].addEventListener('ended',()=>clearInterval(t));window.__capture=s;return s;};
+    navigator.mediaDevices.getDisplayMedia=async(options)=>{window.__lastCaptureOptions=options;if(window.__cancelNextCapture){window.__cancelNextCapture=false;throw new DOMException('Synthetic picker cancelled','NotAllowedError');}const c=document.createElement('canvas');c.width=1280;c.height=720;const x=c.getContext('2d');let f=0;const t=setInterval(()=>{x.fillStyle='hsl('+(f++%360)+',75%,45%)';x.fillRect(0,0,c.width,c.height);x.fillStyle='white';x.fillRect((f*17)%1200,120,80,440);},16);const s=c.captureStream(30);const track=s.getVideoTracks()[0],stop=track.stop.bind(track),apply=track.applyConstraints.bind(track);track.stop=()=>{clearInterval(t);stop();};track.applyConstraints=async(value)=>{window.__lastCaptureConstraints=value;return apply(value);};window.__capture=s;if(window.__holdNextCapture){window.__holdNextCapture=false;return new Promise(resolve=>{window.__releaseCapture=()=>resolve(s);});}return s;};
     window.__mediaStats=async()=>{const result=[];for(const pc of __pcs){if(pc.connectionState!=='connected')continue;const stats=await pc.getStats();for(const r of stats.values()){if(r.type==='inbound-rtp'||r.type==='outbound-rtp')result.push({type:r.type,kind:r.kind,framesDecoded:r.framesDecoded,framesEncoded:r.framesEncoded,bytesReceived:r.bytesReceived,bytesSent:r.bytesSent,codec:stats.get(r.codecId)?.mimeType});}}return result;};
 })()`;
 async function open(room = 'lobby') {
@@ -111,6 +116,7 @@ async function open(room = 'lobby') {
     });
     await send('Page.enable', {}, s);
     await send('Runtime.enable', {}, s);
+    await send('Emulation.setDeviceMetricsOverride', { width: 1920, height: 1080, deviceScaleFactor: 1, mobile: false }, s);
     await send('Page.addScriptToEvaluateOnNewDocument', { source: probe }, s);
     await send(
         'Page.navigate',
@@ -221,6 +227,7 @@ try {
             mediaRequest,
             port,
             work,
+            screenshot,
         });
         writeFileSync(
             join(artifacts, 'native-browser-report.json'),
@@ -260,6 +267,31 @@ try {
         }
         await share(a);
         await wait(() => receiving(b), 'Piik video in original stage');
+        await wait(() => evaluate(a, `!document.querySelector('dialog').open`), 'sharing dialog closes on success');
+        assert.equal(await evaluate(a, '__lastCaptureOptions.audio'), false, 'share audio requires explicit opt-in');
+        const publicationId = (await mediaRequest(b, { action: 'list' })).shares[0].id;
+        const originalTrackId = await evaluate(a, '__capture.getVideoTracks()[0].id');
+        await click(a, '[data-local-share-controls] [data-share-action="quality"]');
+        await evaluate(a, `(()=>{const fps=document.querySelector('[data-screen-share-frame-rate]');fps.value='15';fps.dispatchEvent(new Event('change',{bubbles:true}));document.querySelector('[data-screen-share-bitrate]').value='6000000';})()`);
+        await click(a, '[data-screen-share-start]');
+        await wait(() => evaluate(a, `!document.querySelector('dialog').open`), 'browser live quality ack');
+        assert.equal((await mediaRequest(b, { action: 'list' })).shares[0].id, publicationId);
+        assert.equal(await evaluate(a, '__capture.getVideoTracks()[0].id'), originalTrackId, 'live quality preserves capture');
+        assert.equal(await evaluate(a, `__pcs.flatMap(pc=>pc.getSenders()).some(s=>s.track?.kind==='video' && s.getParameters().encodings.some(e=>e.maxFramerate===15 && e.maxBitrate===6000000))`), true, 'quality is actually applied to sender');
+        await click(a, '[data-local-share-controls] [data-share-action="source"]');
+        await evaluate(a, '__cancelNextCapture=true');
+        await click(a, '[data-screen-share-start]');
+        await wait(() => evaluate(a, `!document.querySelector('[data-screen-share-start]').disabled`), 'cancelled picker recovers');
+        assert.equal((await mediaRequest(b, { action: 'list' })).shares[0].id, publicationId, 'cancel keeps old publication');
+        assert.equal(await evaluate(a, '__capture.getVideoTracks()[0].readyState'), 'live');
+        await evaluate(a, 'window.__oldCapture=__capture');
+        await click(a, '[data-screen-share-start]');
+        await wait(() => evaluate(a, `!document.querySelector('dialog').open`), 'controlled browser source replacement');
+        const replaced = await mediaRequest(b, { action: 'list' });
+        assert.equal(replaced.shares.length, 1);
+        assert.notEqual(replaced.shares[0].id, publicationId);
+        assert.equal(await evaluate(a, '__oldCapture.getVideoTracks()[0].readyState'), 'ended');
+        await wait(() => receiving(b), 'browser receiver after replacement');
         const list = await mediaRequest(b, { action: 'list' });
         assert.equal(list.shares.length, 1);
         assert.equal(
@@ -285,6 +317,14 @@ try {
             'existing chat during Piik sharing'
         );
         await delay(2500);
+        await click(b, '[data-copy-call-diagnostics]');
+        await wait(() => evaluate(b, '!!window.__diagnosticsCopy'), 'paired diagnostic export');
+        const diagnostics = (await evaluate(b, 'JSON.parse(window.__diagnosticsCopy)')).本机;
+        assert.equal(diagnostics.网页版本, JSON.parse(readFileSync('package.json', 'utf8')).version);
+        assert.equal(diagnostics.客户端类型, '浏览器');
+        assert.ok(diagnostics.当前状态.共享.some(s => s.连接.some(c =>
+            c.统计来源 === 'Piik WebRTC stats' && c.视频流.some(v => v.编码 === 'video/VP8' && v.实际帧率 > 0))),
+            'real Piik receive statistics reach the original call diagnostic export');
         const first = await evaluate(b, '__mediaStats()');
         assert.ok(
             first.some(
@@ -351,6 +391,15 @@ try {
                 (await mediaRequest(b, { action: 'list' })).shares.length === 0,
             'stop cleanup'
         );
+        await click(a, '#shareScreen');
+        await evaluate(a, '__holdNextCapture=true');
+        await click(a, '[data-screen-share-start]');
+        await wait(() => evaluate(a, `!!window.__releaseCapture`), 'pending synthetic picker');
+        await click(a, 'dialog [data-share-action="stop"]');
+        await evaluate(a, '__releaseCapture()');
+        await wait(() => evaluate(a, `__capture.getVideoTracks()[0].readyState==='ended'`), 'late cancelled capture is released');
+        assert.equal((await mediaRequest(b, { action: 'list' })).shares.length, 0);
+        assert.equal(await evaluate(a, `document.querySelector('#destroyPeer').dataset.sessionAction`), 'hangup', 'pending cancel preserves voice');
         await share(a);
         await wait(() => receiving(b), 'restart sharing');
         const oldId = (await mediaRequest(b, { action: 'list' })).shares[0].id;
@@ -399,6 +448,9 @@ try {
             firstReceiveStats: first,
             senderVideoTracks,
             checks: [
+                'browser live quality updates actual sender FPS and bitrate',
+                'cancel source picker retains old share; confirmed switch retires old capture',
+                'pending capture stop discards late stream without leaving voice',
                 'original channel and stage',
                 'real Piik P2P',
                 'no duplicate legacy video sender',

@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <% const piikPrototype = typeof piikEnabled !== 'undefined' && piikEnabled; %>
 <html lang="zh-CN" data-room-boot="pending">
 <head>
@@ -29,6 +29,7 @@
         const roomBootstrap = <%- roomBootstrap %>
         const ROOM_ID = roomBootstrap.roomId
         const iceServers = roomBootstrap.iceServers
+        window.voiceBuildInfo = roomBootstrap.buildInfo || {}
         window.voiceScreenSfuConfig = roomBootstrap.screenSfu || {}
         window.voiceScreenMediaProvider = roomBootstrap.screenMediaProvider || 'legacy'
     </script>
@@ -79,7 +80,9 @@
         </aside>
 
         <main class="room-stage" aria-label="屏幕共享舞台">
-            <header class="share-stage-header"><strong>正在观看</strong><nav id="share-sources" aria-label="选择共享源"></nav></header>
+            <header class="share-stage-header"><strong>正在观看</strong><nav id="share-sources" aria-label="选择共享源"></nav>
+                <div class="local-share-controls" data-local-share-controls hidden><span data-local-share-state>正在共享</span><button type="button" data-share-action="source">更换画面</button><button type="button" data-share-action="quality">画质</button><button type="button" data-share-action="stop">停止共享</button></div>
+            </header>
             <section id="canvas" class="stage-canvas" aria-label="共享画面"><div id="video-grid"></div></section>
         </main>
         <section class="stage-members" aria-label="语音成员舞台">
@@ -228,88 +231,7 @@
                             <strong id="outputVolumeValue">100%</strong>
                         </label>
                     </section>
-                    <dialog class="media-device-popover screen-share-settings-popover" data-control-panel="screen" data-device-popover="screen" role="dialog" aria-modal="true" aria-label="屏幕共享设置">
-                        <div class="media-device-popover-header">
-                            <strong>屏幕共享</strong>
-                            <span data-screen-share-settings-status>开始共享时生效</span>
-                        </div>
-                        <label class="media-select-row">
-                            <span>共享内容</span>
-                            <select data-screen-share-mode>
-                                <option value="game" selected>游戏画面 · 60fps 目标</option>
-                                <option value="detail">桌面文字 · 清晰优先</option>
-                            </select>
-                        </label>
-                        <label class="media-select-row">
-                            <span>分辨率</span>
-                            <select id="screenShareResolution" data-screen-share-resolution>
-                                <option value="auto">自动</option>
-                                <option value="720p">720p</option>
-                                <option value="1080p" selected>1080p</option>
-                                <option value="1440p">1440p</option>
-                                <option value="2160p">2160p（4K）</option>
-                                <option value="original">原始分辨率</option>
-                            </select>
-                        </label>
-                        <label class="media-select-row">
-                            <span>帧率</span>
-                            <select id="screenShareFrameRate" data-screen-share-frame-rate>
-                                <option value="15">15 fps</option>
-                                <option value="30">30 fps</option>
-                                <option value="60" selected>60 fps</option>
-                            </select>
-                        </label>
-                            <% if (piikPrototype) { %>
-                            <label class="media-select-row">
-                                <span>共享方式</span>
-                                <select data-screen-share-provider>
-                                    <option value="web">网页屏幕共享</option>
-                                    <option value="native">Piik App 原生屏幕共享 · H.264</option>
-                                </select>
-                            </label>
-                            <div data-piik-native-options hidden>
-                                <label class="media-select-row"><span>显示器 / 窗口</span><select data-piik-native-source><option value="">请连接 App</option></select></label>
-                                <label><input type="checkbox" data-piik-native-audio>共享所选源声音（可能包含通话声音）</label>
-                                <p class="media-device-hint" data-piik-native-status>请先启动 Piik App 并批准此网站。</p>
-                                <p class="media-device-hint" data-piik-native-config-status role="status" hidden></p>
-                                <button type="button" data-piik-native-refresh>重新连接 / 刷新来源</button>
-                                <button type="button" data-piik-native-approve>查找 App 授权入口</button>
-                                <a data-piik-native-approval-link hidden target="_blank" rel="noopener noreferrer">打开 App 授权</a>
-                                <p class="media-device-hint">原生模式固定使用 App 的 H.264 硬件路径，请选择明确的分辨率档位；下方编码选项仅用于网页共享。</p>
-                            </div>
-                            <% } %>
-                        <details>
-                            <summary>高级设置</summary>
-                            <label class="media-select-row">
-                                <span>视频编码器</span>
-                                <select data-screen-share-codec>
-                                    <option value="auto" selected><%= piikPrototype ? '自动 · H.264 优先，回退 VP8' : '自动 · 实测 H.264，失败回退 VP8' %></option>
-                                    <% if (!piikPrototype) { %>
-                                    <option value="av1">AV1 优先（实验）· 不可用时 H.264 → VP8</option>
-                                    <% } %>
-                                    <option value="h264">H.264 优先 · 不兼容时回退 VP8</option>
-                                    <option value="vp8">VP8 · 对照测试</option>
-                                </select>
-                            </label>
-                            <label class="media-select-row" <%= piikPrototype ? 'hidden' : '' %>>
-                                <span>SFU 启动码率</span>
-                                <select data-screen-share-start-bitrate>
-                                    <option value="browser" selected>浏览器默认</option>
-                                    <option value="1500">1.5 Mbps · 原设置对照</option>
-                                    <option value="5500">5.5 Mbps · 对照</option>
-                                </select>
-                            </label>
-                        </details>
-                        <% if (piikPrototype) { %>
-                        <p class="media-device-hint" data-piik-provider-hint>Piik P2P · 浏览器采集与编码 · 每路最多 3 人观看 · 目标码率 15 Mbps。实际画质和帧率取决于设备与网络。</p>
-                        <% } else { %>
-                        <p class="media-device-hint">带宽不足时优先降低帧率、保留分辨率。自动编码器检测约需 3–6 秒；实际画质和帧率取决于设备与网络。</p>
-                        <% } %>
-                        <div class="screen-share-dialog-actions">
-                            <button type="button" data-screen-share-cancel>取消</button>
-                            <button type="button" data-screen-share-start>开始共享</button>
-                        </div>
-                    </dialog>
+                    <%- include('share-dialog', { piikPrototype }) %>
                 </div>
             </section>
         </footer>

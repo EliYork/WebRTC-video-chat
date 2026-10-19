@@ -26,6 +26,26 @@ function fixture({ storage, connections = [], shares = [], getReceiverHealth } =
 }
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
+test('diagnostics distinguish website, desktop and schema versions without exporting raw user agents', async () => {
+    const f = fixture();
+    f.window.voiceBuildInfo = { webVersion: '1.0.5', webRevision: 'd4ca9c9' };
+    f.window.navigator.userAgent = 'Mozilla Windows eliyork-voice-desktop/0.1.1 Chrome/152.0 Electron/44.9.0 Safari';
+    const report = await f.runtime.report();
+    assert.equal(report.网页版本, '1.0.5');
+    assert.equal(report.网页构建, 'd4ca9c9');
+    assert.equal(report.客户端版本, '0.1.1');
+    assert.equal(report.Electron版本, '44.9.0');
+    assert.equal(report.诊断格式, 5);
+    assert.equal(report.版本, undefined);
+    const safe = sanitizeVoiceDiagnostic(report);
+    assert.equal(safe.客户端版本, '0.1.1');
+    assert.doesNotMatch(JSON.stringify(report), /Mozilla|userAgent/);
+    f.window.navigator.userAgent = 'Mozilla Windows Chrome/155.0';
+    assert.equal((await f.runtime.report()).客户端版本, null);
+    assert.equal((await f.runtime.report()).客户端类型, '浏览器');
+    f.runtime.destroy();
+});
+
 test('browser family detection prioritizes Chromium/Edge/Firefox over Android Version/4.0 and keeps Safari on Apple only', async () => {
     const cases = [
         ['Mozilla/5.0 (Linux; Android 15; Phone) AppleWebKit/537.36 Version/4.0 Chrome/130.0 Mobile Safari/537.36', 'Chrome', 130, 'Android'],
@@ -146,7 +166,7 @@ test('both-side collection marks peer failure and does not export past sessions'
     runtime.attachSocket(socket);
     const data = await runtime.collectCombined();
     assert.equal(data.对端[0].状态, '未响应');
-    assert.equal(data.本机.诊断格式, 4);
+    assert.equal(data.本机.诊断格式, 5);
     assert.ok(data.本机.当前会话);
     assert.equal(data.本机.通话, undefined);
     runtime.destroy();

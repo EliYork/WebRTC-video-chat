@@ -5,6 +5,8 @@ import { ViewerPeer } from './.deps/upstream/src/client/webrtc/viewer-peer';
 import { decodeServerMessage } from './.deps/upstream/src/shared/protocol';
 import { NativeSenderPeer } from './.deps/upstream/src/client/native/native-sender-peer';
 import { createNativeCapture } from './native';
+import { diagnosticConnection } from './diagnostics';
+import { applyVideoCaptureProfile } from './.deps/upstream/src/client/media/quality';
 import type { HostMediaPeer } from './.deps/upstream/src/client/webrtc/host-peer';
 import type {
     IceConfig,
@@ -27,6 +29,18 @@ function createRuntime({
     let remoteShares: any[] = [];
     const edges = new Map<string, any>();
     const watchers = new Map<string, any>();
+    const diagnosticClocks = new WeakMap<object, { timestamp: number | null; observedAt: number }>();
+    const observeDiagnostic = (owner: object, snapshot: any) => {
+        const now = performance.now();
+        let clock = diagnosticClocks.get(owner);
+        if (!clock || clock.timestamp !== snapshot.metrics.sampleTimestampMs) {
+            clock = { timestamp: snapshot.metrics.sampleTimestampMs, observedAt: now };
+            diagnosticClocks.set(owner, clock);
+        }
+        return now - clock.observedAt;
+    };
+    const diagnostic = (owner: object, snapshot: any, sending: boolean, native: boolean) =>
+        diagnosticConnection(snapshot, sending, native, observeDiagnostic(owner, snapshot));
     const request = (input: any): Promise<any> =>
         new Promise((resolve, reject) => {
             socket
@@ -146,6 +160,7 @@ function createRuntime({
                         connectionId,
                     }),
                 onPromotedUpdate: (peer, snapshot) => {
+                    observeDiagnostic(peer, snapshot);
                     if (
                         snapshot.connectionState === 'failed' &&
                         edge.peers.get(peer.peerId) === peer
@@ -183,7 +198,7 @@ function createRuntime({
                             candidate: message.candidate,
                             iceConfig: edge.ice,
                             stream,
-                            profile: quality,
+                            profile: edge.quality,
                             videoCodec: codec,
                             natPredictionEnabled: false,
                         })
@@ -299,6 +314,8 @@ function createRuntime({
                         return true;
                     },
                     onUpdate: (snapshot) => {
+                        observeDiagnostic(binding, snapshot);
+                        binding.metrics = snapshot;
                         edge.metrics = snapshot;
                         if (
                             edge.pending === binding &&
@@ -559,7 +576,7 @@ function createRuntime({
                     height: settings.height || 1080,
                 },
                 maxFramerate: options.frameRate || 60,
-                maxBitrate: 15000000,
+                maxBitrate: options.maxBitrate || 15000000,
                 maxAudioBitrate: 128000,
                 degradationPreference: 'maintain-resolution',
             };
@@ -598,6 +615,45 @@ function createRuntime({
         },
         captureNative: (options: any, signal: AbortSignal) =>
             nativeCapture.capture(options, signal),
+        async updateNative(stream: MediaStream, options: any, changeSource: boolean) {
+            const owner = local;
+            const profile = await nativeCapture.update(stream, options, changeSource);
+            if (!owner || local !== owner || owner.stream !== stream) throw new Error('共享已结束');
+            owner.quality = profile;
+            desired = { stream, options };
+        },
+        async updateWeb(stream: MediaStream, options: any) {
+            const owner = local;
+            if (!owner || owner.stream !== stream) throw new Error('共享已结束');
+            const track = stream.getVideoTracks()[0];
+            const sizes: Record<string, { width: number; height: number }> = {
+                '720p': { width: 1280, height: 720 }, '1080p': { width: 1920, height: 1080 },
+                '1440p': { width: 2560, height: 1440 }, '2160p': { width: 3840, height: 2160 },
+            };
+            const settings = track.getSettings();
+            const profile = { ...owner.quality, resolution: sizes[options.resolutionPreset] ||
+                (options.resolutionPreset === 'auto' ? sizes['1080p'] : { width: settings.width || 1920, height: settings.height || 1080 }),
+                maxFramerate: options.frameRate, maxBitrate: options.maxBitrate };
+            try {
+                await applyVideoCaptureProfile(track, profile);
+                const results = await Promise.all([...owner.peers.values()].map((p: any) => p.updateProfile(profile)));
+                if (owner.prepared && !(await owner.prepared.updateProfile(profile))) throw new Error('正在连接的观看者未能应用画质，请重试');
+                if (results.some(ok => !ok)) throw new Error('部分观看连接未能应用画质，请重试');
+            } catch (error) {
+                // Keep the previous declared profile if any sender rejects a mutation.
+                const rollback = await Promise.allSettled([
+                    applyVideoCaptureProfile(track, owner.quality),
+                    ...[...owner.peers.values()].map((p: any) => p.updateProfile(owner.quality)),
+                    ...(owner.prepared ? [owner.prepared.updateProfile(owner.quality)] : []),
+                ]);
+                if (local === owner && rollback.some(r => r.status === 'rejected' || (r.status === 'fulfilled' && r.value === false)))
+                    onPublicationFailure?.();
+                throw error;
+            }
+            if (local !== owner) throw new Error('共享已结束');
+            owner.quality = profile;
+            desired = { stream, options };
+        },
         forgetPeer(peerId: string) {
             for (const edge of [...edges.values()])
                 if (edge.peerId === peerId) dispose(edge);
@@ -626,6 +682,15 @@ function createRuntime({
             }),
         }),
         // Existing UI diagnostics can query this without claiming SFU transport.
+        getDiagnosticConnections: (peerId?: string) => {
+            if (!peerId) return [...(local?.peers.values() || [])].map((peer: HostMediaPeer, i: number) => ({
+                序号: i + 1,
+                ...diagnostic(peer, peer.getSnapshot(), true, !!nativeCapture.get(local.stream)),
+            }));
+            const edge = [...watchers.values()].find((e) => e.peerId === peerId && !e.closed);
+            const binding = edge?.active;
+            return binding?.metrics ? [{ 序号: 1, ...diagnostic(binding, binding.metrics, false, false) }] : [];
+        },
         usesServer: () => false,
         getRemoteSource: () => null,
         getSendConnection: () => null,

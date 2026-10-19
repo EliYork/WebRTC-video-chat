@@ -159,6 +159,13 @@
         let shareMode = initialScreenShareOptions.mode === 'detail' ? 'detail' : 'game';
         let codecMode = ['av1', 'h264', 'vp8'].includes(initialScreenShareOptions.codecMode) ? initialScreenShareOptions.codecMode : 'auto';
         let startBitrate = ['1500', '5500'].includes(String(initialScreenShareOptions.startBitrate)) ? String(initialScreenShareOptions.startBitrate) : 'browser';
+        let editorMode = 'source';
+        let observedSharing = false;
+        const screenPanel = () => popovers.find(el => el.dataset.devicePopover === 'screen');
+        const screenField = selector => screenPanel()?.querySelector(selector) || root.querySelector(selector);
+        const signalDialog = (name, detail) => {
+            if (global.CustomEvent) global.document.dispatchEvent(new global.CustomEvent(name, { detail }));
+        };
         const pendingActions = new Set();
         const intentRevisions = new Map();
         const listenerCleanups = [];
@@ -450,7 +457,9 @@
                 Boolean(lastSnapshot.screenSharePending) ||
                 pendingActions.has('screen');
             const sharing = Boolean(lastSnapshot.screenShareEnabled);
-            const screenSelectDisabled = sharing || screenPending;
+            if (sharing) observedSharing = true;
+            if (!lastSnapshot.actualVoiceJoined && !lastSnapshot.desiredVoiceJoined) observedSharing = false;
+            const screenSelectDisabled = screenPending;
 
             root.classList.remove('hidden');
             root.dataset.connectionState =
@@ -512,38 +521,64 @@
                 iconClass: sharing ? 'fas fa-desktop' : 'far fa-newspaper',
                 iconName: sharing ? 'screen-share' : 'screen-share-off',
                 label: sharing ? '停止屏幕共享' : '开始屏幕共享',
-                pending: screenPending,
+                pending: screenPending && !sharing,
                 unavailable: Boolean(lastSnapshot.screenShareError),
             });
             setText(
                 refs.screenButton.querySelector('span'),
                 sharing ? '停止共享' : '共享'
             );
-            refs.screenStartButton.disabled = !mediaAvailable || sharing || screenPending;
-            setText(refs.screenStartButton, screenPending ? '正在请求…' : '开始共享');
-            refs.screenStatus.classList.toggle('hidden', !sharing);
+            const native = screenField('[data-screen-share-provider]')?.value === 'native';
+            const sourceReady = !native || (sharing && editorMode === 'quality') || Boolean(screenField('[data-piik-native-source]')?.value);
+            refs.screenStartButton.disabled = !mediaAvailable || screenPending || !sourceReady;
+            setText(refs.screenStartButton, screenPending ? '正在处理…' : sharing ? (editorMode === 'quality' ? '应用画质' : '切换来源') : native ? '开始共享' : '选择来源并共享');
+            refs.screenStatus.classList.toggle('hidden', !sharing && !screenPending && !observedSharing);
             refs.resolutionSelect.value = resolutionPreset;
             refs.frameRateSelect.value = String(frameRate);
             refs.resolutionSelect.disabled = screenSelectDisabled;
             refs.frameRateSelect.disabled = screenSelectDisabled;
-            const modeSelect = root.querySelector('[data-screen-share-mode]');
+            const modeSelect = screenField('[data-screen-share-mode]');
             if (modeSelect) {
                 modeSelect.value = shareMode;
                 modeSelect.disabled = screenSelectDisabled;
             }
-            const route = lastSnapshot.screenShareRoute;
             for (const [selector, value] of [['[data-screen-share-codec]', codecMode], ['[data-screen-share-start-bitrate]', startBitrate]]) {
-                const select = root.querySelector(selector);
+                const select = screenField(selector);
                 if (select) { select.value = value; select.disabled = screenSelectDisabled; }
             }
-            setText(refs.screenStatus, sharing ? (route?.hasUplink ? (route.serverViewers > 0 ? `共享中 · 服务器转发 ${route.serverViewers} 人` : '共享中 · 无服务器观看者（SFU 备用）') : '共享中 · 直连') : '');
+            const stateText = screenPending ? '正在处理共享…' : sharing ? `正在共享 · ${lastSnapshot.screenShareAudioActive ? '含来源声音' : '不含来源声音'}` : '已停止共享';
+            setText(refs.screenStatus, stateText);
+            const stageControls = global.document.querySelector?.('[data-local-share-controls]');
+            if (stageControls) {
+                stageControls.hidden = !sharing && !screenPending;
+                setText(stageControls.querySelector('[data-local-share-state]'), stateText);
+                stageControls.querySelectorAll('[data-share-action]').forEach(button => { button.disabled = screenPending && button.dataset.shareAction !== 'stop'; });
+            }
+            const stopButton = screenField('[data-share-action="stop"]');
+            if (stopButton) stopButton.hidden = !sharing && !screenPending;
+            const provider = screenField('[data-screen-share-provider]');
+            if (provider) provider.disabled = screenPending || (sharing && editorMode === 'quality');
+            screenPanel()?.querySelectorAll('[data-screen-share-cancel]').forEach(button => { button.disabled = screenPending; });
+            const sourceSection = screenField('[data-share-source-section]');
+            if (sourceSection) sourceSection.hidden = sharing && editorMode === 'quality';
+            const browserSource = screenField('[data-share-browser-source]');
+            if (browserSource) browserSource.hidden = native;
+            const nativeSection = screenField('[data-piik-native-options]');
+            if (nativeSection) nativeSection.hidden = !native;
+            const webOnly = screenField('[data-share-web-only]');
+            if (webOnly) webOnly.hidden = native;
+            const modeRow = screenField('[data-share-mode-row]');
+            if (modeRow) modeRow.hidden = native;
+            screenPanel()?.querySelectorAll('[data-screen-share-audio], [data-screen-share-bitrate]').forEach(el => { el.disabled = screenPending; });
+            setText(screenField('[data-share-dialog-title]'), sharing ? (editorMode === 'quality' ? '调整共享画质' : '切换共享内容') : '选择共享内容');
+            const old = lastSnapshot.screenShareOptions;
+            const audio = screenField('[data-screen-share-audio]')?.checked === true;
+            const restart = sharing && (old?.provider !== (native ? 'native' : 'web') || old?.shareAudio !== audio ||
+                (!native && (old?.codecMode !== codecMode || !provider || (resolutionPreset === 'original' && old?.resolutionPreset !== 'original'))));
             setText(
                 refs.screenSettingsStatus,
-                sharing
-                    ? '停止共享后可修改'
-                    : screenPending
-                      ? '正在请求共享权限'
-                      : '开始共享时生效'
+                screenPending ? '正在应用，请稍候；可停止共享取消' : restart ? '此项变更需要重建共享，观看画面会短暂中断；语音保持连接' :
+                sharing ? (editorMode === 'quality' ? '在当前共享上应用；实际画质以接收端为准' : native ? '选中新来源后切换，语音保持连接' : '取消浏览器选择器将保留当前共享') : '选择来源，再确认画质'
             );
 
             renderSessionButton(lastSnapshot);
@@ -617,6 +652,7 @@
         const handleScreenClick = () => {
             const snapshot = getCurrentAdapterSnapshot();
             if (snapshot.screenSharePending) {
+                void runIntent('screen', () => adapter.stopScreenShare(), true);
                 return;
             }
             if (snapshot.screenShareEnabled) {
@@ -625,18 +661,25 @@
         };
         const handleScreenStart = () => {
             const snapshot = getCurrentAdapterSnapshot();
-            if (!snapshot.mediaControlsAvailable || snapshot.screenSharePending || snapshot.screenShareEnabled) return;
+            if (!snapshot.mediaControlsAvailable || snapshot.screenSharePending) return;
             if (refs.resolutionSelect.reportValidity?.() === false) return;
             // Call capture directly from this click to preserve browser user activation.
-            void runIntent('screen', () => {
-                const started = adapter.startScreenShare({
+            void runIntent('screen', async () => {
+                setText(screenField('[data-share-dialog-feedback]'), '');
+                const options = {
                           frameRate,
                           resolutionPreset,
                           mode: shareMode,
                           codecMode,
                           startBitrate,
-                      });
-                closePopovers();
+                          provider: screenField('[data-screen-share-provider]')?.value || 'web',
+                          nativeSourceKey: screenField('[data-piik-native-source]')?.value || snapshot.screenShareOptions?.nativeSourceKey || '',
+                          shareAudio: screenField('[data-screen-share-audio]')?.checked === true,
+                          maxBitrate: Number(screenField('[data-screen-share-bitrate]')?.value) || 15000000,
+                      };
+                const started = await (snapshot.screenShareEnabled ? adapter.updateScreenShare?.(options, editorMode) : adapter.startScreenShare(options));
+                if (started !== false && started !== undefined) closePopovers();
+                else if (openPopoverType === 'screen') setText(screenField('[data-share-dialog-feedback]'), getCurrentAdapterSnapshot().screenShareError || '操作未完成或已取消。请检查来源后重试。');
                 return started;
             });
         };
@@ -705,6 +748,7 @@
             });
         };
         const closePopovers = () => {
+            if (openPopoverType === 'screen') signalDialog('voice-share-dialog-close');
             cancelHoverClose();
             root.querySelectorAll('[data-device-control]').forEach((control) =>
                 control.classList.remove('is-open')
@@ -761,8 +805,32 @@
             popover.style.top = `${top}px`;
             popover.style.right = 'auto';
         };
-        const openPopover = (type, fromHover = false) => {
+        const cancelShareDialog = () => {
+            if (getCurrentAdapterSnapshot().screenSharePending || pendingActions.has('screen')) {
+                setText(screenField('[data-share-dialog-feedback]'), '正在处理共享，请使用“停止共享”取消。');
+                return;
+            }
             closePopovers();
+        };
+        const openPopover = (type, fromHover = false, mode = 'source') => {
+            closePopovers();
+            if (type === 'screen') {
+                editorMode = mode;
+                const options = getCurrentAdapterSnapshot().screenShareOptions;
+                if (getCurrentAdapterSnapshot().screenShareEnabled && options) {
+                    resolutionPreset = normalizeResolutionPreset(options.resolutionPreset);
+                    frameRate = normalizeFrameRate(options.frameRate);
+                    shareMode = options.mode;
+                    codecMode = options.codecMode;
+                    startBitrate = options.startBitrate;
+                    const values = [['[data-screen-share-provider]', options.provider], ['[data-screen-share-bitrate]', options.maxBitrate]];
+                    values.forEach(([selector, value]) => { const el = screenField(selector); if (el) el.value = String(value); });
+                    const audio = screenField('[data-screen-share-audio]');
+                    if (audio) audio.checked = options.shareAudio === true;
+                }
+                setText(screenField('[data-share-dialog-feedback]'), '');
+                render(getCurrentAdapterSnapshot());
+            }
             const control = root.querySelector(
                 `[data-device-control="${type}"]`
             );
@@ -789,7 +857,7 @@
                     fallbackBackdrop = global.document.createElement('div');
                     fallbackBackdrop.className = 'media-modal-fallback-backdrop';
                     fallbackBackdrop.addEventListener('click', (event) => {
-                        event.preventDefault(); event.stopPropagation(); closePopovers();
+                        event.preventDefault(); event.stopPropagation(); cancelShareDialog();
                     });
                     global.document.body.append(fallbackBackdrop);
                 }
@@ -798,6 +866,7 @@
             }
             toggle.setAttribute('aria-expanded', 'true');
             openPopoverType = type;
+            if (type === 'screen') signalDialog('voice-share-dialog-open', { mode, nativeSourceKey: getCurrentAdapterSnapshot().screenShareOptions?.nativeSourceKey });
             popoverOpenedByHover = fromHover;
             if (DEVICE_TYPES.includes(type)) {
                 adapter.refreshDevices?.(type);
@@ -839,6 +908,14 @@
             void runIntent(`device-${type}`, () => action(deviceId), true);
         };
         const handleDocumentClick = (event) => {
+            const action = event.target.closest?.('[data-share-action]')?.dataset.shareAction;
+            if (action) {
+                if (action === 'stop') {
+                    void runIntent('screen', () => adapter.stopScreenShare(), true);
+                    closePopovers();
+                } else openPopover('screen', false, action);
+                return;
+            }
             if (openPopoverType && !root.contains(event.target) && !fallbackPopup?.contains(event.target)) {
                 closePopovers();
             }
@@ -853,7 +930,8 @@
                 }
             }
             if (event.key === 'Escape') {
-                closePopovers();
+                if (openPopoverType === 'screen') { event.preventDefault(); cancelShareDialog(); }
+                else closePopovers();
             }
         };
         const handleResize = () => {
@@ -897,7 +975,8 @@
             listen(refs.cameraButton, 'click', handleCameraClick);
             listen(refs.screenButton, 'click', handleScreenClick);
             listen(refs.screenStartButton, 'click', handleScreenStart);
-            listen(refs.screenCancelButton, 'click', closePopovers);
+            root.querySelectorAll('[data-screen-share-cancel]').forEach(button => listen(button, 'click', cancelShareDialog));
+            for (const selector of ['[data-screen-share-provider]', '[data-piik-native-source]', '[data-screen-share-audio]', '[data-screen-share-bitrate]']) listen(screenField(selector), 'change', () => render(getCurrentAdapterSnapshot()));
             listen(refs.outputButton, 'click', handleOutputClick);
             listen(refs.statusMessages, 'click', (event) => {
                 if (event.target.closest?.('[data-audio-recovery]')) {
@@ -958,12 +1037,12 @@
                         if (!root.contains(popover)) handleRootClick(event);
                     });
                     if (popover.dataset.devicePopover === 'screen') {
-                        listen(popover, 'cancel', (event) => { event.preventDefault(); closePopovers(); });
+                        listen(popover, 'cancel', (event) => { event.preventDefault(); cancelShareDialog(); });
                         listen(popover, 'click', (event) => {
                             if (event.target !== popover) return;
                             const rect = popover.getBoundingClientRect?.();
                             if (rect && (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom)) {
-                                event.preventDefault(); event.stopPropagation(); closePopovers();
+                                event.preventDefault(); event.stopPropagation(); cancelShareDialog();
                             }
                         });
                         return;

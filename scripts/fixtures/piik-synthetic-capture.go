@@ -46,8 +46,30 @@ func run() error {
 		fmt.Print(`{"protocol":7,"platform":"windows","platformBuild":"synthetic-fixture","videoCapture":true,"processAudio":false,"systemAudio":false,"softwareVP8":false,"adapters":[{"index":0,"name":"Synthetic fixture; no GPU evidence","identity":"fixture","hardwareH264":[{"index":0,"name":"Prerecorded H264; not a hardware encoder","identity":"fixture"}]}]}`)
 		return nil
 	case "--list":
-		fmt.Print(`[{"kind":"display","sourceId":"1","title":"Synthetic motion; no desktop capture"}]`)
+		if _, err := os.Stat(os.Getenv("PIIK_SYNTHETIC_WINDOW_GONE")); err == nil {
+			fmt.Print(`[{"kind":"display","sourceId":"1","title":"Synthetic motion; no desktop capture"}]`)
+			return nil
+		}
+		fmt.Print(`[{"kind":"display","sourceId":"1","title":"Synthetic motion; no desktop capture"},{"kind":"window","sourceId":"2","pid":42,"creationTime":"100","title":"Synthetic window; no desktop capture"}]`)
 		return nil
+	case "--preview":
+		// Real BMP bytes from this explicitly synthetic fixture, never a desktop.
+		const width, height = 320, 180
+		bmp := make([]byte, 54+width*height*3)
+		copy(bmp, "BM")
+		binary.LittleEndian.PutUint32(bmp[2:], uint32(len(bmp)))
+		binary.LittleEndian.PutUint32(bmp[10:], 54)
+		binary.LittleEndian.PutUint32(bmp[14:], 40)
+		binary.LittleEndian.PutUint32(bmp[18:], width)
+		binary.LittleEndian.PutUint32(bmp[22:], height)
+		binary.LittleEndian.PutUint16(bmp[26:], 1)
+		binary.LittleEndian.PutUint16(bmp[28:], 24)
+		for y := 0; y < height; y++ { for x := 0; x < width; x++ {
+			i := 54+(y*width+x)*3
+			bmp[i], bmp[i+1], bmp[i+2] = byte(x), byte(y), 180
+		} }
+		_, err := os.Stdout.Write(bmp)
+		return err
 	case "--capture-video":
 		// Continue below. Other modes fail rather than touching a real device.
 	default:
@@ -70,6 +92,13 @@ func run() error {
 	}
 	if len(outputs) < 2 {
 		return fmt.Errorf("expected Piik's shared output profiles")
+	}
+	if log := os.Getenv("PIIK_SYNTHETIC_OPERATIONS"); log != "" {
+		f, e := os.OpenFile(log, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+		if e != nil { return e }
+		detail, _ := json.Marshal(map[string]any{"args": args, "outputs": outputs})
+		fmt.Fprintln(f, string(detail))
+		f.Close()
 	}
 	bytes, err := os.ReadFile(os.Getenv("PIIK_SYNTHETIC_CLIPS"))
 	if err != nil {

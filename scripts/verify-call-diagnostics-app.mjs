@@ -58,7 +58,7 @@ try {
     await pages[0].waitForTimeout(2200);
     await pages[0].evaluate(() => window.VoiceCallDiagnostics.copyCombined(document.querySelector('[data-copy-call-diagnostics]')));
     const combined = await pages[0].evaluate(() => JSON.parse(window.copiedDiagnostics));
-    assert.equal(combined.诊断格式, 4);
+    assert.equal(combined.诊断格式, 5);
     assert.equal(combined.未响应原因, null);
     assert.equal(combined.对端.length, 1);
     assert.equal(combined.对端[0].状态, '已采样');

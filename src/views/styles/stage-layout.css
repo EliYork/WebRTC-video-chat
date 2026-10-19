@@ -5,12 +5,12 @@
 .workspace-actions .workspace-copy-diagnostics { width: 112px; font-size: 12px; box-shadow: none; }
 #stageChannelsToggle { display: none; }
 #main.stage-layout {
-    --nav-width: clamp(200px, 17vw, 280px);
+    --nav-width: clamp(280px, 18vw, 300px);
     --chat-width: clamp(280px, 23vw, 400px);
     display: grid;
     grid-template-columns: var(--nav-width) minmax(0, 1fr) var(--chat-width);
     grid-template-rows: minmax(0, 1fr) auto;
-    grid-template-areas: 'nav members chat' 'dock dock dock';
+    grid-template-areas: 'nav members chat' 'dock members chat';
     gap: 1px;
     height: 100vh;
     height: 100dvh;
@@ -58,32 +58,33 @@
 #member-cards .voice-media-quality-pill { display: none; }
 #member-cards .tile-badges { gap: 4px; }
 /* Every active control has a bounded icon and a consistent 44px main action. */
-.stage-layout .stage-dock { grid-area: dock; padding: 10px max(16px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); background: var(--panel); border-top: 1px solid var(--line-soft); }
+.stage-layout .stage-dock { grid-area: dock; padding: 12px; background: var(--panel); border-top: 1px solid var(--line-soft); align-self: end; }
 .stage-dock .local-user-card { padding: 0; border: 0; background: none; box-shadow: none; }
-.stage-dock #buttons.media-dock { display: grid; grid-template-columns: minmax(180px, 1fr) auto minmax(170px, 1fr); grid-template-areas: 'user controls session' 'status status status'; align-items: center; gap: 0 16px; min-height: 64px; padding: 0; border: 0; box-shadow: none; border-radius: 0; background: none; }
-.stage-dock .media-dock-header { grid-area: user; grid-template-columns: minmax(90px, 1fr) minmax(70px, 1fr); max-width: 400px; padding: 0; }
-.stage-dock .media-dock-activity-row { grid-area: session; display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
-.stage-dock .media-dock-actions { grid-area: controls; display: grid; grid-template-columns: repeat(4, minmax(0, 76px)); gap: 8px; }
-.stage-dock #buttons .control-button-wrap { grid-template-columns: minmax(0, 1fr) 24px; min-width: 0; }
-.stage-dock #buttons .control-menu-toggle { position: static; width: 24px !important; height: 44px; min-height: 44px; clip-path: none; overflow: hidden; }
+.stage-dock #buttons.media-dock { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-areas: 'user' 'controls' 'session' 'status'; align-items: center; gap: 10px; min-height: 0; padding: 0; border: 0; box-shadow: none; border-radius: 0; background: none; }
+.stage-dock #buttons .media-dock-header { grid-area: user; grid-template-columns: minmax(0, 1fr); gap: 6px; padding: 0; }
+.stage-dock .media-dock-activity-row { grid-area: session; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; }
+.stage-dock #buttons .media-dock-actions { grid-area: controls; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
+.stage-dock #buttons .control-button-wrap { grid-template-columns: minmax(0, 1fr) 16px; min-width: 0; }
+.stage-dock #buttons .control-menu-toggle { position: static; width: 16px !important; height: 44px; min-height: 44px; clip-path: none; overflow: hidden; }
 .stage-dock #buttons :is(.media-dock-action-button, .media-dock-hangup) { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; height: 44px; min-height: 44px; padding: 4px; gap: 2px; line-height: 1; }
 .stage-dock #buttons .media-dock-action-button span { display: block; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
 .stage-dock #buttons :is(svg, i) { width: 20px; height: 20px; flex: 0 0 20px; font-size: 18px; line-height: 20px; }
 .stage-dock #buttons .control-menu-toggle i { width: 12px; height: 12px; flex-basis: 12px; font-size: 10px; line-height: 12px; }
 .stage-dock #buttons #copyRoomLink { width: 44px; flex: 0 0 44px; }
 .stage-dock #buttons #copyRoomLink span { display: none; }
-.stage-dock #buttons #destroyPeer { width: 112px; flex: 0 0 112px; flex-direction: row; gap: 8px; padding: 8px 12px; }
+.stage-dock #buttons #destroyPeer { width: auto; flex: 1 1 100px; flex-direction: row; gap: 8px; padding: 8px 12px; }
 .stage-dock #destroyPeer [data-session-label] { font-size: 12px; white-space: nowrap; }
 .stage-dock .voice-status-messages:not(.hidden) { grid-area: status; margin: 6px 0 0; max-height: 64px; overflow: auto; }
-.stage-dock .media-dock-info { font-size: 11px; }
-.stage-dock .screen-status-chip { display: none; }
+.stage-dock .media-dock-info { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 11px; }
+.stage-dock .media-dock-kicker { display: none; }
+.stage-dock .screen-status-chip:not(.hidden) { position: static; display: block; flex: 1 0 100%; min-height: 24px; padding: 6px 9px; color: var(--accent-strong); background: var(--accent-soft); white-space: normal; font-size: 11px; line-height: 1.3; }
 .member-card .voice-placeholder[hidden] { display: none; }
-#main.stage-layout.stage-chat-closed { grid-template-columns: var(--nav-width) minmax(0, 1fr); grid-template-areas: 'nav members' 'dock dock'; }
+#main.stage-layout.stage-chat-closed { grid-template-columns: var(--nav-width) minmax(0, 1fr); grid-template-areas: 'nav members' 'dock members'; }
 .stage-chat-closed > #chat-panel { display: none; }
 #main.stage-layout[data-stage-mode='sharing'] {
     grid-template-columns: var(--nav-width) minmax(0, 1fr) var(--chat-width);
-    grid-template-rows: minmax(0, 1fr) clamp(156px, 18dvh, 210px) auto;
-    grid-template-areas: 'nav stage chat' 'nav members chat' 'dock dock dock';
+    grid-template-rows: minmax(0, 1fr) auto;
+    grid-template-areas: 'nav stage chat' 'dock members chat';
 }
 .stage-layout[data-stage-mode='sharing'] .room-stage { display: flex; flex-direction: column; gap: 8px; }
 .share-stage-header { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 0 0 auto; font-size: 12px; color: var(--muted); }
@@ -97,7 +98,7 @@
 #video-grid > .video-tile.is-stage-focus { visibility: visible; pointer-events: auto; }
 #video-grid .tile-body { background: #17161b; }
 #video-grid .tile-body video { object-fit: contain; }
-.stage-layout[data-stage-mode='sharing'] .stage-members { padding: 8px 12px; }
+.stage-layout[data-stage-mode='sharing'] .stage-members { padding: 8px 12px; height: clamp(160px, 19dvh, 210px); align-self: end; }
 .stage-layout[data-stage-mode='sharing'] .members-heading { padding-bottom: 5px; }
 .stage-layout[data-stage-mode='sharing'] #stageChannelStatus { display: none; }
 .stage-layout[data-stage-mode='sharing'] #member-cards { display: flex; flex: 1; max-width: none; width: 100%; margin: 0; align-content: normal; justify-content: flex-start; padding: 2px; overflow-x: auto; overflow-y: hidden; scrollbar-gutter: auto; }
@@ -108,25 +109,24 @@
 .stage-layout[data-stage-mode='sharing'] #member-cards .tile-header { position: absolute; left: 0; right: 0; bottom: 0; min-height: 36px; padding: 2px 6px; border: 0; background: #fffefde8; }
 .stage-layout[data-stage-mode='sharing'] #member-cards .tile-body { grid-row: 1; padding-bottom: 36px; }
 .stage-layout[data-stage-mode='sharing'] #member-cards :is(.tile-footer, .member-watch-button) { display: none; }
-#main.stage-layout[data-stage-mode='sharing'].stage-chat-closed { grid-template-columns: var(--nav-width) minmax(0, 1fr); grid-template-areas: 'nav stage' 'nav members' 'dock dock'; }
+#main.stage-layout[data-stage-mode='sharing'].stage-chat-closed { grid-template-columns: var(--nav-width) minmax(0, 1fr); grid-template-areas: 'nav stage' 'dock members'; }
 .stage-layout .video-tile:is(:fullscreen, .is-web-fullscreen) { position: fixed !important; inset: 0 !important; width: 100vw !important; height: 100dvh !important; z-index: 2147483647; visibility: visible; pointer-events: auto; border-radius: 0; }
 .stage-layout .video-tile:is(:fullscreen, .is-web-fullscreen) .tile-body video { object-fit: contain; }
 @media (min-width: 2400px) {
-    #main.stage-layout { --nav-width: 280px; --chat-width: 400px; }
+    #main.stage-layout { --nav-width: 300px; --chat-width: 400px; }
 }
 @media (max-width: 1100px) {
-    #main.stage-layout { --nav-width: 176px; --chat-width: 280px; }
-    .stage-dock #buttons.media-dock { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'user session' 'controls controls' 'status status'; gap: 8px 12px; }
-    .stage-dock .media-dock-actions { justify-content: center; }
-    .stage-dock .media-dock-info { display: none; }
+    #main.stage-layout { --nav-width: 280px; --chat-width: 280px; }
 }
 @media (max-width: 900px) {
     #stageChannelsToggle { display: block; }
-    #main.stage-layout { grid-template-columns: minmax(0, 1fr) var(--chat-width); grid-template-areas: 'members chat' 'dock dock'; }
+    #main.stage-layout { grid-template-columns: minmax(0, 1fr) var(--chat-width); grid-template-areas: 'members chat' 'dock chat'; }
     .stage-layout > .room-sidebar { display: none; }
     #main.stage-layout.stage-chat-closed { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'members' 'dock'; }
-    #main.stage-layout[data-stage-mode='sharing'] { grid-template-columns: minmax(0, 1fr) var(--chat-width); grid-template-areas: 'stage chat' 'members chat' 'dock dock'; }
+    #main.stage-layout[data-stage-mode='sharing'] { grid-template-columns: minmax(0, 1fr) var(--chat-width); grid-template-rows: minmax(0, 1fr) 140px auto; grid-template-areas: 'stage chat' 'members chat' 'dock chat'; }
     #main.stage-layout[data-stage-mode='sharing'].stage-chat-closed { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'stage' 'members' 'dock'; }
+    .stage-layout .stage-dock { width: min(100%, 320px); justify-self: start; }
+    .stage-layout[data-stage-mode='sharing'] .stage-members { height: 140px; }
     #main.stage-layout.stage-channels-open { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; grid-template-areas: 'nav' 'dock'; }
     .stage-layout.stage-channels-open > .room-sidebar { display: flex; }
     .stage-layout.stage-channels-open > :is(.room-stage, .stage-members, #chat-panel) { display: none; }
@@ -156,18 +156,19 @@
     .stage-layout .stage-dock { padding: 8px max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); }
     .stage-dock #buttons.media-dock { gap: 8px; }
     .stage-dock .media-dock-header { grid-template-columns: minmax(0, 1fr); }
-    .stage-dock .media-dock-actions { grid-template-columns: repeat(4, minmax(0, 70px)); gap: 6px; }
+    .stage-dock .media-dock-actions { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
     .stage-dock #buttons .media-dock-user { grid-template-columns: 28px minmax(0, 1fr); gap: 6px; }
     .stage-dock #buttons .local-avatar { width: 28px; height: 28px; }
     #main.stage-layout.stage-channels-open { grid-template-rows: minmax(0, 1fr) auto; grid-template-areas: 'nav' 'dock'; }
 }
 @media (max-height: 550px) {
-    #main.stage-layout[data-stage-mode='sharing'] { grid-template-rows: minmax(0, 1fr) 100px auto; }
+    #main.stage-layout[data-stage-mode='sharing'] { grid-template-rows: minmax(0, 1fr) auto; }
+    .stage-layout[data-stage-mode='sharing'] .stage-members { height: 100px; }
     .stage-layout[data-stage-mode='sharing'] .members-heading, #stageChannelStatus { display: none; }
     .stage-layout[data-stage-mode='sharing'] #member-cards .tile-header { min-height: 32px; }
     .stage-layout[data-stage-mode='sharing'] #member-cards .voice-placeholder-avatar { width: 28px; height: 28px; font-size: 14px; }
-    .stage-dock .media-dock-header { display: none; }
-    .stage-dock #buttons.media-dock { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'controls session' 'status status'; gap: 6px; min-height: 44px; }
+    .stage-dock #buttons .media-dock-header { display: none; }
+    .stage-dock #buttons.media-dock { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'controls' 'session' 'status'; gap: 6px; min-height: 44px; }
     .stage-dock .media-dock-actions { justify-content: start; }
 }
 @media (max-height: 550px) and (max-width: 640px) {

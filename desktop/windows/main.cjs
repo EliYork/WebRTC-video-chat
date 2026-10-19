@@ -417,7 +417,12 @@ else {
                             const value = await clipboard.readText();
                             if (value !== marker) {
                                 const data = JSON.parse(value);
-                                result.diagnosticsCopied = data.诊断格式 === 4;
+                                result.diagnosticsCopied = data.诊断格式 >= 4;
+                                result.diagnosticVersions = {
+                                    web: data.网页版本,
+                                    desktop: data.客户端版本,
+                                    schema: data.诊断格式,
+                                };
                                 writtenText = value;
                                 break;
                             }

@@ -668,6 +668,7 @@ const createAdapterStub = (initialState = {}) => {
         setOutputMuted: (...args) => record('setOutputMuted', ...args),
         setOutputVolume: (...args) => record('setOutputVolume', ...args),
         startScreenShare: (...args) => record('startScreenShare', ...args),
+        updateScreenShare: (...args) => record('updateScreenShare', ...args),
         stopScreenShare: (...args) => record('stopScreenShare', ...args),
         subscribe(listener) {
             subscribers.add(listener);
@@ -845,7 +846,7 @@ test('buttons, device selection, output volume and mute emit one adapter intent'
     assert.equal(stub.calls.get('leaveVoice').length, 1);
 });
 
-test('screen options persist, rapid clicks start once, cancellation recovers, and sharing disables settings', async () => {
+test('screen options persist, rapid clicks start once, cancellation recovers, and active sharing remains editable', async () => {
     const fixture = createFixture();
     const { runtimeApi } = loadApis(fixture);
     const stub = createAdapterStub();
@@ -876,7 +877,7 @@ test('screen options persist, rapid clicks start once, cancellation recovers, an
     assert.equal(stub.calls.get('startScreenShare').length, 1);
     assert.deepEqual(
         JSON.parse(JSON.stringify(stub.calls.get('startScreenShare')[0])),
-        [{ frameRate: 60, resolutionPreset: '1440p', mode: 'game', codecMode: 'auto', startBitrate: 'browser' }]
+        [{ frameRate: 60, resolutionPreset: '1440p', mode: 'game', codecMode: 'auto', startBitrate: 'browser', provider: 'web', nativeSourceKey: '', shareAudio: false, maxBitrate: 15000000 }]
     );
     assert.equal(fixture.refs.resolutionSelect.disabled, true);
     assert.equal(fixture.refs.frameRateSelect.disabled, true);
@@ -889,7 +890,7 @@ test('screen options persist, rapid clicks start once, cancellation recovers, an
     assert.equal(runtime.getSnapshot().screenShareFrameRate, 60);
 
     stub.emit({ screenShareEnabled: true });
-    assert.equal(fixture.refs.resolutionSelect.disabled, true);
+    assert.equal(fixture.refs.resolutionSelect.disabled, false);
     assert.equal(fixture.refs.screenButton.textContent.includes('停止'), true);
     fixture.refs.screenButton.click();
     await flush();
@@ -898,9 +899,11 @@ test('screen options persist, rapid clicks start once, cancellation recovers, an
     stub.emit({ screenShareEnabled: false });
     assert.equal(fixture.refs.resolutionSelect.disabled, false);
     assert.equal(fixture.refs.frameRateSelect.disabled, false);
+    assert.equal(fixture.refs.screenStatus.classList.contains('hidden'), false);
+    assert.equal(fixture.refs.screenStatus.textContent, '已停止共享');
 });
 
-test('4K30 AV1 settings reach capture adapter and idle SFU publication is labeled as standby', async () => {
+test('4K30 AV1 settings reach capture adapter and the dock shows sharing and actual audio state', async () => {
     const fixture = createFixture(); const { runtimeApi } = loadApis(fixture); const stub = createAdapterStub();
     const runtime = runtimeApi.createMediaDockRuntime({ root: fixture.root, adapter: stub.adapter }); runtime.init();
     fixture.refs.resolutionSelect.value = '2160p'; fixture.refs.resolutionSelect.dispatchEvent(new FakeEvent('change'));
@@ -911,9 +914,9 @@ test('4K30 AV1 settings reach capture adapter and idle SFU publication is labele
     assert.equal(stub.calls.get('startScreenShare')[0][0].frameRate, 30);
     assert.equal(stub.calls.get('startScreenShare')[0][0].codecMode, 'av1');
     stub.emit({ screenShareEnabled: true, screenShareRoute: { hasUplink: true, serverViewers: 0 } });
-    assert.match(fixture.refs.screenStatus.textContent, /无服务器观看者（SFU 备用）/);
-    stub.emit({ screenShareEnabled: true, screenShareRoute: { hasUplink: true, serverViewers: 1 } });
-    assert.match(fixture.refs.screenStatus.textContent, /服务器转发 1 人/);
+    assert.match(fixture.refs.screenStatus.textContent, /正在共享 · 不含来源声音/);
+    stub.emit({ screenShareEnabled: true, screenShareAudioActive: true });
+    assert.match(fixture.refs.screenStatus.textContent, /正在共享 · 含来源声音/);
     runtime.destroy();
 });
 
@@ -952,7 +955,7 @@ test('layout moves and recovery preserve root identity, selections and listener 
     assert.equal(fixture.refs.screenButton.listenerCount('click'), 1);
 });
 
-test('advanced codec and startup choices pass through once, lock during sharing and survive stop', async () => {
+test('advanced codec and startup choices pass through once, stay editable and survive stop', async () => {
     const fixture = createFixture();
     const { runtimeApi } = loadApis(fixture);
     const stub = createAdapterStub();
@@ -968,8 +971,8 @@ test('advanced codec and startup choices pass through once, lock during sharing 
     assert.equal(options.codecMode, 'h264');
     assert.equal(options.startBitrate, '1500');
     stub.emit({ screenShareEnabled: true });
-    assert.equal(fixture.refs.codecSelect.disabled, true);
-    assert.equal(fixture.refs.startBitrateSelect.disabled, true);
+    assert.equal(fixture.refs.codecSelect.disabled, false);
+    assert.equal(fixture.refs.startBitrateSelect.disabled, false);
     stub.emit({ screenShareEnabled: false });
     assert.equal(fixture.refs.codecSelect.disabled, false);
     assert.equal(runtime.getSnapshot().screenShareCodecMode, 'h264');
@@ -1012,6 +1015,33 @@ test('destroy removes DOM listeners and runtime subscription; recreate does not 
     fixture.refs.micButton.click();
     assert.equal(secondStub.calls.get('toggleMicrophone').length, 1);
     second.destroy();
+});
+
+test('stage quality and source actions edit the active share and stage stop does not leave voice', async () => {
+    const fixture = createFixture(); const { runtimeApi } = loadApis(fixture);
+    const options = { provider: 'web', frameRate: 60, resolutionPreset: '1080p', mode: 'game', codecMode: 'auto', startBitrate: 'browser', shareAudio: false, maxBitrate: 15000000 };
+    const stub = createAdapterStub({ screenShareEnabled: true, screenShareOptions: options });
+    const runtime = runtimeApi.createMediaDockRuntime({ root: fixture.root, adapter: stub.adapter }); runtime.init();
+    const stageAction = action => {
+        const button = createElement(fixture.document, 'button', { data: { 'share-action': action } });
+        fixture.document.dispatchEvent(new FakeEvent('click', { target: button }));
+    };
+    stageAction('quality');
+    assert.equal(fixture.refs.screenStartButton.textContent, '应用画质');
+    assert.equal(fixture.refs.resolutionSelect.disabled, false);
+    fixture.refs.frameRateSelect.value = '30'; fixture.refs.frameRateSelect.dispatchEvent(new FakeEvent('change'));
+    fixture.refs.screenStartButton.click(); await flush();
+    assert.equal(stub.calls.get('updateScreenShare')[0][0].frameRate, 30);
+    assert.equal(stub.calls.get('updateScreenShare')[0][1], 'quality');
+    stageAction('source');
+    assert.equal(fixture.refs.screenStartButton.textContent, '切换来源');
+    fixture.refs.screenStartButton.click(); await flush();
+    assert.equal(stub.calls.get('updateScreenShare')[1][1], 'source');
+    stageAction('stop'); await flush();
+    assert.equal(stub.calls.get('stopScreenShare').length, 1);
+    assert.equal(stub.calls.has('startScreenShare'), false);
+    assert.equal(stub.calls.has('hangUp'), false);
+    runtime.destroy();
 });
 
 test('component source cannot own media capture, layout reconstruction, Peer or Socket flows', () => {

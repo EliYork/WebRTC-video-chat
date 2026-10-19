@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import vm from 'node:vm';
 import ejs from 'ejs';
+import { fileURLToPath } from 'node:url';
 import { sanitizeVoiceDiagnostic } from '../src/views/js/shared/voice-diagnostic-schema.js';
 
 const read = (path) => readFileSync(new URL(`../src/views/${path}`, import.meta.url), 'utf8');
@@ -66,7 +67,7 @@ function fixture({ clipboardFails = false } = {}) {
 
 test('room renders one diagnostics action in the global header and binds it once outside the dock', () => {
     const html = ejs.render(read('room/index.ejs'), { channelName: '大厅', roomId: 'lobby', channels: [],
-        cspNonce: 'test', roomBootstrap: '{}' });
+        cspNonce: 'test', roomBootstrap: '{}' }, { filename: fileURLToPath(new URL('../src/views/room/index.ejs', import.meta.url)) });
     const header = html.match(/<header class="workspace-topbar"[\s\S]*?<\/header>/)?.[0];
     assert.ok(header);
     assert.match(header, /workspace-brand/);
