@@ -92,6 +92,10 @@ await build({
                 join(appOutDir, 'LICENSES-desktop.txt'),
                 notices.join('\n')
             );
+        },
+        // Resource editing changes the EXE after afterPack. Hash final bytes
+        // before NSIS archives them (this hook also runs with signExecutable=false).
+        afterSign: async ({ appOutDir }) => {
             writeFileSync(
                 join(appOutDir, 'build.json'),
                 JSON.stringify(
