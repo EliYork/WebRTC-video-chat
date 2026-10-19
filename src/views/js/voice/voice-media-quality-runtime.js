@@ -156,11 +156,11 @@
                 fps = Math.round((frames - previous.frames) * 1000 / (timestamp - previous.timestamp));
             }
             state.playbackBaseline = Number.isFinite(frames) ? { frames, timestamp } : null;
-            return { fps, width: video?.videoWidth, height: video?.videoHeight, fpsSource: '播放计数（非提交）' };
+            return { fps, width: video?.videoWidth, height: video?.videoHeight, fpsSource: '播放' };
         };
         const renderSample = (state, sample) => {
             const label = view?.render?.(state.tile, [formatLabel(sample), sample.status || (sample.fps === undefined ? '帧率不可用/待采样' : '')].filter(Boolean).join(' · '), sample.fpsSource || '视频');
-            if (label) label.title = `${sample.fpsSource || '视频'}帧率；RTC 帧率为最近至多 3 次有效采样的均值。播放计数回退扣除丢帧，不等同于合成器提交。各阶段实测值请打开视频统计。`;
+            if (label) label.title = `${sample.fpsSource || '视频'}帧率；RTC 帧率为最近至多 3 次有效采样的均值。播放为播放计数回退，扣除丢帧，不等同于合成器提交。各阶段实测值请打开视频统计。`;
         };
         const renderPlaybackSample = (state, source) => {
             renderSample(state, getPlaybackSample(state, source));

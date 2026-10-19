@@ -84,6 +84,11 @@ try {
     assert.equal(data.audioMuted, true);
     assert.equal(data.roomReady, true);
     assert.equal(data.nativeHealth, 200);
+    assert.equal(data.clipboardWrite, true);
+    assert.equal(data.diagnosticsCopied, true);
+    assert.equal(data.clipboardReadDenied, true);
+    assert.equal(data.updaterLoaded, true);
+    assert.equal(data.qualityLabelFits, true);
     assert.throws(
         () => process.kill(data.nativePid, 0),
         'native App must exit with client'
@@ -92,7 +97,7 @@ try {
     mkdirSync(artifacts, { recursive: true });
     copyFileSync(report, join(artifacts, 'desktop-smoke.json'));
     process.stdout.write(
-        `PASS hidden Electron: sandbox, original room, fake microphone, own-frame display capture, authenticated-origin App discovery, muted output and App cleanup. Logs ${work}\n`
+        `PASS hidden Electron: sandbox, original room, real diagnostics clipboard write/readback, clipboard read denial, updater load, fake media, muted output and App cleanup. Logs ${work}\n`
     );
 } finally {
     desktop?.kill();

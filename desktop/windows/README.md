@@ -1,8 +1,8 @@
 # EliYork Voice · Windows x64
 
-解压 ZIP 到可写目录，双击 **EliYork Voice.exe**。客户端打开独立窗口，默认连接 **https://voice.eliyork.com/room/lobby**，与普通浏览器共享频道、成员、聊天与语音。
+下载 **EliYork-Voice-Setup-0.1.1-x64.exe** 并双击，为当前用户安装（不需要管理员权限）。之后双击桌面 **EliYork Voice**。客户端打开独立窗口，默认连接 **https://voice.eliyork.com/room/lobby**，与普通浏览器共享频道、成员、聊天与语音。
 
-不需要 Node、Go、PowerShell 或管理员安装。请保留整个目录及 resources，不要只复制 EXE。客户端内置 Electron/Chromium 与 Piik App/WGC 原生组件；网页无 Node 权限。麦克风/摄像头首次使用需授权，设备仍通过原频道界面选择。
+不需要 Node、Go 或 PowerShell。旧 0.1.0 ZIP 需要先退出，再手动安装一次新版；旧目录可以保留。用户配置继续保存在 AppData。发布 ZIP 内包含安装包及更新元数据，不再是解压即用的便携目录。客户端内置 Electron/Chromium 与 Piik App/WGC 原生组件；网页无 Node 权限。麦克风/摄像头首次使用需授权，设备仍通过原频道界面选择。
 
 ## 原生共享
 
@@ -20,7 +20,13 @@ F12 打开诊断工具。页面“复制诊断”提供摘要；原生日志位�
 
 查看 NVIDIA 硬编：对应共享的 capture-state 应有 hardware=true、codec=h264、NVIDIA adapterName/encoderName，并与接收 video/H264、GPU Video Encode 负载对照；不能仅凭显卡存在或 H.264 文案确认。详细测试步骤见项目 `integrations/piik/ACCEPTANCE.md`。
 
-便携版升级：退出旧客户端，解压新 ZIP 到新目录再双击；用户配置保存在 AppData。没有自动更新或后台服务。删除程序目录即可移除便携版，用户设置可自行保留；删除 AppData 会清除本客户端的浏览器权限/存储及日志。
+## 在线更新（0.1.1 起）
+
+菜单 **EliYork Voice → 检查客户端更新**。启动 15 秒后及每 6 小时静默检查，只在菜单标记新版本。你选择“下载更新”后才下载，任务栏显示进度；完成后选择“退出并更新”或“稍后”。不会自动中断通话，不会在普通退出时偷偷安装；下次可再次通过菜单安装。安装前停止本次原生 App/采集进程。
+
+更新源固定为 `https://voice.eliyork.com/downloads/windows/`，使用 electron-updater 6.8.10 / NSIS，每用户安装、HTTPS 与 SHA512 完整性验证。当前没有代码签名证书，HTTPS 和摘要不能代替发布者签名；SmartScreen 仍可能提示。更新失败仍可使用旧版本。新版不强制降级；撤回坏版时先停止发布，再以更高版本号发布修复，或用户手动安装保留的旧版。
+
+更新包约 150 MB，服务器会限制下载速度与并发，下载可能需要约 10 分钟；网络忙时可稍后重试。网站界面更新仍通过刷新获得；更新客户端用于 Electron/Piik/桌面权限等本机代码。卸载使用 Windows“已安装的应用”，默认保留 AppData 设置。
 
 本构建未使用代码签名证书，Windows SmartScreen 可能显示未知发布者/拦截。核对提供方和 ZIP SHA256 后自行决定是否运行；不会自动绕过 SmartScreen。
 

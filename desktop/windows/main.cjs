@@ -7,6 +7,8 @@ const {
     dialog,
     Menu,
     webContents,
+    clipboard,
+    ClipboardItem,
 } = require('electron');
 const { spawn } = require('node:child_process');
 const { join } = require('node:path');
@@ -31,6 +33,7 @@ let mainWindow,
     quitting = false,
     nativeReady,
     nativePort;
+let updates;
 const mediaAllowed = new Set();
 const trusted = (value) => {
     try {
@@ -199,6 +202,16 @@ else {
         .then(async () => {
             mkdirSync(app.getPath('userData'), { recursive: true });
             startNative();
+            ipcMain.handle('voice:clipboard-write', async (event, text) => {
+                if (
+                    !owned(event.sender, event.senderFrame?.url) ||
+                    event.senderFrame !== mainWindow.webContents.mainFrame ||
+                    typeof text !== 'string' ||
+                    Buffer.byteLength(text, 'utf8') > 8 * 1024 * 1024
+                )
+                    throw Error('Clipboard write denied');
+                await clipboard.writeText(text);
+            });
             const permissions = new Set([
                 'fullscreen',
                 'speaker-selection',
@@ -206,6 +219,7 @@ else {
                 'loopback-network',
                 'local-network-access',
                 'display-capture',
+                'clipboard-sanitized-write',
             ]);
             session.defaultSession.setPermissionCheckHandler(
                 (contents, permission, requestingOrigin) =>
@@ -257,6 +271,7 @@ else {
                 show: !smoke,
                 backgroundColor: '#151923',
                 webPreferences: {
+                    preload: join(__dirname, 'preload.cjs'),
                     sandbox: true,
                     contextIsolation: true,
                     nodeIntegration: false,
@@ -276,28 +291,57 @@ else {
             mainWindow.webContents.on('will-redirect', (event, url) => {
                 if (!trusted(url)) event.preventDefault();
             });
-            Menu.setApplicationMenu(
-                Menu.buildFromTemplate([
-                    {
-                        label: 'EliYork Voice',
-                        submenu: [
-                            {
-                                label: '刷新频道页面',
-                                accelerator: 'CmdOrCtrl+R',
-                                click: () => mainWindow.webContents.reload(),
-                            },
-                            {
-                                label: '诊断工具',
-                                accelerator: 'F12',
-                                click: () =>
-                                    mainWindow.webContents.toggleDevTools(),
-                            },
-                            { type: 'separator' },
-                            { role: 'quit', label: '退出' },
-                        ],
-                    },
-                ])
-            );
+            const installUpdate = async () => {
+                quitting = true;
+                picker?.close();
+                await stopNative();
+            };
+            const buildMenu = () =>
+                Menu.setApplicationMenu(
+                    Menu.buildFromTemplate([
+                        {
+                            label: 'EliYork Voice',
+                            submenu: [
+                                {
+                                    label: `客户端版本 ${app.getVersion()}`,
+                                    enabled: false,
+                                },
+                                {
+                                    label:
+                                        updates?.label() || '检查客户端更新…',
+                                    click: () => void updates?.check(),
+                                },
+                                { type: 'separator' },
+                                {
+                                    label: '刷新频道页面',
+                                    accelerator: 'CmdOrCtrl+R',
+                                    click: () =>
+                                        mainWindow.webContents.reload(),
+                                },
+                                {
+                                    label: '诊断工具',
+                                    accelerator: 'F12',
+                                    click: () =>
+                                        mainWindow.webContents.toggleDevTools(),
+                                },
+                                { type: 'separator' },
+                                { role: 'quit', label: '退出' },
+                            ],
+                        },
+                    ])
+                );
+            if (!smoke && app.isPackaged) {
+                updates = require('./updater.cjs').createUpdates({
+                    updater: require('electron-updater').autoUpdater,
+                    app,
+                    dialog,
+                    window: () => mainWindow,
+                    log,
+                    changed: () => buildMenu(),
+                    prepareInstall: installUpdate,
+                });
+            }
+            buildMenu();
             await mainWindow.loadURL(`${origin}/room/lobby`);
             if (smoke) {
                 try {
@@ -322,17 +366,87 @@ else {
                         await mainWindow.webContents.executeJavaScript(
                             `({url:location.origin,secure:isSecureContext,media:!!navigator.mediaDevices,displayCapture:typeof navigator.mediaDevices?.getDisplayMedia,nodeExposed:typeof require!=='undefined',roomReady:document.documentElement.dataset.roomBoot==='ready'})`
                         );
+                    result.updaterLoaded =
+                        typeof require('electron-updater').NsisUpdater ===
+                        'function';
+                    result.qualityLabelFits = await mainWindow.webContents
+                        .executeJavaScript(`(() => {
+                        const tile = document.createElement('div');
+                        tile.className = 'video-tile is-screen-share';
+                        tile.style.width = '220px';
+                        tile.innerHTML = '<div class="tile-header"><div class="window-title-region">测试共享</div><div class="tile-header-controls"><div class="tile-header-actions"><button class="fullscreen-btn">⛶</button></div></div></div>';
+                        document.body.append(tile);
+                        const badge = VoiceMediaQualityView.render(tile, '4K · 60fps', '播放');
+                        const fits = badge.scrollWidth <= badge.clientWidth && badge.textContent.includes('60fps');
+                        tile.remove(); return fits;
+                    })()`);
                     result.nativeHealth =
                         await mainWindow.webContents.executeJavaScript(
                             `fetch('http://127.0.0.1:${nativePort}/health').then(r=>r.status)`
                         );
+                    // Verify real renderer -> OS clipboard, without exposing or
+                    // losing the user's clipboard. Do not restore over a new copy.
+                    const previousClipboard = await Promise.all(
+                        (await clipboard.read()).map(async (item) => {
+                            const entries = await Promise.all(
+                                item.types.map(async (type) => [
+                                    type,
+                                    await item.getType(type),
+                                ])
+                            );
+                            return new ClipboardItem(
+                                Object.fromEntries(entries)
+                            );
+                        })
+                    );
+                    const marker = `EliYork clipboard smoke ${Date.now()}`;
+                    let writtenText = marker;
+                    try {
+                        // Same delayed path used by Copy diagnostics, no active
+                        // user gesture and no mock navigator.clipboard.
+                        await mainWindow.webContents.executeJavaScript(
+                            `EliYorkDesktop.writeClipboardText(${JSON.stringify(marker)})`
+                        );
+                        result.clipboardWrite =
+                            (await clipboard.readText()) === marker;
+                        await mainWindow.webContents.executeJavaScript(
+                            `document.querySelector('[data-copy-call-diagnostics]').click()`
+                        );
+                        for (let attempt = 0; attempt < 110; attempt++) {
+                            // eslint-disable-next-line no-await-in-loop -- Poll this one clipboard operation in order.
+                            const value = await clipboard.readText();
+                            if (value !== marker) {
+                                const data = JSON.parse(value);
+                                result.diagnosticsCopied = data.诊断格式 === 4;
+                                writtenText = value;
+                                break;
+                            }
+                            // eslint-disable-next-line no-await-in-loop -- Bound the asynchronous OS clipboard check.
+                            await new Promise((done) => setTimeout(done, 100));
+                        }
+                        result.clipboardReadDenied =
+                            await mainWindow.webContents.executeJavaScript(
+                                `navigator.clipboard.readText().then(()=>false,()=>true)`
+                            );
+                    } finally {
+                        const currentText = await clipboard.readText();
+                        if (currentText === writtenText) {
+                            if (previousClipboard.length)
+                                await clipboard.write(previousClipboard);
+                            else clipboard.clear();
+                        }
+                    }
                     if (
                         result.url !== origin ||
                         result.nodeExposed ||
                         !result.media ||
                         media.microphone !== 1 ||
                         media.display !== 1 ||
-                        result.nativeHealth !== 200
+                        result.nativeHealth !== 200 ||
+                        !result.clipboardWrite ||
+                        !result.clipboardReadDenied ||
+                        !result.diagnosticsCopied ||
+                        !result.qualityLabelFits
                     )
                         throw Error(JSON.stringify({ result, media }));
                     writeFileSync(
@@ -346,7 +460,7 @@ else {
                         })
                     );
                 } catch (error) {
-                    log(error.stack);
+                    log(error.stack || String(error));
                     process.exitCode = 1;
                 }
                 app.quit();
@@ -361,6 +475,7 @@ else {
         });
     app.on('window-all-closed', () => app.quit());
     app.on('before-quit', (event) => {
+        updates?.stop();
         if (quitting) return;
         event.preventDefault();
         quitting = true;

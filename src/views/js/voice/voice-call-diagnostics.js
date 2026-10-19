@@ -355,7 +355,12 @@
             try {
                 const data = await collectCombined();
                 const text = JSON.stringify(data, null, 2);
-                try { await global.navigator.clipboard.writeText(text); if (button) button.textContent = '诊断已复制'; }
+                try {
+                    if (global.EliYorkDesktop?.writeClipboardText)
+                        await global.EliYorkDesktop.writeClipboardText(text);
+                    else await global.navigator.clipboard.writeText(text);
+                    if (button) button.textContent = '诊断已复制';
+                }
                 catch {
                     showText(text);
                     if (button) button.textContent = '请在日志窗口手动复制';

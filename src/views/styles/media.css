@@ -312,10 +312,9 @@
 .voice-media-quality-pill {
     position: static;
     z-index: auto;
-    max-width: 150px;
+    flex: 0 0 auto;
     min-width: 0;
     padding: 4px 7px;
-    overflow: hidden;
     border: 1px solid rgba(216, 111, 154, 0.2);
     border-radius: 999px;
     background: rgba(255, 248, 252, 0.92);
@@ -324,8 +323,7 @@
     font-size: 10px;
     font-weight: 700;
     line-height: 1.2;
-    pointer-events: none;
-    text-overflow: ellipsis;
+    pointer-events: auto;
     text-shadow: none;
     white-space: nowrap;
 }
@@ -419,7 +417,6 @@
 
 @media (max-width: 768px) {
     .voice-media-quality-pill {
-        max-width: 112px;
         padding: 3px 6px;
         font-size: 9px;
     }

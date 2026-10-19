@@ -419,7 +419,7 @@ test('screen-only lifecycle hides camera, ended, audio-only, reject, stale and c
     await runTimers();
     assert.equal(
         tile.querySelector('.voice-media-quality-pill')?.textContent || '',
-        '播放计数（非提交） 帧率不可用/待采样'
+        '播放 帧率不可用/待采样'
     );
     assert.equal(rt.getActivePeerCount(), 1);
     let playbackFrames = 10;
@@ -432,7 +432,8 @@ test('screen-only lifecycle hides camera, ended, audio-only, reject, stale and c
     playbackFrames += 25;
     playbackTime += 1000;
     await runTimers();
-    assert.equal(tile.querySelector('.voice-media-quality-pill').textContent, '播放计数（非提交） 720p · 25fps');
+    assert.equal(tile.querySelector('.voice-media-quality-pill').textContent, '播放 720p · 25fps');
+    assert.match(tile.querySelector('.voice-media-quality-pill').title, /不等同于合成器提交/);
     rt.stop('peer-a', 'leave', { remove: true });
     assert.equal(rt.getActivePeerCount(), 0);
 });
@@ -557,7 +558,7 @@ test('FPS falls back to playback even when stats already provide dimensions', as
     const f = qualitySequence();
     const rows = [{ id: 'no-fps', frameWidth: 3840, frameHeight: 2160 }];
     assert.equal(await f.step(rows), '视频 4K · 帧率不可用/待采样');
-    assert.equal(await f.step(rows, 47), '播放计数（非提交） 4K · 47fps');
+    assert.equal(await f.step(rows, 47), '播放 4K · 47fps');
 });
 
 test('zero decoded growth displays a stall immediately and report replacement never mixes counters', async () => {
@@ -565,7 +566,7 @@ test('zero decoded growth displays a stall immediately and report replacement ne
     await f.step([{ id: 'old', framesDecoded: 100 }]);
     assert.equal(await f.step([{ id: 'old', framesDecoded: 160 }]), '解码 4K · 60fps');
     assert.equal(await f.step([{ id: 'old', framesDecoded: 160 }]), '解码 4K · 0fps');
-    assert.equal(await f.step([{ id: 'new', framesDecoded: 9000 }], 25), '播放计数（非提交） 4K · 25fps');
+    assert.equal(await f.step([{ id: 'new', framesDecoded: 9000 }], 25), '播放 4K · 25fps');
     assert.equal(await f.step([{ id: 'new', framesDecoded: 9030 }]), '解码 4K · 30fps');
 });
 
