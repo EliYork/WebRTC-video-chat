@@ -28,3 +28,15 @@ test('explicit zero and valid user microphone levels are preserved', () => {
         assert.equal(api.getMicGain(), 80);
     }
 });
+
+test('enhanced mode persists explicitly without changing the default or enabling browser double suppression', () => {
+    const api = fixture();
+    assert.equal(api.getNoiseMode(), 'browser');
+    assert.equal(api.setNoiseMode('deepfilter'), true);
+    assert.equal(api.getNoiseMode(), 'deepfilter');
+    assert.equal(api.getAudioConstraints().noiseSuppression, false);
+    assert.equal(api.getAudioConstraints().autoGainControl, false);
+    assert.equal(api.getAudioConstraints().echoCancellation, true);
+    assert.equal(api.setNoiseMode('invented'), false);
+    assert.equal(api.getNoiseMode(), 'deepfilter');
+});

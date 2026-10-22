@@ -17,6 +17,7 @@ const fixture = () => {
     const contexts = [];
     const rawStreams = [];
     const sent = [];
+    const sentPeers = [];
     let captureGate, processorGate;
     const stopStream = (stream) => stream?.getTracks().forEach((track) => { track.readyState = 'ended'; });
     const window = { setTimeout, clearTimeout };
@@ -43,6 +44,7 @@ const fixture = () => {
         isAiExperimentSupported: () => false,
         localMediaTrackStopper: { stopStream },
         voiceSessionRuntime: { getSnapshot: () => ({ epoch: 1 }) },
+        currentPeer: { id: 'initial-peer' },
         captureAudio: async () => {
             const stream = new StrictStream([new StrictTrack('audio', `raw-${rawStreams.length}`)]);
             rawStreams.push(stream);
@@ -57,7 +59,7 @@ const fixture = () => {
         bindLocalTrackEnded() {}, unbindLocalTrackEnded() {}, getActiveStream() {},
         voiceDeviceRuntime: { setSelected() {} },
         localTrackEndedController: { releaseRecovery() {} }, voiceMediaDebug: { record() {} },
-        sendAudioTrackToPeers: (_, track) => sent.push(track),
+        sendAudioTrackToPeers: (peer, track) => { sentPeers.push(peer); sent.push(track); },
     });
     context.audioProcessingRuntime = window.VoiceAudioProcessing.createRuntime({
         mediaDevices: { getUserMedia: () => context.captureAudio() },
@@ -83,7 +85,7 @@ const fixture = () => {
     `, context);
     const read = (code) => vm.runInContext(code, context);
     return {
-        contexts, rawStreams, sent, controller: context.mediaOperationController,
+        contexts, rawStreams, sent, sentPeers, controller: context.mediaOperationController,
         read, start: () => read('restartLocalMicrophone({}, { preserveOldTrack: true })'),
         blockNextPipeline() { captureGate = deferred(); return captureGate; },
         blockNextProcessor() { processorGate = deferred(); return processorGate; },
@@ -95,6 +97,14 @@ const fixture = () => {
     };
 };
 const flush = () => new Promise((resolve) => setImmediate(resolve));
+
+test('microphone capture finishing after peer replacement publishes only to the current peer', async () => {
+    const f=fixture();f.controller.setDesired('microphone',true);
+    const gate=f.blockNextPipeline(),pending=f.start();await flush();
+    f.read("currentPeer={id:'replacement-peer'}");gate.resolve();
+    assert.equal(await pending,true);assert.equal(f.sentPeers.length,1);
+    assert.equal(f.sentPeers[0],f.read('currentPeer'));f.hangup();
+});
 
 test('pending microphone pipeline keeps old audio alive and adopts the latest mute state', async () => {
     const f = fixture();

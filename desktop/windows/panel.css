@@ -101,7 +101,14 @@ main {
     border: 1px solid #ecd4df;
     color: var(--accent);
     font-size: 30px;
+    object-fit: contain;
 }
+.update-prompt main { padding: 22px 24px; }
+.update-prompt .identity { gap: 12px; margin-bottom: 18px; }
+.update-prompt .app-mark { width: 44px; height: 44px; border-radius: 12px; }
+.update-prompt .identity h1 { font-size: 20px; }
+.update-prompt .notes p:first-child { display: none; }
+.update-prompt #prompt-actions { margin-top: 8px; }
 .identity h1 {
     font-size: 24px;
     letter-spacing: 1px;

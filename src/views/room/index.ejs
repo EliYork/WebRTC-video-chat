@@ -5,6 +5,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title><%= channelName %> - 语音据点</title>
+    <meta name="theme-color" content="#D97799">
+    <link rel="icon" href="/favicon.ico?v=brand-20261022" sizes="16x16 32x32 48x48 256x256">
+    <link rel="icon" href="/assets/brand/voice.svg?v=brand-20261022" type="image/svg+xml" sizes="any">
+    <link rel="apple-touch-icon" href="/assets/brand/apple-touch-icon.png?v=brand-20261022">
     <style>
         body { background: #fbf7f9; }
         .room-boot-status { display: none; }
@@ -35,7 +39,7 @@
     <div class="room-boot-status" role="status"><span data-room-load-message></span><button type="button" data-room-reload>刷新重试</button></div>
     <header class="workspace-topbar" aria-label="语音据点">
         <div class="workspace-brand">
-            <span class="workspace-mark" aria-hidden="true">◖◗</span>
+            <img class="workspace-mark" src="/assets/brand/voice.svg?v=brand-20261022" width="30" height="30" alt="" aria-hidden="true">
             <strong>语音据点</strong>
         </div>
         <div class="workspace-actions">
@@ -45,7 +49,7 @@
             <button type="button" id="stageChatToggle" aria-controls="chat-panel" aria-expanded="true">聊天</button>
             </nav>
             <button type="button" id="stageMoreToggle" aria-controls="workspace-tools" aria-expanded="false" aria-label="更多操作">•••</button>
-            <div class="workspace-tools" id="workspace-tools">
+            <div class="workspace-tools" id="workspace-tools" role="group" aria-label="更多操作" inert>
             <button type="button" class="workspace-copy-diagnostics" data-copy-call-diagnostics aria-live="polite" aria-atomic="true">复制诊断</button>
             <a class="workspace-download" href="/download/windows" target="_blank" rel="noopener" title="下载 Windows 客户端（Windows 10/11，64 位）" aria-label="下载 Windows 客户端（64 位）"><i class="fa-solid fa-download" aria-hidden="true"></i><span>下载客户端</span></a>
             </div>
@@ -174,12 +178,14 @@
                                 <option value="off">关闭</option>
                                 <option value="browser">浏览器内置</option>
                                 <option value="rnnoise">RNNoise</option>
+                                <option value="deepfilter">增强降噪 · DeepFilterNet3（实验）</option>
                             </select>
                         </label>
                         <label class="media-device-status" title="只作用于 RNNoise；压低非语音残留。轻声或首字变弱时可关闭对比。">
                             <input type="checkbox" data-rnnoise-speech-gate checked>
                             非语音门控（RNNoise）
                         </label>
+                        <p class="media-device-status">增强降噪在本机处理，首次加载约 23 MB；会增加语音延迟，轻声或首字变弱时可切回 RNNoise 对比。</p>
                         <p class="media-device-status" data-audio-processing-status role="status" aria-live="polite"></p>
                         <details>
                             <summary>通话诊断与日志</summary>

@@ -4,6 +4,7 @@
         off: '关闭',
         browser: '浏览器内置',
         rnnoise: 'RNNoise',
+        deepfilter: '增强降噪 · DeepFilterNet3',
         raw: '直通',
         unknown: '未报告',
     };
@@ -32,7 +33,9 @@
             `实际：${MODE_LABELS[state.mode]} · 浏览器降噪${flag(actual.noiseSuppression)} · AEC ${aec(actual.echoCancellation)} · 自动增益${flag(actual.autoGainControl)}`,
         ];
         if (state.aecFallback) parts.push('系统 AEC 未确认，使用普通 AEC 请求');
-        if (state.fallbackReason) parts.push('处理器不可用，已回退');
+        if (state.fallbackReason) parts.push(state.fallbackReason === 'deepfilter-overload'
+            ? '增强降噪耗时过高，已回退直通，可切回 RNNoise' : '处理器不可用，已回退');
+        if (state.mode === 'deepfilter') parts.push('增强降噪（实验）· 本机处理 · 48 kHz · 会增加语音延迟');
         if (state.mode === 'rnnoise') {
             parts.push(state.engine === 'rnnoise-v2-2025.1.5' ? 'RNNoise 新模型（v0.2 系）' : 'RNNoise 旧模型');
             if (state.engineFallback) parts.push(state.engineFallback === 'model-too-slow' ? '新模型耗时偏高，回退旧模型' : '新模型加载失败，回退旧模型');
@@ -50,6 +53,7 @@
             const failure = state.lastSwitchFailure;
             const reasons = {
                 'rnnoise-csp-blocked': '浏览器安全策略阻止降噪模型加载',
+                'deepfilter-csp-blocked': '浏览器安全策略阻止降噪模型加载',
                 'processor-unavailable': '降噪处理器初始化失败',
                 'capture-failed': '麦克风采集失败，请检查设备和权限',
             };

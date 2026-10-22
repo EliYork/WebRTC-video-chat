@@ -1,0 +1,32 @@
+{
+  "package": "@workadventure/noise-suppression",
+  "version": "0.2.0",
+  "gitCommit": "7e00a1b7522f044a31776fddc249a97a98de94ed",
+  "coreCommit": "d375b2d8309e0935d165700c91da9de862a99c31",
+  "files": {
+    "src/views/vendor/deepfilter-0.2.0/processor.js": {
+      "bytes": 21759,
+      "sha256": "e91ddfeb95288e1359d61c1828c39e46474e06c8bbb4789bcd7da32c4593bb52"
+    },
+    "src/views/wasm/deepfilter-0.2.0/df_bg.wasm": {
+      "bytes": 14643565,
+      "sha256": "8ebf2b217b80fc128505b993c8d7d7d892df5a845ab7a2516fed74b76e7fe708"
+    },
+    "src/views/wasm/deepfilter-0.2.0/DeepFilterNet3_onnx.tar.gz": {
+      "bytes": 7983136,
+      "sha256": "c94d91f70911001c946e0fabb4aa9adc37045f45a03b56008cb0c8244cb63616"
+    },
+    "src/views/vendor/deepfilter-0.2.0/LICENSE": {
+      "bytes": 1057,
+      "sha256": "8799c8bada86a11bbe34ece32c6bc4b3ea352b881911f79466537188a322cfa8"
+    },
+    "src/views/wasm/deepfilter-0.2.0/LICENSE-MIT": {
+      "bytes": 1083,
+      "sha256": "24e6bb09c928af8d8e56268082f87413247ce36b39dd5d33add2f9893968065e"
+    },
+    "src/views/wasm/deepfilter-0.2.0/LICENSE-APACHE": {
+      "bytes": 10837,
+      "sha256": "1eaee808c5fb6b4e895ba30425285a5cdc5dd25bba2cd230f264c2200c331aec"
+    }
+  }
+}

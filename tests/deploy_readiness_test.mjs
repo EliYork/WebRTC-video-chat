@@ -34,6 +34,14 @@ const probe = source.match(
     /^probe_ready\(\) \{\n[\s\S]*?^\}\n(?=LOCAL_READY_URL)/m
 )?.[0];
 assert.ok(probe);
+// This harness starts exactly one probe per Bash process. On Windows, replace
+// that final shell call with exec: MSYS fork can fail with 0xC0000142 under the
+// default parallel Node test load. The shipped Node code, URLs, deadlines and
+// all HTTP/TLS assertions stay identical; the Linux deployment script is intact.
+const standaloneProbe = process.platform === 'win32'
+    ? probe.replace('    "$NODE" -e ', '    exec "$NODE" -e ')
+    : probe;
+if (process.platform === 'win32') assert.notEqual(standaloneProbe, probe);
 const runProbe = async (url, t, env = {}) => {
     const started = Date.now();
     const child = spawn(
@@ -42,7 +50,7 @@ const runProbe = async (url, t, env = {}) => {
             '--noprofile',
             '--norc',
             '-c',
-            `set -o pipefail\n${probe}\nprobe_ready "$READY_URL"`,
+            `set -o pipefail\n${standaloneProbe}\nprobe_ready "$READY_URL"`,
         ],
         {
             windowsHide: true,

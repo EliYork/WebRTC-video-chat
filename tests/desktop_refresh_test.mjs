@@ -73,12 +73,13 @@ test('about opens local settings with installed/web versions, without automatic 
 
 test('preview about never invokes updates; failed web probe still opens settings', async () => {
     let shown, selected;
+    const window = { isDestroyed: () => false, webContents: {
+        executeJavaScript: async () => { throw Error('loading'); },
+    } };
     const show = createAbout({
         app: { isPackaged: false, getVersion: () => '0.1.1' },
         panels: { about: async (info, updates) => { shown = info; selected = updates; } },
-        window: () => ({ isDestroyed: () => false, webContents: {
-            executeJavaScript: async () => { throw Error('loading'); },
-        } }),
+        window: () => window,
         origin: 'http://127.0.0.1:3300',
         updates: () => ({ label: () => '', check: () => { throw Error('must not update preview'); } }),
     });

@@ -2,7 +2,7 @@
     'use strict';
 
     const normalizeMode = (mode) =>
-        ['off', 'browser', 'rnnoise'].includes(mode) ? mode : 'browser';
+        ['off', 'browser', 'rnnoise', 'deepfilter'].includes(mode) ? mode : 'browser';
     const constraintsFor = (mode) => ({
         echoCancellation: true,
         noiseSuppression: normalizeMode(mode) === 'browser',
@@ -38,6 +38,7 @@
         getSpeechGateEnabled = () => true,
         supportsRnnoise = () => typeof global.AudioWorkletNode === 'function',
         loadLibrary = () => import('/js/voice/rnnoise-engine.js'),
+        loadDeepfilterLibrary = () => import('/js/voice/deepfilter-engine.js'),
         stopStream = (stream) =>
             stream?.getTracks().forEach((track) => track.stop()),
         onSourceEnded,
@@ -176,24 +177,24 @@
             });
             return library;
         };
-        const waitForProcessor = (node, wait = bounded) =>
+        const waitForProcessor = (node, wait = bounded, mode = 'rnnoise') =>
             wait(
                 new Promise((resolve, reject) => {
                     node.port.onmessage = ({ data }) => {
                         if (data?.type === 'ready') resolve(data);
                         if (data?.type === 'error')
                             reject(new Error(
-                                /content security|unsafe-eval/i.test(String(data.detail || ''))
-                                    ? 'rnnoise-csp-blocked'
-                                    : 'rnnoise-init-failed'
+                                /content security|unsafe-eval/i.test(String(data.detail || data.message || ''))
+                                    ? `${mode}-csp-blocked`
+                                    : `${mode}-init-failed`
                             ));
                     };
                     node.onprocessorerror = () =>
-                        reject(new Error('rnnoise-processor-error'));
+                        reject(new Error(`${mode}-processor-error`));
                     node.port.start?.();
                 }),
-                2500,
-                'rnnoise-init-timeout'
+                mode === 'deepfilter' ? 10000 : 2500,
+                `${mode}-init-timeout`
             ).finally(() => {
                 node.port.onmessage = null;
             });
@@ -218,11 +219,8 @@
                 return false;
             }
         };
-        const releaseBranch = (pipeline, { preserveRaw = false } = {}) => {
-            pipeline.rawTrack?.removeEventListener?.(
-                'ended',
-                pipeline.endedListener
-            );
+        const releaseProcessor = (pipeline) => {
+            pipeline.modelAbort?.abort();
             if (pipeline.processor) {
                 pipeline.processor.onprocessorerror = null;
                 pipeline.processor.port.onmessage = null;
@@ -232,8 +230,17 @@
                     /* already destroyed */
                 }
             }
-            disconnect(pipeline.source);
             disconnect(pipeline.processor);
+            disconnect(pipeline.processorSource);
+            stopStream(pipeline.bridgeStream);
+            if (pipeline.processorContext) close(pipeline.processorContext);
+            pipeline.processorContext = null;
+            pipeline.bridgeStream = null;
+        };
+        const releaseBranch = (pipeline, { preserveRaw = false } = {}) => {
+            pipeline.rawTrack?.removeEventListener?.('ended', pipeline.endedListener);
+            releaseProcessor(pipeline);
+            disconnect(pipeline.source);
             disconnect(pipeline.gain);
             if (!preserveRaw) stopStream(pipeline.rawStream);
         };
@@ -324,7 +331,6 @@
                 ensureCurrent();
                 if (context.state !== 'running')
                     throw new Error('microphone-audio-context-not-running');
-                pipeline.source = context.createMediaStreamSource(rawStream);
                 pipeline.destination = context.createMediaStreamDestination();
                 pipeline.destination.channelCount = 1;
                 pipeline.stream = pipeline.destination.stream;
@@ -332,6 +338,50 @@
                     context,
                     Math.max(0, getGain() / 100)
                 );
+                if (request.mode === 'deepfilter') {
+                    if (!supportsRnnoise() || context.sampleRate !== 48000)
+                        throw new Error('deepfilter-unsupported');
+                    // A private worklet context releases libDF's WASM heap on
+                    // every switch. The shared output context/track stays live.
+                    const child = pipeline.processorContext = createContext();
+                    if (child.state !== 'running') await wait(Promise.resolve(child.resume()), 1500, 'deepfilter-context-timeout');
+                    ensureCurrent();
+                    if (child.state !== 'running' || child.sampleRate !== 48000) throw new Error('deepfilter-unsupported');
+                    pipeline.modelAbort = new global.AbortController();
+                    const api = await wait(loadDeepfilterLibrary(), 8000, 'deepfilter-library-timeout');
+                    ensureCurrent();
+                    const assets = await wait(api.loadDeepfilter({ signal: pipeline.modelAbort.signal }), 22000, 'deepfilter-load-timeout');
+                    ensureCurrent();
+                    await wait(child.audioWorklet.addModule(api.DEEPFILTER_ASSETS.worklet), 8000, 'deepfilter-module-timeout');
+                    ensureCurrent();
+                    pipeline.processor = new api.DeepfilterWorkletNode(child, assets);
+                    const ready = await waitForProcessor(pipeline.processor, wait, 'deepfilter');
+                    ensureCurrent();
+                    if (ready.frameSamples !== 480) throw new Error('deepfilter-frame-size-invalid');
+                    pipeline.engine = 'deepfilternet3-0.2.0';
+                    pipeline.processorSource = child.createMediaStreamSource(rawStream);
+                    const bridge = child.createMediaStreamDestination();
+                    bridge.channelCount = 1;
+                    pipeline.bridgeStream = bridge.stream;
+                    pipeline.processorSource.connect(pipeline.processor);
+                    pipeline.processor.connect(bridge);
+                    pipeline.source = context.createMediaStreamSource(bridge.stream);
+                    const fail = (reason) => {
+                        if (pipeline.released || pipeline.processorFailed) return;
+                        pipeline.processorFailed = true;
+                        pipeline.processorFailureReason = reason;
+                        if (active === pipeline) onProcessorFailure?.(pipeline);
+                    };
+                    pipeline.processor.port.onmessage = ({ data }) => {
+                        if (data?.type === 'error') fail('deepfilter-processor-error');
+                        if (data?.type === 'overload') fail('deepfilter-overload');
+                        if (data?.type === 'load-report' && !pipeline.processorFailed) {
+                            pipeline.processingLoad = { median: data.medianLoad, p95: data.p95Load, max: data.maxLoad, slowFrames: data.slowFrames };
+                            if (active === pipeline) onProcessingStatus?.();
+                        }
+                    };
+                    pipeline.processor.onprocessorerror = () => fail('deepfilter-processor-error');
+                } else pipeline.source = context.createMediaStreamSource(rawStream);
                 let output = pipeline.source;
                 if (request.mode === 'rnnoise') {
                     if (!supportsRnnoise() || context.sampleRate !== 48000)
@@ -383,8 +433,8 @@
                 output.connect(pipeline.gain);
                 pipeline.gain.connect(pipeline.destination);
                 pipeline.mode =
-                    request.mode === 'rnnoise'
-                        ? 'rnnoise'
+                    ['rnnoise', 'deepfilter'].includes(request.mode)
+                        ? request.mode
                         : readSettings(rawStream.getAudioTracks()[0])
                                 .noiseSuppression === true
                           ? 'browser'
@@ -458,8 +508,8 @@
                         if (revision === stageRevision && error?.name !== 'AbortError') {
                             lastSwitchFailure = {
                                 mode: normalizeMode(request.mode),
-                                code: error?.message === 'rnnoise-csp-blocked'
-                                    ? 'rnnoise-csp-blocked'
+                                code: /^(rnnoise|deepfilter)-csp-blocked$/.test(error?.message)
+                                    ? error.message
                                     : error?.audioProcessingFailure
                                       ? 'processor-unavailable'
                                       : 'capture-failed',
@@ -486,6 +536,7 @@
             }
             if (
                 candidate.context.state !== 'running' ||
+                (candidate.processorContext && candidate.processorContext.state !== 'running') ||
                 candidate.processorFailed ||
                 candidate.rawStream.getAudioTracks()[0]?.readyState !== 'live'
             ) {
@@ -549,6 +600,7 @@
                 engine: pipeline?.engine || null,
                 engineFallback: pipeline?.engineFallback || null,
                 probeP95Ms: pipeline?.probeP95Ms ?? null,
+                processingLoad: pipeline?.processingLoad || null,
                 speechGateEnabled: Boolean(pipeline?.processor && pipeline.speechGateEnabled),
                 speechGateRequested: pipeline?.speechGateRequested,
                 allSupported: info.allSupported,
@@ -593,14 +645,13 @@
                 )
                     return false;
                 disconnect(pipeline.source);
-                disconnect(pipeline.processor);
-                pipeline.processor.onprocessorerror = null;
-                pipeline.processor.port.onmessage = null;
-                pipeline.processor.destroy?.();
+                releaseProcessor(pipeline);
                 pipeline.processor = null;
+                pipeline.processorFailed = false;
+                pipeline.source = pipeline.context.createMediaStreamSource(pipeline.rawStream);
                 pipeline.source.connect(pipeline.gain);
                 pipeline.mode = 'off';
-                pipeline.fallbackReason = 'rnnoise-processor-error';
+                pipeline.fallbackReason = pipeline.processorFailureReason || `${pipeline.request.mode}-processor-error`;
                 return true;
             },
             setGain: (percent) => {

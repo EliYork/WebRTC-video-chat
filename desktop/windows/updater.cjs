@@ -7,6 +7,9 @@ function createUpdates({
     changed,
     prepareInstall,
     confirmInstall,
+    onStartupUpdate,
+    preferences,
+    timers = { setTimeout, clearTimeout, setInterval, clearInterval },
 }) {
     let status = 'idle',
         version = '',
@@ -19,6 +22,7 @@ function createUpdates({
     let cancelled = false,
         phase = 'check';
     const listeners = new Set();
+    const prompted = new Set();
     updater.autoDownload = false;
     updater.autoInstallOnAppQuit = false;
     updater.allowDowngrade = false;
@@ -50,6 +54,7 @@ function createUpdates({
         error,
         lastChecked,
         canCancel: status === 'downloading' && Boolean(token),
+        ignoredVersion: preferences?.getIgnoredVersion() || '',
     });
     const publish = () => {
         if (stopped) return;
@@ -121,7 +126,7 @@ function createUpdates({
         taskbar(-1);
         update('downloaded');
     });
-    async function check() {
+    async function check(options) {
         if (busy || stopped || ['downloaded', 'installing'].includes(status))
             return;
         busy = true;
@@ -144,6 +149,12 @@ function createUpdates({
         } finally {
             busy = false;
             publish();
+        }
+        if (options?.startup && !stopped && status === 'available' && version &&
+            version !== preferences?.getIgnoredVersion() && !prompted.has(version)) {
+            prompted.add(version);
+            try { await onStartupUpdate?.(snapshot()); }
+            catch (failure) { log(`update-prompt-failed ${failure.message}`); }
         }
     }
     async function download() {
@@ -190,9 +201,17 @@ function createUpdates({
             publish();
         }
     }
-    // Quiet checks never open UI, download, play sounds or restart.
-    const startup = setTimeout(() => void check(), 15000);
-    const periodic = setInterval(() => void check(), 6 * 60 * 60 * 1000);
+    function ignoreVersion(expectedVersion) {
+        if (busy || stopped || status !== 'available' || expectedVersion !== version) return false;
+        if (!preferences) throw Error('Update preferences unavailable');
+        preferences.setIgnoredVersion(version);
+        publish();
+        return true;
+    }
+    // Startup may offer a new version. Scheduled checks stay quiet; neither
+    // path downloads or installs until an owned local window requests it.
+    const startup = timers.setTimeout(() => void check({ startup: true }), 3000);
+    const periodic = timers.setInterval(() => void check(), 6 * 60 * 60 * 1000);
     startup.unref?.();
     periodic.unref?.();
     return {
@@ -200,6 +219,7 @@ function createUpdates({
         download,
         cancel,
         install,
+        ignoreVersion,
         label,
         snapshot,
         subscribe(listener) {
@@ -211,8 +231,8 @@ function createUpdates({
             token?.cancel();
             taskbar(-1);
             listeners.clear();
-            clearTimeout(startup);
-            clearInterval(periodic);
+            timers.clearTimeout(startup);
+            timers.clearInterval(periodic);
         },
     };
 }

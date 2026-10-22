@@ -339,6 +339,8 @@
                 modeSelect.value = snapshot.requestedNoiseMode || 'browser';
                 const rnnoiseOption = modeSelect.querySelector('[value="rnnoise"]');
                 if (rnnoiseOption) rnnoiseOption.disabled = !snapshot.aiNoiseSupported;
+                const enhancedOption = modeSelect.querySelector('[value="deepfilter"]');
+                if (enhancedOption) enhancedOption.disabled = !snapshot.aiNoiseSupported;
             }
             const diagnostic = refs.processingStatus;
             if (diagnostic) setText(diagnostic, global.VoiceAudioProcessingView.describe(snapshot));
@@ -487,19 +489,25 @@
 
             renderToggleButton({
                 button: refs.micButton,
-                disabled: !mediaAvailable,
+                disabled: !(lastSnapshot.microphoneControlsAvailable ?? mediaAvailable),
                 enabled: Boolean(lastSnapshot.microphoneEnabled),
                 iconClass: 'fas fa-microphone',
                 iconName: lastSnapshot.microphoneEnabled ? 'mic' : 'mic-off',
-                label: lastSnapshot.microphoneError
+                label: lastSnapshot.microphoneIntentOnly
+                    ? lastSnapshot.microphoneEnabled ? '加入语音后开启麦克风，点击关闭' : '加入语音后保持关闭，点击开启'
+                    : lastSnapshot.microphonePending && !lastSnapshot.microphoneEnabled
+                    ? '取消开启麦克风'
+                    : lastSnapshot.microphoneError
                     ? '麦克风不可用'
                     : lastSnapshot.microphoneEnabled
                       ? '关闭麦克风'
                       : '打开麦克风',
                 pending: microphonePending,
+                cancelPending: Boolean(lastSnapshot.microphonePending),
                 unavailable:
-                    lastSnapshot.microphonePermissionState === 'denied' ||
-                    Boolean(lastSnapshot.microphoneError),
+                    !lastSnapshot.microphoneIntentOnly && (
+                        lastSnapshot.microphonePermissionState === 'denied' ||
+                        Boolean(lastSnapshot.microphoneError)),
             });
             renderToggleButton({
                 button: refs.cameraButton,
@@ -656,7 +664,8 @@
             );
         };
         const handleMicrophoneClick = () => {
-            void runIntent('microphone', () => adapter.toggleMicrophone());
+            void runIntent('microphone', () => adapter.toggleMicrophone(),
+                Boolean(getCurrentAdapterSnapshot().microphonePending));
         };
         const handleCameraClick = () => {
             void runIntent('camera', () => adapter.toggleCamera(),

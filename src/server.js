@@ -313,7 +313,7 @@ const normalizeCursorPosition = (value) => {
 
 app.set('view engine', 'ejs');
 app.set('views', __dirname + '/views');
-['audio-worklet', 'js', 'styles', 'vendor', 'wasm'].forEach((directory) =>
+['assets', 'audio-worklet', 'js', 'styles', 'vendor', 'wasm'].forEach((directory) =>
     app.use(
         `/${directory}`,
         express.static(join(__dirname, 'views', directory), {
@@ -328,6 +328,9 @@ app.get('/script.js', (_, res) =>
 );
 app.get('/style.css', (_, res) =>
     res.sendFile('style.css', { root: join(__dirname, 'views') })
+);
+app.get('/favicon.ico', (_, res) =>
+    res.sendFile('favicon.ico', { root: join(__dirname, 'views/assets/brand') })
 );
 
 /** Routes */

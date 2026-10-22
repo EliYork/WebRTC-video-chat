@@ -11,7 +11,9 @@ const duration = (seconds) =>
         : `${Math.max(1, Math.ceil(seconds))} 秒`;
 function render(state) {
     current = state;
-    $('#about').hidden = state.kind !== 'about';
+    const prompt = state.kind === 'update';
+    document.body.classList.toggle('update-prompt', prompt);
+    $('#about').hidden = !['about', 'update'].includes(state.kind);
     $('#confirm').hidden = state.kind !== 'confirm';
     $('#close-choice').hidden = state.kind !== 'close-choice';
     if (state.kind === 'close-choice') {
@@ -38,6 +40,12 @@ function render(state) {
         return;
     }
     const { info, update: u } = state;
+    $('#window-title').textContent = prompt ? '客户端更新' : '关于与更新';
+    document.title = prompt ? '客户端更新' : '关于与更新';
+    $('#version-details').hidden = prompt;
+    $('#prompt-actions').hidden = !prompt;
+    $('#ignore-explanation').hidden = !prompt;
+    $('#ignore-update').disabled = u?.busy || u?.status !== 'available';
     $('#window-preferences').hidden = !state.preferences;
     if (state.preferences) {
         $('#close-behavior').value = state.preferences.closeBehavior;
@@ -121,6 +129,7 @@ function render(state) {
         ],
     };
     const view = views[status] || views.idle;
+    if (prompt && status === 'available') view[2] = '更新';
     $('.update-card').dataset.status = status;
     $('#update-title').textContent = view[0];
     $('#update-detail').textContent = view[1];
@@ -215,6 +224,8 @@ $('#primary').addEventListener(
     () => void action($('#primary').dataset.action)
 );
 $('#secondary').addEventListener('click', () => void action('cancel'));
+$('#ignore-update').addEventListener('click', () => void action('ignore-update', current?.update?.version));
+$('#dismiss-update').addEventListener('click', () => void action('close'));
 $('#accept').addEventListener('click', () => void action('accept'));
 $('#cancel').addEventListener('click', () => void action('cancel'));
 function updateCloseButton() {

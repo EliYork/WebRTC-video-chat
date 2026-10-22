@@ -163,6 +163,8 @@ const mediaOperationController =
             localMediaTrackStopper.stopStream(stream);
         },
     });
+// This is a join preference, not permission to capture outside a voice session.
+mediaOperationController.setDesired('microphone', true);
 const localTrackEndedController =
     voiceMediaOperationApi.createTrackEndedController({
         getEpoch: () => voiceSessionRuntime.getSnapshot().epoch,
@@ -611,7 +613,9 @@ const getMediaDockSnapshot = () => {
         displayName: getChatName(),
         mediaControlsAvailable: actualVoiceJoined,
         mediaErrors,
-        microphoneEnabled: Boolean(
+        microphoneControlsAvailable: session.state !== 'disposed',
+        microphoneIntentOnly: session.desiredVoiceState !== 'joined',
+        microphoneEnabled: session.desiredVoiceState !== 'joined' ? microphoneOperation.desired : Boolean(
             microphoneTrack?.readyState === 'live' && microphoneTrack.enabled &&
             audioProcessingRuntime.diagnostics(myVideoStream)?.sourceLive !== false
         ),
@@ -2917,7 +2921,8 @@ const restartLocalMicrophone = async (
     setAudioButtonState(Boolean(nextAudioTrack?.enabled));
     if (previousStream !== stream) {
         setLocalVideoStream(getActiveStream());
-        sendAudioTrackToPeers(peer, nextAudioTrack);
+        // Capture can finish after the join creates or replaces its Peer.
+        sendAudioTrackToPeers(currentPeer, nextAudioTrack);
     }
     emitLocalPresenceUpdate();
     updateLocalUserCard();
@@ -2929,13 +2934,13 @@ const restartLocalMicrophone = async (
 };
 
 const recoverProcessingFailure = ({ context, stream, rawStream }) => {
-        if (stream !== myVideoStream || audioPipelines.get(stream)?.context !== context ||
-            mediaOperationController.getSnapshot('microphone').promise) return;
+        if (stream !== myVideoStream || audioPipelines.get(stream)?.context !== context) return;
         if (audioProcessingRuntime.bypassFailedProcessor(stream)) {
             adoptAudioPipeline(stream);
             notifyMediaDock();
             return;
         }
+        if (mediaOperationController.getSnapshot('microphone').promise) return;
         const oldTrack = stream.getAudioTracks()[0];
         const rawTrack = voiceMediaLifecycle.getLiveTracks(rawStream, 'audio')[0];
         if (!rawTrack) return;
@@ -3014,14 +3019,30 @@ const initiateAudio = async (peer) => {
         if (!callStartedAt) {
             startCallTimer();
         }
-        bindPeerCallHandler(peer);
+        if (currentPeer && !currentPeer.destroyed) bindPeerCallHandler(currentPeer);
     }
 };
 
 const handleMicClick = async (peer) => {
-    if (myVideoStream) {
+    const operation = mediaOperationController.getSnapshot('microphone');
+    if (voiceSessionRuntime.getSnapshot().desiredVoiceState !== 'joined') {
+        mediaOperationController.setDesired('microphone', !operation.desired);
+        voiceStatusView.clearMediaError('microphone');
+        notifyMediaDock();
+        return true;
+    }
+    if (myVideoStream?.getAudioTracks?.()[0]?.readyState === 'live') {
         toggleAudio(myVideoStream);
         return;
+    }
+    if (operation.promise) {
+        mediaOperationController.setDesired('microphone', false);
+        mediaOperationController.invalidate('microphone');
+        audioSettingsController.cancel();
+        audioProcessingRuntime.cancelPending();
+        voiceStatusView.clearMediaError('microphone');
+        notifyMediaDock();
+        return true;
     }
 
     console.log('[mic] Requesting microphone...');
@@ -3364,7 +3385,6 @@ const leaveVoiceSession = (reason = 'user-leave') => {
     voiceSessionRuntime.leave({ reason });
     voiceMediaDebug.record({ event: 'teardown', reason });
     peerRetryController.reset(reason);
-    mediaOperationController.setDesired('microphone', false);
     mediaOperationController.setDesired('camera', false);
     mediaOperationController.setDesired('screen', false);
     ['microphone', 'camera', 'screen'].forEach((type) =>
@@ -3433,6 +3453,10 @@ const joinVoiceChannel = (roomId) => {
     setCameraButtonState(false);
     notifyMediaDock();
     syncRoomCompositionState();
+    if (mediaOperationController.getSnapshot('microphone').desired) {
+        // Joining requests the chosen microphone; outside toggles never capture.
+        void initiateAudio(currentPeer);
+    }
     void createPeerInstance(roomId).catch(() => {
         if (voiceSessionRuntime.isCurrent(sessionEpoch)) voiceSessionRuntime.fail('ice-configuration-unavailable');
     });
@@ -3490,9 +3514,11 @@ callDiagnostics = window.VoiceCallDiagnostics.createRuntime({
                 降噪模型: processing?.engine || null,
                 模型回退: processing?.engineFallback || null,
                 模型预检p95_ms: processing?.probeP95Ms ?? null,
+                处理负载: processing?.processingLoad || null,
                 设置切换中: settings.pending,
                 切换结果: settings.error,
-                处理链: processing?.mode === 'rnnoise' ? '浏览器AEC → RNNoise → 可选非语音门控 → 输入增益' :
+                处理链: processing?.mode === 'deepfilter' ? '浏览器AEC → DeepFilterNet3 → 短前瞻门控 → 输入增益' :
+                    processing?.mode === 'rnnoise' ? '浏览器AEC → RNNoise → 可选非语音门控 → 输入增益' :
                     processing?.actual?.noiseSuppression ? '浏览器AEC / NS / AGC → 输入增益' : '浏览器AEC → 输入增益',
                 请求AEC: 'all（不支持时普通AEC）',
                 请求浏览器降噪: settings.requested.mode === 'browser',

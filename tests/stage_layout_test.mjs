@@ -212,6 +212,42 @@ test('mobile stage, chat and channels are exclusive and retain the actual video 
     assert.equal(get('workspace-tools').inert, true);
 });
 
+test('wide tools disclosure is inert until opened and preserves players and the chat draft', () => {
+    const f = fixture(1440), tile = f.add('a', true);
+    f.runtime.sync();
+    const tools = f.document.getElementById('workspace-tools'), toggle = f.document.getElementById('stageMoreToggle');
+    const video = tile.querySelector('video'), stream = video.srcObject;
+    f.document.getElementById('chatInput').value = 'preserved draft';
+    assert.equal(tools.inert, true);
+    toggle.click();
+    assert.equal(tools.inert, false);
+    assert.equal(toggle.getAttribute('aria-expanded'), 'true');
+    toggle.click();
+    assert.equal(tools.inert, true);
+    assert.equal(video.srcObject, stream);
+    assert.equal(f.document.getElementById('chatInput').value, 'preserved draft');
+    f.runtime.destroy();
+});
+
+test('wide tools CloseWatcher restores owned focus and ignores an obsolete close after reopening', () => {
+    const f = fixture(1440), watchers = [];
+    f.window.CloseWatcher = class {
+        constructor() { watchers.push(this); }
+        addEventListener(_, handler) { this.close = handler; }
+        destroy() { this.destroyed = true; }
+    };
+    const tools = f.document.getElementById('workspace-tools'), toggle = f.document.getElementById('stageMoreToggle');
+    const action = f.document.createElement('button'); tools.append(action);
+    toggle.click(); action.focus(); watchers[0].close();
+    assert.equal(tools.inert, true);
+    assert.equal(f.document.activeElement, toggle);
+    toggle.click();
+    watchers[0].close();
+    assert.equal(tools.inert, false);
+    f.runtime.destroy();
+    assert.equal(watchers[1].destroyed, true);
+});
+
 test('rotation uses the mobile layout and restores desktop chat without touching media', () => {
     const f = fixture(1920); const tile = f.add('a', true); f.runtime.sync();
     const video = tile.querySelector('video'); const stream = video.srcObject;

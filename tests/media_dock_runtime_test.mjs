@@ -884,6 +884,29 @@ test('buttons, device selection, output volume and mute emit one adapter intent'
     assert.equal(stub.calls.get('leaveVoice').length, 1);
 });
 
+test('outside microphone choice is actionable while camera and sharing remain unavailable', async () => {
+    const fixture=createFixture(),{runtimeApi}=loadApis(fixture),stub=createAdapterStub();
+    stub.emit({actualVoiceJoined:false,desiredVoiceJoined:false,mediaControlsAvailable:false,
+        microphoneControlsAvailable:true,microphoneIntentOnly:true,microphoneEnabled:true});
+    const runtime=runtimeApi.createMediaDockRuntime({root:fixture.root,adapter:stub.adapter});runtime.init();
+    assert.equal(fixture.refs.micButton.disabled,false);
+    assert.equal(fixture.refs.cameraButton.disabled,true);assert.equal(fixture.refs.screenButton.disabled,true);
+    assert.match(fixture.refs.micButton.getAttribute('aria-label'),/加入/);
+    fixture.refs.micButton.click();await flush();assert.equal(stub.calls.get('toggleMicrophone').length,1);
+    stub.emit({microphoneEnabled:false});assert.equal(fixture.refs.micButton.getAttribute('aria-pressed'),'false');
+    runtime.destroy();
+});
+
+test('microphone permission waiting can be cancelled through the actual dock button', async () => {
+    const fixture=createFixture(),{runtimeApi}=loadApis(fixture),stub=createAdapterStub();let finish;
+    stub.results.set('toggleMicrophone',new Promise(resolve=>{finish=resolve;}));
+    const runtime=runtimeApi.createMediaDockRuntime({root:fixture.root,adapter:stub.adapter});runtime.init();
+    fixture.refs.micButton.click();stub.emit({microphoneEnabled:false,microphonePending:true});
+    assert.equal(fixture.refs.micButton.disabled,false);assert.match(fixture.refs.micButton.getAttribute('aria-label'),/取消/);
+    stub.results.set('toggleMicrophone',true);fixture.refs.micButton.click();await flush();
+    assert.equal(stub.calls.get('toggleMicrophone').length,2);finish(true);await flush();runtime.destroy();
+});
+
 test('camera can be closed while its device is switching and cancelled while first capture waits', async () => {
     const fixture = createFixture();
     const { runtimeApi } = loadApis(fixture);

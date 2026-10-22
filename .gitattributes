@@ -1,0 +1,4 @@
+# Keep pinned third-party runtime/license hashes identical on Windows checkouts.
+src/views/vendor/deepfilter-0.2.0/processor.js -text
+src/views/vendor/deepfilter-0.2.0/LICENSE -text
+src/views/wasm/deepfilter-0.2.0/** -text

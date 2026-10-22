@@ -12,7 +12,7 @@ function createPanels({
 }) {
     const entries = new Map();
     const url = pathToFileURL(join(__dirname, 'panel.html')).href;
-    let aboutEntry = null,
+    let aboutEntry = null, updateEntry = null,
         confirmation = null;
     // A matching URL alone is insufficient: only an owned local window may act.
     const valid = (event) => {
@@ -40,6 +40,11 @@ function createPanels({
         const entry = valid(event);
         if (action === 'close') {
             entry.win.close();
+            return;
+        }
+        if (action === 'ignore-update') {
+            if (entry.state.kind !== 'update' || typeof value !== 'string') throw Error('Invalid update choice');
+            if (entry.updates?.ignoreVersion(value)) entry.win.close();
             return;
         }
         if (entry.state.kind === 'close-choice') {
@@ -76,7 +81,7 @@ function createPanels({
         if (entry.updates) await entry.updates[action]();
     });
     function create(state, modal = false) {
-        const parent = aboutEntry && modal ? aboutEntry.win : window();
+        const parent = modal ? (aboutEntry?.win || updateEntry?.win || window()) : window();
         const bounds =
             parent && !parent.isDestroyed() ? parent.getBounds() : null;
         const work = bounds && screen.getDisplayMatching(bounds).workArea;
@@ -87,6 +92,7 @@ function createPanels({
         const height = Math.min(
             state.kind === 'about'
                 ? 790
+                : state.kind === 'update' ? 520
                 : state.kind === 'close-choice'
                   ? 470
                   : 350,
@@ -109,6 +115,7 @@ function createPanels({
             ),
         };
         const win = new BrowserWindow({
+            icon: join(__dirname, 'assets/app.png'),
             // A startup failure must not reveal the still-hidden main window
             // behind its local error dialog.
             ...(parent && !parent.isDestroyed() && parent.isVisible() ? { parent, modal } : {}),
@@ -120,7 +127,7 @@ function createPanels({
             title: state.kind === 'about' ? '关于与更新' : state.title,
             frame: false,
             show: false,
-            resizable: state.kind === 'about',
+            resizable: ['about', 'update'].includes(state.kind),
             autoHideMenuBar: true,
             backgroundColor: '#fbf7f9',
             webPreferences: {
@@ -154,6 +161,7 @@ function createPanels({
             entry.unsubscribe?.();
             entry.unsubscribe = null;
             if (aboutEntry === entry) aboutEntry = null;
+            if (updateEntry === entry) updateEntry = null;
         });
         win.once('closed', () => {
             entries.delete(id);
@@ -181,6 +189,7 @@ function createPanels({
     }
     return {
         async about(info, updates) {
+            if (updateEntry && !updateEntry.win.isDestroyed()) updateEntry.win.close();
             if (
                 aboutEntry &&
                 !aboutEntry.closing &&
@@ -207,6 +216,16 @@ function createPanels({
                 entry.state.update = state;
                 send(entry);
             });
+            return entry.ready;
+        },
+        async updatePrompt(info, updates) {
+            // An already open settings window already observes the same update.
+            if (aboutEntry && !aboutEntry.closing && !aboutEntry.win.isDestroyed()) return aboutEntry.ready;
+            if (updateEntry && !updateEntry.closing && !updateEntry.win.isDestroyed()) return updateEntry.ready;
+            const entry = create({ kind: 'update', title: '客户端更新', info, update: updates.snapshot() });
+            updateEntry = entry;
+            entry.updates = updates;
+            entry.unsubscribe = updates.subscribe(state => { entry.state.update = state; send(entry); });
             return entry.ready;
         },
         async confirm(options) {

@@ -1,5 +1,6 @@
 /* One existing page header becomes the Windows title bar. Windows retains
    resize, snap, system menu and caption buttons through titleBarOverlay. */
+html[data-desktop-chrome] { --workspace-bar-height: env(titlebar-area-height, 40px); }
 html[data-desktop-chrome] .workspace-topbar {
     position: fixed;
     inset: 0 auto auto 0;
@@ -30,8 +31,9 @@ html[data-desktop-chrome] .workspace-brand {
     font: 600 13px 'Segoe UI', 'Microsoft YaHei', sans-serif;
 }
 html[data-desktop-chrome] .workspace-brand strong { display: block; white-space: nowrap; }
-html[data-desktop-chrome] .workspace-mark { width: 24px; height: 24px; font-size: 14px; border-radius: 7px; }
-html[data-desktop-chrome] .workspace-actions { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
+html[data-desktop-chrome] .workspace-mark { width: 24px; height: 24px; }
+html[data-desktop-chrome] .workspace-actions { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; width: auto; }
+html[data-desktop-chrome] .workspace-actions > #stageMoreToggle { height: 28px; min-height: 0; }
 html[data-desktop-chrome] .workspace-topbar :is(button, a) { -webkit-app-region: no-drag; }
 html[data-desktop-chrome] .workspace-actions > button {
     height: 28px;

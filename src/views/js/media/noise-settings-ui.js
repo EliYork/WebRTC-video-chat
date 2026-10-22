@@ -15,12 +15,12 @@
 
     const getNoiseMode = () => {
         const saved = safeStorageGet(NOISE_MODE_KEY);
-        if (['off', 'browser', 'rnnoise'].includes(saved)) return saved;
+        if (['off', 'browser', 'rnnoise', 'deepfilter'].includes(saved)) return saved;
         return safeStorageGet(AI_NOISE_EXPERIMENT_KEY) === 'true' ? 'rnnoise' :
             safeStorageGet(NOISE_SUPPRESSION_KEY) === 'false' ? 'off' : 'browser';
     };
     const setNoiseMode = (mode) => {
-        if (!['off', 'browser', 'rnnoise'].includes(mode)) return false;
+        if (!['off', 'browser', 'rnnoise', 'deepfilter'].includes(mode)) return false;
         safeStorageSet(NOISE_MODE_KEY, mode);
         safeStorageSet(NOISE_SUPPRESSION_KEY, mode === 'browser');
         safeStorageSet(AI_NOISE_EXPERIMENT_KEY, mode === 'rnnoise');

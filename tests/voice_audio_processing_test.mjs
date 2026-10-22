@@ -34,6 +34,7 @@ const fixture = (options = {}) => {
             track.readyState = 'ended';
         });
     const window = {
+        AbortController,
         setTimeout: (callback, ms) => {
             const timer = setTimeout(() => { pendingTimers.delete(timer); callback(); }, ms);
             pendingTimers.add(timer);
@@ -194,7 +195,35 @@ const fixture = (options = {}) => {
                 },
             };
         },
+        loadDeepfilterLibrary: async () => ({
+            DEEPFILTER_ASSETS: { worklet: '/vendor/deepfilter-0.2.0/processor.js' },
+            loadDeepfilter: async ({ signal }) => {
+                const gate = libraryGate;
+                libraryGate = undefined;
+                await gate;
+                signal.throwIfAborted();
+                if (options.failEnhancedLoad) throw new Error('deepfilter-download-failed');
+                return {};
+            },
+            DeepfilterWorkletNode: class {
+                constructor(context) {
+                    Object.assign(this, node(), { context });
+                    this.port = { onmessage: null };
+                    processors.push(this);
+                    const gate = processorGate;
+                    processorGate = undefined;
+                    queueMicrotask(async () => {
+                        await gate;
+                        this.port.onmessage?.({ data: failProcessor
+                            ? { type: 'error', message: 'enhanced-init-error' }
+                            : { type: 'ready', frameSamples: 480 } });
+                    });
+                }
+                destroy() { this.destroyed = true; }
+            },
+        }),
         onSourceEnded: (stream) => events.push({ ended: stream }),
+        onProcessorFailure: (pipeline) => events.push({ failed: pipeline }),
     });
     return {
         runtime,
@@ -250,6 +279,103 @@ const fixture = (options = {}) => {
     };
 };
 const flush = () => new Promise((resolve) => setImmediate(resolve));
+
+test('enhanced denoising preserves the muted output track and frees each private model context on switches', async () => {
+    const f = fixture();
+    const stream = await f.start('rnnoise');
+    const track = stream.getAudioTracks()[0];
+    track.enabled = false;
+    const outputContext = f.contexts[0];
+    // Sequential changes exercise ownership of one live output.
+    /* eslint-disable no-await-in-loop */
+    for (let i = 0; i < 3; i++) {
+        assert.equal(await f.start('deepfilter'), stream);
+        const pipeline = f.runtime.pipelines.get(stream);
+        const child = pipeline.processorContext, bridge = pipeline.bridgeStream;
+        assert.notEqual(child, outputContext);
+        assert.equal(f.runtime.diagnostics(stream).mode, 'deepfilter');
+        assert.equal(f.runtime.diagnostics(stream).engine, 'deepfilternet3-0.2.0');
+        assert.equal(f.runtime.diagnostics(stream).actual.noiseSuppression, false);
+        assert.equal(f.runtime.diagnostics(stream).actual.autoGainControl, false);
+        assert.equal(f.runtime.setSpeechGate(false), false);
+        assert.equal(track.enabled, false);
+        assert.equal(await f.start('browser'), stream);
+        assert.equal(child.state, 'closed');
+        assert.equal(bridge.getAudioTracks()[0].readyState, 'ended');
+        assert.equal(track.readyState, 'live');
+        assert.equal(outputContext.state, 'running');
+    }
+    /* eslint-enable no-await-in-loop */
+    f.runtime.dispose(stream);
+    assert.ok(f.contexts.every(context => context.state === 'closed'));
+    assert.ok(f.processors.every(processor => processor.destroyed));
+});
+
+for (const phase of ['download', 'processor']) {
+    test(`enhanced ${phase} failure keeps the old branch, mute and constraints and releases model resources`, async () => {
+        const f = fixture({ failEnhancedLoad: phase === 'download' });
+        const stream = await f.start('browser');
+        stream.getAudioTracks()[0].enabled = false;
+        if (phase === 'processor') f.failProcessor(true);
+        await assert.rejects(f.runtime.stage({ mode: 'deepfilter' }), /deepfilter/);
+        assert.equal(f.runtime.diagnostics(stream).mode, 'browser');
+        assert.equal(f.runtime.diagnostics(stream).lastSwitchFailure.mode, 'deepfilter');
+        assert.equal(f.captures[0].track.readyState, 'live');
+        assert.equal(f.captures[0].applied.at(-1).noiseSuppression, true);
+        assert.equal(f.captures[1].track.readyState, 'ended');
+        assert.equal(stream.getAudioTracks()[0].enabled, false);
+        assert.equal(f.contexts[0].state, 'running');
+        assert.equal(f.contexts[1].state, 'closed');
+        assert.equal(f.pendingTimers.size, 0);
+        f.runtime.dispose(stream);
+    });
+}
+
+for (const phase of ['download', 'processor']) {
+    test(`cancelling enhanced ${phase} initialization immediately frees its context without delaying newer settings`, async () => {
+        const f = fixture();
+        const stream = await f.start('browser');
+        const release = phase === 'download' ? f.blockLibrary() : f.blockProcessor();
+        const obsolete = f.runtime.stage({ mode: 'deepfilter' });
+        const rejected = assert.rejects(obsolete, { name: 'AbortError' });
+        await flush();
+        const child = f.contexts[1];
+        const fresh = f.runtime.stage({ mode: 'off' });
+        await flush();
+        assert.equal(f.runtime.adopt(await fresh), stream);
+        assert.equal(child.state, 'closed');
+        assert.equal(f.pendingTimers.size, 0);
+        release();
+        await rejected;
+        assert.equal(f.runtime.diagnostics(stream).mode, 'off');
+        f.runtime.dispose(stream);
+    });
+}
+
+for (const type of ['error', 'overload']) {
+    test(`enhanced runtime ${type} falls back on the existing track, releases its model and ignores stale events`, async () => {
+        const f = fixture();
+        const stream = await f.start('deepfilter');
+        stream.getAudioTracks()[0].enabled = false;
+        const pipeline = f.runtime.pipelines.get(stream);
+        const child = pipeline.processorContext;
+        const receive = pipeline.processor.port.onmessage;
+        receive({ data: { type } });
+        assert.equal(f.events.at(-1).failed, pipeline);
+        assert.equal(f.runtime.bypassFailedProcessor(stream), true);
+        assert.equal(f.runtime.adopt(stream), stream);
+        assert.equal(child.state, 'closed');
+        assert.equal(stream.getAudioTracks()[0].enabled, false);
+        assert.equal(f.runtime.diagnostics(stream).mode, 'off');
+        assert.equal(f.runtime.diagnostics(stream).fallbackReason, `deepfilter-${type === 'error' ? 'processor-error' : type}`);
+        await f.start('browser');
+        const count = f.events.length;
+        receive({ data: { type } });
+        assert.equal(f.events.length, count);
+        assert.equal(f.runtime.diagnostics(stream).mode, 'browser');
+        f.runtime.dispose(stream);
+    });
+}
 
 test('AEC all is requested exactly after capability detection and read back from the physical capture', async () => {
     const f = fixture();

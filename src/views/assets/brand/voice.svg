@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="rose" x1="80" y1="36" x2="426" y2="484" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#EF9BB5"/>
+      <stop offset="1" stop-color="#C75B80"/>
+    </linearGradient>
+    <linearGradient id="edge" x1="256" y1="16" x2="256" y2="496" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFF7F2" stop-opacity=".34"/>
+      <stop offset="1" stop-color="#FFF7F2" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="136" fill="url(#rose)"/>
+  <rect x="19" y="19" width="474" height="474" rx="133" stroke="url(#edge)" stroke-width="6"/>
+  <path d="M130 278v-46c0-70 56-126 126-126s126 56 126 126v46" stroke="#FFF8F2" stroke-width="36" stroke-linecap="round"/>
+  <rect x="104" y="238" width="70" height="122" rx="33" fill="#FFF8F2"/>
+  <rect x="338" y="238" width="70" height="122" rx="33" fill="#FFF8F2"/>
+  <path d="M373 345v7c0 35-29 64-64 64h-42" stroke="#FFF8F2" stroke-width="24" stroke-linecap="round"/>
+  <rect x="239" y="400" width="58" height="32" rx="16" fill="#FFF8F2"/>
+</svg>

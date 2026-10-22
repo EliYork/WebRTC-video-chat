@@ -87,10 +87,16 @@
                 panelCloseWatcher = new global.CloseWatcher();
                 panelCloseWatcher.addEventListener('close', () => { panelCloseWatcher = undefined; showStage(); });
             }
-            if (!compact || !toolsOpen) { toolsCloseWatcher?.destroy(); toolsCloseWatcher = undefined; }
+            if (!toolsOpen) { toolsCloseWatcher?.destroy(); toolsCloseWatcher = undefined; }
             else if (!toolsCloseWatcher) {
-                toolsCloseWatcher = new global.CloseWatcher();
-                toolsCloseWatcher.addEventListener('close', () => { toolsCloseWatcher = undefined; toolsOpen = false; renderControls(); });
+                const watcher = toolsCloseWatcher = new global.CloseWatcher();
+                watcher.addEventListener('close', () => {
+                    if (toolsCloseWatcher !== watcher) return;
+                    const toggle = byId('stageMoreToggle');
+                    const restoreFocus = byId('workspace-tools')?.contains(doc.activeElement) || doc.activeElement === toggle;
+                    toolsCloseWatcher = undefined; toolsOpen = false; renderControls();
+                    if (restoreFocus) toggle?.focus();
+                });
             }
         };
         const button = (label, className) => {
@@ -138,7 +144,7 @@
             const channels = byId('stage-channels');
             if (channels) channels.inert = compact && !channelsOpen;
             const tools = byId('workspace-tools');
-            if (tools) tools.inert = compact && !toolsOpen;
+            if (tools) tools.inert = !toolsOpen;
             byId('stageMoreToggle')?.setAttribute('aria-expanded', String(toolsOpen));
             tools?.classList.toggle('is-open', toolsOpen);
             renderUnread();

@@ -160,6 +160,7 @@ async function chooseSource(request, callback) {
     });
     if (quitting || mainWindow.isDestroyed()) return callback({});
     const window = new BrowserWindow({
+        icon: join(__dirname, 'assets/app.png'),
         parent: mainWindow,
         modal: true,
         width: 760,
@@ -283,6 +284,7 @@ else {
                 }
             );
             mainWindow = new BrowserWindow({
+                icon: join(__dirname, 'assets/app.png'),
                 title: '语音据点',
                 titleBarStyle: 'hidden',
                 titleBarOverlay: { color: '#f4ebf0', symbolColor: '#49333f', height: 40 },
@@ -321,7 +323,7 @@ else {
                 })).response === 0,
             });
             const showAbout = createAbout({ app, panels, window: () => mainWindow,
-                updates: () => updates, origin });
+                updates: () => updates, origin, cancelled: () => quitting });
             windowLifecycle = createWindowLifecycle({
                 window: mainWindow, Tray, Menu,
                 icon: nativeImage.createFromPath(join(__dirname, 'assets/tray.png')),
@@ -429,6 +431,17 @@ else {
                     window: () => mainWindow,
                     log,
                     changed: () => buildMenu(),
+                    preferences: require('./update-preferences.cjs').createUpdatePreferences(
+                        join(app.getPath('userData'), 'update-preferences.json'), log),
+                    onStartupUpdate: ({ version }) => {
+                        const offer = () => {
+                            if (quitting || mainWindow.isDestroyed() || updates.snapshot().status !== 'available' ||
+                                updates.snapshot().version !== version || updates.snapshot().ignoredVersion === version) return;
+                            void showAbout({ startupPrompt: true }).catch(error => log(`update-prompt-error ${error.message}`));
+                        };
+                        if (mainWindow.isVisible()) offer();
+                        else mainWindow.once('show', offer);
+                    },
                     prepareInstall: installUpdate,
                     confirmInstall: async (version) => (await panels.confirm({
                         title: `退出并安装 ${version}？`,

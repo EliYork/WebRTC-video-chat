@@ -94,7 +94,7 @@ test('stage replaces desktop tools and retains safe edges and touch-sized header
     const css = read('styles/layout.css') + read('styles/stage-layout.css');
     for (const side of ['top', 'left', 'right']) assert.ok(css.includes(`env(safe-area-inset-${side})`));
     assert.match(css, /min-height: 44px/);
-    assert.match(css, /padding-top: max\(64px, calc\(env\(safe-area-inset-top\)/);
+    assert.match(css, /padding-top: calc\(var\(--workspace-bar-height\) \+ env\(safe-area-inset-top\)\)/);
     assert.match(template, /viewport-fit=cover/);
 });
 
