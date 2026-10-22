@@ -9,13 +9,13 @@ const fixture = (width = 1920) => {
     const document = createDocument();
     const window = { document, innerWidth: width, MediaStream: class { constructor(tracks) { this.tracks = tracks; } getAudioTracks() { return []; } } };
     Object.defineProperty(window, 'localStorage', { get() { throw new Error('stage must never read old layouts'); } });
-    for (const file of ['shared/view-utils', 'room/video-tile-structure-ui', 'room/tile-status-ui', 'room/presence-view-model', 'room/stage-layout-runtime']) {
+    for (const file of ['shared/view-utils', 'chat/chat-message-ui', 'room/video-tile-structure-ui', 'room/tile-status-ui', 'room/presence-view-model', 'room/stage-layout-runtime']) {
         vm.runInNewContext(read(`js/${file}.js`), { window });
     }
     const node = (id, host = document.body) => { const element = document.createElement('div'); element.id = id; host.append(element); return element; };
     const root = node('main'); const stage = node('video-grid', root); const members = node('member-cards', root); const chat = node('chat-panel', root);
     const sources = node('share-sources', root);
-    for (const id of ['stageChatToggle', 'stageChannelsToggle', 'member-count', 'members-empty', 'stageChannelName', 'stageChannelStatus', 'stageWelcomeTitle', 'stageWelcomeDetail', 'stageJoinVoice']) node(id);
+    for (const id of ['stageChatToggle', 'stageChannelsToggle', 'stageStageToggle', 'stageMoreToggle', 'workspace-tools', 'stage-channels', 'member-count', 'members-empty', 'stageChannelName', 'stageChannelStatus', 'stageWelcomeTitle', 'stageWelcomeDetail', 'stageJoinVoice', 'stageConnectionStatus', 'chatJumpToLatest']) node(id);
     node('chatMessages', chat); node('chatInput', chat);
     const state = new Map(); const volumes = []; const channel = {}; let joins = 0;
     const runtime = window.VoiceStageLayout.createRuntime({ root, stage, members, sources, chat,
@@ -37,6 +37,8 @@ const fixture = (width = 1920) => {
 
 test('voice uses member cards, shares choose one stable focus and last end returns to voice', () => {
     const f = fixture(); const a = f.add('a'); const b = f.add('b');
+    const fullscreenExits = [];
+    f.window.VoiceFullscreenControls = { exitTileFullscreen: tile => fullscreenExits.push(tile.id) };
     f.runtime.sync();
     assert.equal(f.runtime.snapshot().mode, 'voice');
     assert.deepEqual(f.members.children, [a, b]);
@@ -55,6 +57,7 @@ test('voice uses member cards, shares choose one stable focus and last end retur
     f.state.get('a').screenSharing = false; f.runtime.sync();
     assert.equal(f.runtime.snapshot().mode, 'voice'); assert.equal(f.runtime.snapshot().selectedId, undefined);
     assert.equal(f.sources.children.length, 0); assert.equal(f.members.children.length, 2);
+    assert.deepEqual(fullscreenExits, ['b', 'a'], 'ended shares leave fullscreen even if a camera remains');
 });
 
 test('layout and chat changes preserve exact players, streams, per-sharer route state and listeners', () => {
@@ -120,12 +123,12 @@ test('hidden local screen preview remains a share; distinct camera preview is si
     assert.equal(local.querySelector('video').srcObject, null, 'preview stays hidden');
 });
 
-test('chat starts expanded at every width and a manual collapse survives view and member updates', () => {
+test('desktop chat starts expanded; phones start on stage and preserve explicit navigation', () => {
     for (const width of [3840, 1920, 900, 390, 320]) {
-        const f = fixture(width); assert.equal(f.runtime.snapshot().chatOpen, true);
+        const f = fixture(width); assert.equal(f.runtime.snapshot().chatOpen, width > 640);
         const toggle = f.document.getElementById('stageChatToggle');
-        assert.equal(toggle.getAttribute('aria-expanded'), 'true');
-        toggle.click(); assert.equal(f.runtime.snapshot().chatOpen, false);
+        assert.equal(toggle.getAttribute('aria-expanded'), String(width > 640));
+        f.runtime.setChatOpen(false);
         f.runtime.syncViewport(); f.runtime.sync();
         assert.equal(f.runtime.snapshot().chatOpen, false);
         assert.equal(f.chat.inert, true);
@@ -134,6 +137,163 @@ test('chat starts expanded at every width and a manual collapse survives view an
         assert.equal(f.runtime.snapshot().channelsOpen, false);
         f.runtime.destroy(); assert.equal(toggle.listeners.get('click').size, 0);
     }
+});
+
+test('first mobile chat opening follows latest history; later openings retain reading position', () => {
+    const f = fixture(390);
+    const messages = f.document.getElementById('chatMessages');
+    Object.assign(messages, { scrollHeight: 1800, clientHeight: 300, scrollTop: 1500 });
+    f.runtime.setChatOpen(true);
+    assert.equal(messages.scrollTop, 1800, 'first opening scrolls to latest after hidden history becomes measurable');
+    messages.scrollTop = 420;
+    f.runtime.setChatOpen(false);
+    messages.scrollTop = 0;
+    f.runtime.setChatOpen(true);
+    assert.equal(messages.scrollTop, 420, 'explicit close and reopen still restore reading position');
+    f.runtime.destroy();
+});
+
+test('entering compact layout saves the current reading position before hiding chat', () => {
+    const f = fixture(); const tile = f.add('reader', true); f.runtime.sync();
+    const video = tile.querySelector('video'); const stream = video.srcObject;
+    const messages = f.document.getElementById('chatMessages');
+    Object.assign(messages, { scrollHeight: 1800, clientHeight: 300, scrollTop: 120 });
+    f.runtime.setChatOpen(false); f.runtime.setChatOpen(true);
+    messages.scrollTop = 610;
+    f.window.innerWidth = 390; f.window.innerHeight = 844; f.runtime.syncViewport();
+    assert.equal(f.runtime.snapshot().chatOpen, false);
+    messages.scrollTop = 0;
+    f.runtime.setChatOpen(true);
+    assert.equal(messages.scrollTop, 610, 'use the position at resize, not the older explicit close');
+    assert.equal(tile.querySelector('video'), video); assert.equal(video.srcObject, stream);
+    f.runtime.destroy();
+});
+
+test('room changes discard the previous panel offset; clearing unread alone keeps it', () => {
+    const f = fixture(390);
+    const messages = f.document.getElementById('chatMessages');
+    Object.assign(messages, { scrollHeight: 1800, clientHeight: 300 });
+    f.runtime.setChatOpen(true); messages.scrollTop = 420;
+    f.runtime.setChatOpen(false); f.runtime.notifyChatMessage({ content: 'same room' });
+    f.runtime.resetUnread(); messages.scrollTop = 0; f.runtime.setChatOpen(true);
+    assert.equal(messages.scrollTop, 420, 'read state must not discard the current channel reading position');
+    f.runtime.setChatOpen(false); f.runtime.notifyChatMessage({ content: 'old room' });
+    assert.equal(f.runtime.snapshot().unread, 1);
+    f.runtime.resetChatRoom();
+    assert.equal(f.runtime.snapshot().unread, 0);
+    assert.equal(f.document.getElementById('stageChatToggle').dataset.unreadCount, '0');
+    Object.assign(messages, { scrollHeight: 2400, scrollTop: 0 });
+    f.runtime.setChatOpen(true);
+    assert.equal(messages.scrollTop, 2400, 'new channel follows latest instead of restoring 420');
+    f.runtime.destroy();
+});
+
+test('mobile stage, chat and channels are exclusive and retain the actual video and draft', () => {
+    const f = fixture(390); const tile = f.add('a', true); f.runtime.sync();
+    const video = tile.querySelector('video'); const stream = video.srcObject;
+    const get = (id) => f.document.getElementById(id);
+    const draft = get('chatInput'); draft.value = 'mobile draft';
+    get('stageChatToggle').click();
+    assert.equal(f.root.dataset.mobilePanel, 'chat');
+    get('stageChannelsToggle').click();
+    assert.equal(f.root.dataset.mobilePanel, 'channels');
+    assert.equal(f.chat.inert, true);
+    assert.equal(get('stage-channels').inert, false);
+    get('stageStageToggle').click();
+    assert.equal(f.root.dataset.mobilePanel, 'stage');
+    assert.equal(get('stageStageToggle').textContent, '共享');
+    assert.equal(get('stage-channels').inert, true);
+    assert.equal(tile.querySelector('video'), video);
+    assert.equal(video.srcObject, stream);
+    assert.equal(draft.value, 'mobile draft');
+    get('stageMoreToggle').click();
+    assert.equal(get('workspace-tools').inert, false);
+    get('stageMoreToggle').click();
+    assert.equal(get('workspace-tools').inert, true);
+});
+
+test('rotation uses the mobile layout and restores desktop chat without touching media', () => {
+    const f = fixture(1920); const tile = f.add('a', true); f.runtime.sync();
+    const video = tile.querySelector('video'); const stream = video.srcObject;
+    f.window.innerWidth = 844; f.window.innerHeight = 390; f.runtime.syncViewport();
+    assert.equal(f.runtime.snapshot().chatOpen, false);
+    f.runtime.setChannelsOpen(true);
+    f.window.innerWidth = 390; f.window.innerHeight = 844; f.runtime.syncViewport();
+    assert.equal(f.runtime.snapshot().channelsOpen, true, 'phone rotation retains the selected view');
+    f.window.innerWidth = 1920; f.window.innerHeight = 1080; f.runtime.syncViewport();
+    assert.equal(f.runtime.snapshot().chatOpen, true);
+    assert.equal(f.runtime.snapshot().channelsOpen, false);
+    assert.equal(video.srcObject, stream);
+});
+
+test('unread messages follow actual visibility and reading position, not history or display names', () => {
+    const f = fixture(390);
+    const messages = f.document.getElementById('chatMessages');
+    const jump = f.document.getElementById('chatJumpToLatest');
+    f.runtime.notifyChatMessage({ content: 'new' });
+    f.runtime.notifyChatMessage({ type: 'system' });
+    assert.equal(f.runtime.snapshot().unread, 1);
+    f.runtime.setChatOpen(true);
+    assert.equal(f.runtime.snapshot().unread, 0);
+    f.runtime.notifyChatMessage({ content: 'already reading latest' });
+    assert.equal(f.runtime.snapshot().unread, 0);
+    Object.assign(messages, { scrollHeight: 1000, clientHeight: 200, scrollTop: 100 });
+    f.runtime.notifyChatMessage({ content: 'while reading' });
+    assert.equal(messages.scrollTop, 100);
+    assert.equal(f.runtime.snapshot().unread, 1);
+    assert.equal(jump.hidden, false);
+    jump.click();
+    assert.equal(messages.scrollTop, 1000);
+    assert.equal(f.runtime.snapshot().unread, 0);
+    f.document.hidden = true;
+    f.runtime.notifyChatMessage({ content: 'background' });
+    assert.equal(f.runtime.snapshot().unread, 1);
+    f.runtime.resetUnread();
+    assert.equal(f.document.getElementById('stageChatToggle').dataset.unreadCount, '0');
+    f.runtime.destroy(); f.runtime.notifyChatMessage({ content: 'late' });
+    assert.equal(f.runtime.snapshot().unread, 0);
+});
+
+test('connection feedback distinguishes signalling, voice recovery and connected playback', () => {
+    const f = fixture(390); const notice = f.document.getElementById('stageConnectionStatus');
+    f.runtime.setChatConnection('offline'); assert.match(notice.textContent, /聊天已离线/);
+    f.channel.connectionState = 'reconnecting-peer'; f.runtime.sync();
+    assert.match(notice.textContent, /语音正在重新连接/);
+    f.channel.connectionState = 'joined'; f.runtime.setChatConnection('connected');
+    assert.equal(notice.hidden, true);
+});
+
+test('mobile CloseWatchers close panels without changing history and release on resize/destroy', () => {
+    const f = fixture(390); const watchers = [];
+    f.window.CloseWatcher = class {
+        constructor() { watchers.push(this); }
+        addEventListener(_, handler) { this.close = handler; }
+        destroy() { this.destroyed = true; }
+    };
+    f.runtime.setChatOpen(true); assert.equal(watchers.length, 1);
+    f.runtime.sync(); assert.equal(watchers.length, 1, 'state updates do not recreate the watcher');
+    watchers[0].close(); assert.equal(f.runtime.snapshot().chatOpen, false);
+    f.runtime.setChannelsOpen(true); assert.equal(watchers.length, 2);
+    f.window.innerWidth = 1920; f.runtime.syncViewport();
+    assert.equal(watchers[1].destroyed, true);
+    f.window.innerWidth = 390; f.runtime.syncViewport(); f.runtime.setChatOpen(true);
+    f.runtime.destroy(); assert.equal(watchers.at(-1).destroyed, true);
+});
+
+test('visual keyboard leaves the chat composer usable; zoom does not trigger keyboard layout', () => {
+    const f = fixture(390);
+    f.window.innerHeight = 844;
+    f.window.visualViewport = { height: 400, scale: 1 };
+    const values = new Map(); f.root.style.setProperty = (key, value) => values.set(key, value);
+    f.runtime.setChatOpen(true);
+    f.document.getElementById('chatInput').focus();
+    f.runtime.syncViewport();
+    assert.equal(f.root.classList.contains('stage-mobile-keyboard'), true);
+    assert.equal(values.get('--stage-viewport-height'), '400px');
+    f.window.visualViewport.scale = 2; f.runtime.syncViewport();
+    assert.equal(f.root.classList.contains('stage-mobile-keyboard'), false);
+    f.window.visualViewport.scale = 1; f.runtime.setChatOpen(false);
+    assert.equal(f.root.classList.contains('stage-mobile-keyboard'), false);
 });
 
 test('channel guide distinguishes unknown, empty, occupied, joining and joined without creating media', () => {

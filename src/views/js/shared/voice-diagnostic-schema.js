@@ -12,7 +12,7 @@ for (const key of `接收健康格式 接收统计间隔_ms 完整接收帧数 �
 for (const key of `最近异常 缓存时间 缓存年龄_ms`.split(' ')) keys.add(key);
 
 for (const key of `指标状态 统计状态 播放指标状态 视频序号 浏览器报告帧率 预览隐藏`.split(' ')) keys.add(key);
-for (const key of `网页版本 网页构建 客户端类型 客户端版本 Electron版本 统计来源 统计年龄_ms 原生输出帧率 码率口径`.split(' ')) keys.add(key);
+for (const key of `网页版本 网页构建 客户端类型 客户端版本 Electron版本 统计来源 统计年龄_ms 原生输出帧率 码率口径 播放采样间隔_ms 播放丢帧采样间隔_ms 最近帧解码准备_ms 最近帧收齐到提交_ms 最近帧回调滞后_ms`.split(' ')) keys.add(key);
 for (const key of `编码协商 实际传输路径 requested negotiated actual hardwareAcceleration trials support av1Send av1Receive actualCodec resolutionReduced remoteSdpAV1 uplinkStatus`.split(' ')) keys.add(key);
 
 export function sanitizeVoiceDiagnostic(value) {

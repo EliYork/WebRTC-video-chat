@@ -1,7 +1,7 @@
 {
     "name": "eliyork-voice-desktop",
     "productName": "EliYork Voice",
-    "version": "0.1.2",
+    "version": "0.1.5",
     "private": true,
     "description": "EliYork Voice Windows client with Piik native sharing",
     "author": "EliYork",

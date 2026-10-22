@@ -18,6 +18,10 @@
             ['播放提交 FPS', stale ? '数据过期' : playback?.预览隐藏 ? '本机预览已隐藏' : hidden || playback?.页面后台 ? '页面后台，暂停判读' :
                 finite(playback?.提交合成器帧率) ?? snapshot.播放指标状态 ?? '未采样'],
         ], details: [['采样时间', snapshot.采样时间], ['播放暂停', playback?.暂停 ? '是' : '否']] }];
+        for (const [label, key] of [['播放 FPS 窗口', '播放采样间隔_ms'], ['播放丢帧窗口', '播放丢帧采样间隔_ms'],
+            ['最近帧解码准备', '最近帧解码准备_ms'], ['最近帧收齐至提交', '最近帧收齐到提交_ms'], ['最近帧回调滞后', '最近帧回调滞后_ms']]) {
+            groups[0].details.push([label, metric(playback, key, ' ms')]);
+        }
         if (snapshot.角色 === '共享者') groups[0].rows.unshift(['目标 FPS（设置）', finite(snapshot.共享目标?.frameRate) ?? '未设置'],
             ['采集轨道尺寸（设置）', stale ? '数据过期' : dimensions(snapshot.采集轨道设置)]);
         const decision = snapshot.编码器选择;

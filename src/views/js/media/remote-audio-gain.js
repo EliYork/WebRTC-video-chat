@@ -47,16 +47,18 @@
                 native(element, volume, muted);
                 return true;
             }
-            const signature = tracks.map((track) => track.id).join('|');
             let branch = branches.get(element);
-            if (branch && branch.signature !== signature) {
+            // A new receiver can retain the previous track ID. Reuse only the
+            // same live track objects; their container/order does not matter.
+            if (branch && (branch.tracks.length !== tracks.length ||
+                tracks.some((track) => !branch.tracks.includes(track)))) {
                 release(element);
                 branch = undefined;
             }
             try {
                 context ||= createContext();
                 if (!branch) {
-                    branch = { sources: [], gain: context.createGain(), signature };
+                    branch = { sources: [], gain: context.createGain(), tracks };
                     branch.gain.gain.value = 0;
                     branches.set(element, branch);
                     for (const track of tracks) {
@@ -71,8 +73,13 @@
                 // Prevent the native element from duplicating the amplified audio.
                 native(element, 1, true);
                 if (context.state !== 'running') {
+                    const outputContext = context;
+                    const resumeRevision = branch.resumeRevision = (branch.resumeRevision || 0) + 1;
                     void Promise.resolve(context.resume()).catch((error) => {
-                        if (branches.get(element) !== branch) return;
+                        // The same graph can outlive a resume request. A newer
+                        // attempt or another player may already own recovery.
+                        if (branches.get(element) !== branch || branch.resumeRevision !== resumeRevision ||
+                            outputContext.state === 'running') return;
                         release(element);
                         native(element, 1, false);
                         onFailure?.(error);

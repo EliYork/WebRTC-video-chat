@@ -6,8 +6,8 @@ import { randomUUID } from 'node:crypto';
 import dotenv from 'dotenv';
 dotenv.config();
 
-import { createServer as createServerHttp } from 'http';
-import { createServer as createServerHttps } from 'https';
+import { createWebServer } from './utils/WebServer.js';
+import { createMediaReadiness } from './utils/MediaReadiness.js';
 
 import { Server as SocketServer } from 'socket.io';
 import { ExpressPeerServer } from 'peer';
@@ -19,11 +19,13 @@ import { fileURLToPath } from 'url';
 import Logger from './utils/Log.js';
 
 import { iceServers as iceServersList } from './utils/iceServers.js';
+import { createTurnCredentials } from './utils/TurnCredentials.js';
 import { createChatRateLimiter } from './utils/ChatRateLimit.js';
 import { validateSocketPacket } from './utils/SocketPacketValidation.js';
 import { createChatHistoryStore } from './utils/ChatHistoryStore.js';
 import {
     emitViewCursorRemove,
+    getViewChatSocketRoom,
     resolveOwnedViewChatRoom,
     switchViewChatRoom,
 } from './utils/ViewChatRoomLifecycle.js';
@@ -32,6 +34,7 @@ import { createVoiceDiagnosticsRelay } from './utils/VoiceDiagnosticsRelay.js';
 import { readScreenSfuConfig } from './utils/ScreenSfuBudget.js';
 import { createScreenSfuService } from './utils/ScreenSfuService.js';
 import { createPiikMediaGateway } from './utils/PiikMediaGateway.js';
+import { createDesktopDownload } from './utils/DesktopDownload.js';
 import {
     bindSocketDisconnectLifecycle,
     removeOwnedPresenceMember,
@@ -51,36 +54,8 @@ const HOST = process.env.HOST || 'localhost';
 const PORT = process.env.PORT || 443;
 
 const app = express();
-let key;
-let cert;
-let httpServer;
-
-const requestedHttps =
-    process.env.USE_HTTPS === 'true'
-        ? true
-        : process.env.USE_HTTPS === 'false'
-          ? false
-          : undefined;
-if (requestedHttps === undefined)
-    throw new Error('Please set useHttps to either "true" or "false"');
-
-let useHttps = requestedHttps;
-if (requestedHttps) {
-    try {
-        key = fs.readFileSync(__dirname + '/../cert/selfsigned.key', 'utf8');
-        cert = fs.readFileSync(__dirname + '/../cert/selfsigned.crt', 'utf8');
-        httpServer = createServerHttps({ key, cert }, app);
-    } catch (error) {
-        useHttps = false;
-        console.error(
-            '[https] TLS certificate could not be loaded; falling back to HTTP.',
-            error.message
-        );
-        httpServer = createServerHttp(app);
-    }
-} else {
-    httpServer = createServerHttp(app);
-}
+const { server: httpServer, useHttps } = createWebServer(app, { root: join(__dirname, '..') });
+const turnCredentials = createTurnCredentials();
 
 const io = new SocketServer(httpServer);
 
@@ -111,17 +86,14 @@ app.use((req, res, next) =>
                     // RNNoise compiles WASM inside its AudioWorklet; JS eval stays blocked.
                     "'wasm-unsafe-eval'",
                     `'nonce-${res.locals.cspNonce}'`,
-                    'https://unpkg.com',
-                    'https://kit.fontawesome.com',
                 ],
                 styleSrc: ["'self'", "'unsafe-inline'"],
-                fontSrc: ["'self'", 'https://ka-f.fontawesome.com', 'data:'],
+                fontSrc: ["'self'", 'data:'],
                 connectSrc: [
                     "'self'",
                     ...(process.env.PIIK_ENABLED === 'true'
                         ? Array.from({ length: 10 }, (_, index) => `http://127.0.0.1:${39721 + index}`)
                         : []),
-                    'https://ka-f.fontawesome.com',
                     'ws:',
                     'wss:',
                 ],
@@ -186,19 +158,12 @@ const piikMedia = piikEnabled ? createPiikMediaGateway({
     baseURL: process.env.PIIK_INTERNAL_URL || 'http://127.0.0.1:17887',
     onSharing: (socket, sharing, owner) => voiceCallSignaling.updateScreenShare({ sharing, voiceSessionGeneration: owner.voiceSessionGeneration }, socket),
 }) : undefined;
-app.get('/healthz', async (_req, res) => {
-    let mediaReady = !piikEnabled;
-    if (piikEnabled) {
-        try {
-            mediaReady = (await fetch(new URL('/healthz', process.env.PIIK_INTERNAL_URL || 'http://127.0.0.1:17887'), { signal: AbortSignal.timeout(1500) })).ok;
-        } catch { mediaReady = false; }
-    }
-    res.set('Cache-Control', 'no-store').json({ ok: true, build: process.env.VOICE_BUILD_ID || 'development', screenProvider: piikEnabled ? 'piik' : 'legacy', mediaReady });
-});
 let screenSfuConfig;
+let sfuConfigValid = true;
 try {
     screenSfuConfig = readScreenSfuConfig(piikEnabled ? { SFU_ENABLED: 'false' } : process.env);
 } catch (error) {
+    sfuConfigValid = false;
     Log.error(`[sfu] invalid bandwidth/configuration; using P2P until reviewed: ${error.message}`);
     screenSfuConfig = readScreenSfuConfig({ SFU_ENABLED: 'false' });
 }
@@ -213,6 +178,20 @@ const screenSfu = createScreenSfuService({
 });
 if (screenSfuConfig.enabled) void screenSfu.start().catch(() => {});
 else Log.info('[sfu] not configured; screen sharing uses P2P');
+const getMediaReadiness = createMediaReadiness({
+    piikEnabled, piikBaseURL: process.env.PIIK_INTERNAL_URL || 'http://127.0.0.1:17887',
+    screenSfu, sfuConfigValid,
+});
+const health = async (_req, res) => {
+    const readiness = await getMediaReadiness();
+    res.set('Cache-Control', 'no-store').json({ ok: true, build: process.env.VOICE_BUILD_ID || 'development', ...readiness });
+};
+app.get('/healthz', health);
+app.get('/readyz', async (_req, res) => {
+    const readiness = await getMediaReadiness();
+    res.status(readiness.mediaReady ? 200 : 503).set('Cache-Control', 'no-store')
+        .json({ ok: readiness.mediaReady, build: process.env.VOICE_BUILD_ID || 'development', ...readiness });
+});
 const CHAT_HISTORY_LIMIT = 50;
 const CHAT_MESSAGE_MAX_LENGTH = 500;
 const onlineMembersByRoom = new Map();
@@ -223,6 +202,7 @@ const chatHistoryStore = createChatHistoryStore({
         join(__dirname, '..', 'data', 'chat-history.json'),
     limit: CHAT_HISTORY_LIMIT,
     logger: Log,
+    onPersistenceChange: status => io.to(getViewChatSocketRoom(status.roomId)).emit('chat:persistence', status),
 });
 
 const getChatHistory = (roomId) => chatHistoryStore.get(roomId);
@@ -352,6 +332,7 @@ app.get('/style.css', (_, res) =>
 
 /** Routes */
 app.get('/', (_, res) => res.redirect('/room/lobby'));
+app.get('/download/windows', createDesktopDownload(join(__dirname, '../downloads/windows')));
 
 app.get('/room/:channel', (req, res) => {
     const channel = getChannel(req.params.channel);
@@ -369,6 +350,7 @@ app.get('/room/:channel', (req, res) => {
             buildInfo: { webVersion, webRevision },
             screenMediaProvider: piikEnabled ? 'piik' : 'legacy',
             iceServers: iceServersList,
+            turnEnabled: turnCredentials.enabled,
             screenSfu: { enabled: screenSfuConfig.enabled, videoBitrate: screenSfuConfig.videoBitrate, initialViewerBitrate: screenSfuConfig.initialViewerBitrate, defaultReceiveMode: 'p2p-first', p2pBudget: 24000000 },
             roomId: channel.slug,
         }).replace(
@@ -538,7 +520,7 @@ const handlePresenceLeaveVoice = (socket) => {
     }
 };
 
-const handleChatJoin = async ({ roomId } = {}, socket) => {
+const handleChatJoin = async ({ roomId, joinRequestId } = {}, socket) => {
     const transition = await switchViewChatRoom(socket, roomId, {
         isAllowedRoomId: (candidateRoomId) =>
             Boolean(getChannel(candidateRoomId)),
@@ -551,6 +533,8 @@ const handleChatJoin = async ({ roomId } = {}, socket) => {
     const channel = getChannel(transition.roomId);
     socket.emit('chat:history', getChatHistory(channel.slug), {
         roomId: channel.slug,
+        ...(Number.isSafeInteger(joinRequestId) && joinRequestId > 0 ? { joinRequestId } : {}),
+        persistence: chatHistoryStore.getPersistence(channel.slug),
     });
     emitPresenceToSocket(socket);
 };
@@ -583,7 +567,7 @@ const handleChatSend = ({ roomId, senderName, content } = {}, socket) => {
 
     saveChatMessage(message);
     io.to(ownedRoom.socketRoom).emit('chat:message', message);
-    return { ok: true, messageId: message.id };
+    return { ok: true, messageId: message.id, persistence: chatHistoryStore.getPersistence(channel.slug) };
 };
 
 const handleCursorMove = ({ roomId, x, y, senderName } = {}, socket) => {
@@ -664,6 +648,14 @@ const clearDisconnectedSocketOwners = (socket) => {
 io.on('connection', (socket) => {
     socket.use(validateSocketPacket);
     Log.info(`User with socket.id ${socket.id} has connected.`);
+    socket.on('rtc:ice', acknowledge => {
+        if (typeof acknowledge !== 'function') return;
+        if (!getChannel(socket.handshake.query.roomId)) {
+            acknowledge({ ok: false, reason: 'invalid-room' });
+            return;
+        }
+        acknowledge(turnCredentials.request(socket));
+    });
     if (piikMedia) socket.on('piik:request', (payload, acknowledge) => {
         if (typeof acknowledge !== 'function') return;
         void piikMedia.request(socket, payload).then(result => acknowledge({ ok: true, ...result }),
@@ -693,6 +685,10 @@ io.on('connection', (socket) => {
             {
                 name: 'chat-rate-limit-cleanup',
                 run: () => chatRateLimiter.clear(socket.id),
+            },
+            {
+                name: 'ice-rate-limit-cleanup',
+                run: () => turnCredentials.clear(socket),
             },
             {
                 name: 'disconnect-log',
@@ -777,3 +773,26 @@ httpServer.listen(PORT, HOST, () =>
         `Listening at ${useHttps ? 'https' : 'http'}://${HOST}:${PORT} with PeerJS at /peerjs`
     )
 );
+
+let shuttingDown = false;
+const shutdown = async () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    const deadline = setTimeout(() => process.exit(1), 5000);
+    try {
+        io.close();
+        screenSfu.close();
+        piikMedia?.close();
+        const saved = await chatHistoryStore.close();
+        if (!saved) Log.warn('[chat-history] final save failed during shutdown');
+        process.exitCode = saved ? 0 : 1;
+    } catch (error) {
+        Log.error(`[shutdown] ${error.message}`);
+        process.exitCode = 1;
+    } finally {
+        clearTimeout(deadline);
+        process.exit(process.exitCode || 0);
+    }
+};
+process.once('SIGTERM', () => void shutdown());
+process.once('SIGINT', () => void shutdown());

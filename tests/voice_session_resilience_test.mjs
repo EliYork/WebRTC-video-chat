@@ -315,6 +315,10 @@ class FakeStream {
     getTracks() {
         return this.tracks;
     }
+
+    getVideoTracks() {
+        return this.tracks.filter((track) => track.kind === 'video');
+    }
 }
 
 test('media operations serialize double clicks and reject stale resolve after stop or epoch change', async () => {
@@ -361,6 +365,249 @@ test('media operations serialize double clicks and reject stale resolve after st
     resolveCamera(staleCamera);
     assert.equal((await camera).reason, 'stale-operation');
     assert.equal(staleCamera.tracks[0].stopCount, 1);
+});
+
+test('media operations cancelled before their first microtask never start capture', async () => {
+    await Promise.all(
+        ['invalidated', 'disposed', 'epoch-changed'].map(async (reason) => {
+            let epoch = 1;
+            let requests = 0;
+            const controller = mediaApi.createMediaOperationController({
+                getEpoch: () => epoch,
+            });
+            const pending = controller.run('screen', () => {
+                requests += 1;
+                return new FakeStream();
+            });
+            if (reason === 'invalidated') controller.invalidate('screen');
+            if (reason === 'disposed') controller.dispose();
+            if (reason === 'epoch-changed') epoch += 1;
+
+            assert.equal((await pending).cancelled, true, reason);
+            assert.equal(requests, 0, reason);
+            assert.equal(
+                controller.getSnapshot('screen').promise,
+                undefined,
+                reason
+            );
+            assert.equal(
+                controller.getSnapshot('screen').state,
+                'idle',
+                reason
+            );
+        })
+    );
+});
+
+test('an epoch-stale capture releases its pending state and permits a fresh request', async () => {
+    let epoch = 1;
+    let resolveCapture;
+    const controller = mediaApi.createMediaOperationController({
+        getEpoch: () => epoch,
+        stopStream: (stream) =>
+            stream.getTracks().forEach((track) => track.stop()),
+    });
+    const pending = controller.run(
+        'screen',
+        () =>
+            new Promise((resolve) => {
+                resolveCapture = resolve;
+            })
+    );
+    await Promise.resolve();
+    epoch += 1;
+    const stale = new FakeStream([new FakeTrack('video')]);
+    resolveCapture(stale);
+
+    assert.equal((await pending).cancelled, true);
+    assert.equal(stale.tracks[0].stopCount, 1);
+    assert.equal(controller.getSnapshot('screen').promise, undefined);
+    assert.equal(controller.getSnapshot('screen').state, 'idle');
+    const fresh = new FakeStream([new FakeTrack('video')]);
+    const retry = controller.run('screen', () => fresh);
+    assert.notEqual(retry, pending);
+    assert.equal((await retry).value, fresh);
+    assert.equal(controller.getSnapshot('screen').state, 'active');
+    assert.equal(fresh.tracks[0].stopCount, 0);
+});
+
+test('epoch-stale success and rejection preserve the previously active stream', async () => {
+    await Promise.all(
+        [false, true].map(async (rejects) => {
+            let epoch = 1;
+            let settle;
+            const events = [];
+            const previous = new FakeStream();
+            const controller = mediaApi.createMediaOperationController({
+                getEpoch: () => epoch,
+                onDebug: (event) => events.push(event),
+                stopStream: (stream) =>
+                    stream.getTracks().forEach((track) => track.stop()),
+            });
+            controller.setActive('microphone', previous);
+            const pending = controller.run(
+                'microphone',
+                () =>
+                    new Promise((resolve, reject) => {
+                        settle = rejects ? reject : resolve;
+                    }),
+                { state: 'switching' }
+            );
+            await Promise.resolve();
+            epoch += 1;
+            const candidate = new FakeStream();
+            settle(
+                rejects
+                    ? Object.assign(new Error('old-device-failure'), {
+                          name: 'NotReadableError',
+                      })
+                    : candidate
+            );
+
+            const result = await pending;
+            assert.equal(result.cancelled, true);
+            assert.equal(result.errorType, undefined);
+            const snapshot = controller.getSnapshot('microphone');
+            assert.equal(snapshot.promise, undefined);
+            assert.equal(snapshot.errorType, undefined);
+            assert.equal(snapshot.state, 'active');
+            assert.equal(snapshot.value, previous);
+            assert.equal(previous.tracks[0].stopCount, 0);
+            assert.equal(
+                events.some(
+                    (event) => event.event === 'media-operation-failure'
+                ),
+                false
+            );
+            if (!rejects) assert.equal(candidate.tracks[0].stopCount, 1);
+            assert.equal(
+                (await controller.run('microphone', () => previous)).ok,
+                true
+            );
+        })
+    );
+});
+
+test('old media completion cannot clear a newer pending operation or adopted stream', async () => {
+    await Promise.all(
+        [false, true].map(async (rejects) => {
+            let settleOld;
+            let resolveNew;
+            const controller = mediaApi.createMediaOperationController({
+                stopStream: (stream) =>
+                    stream.getTracks().forEach((track) => track.stop()),
+            });
+            const old = controller.run(
+                'camera',
+                () =>
+                    new Promise((resolve, reject) => {
+                        settleOld = rejects ? reject : resolve;
+                    })
+            );
+            await Promise.resolve();
+            controller.invalidate('camera');
+            const fresh = controller.run(
+                'camera',
+                () =>
+                    new Promise((resolve) => {
+                        resolveNew = resolve;
+                    })
+            );
+            await Promise.resolve();
+            const stale = new FakeStream([new FakeTrack('video')]);
+            settleOld(rejects ? new Error('stale failure') : stale);
+            assert.equal((await old).cancelled, true);
+            assert.equal(controller.getSnapshot('camera').promise, fresh);
+            assert.equal(controller.getSnapshot('camera').state, 'requesting');
+            const adopted = new FakeStream([new FakeTrack('video')]);
+            resolveNew(adopted);
+            assert.equal((await fresh).value, adopted);
+            assert.equal(controller.getSnapshot('camera').value, adopted);
+            assert.equal(adopted.tracks[0].stopCount, 0);
+            if (!rejects) assert.equal(stale.tracks[0].stopCount, 1);
+        })
+    );
+});
+
+test('epoch-surviving captures still run and report current failures after a preflight epoch change', async () => {
+    let epoch = 1;
+    const controller = mediaApi.createMediaOperationController({
+        getEpoch: () => epoch,
+    });
+    const stream = new FakeStream();
+    const capture = controller.run('camera', () => stream, {
+        surviveEpochChange: true,
+    });
+    epoch += 1;
+    assert.equal((await capture).value, stream);
+    const failure = controller.run(
+        'camera',
+        () => {
+            throw Object.assign(new Error('current-device-failure'), {
+                name: 'NotReadableError',
+            });
+        },
+        { surviveEpochChange: true }
+    );
+    epoch += 1;
+    assert.equal((await failure).errorType, 'device-busy');
+    assert.equal(controller.getSnapshot('camera').state, 'failed');
+});
+
+test('screen sharing releases a prepared stream when cancelled before capture starts', async () => {
+    const script = readFileSync(
+        new URL('../src/views/script.js', import.meta.url),
+        'utf8'
+    );
+    const source = script.slice(
+        script.indexOf('const startScreenShare ='),
+        script.indexOf('const stopScreenShare =')
+    );
+    const controller = mediaApi.createMediaOperationController();
+    const prepared = new FakeStream([new FakeTrack('video')]);
+    let pending = false;
+    let captureCalls = 0;
+    let codecCalls = 0;
+    const context = vm.createContext({
+        AbortController,
+        mediaOperationController: controller,
+        localMediaTrackStopper: {
+            stopStream: (stream) =>
+                stream?.getTracks().forEach((track) => track.stop()),
+        },
+        navigator: { mediaDevices: {} },
+        screenCodecAbort: undefined,
+        screenShareRequestPending: false,
+        sharingNow: false,
+        usingPiik: false,
+        setScreenShareRequestPending: (value) => {
+            pending = value;
+        },
+        setMediaOperationError: () => {},
+        voiceSessionRuntime: { getSnapshot: () => ({ epoch: 0 }) },
+        voiceMediaLifecycle: {
+            normalizeScreenShareOptions: (options) => options,
+            requestScreenCapture: () => {
+                captureCalls += 1;
+                throw Error('unexpected capture');
+            },
+        },
+        window: {
+            VoiceScreenCodecs: {
+                prepare: async () => {
+                    codecCalls += 1;
+                },
+            },
+        },
+    });
+    const start = vm.runInContext(`${source}\nstartScreenShare`, context);
+    const result = start(undefined, {}, prepared);
+    controller.invalidate('screen');
+    assert.equal(await result, false);
+    assert.equal(captureCalls, 0);
+    assert.equal(codecCalls, 0);
+    assert.equal(pending, false);
+    assert.equal(prepared.tracks[0].stopCount, 1);
 });
 
 test('media capture can survive a transport epoch change when the operation remains desired', async () => {

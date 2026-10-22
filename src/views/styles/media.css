@@ -143,7 +143,9 @@
 .peer-volume-popover {
     position: fixed;
     z-index: 10000;
-    width: 190px;
+    box-sizing: border-box;
+    width: 212px;
+    max-width: calc(100vw - 16px);
     padding: 10px;
     border: 1px solid rgba(216, 111, 154, 0.24);
     border-radius: 8px;
@@ -152,6 +154,7 @@
     color: #57354a;
     max-height: calc(100dvh - 16px);
     overflow-y: auto;
+    overscroll-behavior: contain;
 }
 
 .peer-volume-section + .peer-volume-section {

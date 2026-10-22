@@ -124,7 +124,8 @@ location ^~ /downloads/windows/ {
     try_files $uri =404;
     autoindex off;
     limit_except GET { deny all; }
-    limit_rate 256k;
+    # Two site-wide active downloads, 1,000,000 bytes/s each: total 2 MB/s.
+    limit_rate 1000000;
     limit_conn perserver 2;
     limit_conn_status 429;
     add_header Cache-Control "no-store" always;
@@ -162,7 +163,8 @@ location ^~ /downloads/windows/ {
         assert {p['name']: p['pid'] for p in before} == {p['name']: p['pid'] for p in after}
         result = {'status': 'deployed', 'version': plan['version'], 'frontendRevision': plan['revision'],
                   'backup': str(backup), 'health': health, 'nodeGoRestarted': False,
-                  'nginxGracefulReload': True, 'downloadLimitKiBps': 256, 'downloadConnections': 2}
+                  'nginxGracefulReload': True, 'downloadLimitBytesPerSecond': 1000000,
+                  'downloadConnections': 2, 'downloadAggregateBytesPerSecond': 2000000}
         (backup / 'result.json').write_text(json.dumps(result, indent=2))
         print(json.dumps(result))
     except Exception:

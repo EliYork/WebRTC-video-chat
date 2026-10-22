@@ -156,7 +156,7 @@ export function createNativeCapture(
             );
             if (hint)
                 hint.textContent =
-                    '默认关闭，语音通话不受影响。声音来源由浏览器选择器决定，请优先选独立窗口或标签页。';
+                    '声音来源由浏览器选择器决定。整屏声音可能包含本频道通话，可取消勾选以避免回传；建议选择独立窗口或标签页。';
         }
         const nativeOptions = document.querySelector<HTMLElement>(
             '[data-piik-native-options]'

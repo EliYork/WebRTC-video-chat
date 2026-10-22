@@ -52,31 +52,30 @@ test('Ctrl+R, forced reload and F5 use the same guard', () => {
         assert.equal(isRefreshKey({ type: 'keyDown', ...input }), false);
 });
 
-test('about shows installed/web versions and uses the existing manual updater', async () => {
-    let shown, checks = 0;
+test('about opens local settings with installed/web versions, without automatic download', async () => {
+    let shown, selected;
+    const updater = { check: () => { throw Error('opening settings must not check or download'); } };
     const win = { isDestroyed: () => false, webContents: {
         executeJavaScript: async () => ({ webVersion: '1.0.5' }),
     } };
     const show = createAbout({
         app: { isPackaged: true, getVersion: () => '0.1.1' },
-        dialog: { showMessageBox: async (_, options) => { shown = options; return { response: 0 }; } },
+        panels: { about: async (info, updates) => { shown = info; selected = updates; } },
         window: () => win, origin: 'https://voice.eliyork.com',
-        updates: () => ({ label: () => '检查客户端更新…', check: async () => { checks++; } }),
+        updates: () => updater,
     });
     await show();
-    assert.match(shown.detail, /客户端版本：0.1.1/);
-    assert.match(shown.detail, /网页版本：1.0.5/);
-    assert.match(shown.detail, /https:\/\/voice.eliyork.com/);
-    assert.equal(shown.defaultId, shown.cancelId);
-    assert.equal(shown.buttons[shown.cancelId], '关闭');
-    assert.equal(checks, 1);
+    assert.equal(shown.clientVersion, '0.1.1');
+    assert.equal(shown.webVersion, '1.0.5');
+    assert.equal(shown.origin, 'https://voice.eliyork.com');
+    assert.equal(selected, updater);
 });
 
 test('preview about never invokes updates; failed web probe still opens settings', async () => {
-    let shown;
+    let shown, selected;
     const show = createAbout({
         app: { isPackaged: false, getVersion: () => '0.1.1' },
-        dialog: { showMessageBox: async (_, options) => { shown = options; return { response: 0 }; } },
+        panels: { about: async (info, updates) => { shown = info; selected = updates; } },
         window: () => ({ isDestroyed: () => false, webContents: {
             executeJavaScript: async () => { throw Error('loading'); },
         } }),
@@ -84,7 +83,7 @@ test('preview about never invokes updates; failed web probe still opens settings
         updates: () => ({ label: () => '', check: () => { throw Error('must not update preview'); } }),
     });
     await show();
-    assert.deepEqual(shown.buttons, ['关闭']);
-    assert.match(shown.detail, /本地开发预览/);
-    assert.match(shown.detail, /暂时无法读取/);
+    assert.equal(selected, null);
+    assert.equal(shown.packaged, false);
+    assert.equal(shown.webVersion, '暂时无法读取');
 });

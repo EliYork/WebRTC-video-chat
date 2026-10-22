@@ -102,6 +102,8 @@ export const createScreenSfuService = ({
     const publications = new Map();
     const queues = new Map();
     let worker;
+    let ready = false;
+    let workerDied = false;
     let webRtcServer;
     let startup;
     let stopped = false;
@@ -407,7 +409,10 @@ export const createScreenSfuService = ({
             const factory =
                 createWorker || (await import('mediasoup')).createWorker;
             worker = await factory({ logLevel: 'warn' });
+            if (stopped) throw fail('sfu-disabled');
             worker.on('died', () => {
+                ready = false;
+                workerDied = true;
                 unhealthy = true;
                 fallbackAll('worker-unavailable');
                 logger?.warn?.(
@@ -422,16 +427,23 @@ export const createScreenSfuService = ({
                     port: config.port,
                 })),
             });
+            if (stopped || workerDied || worker.closed) throw fail('sfu-unavailable');
             healthTimer = setInterval(() => void sampleHealth(), 5000);
             healthTimer.unref?.();
             trafficTimer = setInterval(() => void sampleTraffic(), 2000);
             trafficTimer.unref?.();
             await sampleHealth();
             await sampleTraffic();
+            if (stopped || workerDied || worker.closed) throw fail('sfu-unavailable');
+            ready = true;
             logger?.info?.(
                 `[sfu] ready on UDP/TCP ${config.port}; video=${config.videoBitrate}bps total=${config.payloadBudget}bps`
             );
         })().catch((error) => {
+            ready = false;
+            clearInterval(healthTimer);
+            clearInterval(trafficTimer);
+            webRtcServer?.close();
             worker?.close();
             logger?.warn?.(`[sfu] unavailable; using P2P: ${error.message}`);
             throw fail('sfu-unavailable');
@@ -863,7 +875,7 @@ export const createScreenSfuService = ({
         sampleTraffic,
         snapshot: () => ({
             enabled: config.enabled,
-            ready: Boolean(webRtcServer && !worker?.closed),
+            ready: Boolean(ready && !stopped && webRtcServer && !webRtcServer.closed && !worker?.closed),
             clients: clients.size,
             publishers: publications.size,
             ...budget.snapshot(),
@@ -872,6 +884,7 @@ export const createScreenSfuService = ({
             egress: { ...egress, admissionBlocked: egressBlocked },
         }),
         close: () => {
+            ready = false;
             stopped = true;
             clearInterval(healthTimer);
             clearInterval(trafficTimer);

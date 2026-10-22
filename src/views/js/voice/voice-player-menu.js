@@ -36,9 +36,10 @@
         button.setAttribute('aria-label', '共享视频更多选项');
         button.setAttribute('aria-haspopup', 'menu'); button.setAttribute('aria-expanded', 'false');
         (tile.querySelector('.tile-header-actions') || tile).append(button);
-        let menu, returnFocus;
+        let menu, returnFocus, closeWatcher;
         const close = (restore = true) => {
             if (!menu) return;
+            closeWatcher?.destroy(); closeWatcher = undefined;
             menu.remove(); menu = null;
             button.setAttribute('aria-expanded', 'false');
             doc.removeEventListener('pointerdown', outside, true);
@@ -74,6 +75,10 @@
             item(visible ? '隐藏视频统计' : '显示视频统计', () => global.VoiceShareDiagnostics?.toggle(tile), visible);
             item('查看播放事件', () => actions.showEvents?.(tile));
             if (!isLocal) item('调整音量…', () => actions.onVolume?.(volumeEvent, tile)?.querySelector('input')?.focus());
+            const route = tile.querySelector('.voice-route-toggle');
+            if (route) item('连接方式…', () => route.click());
+            const webFullscreen = tile.querySelector('.web-fullscreen-btn');
+            if (webFullscreen) item(webFullscreen.getAttribute('aria-label') || '网页内全屏', () => webFullscreen.click());
             menu.addEventListener('contextmenu', (context) => { context.preventDefault(); context.stopPropagation(); });
             menu.addEventListener('dblclick', (double) => double.stopPropagation());
             menu.addEventListener('keydown', (key) => {
@@ -97,6 +102,10 @@
             doc.addEventListener('webkitfullscreenchange', dismiss);
             global.addEventListener?.('resize', dismiss);
             active = close;
+            if (global.CloseWatcher) {
+                closeWatcher = new global.CloseWatcher();
+                closeWatcher.addEventListener('close', dismiss);
+            }
         };
         const context = (event) => open(event, video);
         const keyboard = (event) => { if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) open(event, video); };

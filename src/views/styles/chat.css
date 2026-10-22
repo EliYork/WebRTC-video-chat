@@ -14,8 +14,30 @@
     font-size: 0.82rem;
 }
 
+.chat-history-retry {
+    align-self: flex-start;
+    margin: 0 12px 10px;
+    padding: 6px 10px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--panel-warm);
+    color: var(--text);
+}
+
+.chat-retention-note {
+    flex: 0 0 auto;
+    padding: 8px 0;
+    color: var(--muted);
+    font-size: 0.78rem;
+    text-align: center;
+}
+
 .chat-panel-status[data-status-kind='error'] {
     color: var(--danger, #f87171);
+}
+
+.chat-panel-status[data-status-kind='warning'] {
+    color: #895120;
 }
 
 .chat-empty-state {
@@ -41,6 +63,8 @@
     padding: 18px;
     list-style: none;
     overflow-y: auto;
+    /* The renderer preserves a surviving row when trimming old messages. */
+    overflow-anchor: none;
 }
 
 .chat-message {

@@ -47,6 +47,8 @@
         const pipelines = new WeakMap();
         const captures = new WeakMap();
         const modules = new WeakMap();
+        const pendingCaptures = new Set();
+        const pendingPreparations = new Set();
         let library;
         let active;
         let lastSwitchFailure = null;
@@ -57,6 +59,7 @@
             { mode = 'browser', deviceId = 'default' } = {},
             isCurrent = () => true
         ) => {
+            const captureRevision = stageRevision;
             mode = normalizeMode(mode);
             const requested = constraintsFor(mode);
             const supportedConstraints = mediaDevices.getSupportedConstraints?.() || {};
@@ -69,13 +72,18 @@
             }
             const device =
                 deviceId !== 'default' ? { deviceId: { exact: deviceId } } : {};
+            const ensureCurrent = () => {
+                if (captureRevision !== stageRevision || !isCurrent()) throw Object.assign(new Error('superseded-audio-capture'), { name: 'AbortError' });
+            };
             const constraintFailure = (error) => ['OverconstrainedError', 'ConstraintNotSatisfiedError'].includes(error?.name);
             const acquire = async (echoCancellation) => {
+                ensureCurrent();
                 try {
                     return await mediaDevices.getUserMedia({ audio: { ...captureConstraints, echoCancellation, ...device } });
                 } catch (error) {
                     // Relax only the format. Keep device, processing and AEC requirements.
                     if (!constraintFailure(error) || error.constraint === 'echoCancellation') throw error;
+                    ensureCurrent();
                     return mediaDevices.getUserMedia({ audio: {
                         echoCancellation,
                         noiseSuppression: captureConstraints.noiseSuppression,
@@ -94,16 +102,14 @@
                 // Retry only a format/constraint failure. Never hide permission,
                 // missing-device or busy-device errors, or select another mic.
                 if (aecFallback || (!constraintFailure(error) && error?.name !== 'TypeError')) throw error;
-                if (!isCurrent()) throw Object.assign(new Error('superseded-audio-capture'), { name: 'AbortError' });
+                ensureCurrent();
                 aecFallback = error?.name || 'all-failed';
                 rawStream = await acquire(true);
             }
             const track = rawStream.getAudioTracks()[0];
+            pendingCaptures.add(rawStream);
             try {
-                if (!isCurrent())
-                    throw Object.assign(new Error('superseded-audio-capture'), {
-                        name: 'AbortError',
-                    });
+                ensureCurrent();
                 if (!track || track.readyState === 'ended')
                     throw new Error('microphone-track-unavailable');
                 const capabilities = track.getCapabilities?.().echoCancellation;
@@ -114,6 +120,7 @@
                     aecFallback ||= allSupported === false ? 'unsupported' : 'not-reported-as-all';
                     // Also undo legacy engines silently coercing the string to true.
                     await track.applyConstraints?.(requested);
+                    ensureCurrent();
                 }
                 if (
                     mode !== 'browser' &&
@@ -127,6 +134,7 @@
                                 ? { exact: 'all' }
                                 : true,
                     });
+                    ensureCurrent();
                     if (readSettings(track).noiseSuppression === true)
                         throw new Error(
                             'browser-noise-suppression-still-enabled'
@@ -146,6 +154,8 @@
             } catch (error) {
                 stopStream(rawStream);
                 throw error;
+            } finally {
+                pendingCaptures.delete(rawStream);
             }
         };
 
@@ -166,8 +176,8 @@
             });
             return library;
         };
-        const waitForProcessor = (node) =>
-            bounded(
+        const waitForProcessor = (node, wait = bounded) =>
+            wait(
                 new Promise((resolve, reject) => {
                     node.port.onmessage = ({ data }) => {
                         if (data?.type === 'ready') resolve(data);
@@ -244,10 +254,26 @@
             if (pipeline.ownsContext) close(pipeline.context);
         };
 
+        const releasePreparation = (pipeline) => {
+            if (pipeline.released) return;
+            pipeline.released = true;
+            pipeline.cancelWaiters.forEach(cancel => cancel());
+            releaseBranch(pipeline);
+            stopStream(pipeline.stream);
+            if (pipeline.ownsContext) close(pipeline.context);
+        };
+        const cancelPendingResources = () => {
+            pendingCaptures.forEach(stream => stopStream(stream));
+            pendingCaptures.clear();
+            pendingPreparations.forEach(releasePreparation);
+            pendingPreparations.clear();
+        };
+
         const prepare = async (
             rawStream,
             request = { mode: 'browser', deviceId: 'default' }
         ) => {
+            const revision = stageRevision;
             const reusable =
                 active?.context.state === 'running' &&
                 active.stream.getAudioTracks()[0]?.readyState === 'live';
@@ -260,18 +286,42 @@
             }
             const pipeline = {
                 context,
+                cancelWaiters: new Set(),
                 ownsContext: !reusable,
                 rawStream,
                 ...captures.get(rawStream),
                 request,
             };
+            pendingPreparations.add(pipeline);
+            const ensureCurrent = () => {
+                if (pipeline.released || revision !== stageRevision)
+                    throw Object.assign(new Error('superseded-audio-preparation'), { name: 'AbortError' });
+            };
+            const wait = (promise, ms, message) => new Promise((resolve, reject) => {
+                let settled = false, timer;
+                const finish = (complete, value) => {
+                    if (settled) return;
+                    settled = true;
+                    global.clearTimeout(timer);
+                    pipeline.cancelWaiters.delete(cancel);
+                    complete(value);
+                };
+                const cancel = () => finish(reject,
+                    Object.assign(new Error('superseded-audio-preparation'), { name: 'AbortError' }));
+                pipeline.cancelWaiters.add(cancel);
+                if (ms !== undefined)
+                    timer = global.setTimeout(() => finish(reject, new Error(message)), ms);
+                Promise.resolve(promise).then(value => finish(resolve, value), error => finish(reject, error));
+                if (pipeline.released) cancel();
+            });
             try {
                 if (context.state !== 'running')
-                    await bounded(
+                    await wait(
                         Promise.resolve(context.resume()),
                         1500,
                         'microphone-audio-context-timeout'
                     );
+                ensureCurrent();
                 if (context.state !== 'running')
                     throw new Error('microphone-audio-context-not-running');
                 pipeline.source = context.createMediaStreamSource(rawStream);
@@ -286,7 +336,8 @@
                 if (request.mode === 'rnnoise') {
                     if (!supportsRnnoise() || context.sampleRate !== 48000)
                         throw new Error('rnnoise-unsupported');
-                    const { api, wasmBinary } = await loadRnnoise();
+                    const { api, wasmBinary } = await wait(loadRnnoise());
+                    ensureCurrent();
                     if (!modules.has(context))
                         modules.set(
                             context,
@@ -299,14 +350,16 @@
                                     throw error;
                                 })
                         );
-                    await modules.get(context);
+                    await wait(modules.get(context));
+                    ensureCurrent();
                     pipeline.processor = new api.RnnoiseWorkletNode(context, {
                         wasmBinary,
                         maxChannels: 1,
                     });
                     pipeline.processor.channelCount = 1;
                     pipeline.processor.channelCountMode = 'explicit';
-                    const ready = await waitForProcessor(pipeline.processor);
+                    const ready = await waitForProcessor(pipeline.processor, wait);
+                    ensureCurrent();
                     pipeline.engine = ready.engine || 'rnnoise-legacy-2022';
                     pipeline.engineFallback = ready.engineFallback || null;
                     pipeline.probeP95Ms = ready.probeP95Ms ?? null;
@@ -342,11 +395,11 @@
                 pipelines.set(pipeline.stream, pipeline);
                 return pipeline.stream;
             } catch (error) {
-                if (request.mode === 'rnnoise') library = undefined;
-                releaseBranch(pipeline);
-                stopStream(pipeline.stream);
-                if (pipeline.ownsContext) close(context);
+                if (request.mode === 'rnnoise' && !pipeline.released && revision === stageRevision) library = undefined;
+                releasePreparation(pipeline);
                 throw error;
+            } finally {
+                pendingPreparations.delete(pipeline);
             }
         };
 
@@ -370,6 +423,7 @@
         };
         const stage = (request) => {
             const revision = ++stageRevision;
+            cancelPendingResources();
             const aborted = () =>
                 Object.assign(new Error('superseded-audio-settings'), {
                     name: 'AbortError',
@@ -416,6 +470,7 @@
                         // next queued request, including RNNoise startup failures.
                         if (active === baseline)
                             await restoreActiveConstraints();
+                        if (revision !== stageRevision) throw aborted();
                         throw error;
                     }
                 });
@@ -527,6 +582,7 @@
             },
             cancelPending: () => {
                 stageRevision += 1;
+                cancelPendingResources();
                 staging = Promise.resolve();
             },
             bypassFailedProcessor: (stream) => {

@@ -1,8 +1,8 @@
-// Narrow, pinned source overlay: an explicit authenticated viewer departure
-// releases its slot; broken transports keep Piik's original reconnect grace.
+// Narrow, pinned overlays: explicit departure releases capacity; media library
+// packet traces are opt-in while App samples and real warnings/errors survive.
 // Generated full files stay ignored. The upstream checkout is never mutated.
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 export function preparePiikGoOverlay(source, out) {
     const directory = join(out, 'go-overlay');
@@ -45,6 +45,15 @@ export function preparePiikGoOverlay(source, out) {
         writeFileSync(generated, text);
         Replace[original] = generated;
     }
+    const logging = join(source, 'internal/diagnostics/logging.go');
+    let text = readFileSync(logging, 'utf8').replaceAll('\r\n', '\n');
+    const before = 'logr.FromSlogHandler(slog.Default().With("library", "livekit", "scope", scope).Handler())';
+    if (text.split(before).length !== 2) throw new Error('Piik media logger overlay context changed');
+    text = text.replace(before, 'logr.FromSlogHandler(mediaLogHandler(slog.Default().With("library", "livekit", "scope", scope).Handler()))');
+    const generated = join(directory, 'logging.go');
+    writeFileSync(generated, text);
+    Replace[logging] = generated;
+    Replace[join(source, 'internal/diagnostics/media_log_filter.go')] = resolve(import.meta.dirname, 'piik-media-log-filter.go');
     const manifest = join(directory, 'overlay.json');
     writeFileSync(manifest, JSON.stringify({ Replace }, null, 2));
     return manifest;

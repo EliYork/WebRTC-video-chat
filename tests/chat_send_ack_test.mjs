@@ -26,6 +26,7 @@ test('server confirms accepted chat only and rejects wrong-room, empty and limit
         chatRateLimiter: { allow: () => allow },
         createChatMessageId: () => 'confirmed',
         saveChatMessage: (message) => saved.push(message),
+        chatHistoryStore: { getPersistence: () => ({ state: 'pending', revision: 1 }) },
         io: {
             to: (room) => ({
                 emit: (event, message) =>
@@ -47,6 +48,7 @@ test('server confirms accepted chat only and rejects wrong-room, empty and limit
     const result = send({ roomId: 'lobby', content: 'hello' }, socket);
     assert.equal(result.ok, true);
     assert.equal(result.messageId, 'confirmed');
+    assert.equal(result.persistence.state, 'pending', 'acceptance never claims the file is already saved');
     assert.equal(saved.length, 1);
     assert.equal(delivered[0].room, 'view-chat:lobby');
 });

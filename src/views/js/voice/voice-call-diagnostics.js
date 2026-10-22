@@ -99,8 +99,16 @@
         let timer;
         let saveTimer;
         let copyFeedbackTimer;
+        let disposed = false, copyRevision = 0, copyRequest;
         let pending;
         let pendingOwner;
+        let sampleEpoch = 0, cancelSample;
+        const invalidateSample = () => {
+            sampleEpoch++;
+            const cancel = cancelSample;
+            cancelSample = pending = pendingOwner = undefined;
+            cancel?.();
+        };
         let lastObserved;
         let lastCheckpoint = 0;
         let storageState = '可用';
@@ -207,14 +215,24 @@
             record('状态变化', state);
         };
         const sample = () => {
+            if (disposed) return Promise.resolve(null);
             if (pending && pendingOwner === current) return pending;
             const owned = current;
+            const epoch = sampleEpoch, timeouts = new Set();
+            const isCurrent = () => !disposed && sampleEpoch === epoch && current === owned;
+            let cancel;
+            const cancelled = new Promise(resolve => { cancel = () => resolve(null); });
+            const clearTimeouts = () => { timeouts.forEach(id => global.clearTimeout(id)); timeouts.clear(); };
+            cancelSample = () => { clearTimeouts(); cancel(); };
             const sampleBaselines = baselines;
             pendingOwner = owned;
             const task = (async () => {
                 const local = sanitize(getState());
                 const sources = getSources?.() || [];
-                const shares = await Promise.all(sources.slice(0, 8).map((source) => global.VoiceShareDiagnostics?.sync(source, { force: true })));
+                const shares = await Promise.race([
+                    Promise.all(sources.slice(0, 8).map((source) => global.VoiceShareDiagnostics?.sync(source, { force: true }))), cancelled,
+                ]);
+                if (!isCurrent()) return null;
                 const seen = new Set();
                 const pcs = (getConnections?.() || []).filter((entry) => {
                     const pc = entry?.pc || entry;
@@ -227,9 +245,13 @@
                     let timeout;
                     try {
                         const stats = await Promise.race([
-                            Promise.resolve().then(() => pc.getStats()),
-                            new Promise((_, reject) => { timeout = global.setTimeout(() => reject(new Error('timeout')), 2500); }),
+                            Promise.resolve().then(() => isCurrent() ? pc.getStats() : null), cancelled,
+                            new Promise((_, reject) => {
+                                timeout = global.setTimeout(() => reject(new Error('timeout')), 2500);
+                                timeouts.add(timeout);
+                            }),
                         ]);
+                        if (!isCurrent()) return null;
                         const reports = [...stats.values()];
                         const previous = sampleBaselines.get(pc) || new Map();
                         const next = new Map();
@@ -243,8 +265,9 @@
                         sampleBaselines.set(pc, next);
                         return { 序号: index + 1, 参与者序号: entry.ordinal || null, 连接用途: entry.purpose || null, 路径: pc.screenRoute === 'SFU' ? 'SFU' : 'P2P', 连接状态: pc.connectionState || null, ICE状态: pc.iceConnectionState || null, 音频流: audio };
                     } catch { return { 序号: index + 1, 状态: '统计读取失败或超时' }; }
-                    finally { global.clearTimeout(timeout); }
+                    finally { global.clearTimeout(timeout); timeouts.delete(timeout); }
                 }));
+                if (!isCurrent()) return null;
                 const snapshot = sanitize({ 采样时间: new Date().toISOString(), 浏览器: browserInfo(), ...local, 共享: shares.filter(Boolean), 连接: connections });
                 if (owned && current === owned) {
                     // Reuse the existing SFU health decision and ordinal. No second
@@ -267,18 +290,22 @@
                     saveSoon();
                 }
                 return snapshot;
-            })().finally(() => { if (pending === task) pending = null; });
+            })().finally(() => {
+                clearTimeouts();
+                if (pending === task) { pending = null; cancelSample = undefined; }
+            });
             pending = task;
             return pending;
         };
         const tick = async () => {
             const owned = current;
-            await sample().catch(() => record('采样失败', {}));
+            await sample().catch(() => { if (!disposed && current === owned) record('采样失败', {}); });
             if (current !== owned || !owned) return;
             checkpoint();
             timer = global.setTimeout(tick, Date.now() - Date.parse(owned.开始时间) < 15000 && !global.document.hidden ? 1000 : 5000);
         };
         const end = (reason = '离开语音') => {
+            invalidateSample();
             if (!current) return;
             [...shareStates.keys()].forEach(endShare);
             record('通话结束', { 状态: reason });
@@ -291,6 +318,7 @@
             persist();
         };
         const start = () => {
+            if (disposed) return;
             end('开始新通话');
             baselines = new WeakMap();
             shareStates.clear();
@@ -306,7 +334,9 @@
             void tick();
         };
         const report = async () => {
+            const owned = current, epoch = sampleEpoch;
             const state = await sample();
+            if (disposed || current !== owned || sampleEpoch !== epoch) throw new Error('session-changed');
             return {
                 ...versionInfo(),
                 // Keep failure evidence ahead of large histories in the relay's
@@ -363,28 +393,42 @@
                 未响应原因: remote?.ok ? null : remote?.reason || 'collection-failed', 未收集人数: remote?.omitted || 0 };
         };
         const copyCombined = async (button) => {
-            if (button?.disabled) return;
+            if (disposed || copyRequest || button?.disabled) return;
+            const revision = ++copyRevision, owned = current, generation = getState()?.会话?.generation;
+            const isCurrent = () => !disposed && revision === copyRevision;
+            const sameSession = () => current === owned && getState()?.会话?.generation === generation;
+            copyRequest = { button };
             global.clearTimeout(copyFeedbackTimer);
             if (button) { button.disabled = true; button.setAttribute('aria-busy', 'true'); button.textContent = '正在收集诊断…'; }
             try {
                 const data = await collectCombined();
+                if (!isCurrent()) return;
+                if (!sameSession()) throw new Error('session-changed');
                 const text = JSON.stringify(data, null, 2);
                 try {
                     if (global.EliYorkDesktop?.writeClipboardText)
                         await global.EliYorkDesktop.writeClipboardText(text);
                     else await global.navigator.clipboard.writeText(text);
+                    if (!isCurrent()) return;
+                    if (!sameSession()) throw new Error('session-changed');
                     if (button) button.textContent = '诊断已复制';
                 }
                 catch {
+                    if (!isCurrent()) return;
+                    if (!sameSession()) throw new Error('session-changed');
                     showText(text);
                     if (button) button.textContent = '请在日志窗口手动复制';
                 }
-            } catch { if (button) button.textContent = '会话已变化，请重试'; }
+            } catch { if (isCurrent() && button) button.textContent = '会话已变化，请重试'; }
             finally {
-                if (button) {
+                if (isCurrent()) copyRequest = undefined;
+                if (isCurrent() && button) {
                     button.disabled = false;
                     button.setAttribute('aria-busy', 'false');
-                    copyFeedbackTimer = global.setTimeout(() => { button.textContent = '复制诊断'; copyFeedbackTimer = null; }, 2000);
+                    copyFeedbackTimer = global.setTimeout(() => {
+                        if (!isCurrent()) return;
+                        button.textContent = '复制诊断'; copyFeedbackTimer = null;
+                    }, 2000);
                 }
             }
         };
@@ -426,7 +470,16 @@
                 ...options,
             }),
             clearLogs() { sessions = current ? [current] : []; persist(); notifyLogs(); },
-            destroy() { end('页面关闭'); global.clearTimeout(copyFeedbackTimer); socket?.off?.('voice:diagnostics:sample', handleRequest); },
+            destroy() {
+                if (disposed) return;
+                disposed = true; copyRevision++;
+                const button = copyRequest?.button;
+                if (button) {
+                    button.disabled = false; button.setAttribute('aria-busy', 'false'); button.textContent = '复制诊断';
+                }
+                copyRequest = undefined;
+                end('页面关闭'); global.clearTimeout(copyFeedbackTimer); socket?.off?.('voice:diagnostics:sample', handleRequest);
+            },
         };
     };
     global.VoiceCallDiagnostics = { createRuntime, audioSummary, compactReport, versionInfo };

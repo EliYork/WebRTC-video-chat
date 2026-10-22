@@ -10,9 +10,13 @@ const fixture = (options = {}) => {
         constraints = [],
         processors = [];
     const events = [];
+    const pendingTimers = new Set();
     let failCapture,
         failProcessor = false,
         captureGate,
+        libraryGate,
+        moduleGate,
+        processorGate,
         gain = 100,
         speechGate = true,
         loads = 0;
@@ -29,7 +33,14 @@ const fixture = (options = {}) => {
         stream?.getTracks().forEach((track) => {
             track.readyState = 'ended';
         });
-    const window = { setTimeout, clearTimeout };
+    const window = {
+        setTimeout: (callback, ms) => {
+            const timer = setTimeout(() => { pendingTimers.delete(timer); callback(); }, ms);
+            pendingTimers.add(timer);
+            return timer;
+        },
+        clearTimeout: timer => { pendingTimers.delete(timer); clearTimeout(timer); },
+    };
     for (const name of [
         'voice-audio-processing',
         'voice-audio-settings-controller',
@@ -135,6 +146,9 @@ const fixture = (options = {}) => {
                 audioWorklet: {
                     addModule: async () => {
                         context.modules++;
+                        const gate = moduleGate;
+                        moduleGate = undefined;
+                        await gate;
                     },
                 },
             };
@@ -144,6 +158,9 @@ const fixture = (options = {}) => {
         createGain: (_, value) => ({ ...node(), gain: { value } }),
         loadLibrary: async () => {
             loads++;
+            const gate = libraryGate;
+            libraryGate = undefined;
+            await gate;
             return {
                 loadRnnoise: async () => new ArrayBuffer(8),
                 RnnoiseWorkletNode: class {
@@ -157,7 +174,10 @@ const fixture = (options = {}) => {
                             })),
                         };
                         processors.push(this);
-                        queueMicrotask(() =>
+                        const gate = processorGate;
+                        processorGate = undefined;
+                        queueMicrotask(async () => {
+                            await gate;
                             this.port.onmessage?.({
                                 data: {
                                     type: failProcessor ? 'error' : 'ready',
@@ -165,8 +185,8 @@ const fixture = (options = {}) => {
                                     speechGate: options.noSpeechGate !== true,
                                     speechGateEnabled: true,
                                 },
-                            })
-                        );
+                            });
+                        });
                     }
                     destroy() {
                         this.destroyed = true;
@@ -178,6 +198,7 @@ const fixture = (options = {}) => {
     });
     return {
         runtime,
+        pendingTimers,
         window,
         contexts,
         captures,
@@ -206,6 +227,21 @@ const fixture = (options = {}) => {
             captureGate = new Promise((done) => {
                 resolve = done;
             });
+            return resolve;
+        },
+        blockLibrary: () => {
+            let resolve;
+            libraryGate = new Promise(done => { resolve = done; });
+            return resolve;
+        },
+        blockModule: () => {
+            let resolve;
+            moduleGate = new Promise(done => { resolve = done; });
+            return resolve;
+        },
+        blockProcessor: () => {
+            let resolve;
+            processorGate = new Promise(done => { resolve = done; });
             return resolve;
         },
         async start(mode = 'browser', deviceId = 'default') {
@@ -499,6 +535,97 @@ test('a cancelled late permission result cannot configure or dispose the newly j
     assert.equal(f.captures[1].track.readyState, 'live');
     assert.equal(f.contexts[0].state, 'running');
     f.runtime.dispose(stream);
+});
+
+test('cancelling model initialization immediately releases the candidate and preserves any adopted audio', async () => {
+    await Promise.all([false, true].map(async (reuseActive) => {
+        const f = fixture();
+        const active = reuseActive ? await f.start('browser') : undefined;
+        if (active) active.getAudioTracks()[0].enabled = false;
+        const releaseLibrary = f.blockLibrary();
+        const pending = f.runtime.stage({ mode: 'rnnoise', deviceId: 'candidate' });
+        let completed = false;
+        const rejected = assert.rejects(pending, { name: 'AbortError' }).then(() => { completed = true; });
+        await flush();
+        const capture = f.captures.at(-1);
+        assert.equal(capture.track.readyState, 'live');
+        f.runtime.cancelPending();
+        try {
+            assert.equal(capture.track.readyState, 'ended');
+            await flush();
+            assert.equal(completed, true, 'cancel must complete without waiting for the model');
+            assert.equal(f.contexts[0].state, reuseActive ? 'running' : 'closed');
+            if (active) {
+                assert.equal(active.getAudioTracks()[0].readyState, 'live');
+                assert.equal(active.getAudioTracks()[0].enabled, false);
+                assert.equal(f.captures[0].track.readyState, 'live');
+            }
+        } finally {
+            releaseLibrary();
+            await rejected;
+            if (active) f.runtime.dispose(active);
+        }
+        assert.equal(f.processors.length, 0, 'cancelled initialization cannot build a late worklet');
+    }));
+});
+
+test('a newer settings request immediately releases obsolete initialization while retaining the adopted output', async () => {
+    const f = fixture();
+    const active = await f.start('browser');
+    active.getAudioTracks()[0].enabled = false;
+    const releaseLibrary = f.blockLibrary();
+    const old = f.runtime.stage({ mode: 'rnnoise', deviceId: 'obsolete' });
+    const rejected = assert.rejects(old, { name: 'AbortError' });
+    await flush();
+    let advanced = false;
+    const next = f.runtime.stage({ mode: 'off', deviceId: 'current' }).then(stream => { advanced = true; return stream; });
+    try {
+        assert.equal(f.captures[1].track.readyState, 'ended');
+        assert.equal(f.captures[0].track.readyState, 'live');
+        assert.equal(active.getAudioTracks()[0].readyState, 'live');
+        assert.equal(f.contexts[0].state, 'running');
+        await flush();
+        assert.equal(advanced, true, 'current settings must not wait for an obsolete model load');
+    } finally {
+        releaseLibrary();
+        await rejected;
+    }
+    assert.equal(f.runtime.adopt(await next), active);
+    assert.equal(active.getAudioTracks()[0].enabled, false);
+    assert.equal(f.processors.length, 0);
+    assert.equal(f.captures[2].track.readyState, 'live');
+    f.runtime.dispose(active);
+});
+
+test('obsolete module and processor initialization cannot delay newer browser audio settings', async () => {
+    await Promise.all(['module', 'processor'].map(async phase => {
+        const f = fixture();
+        const active = await f.start('browser');
+        const release = phase === 'module' ? f.blockModule() : f.blockProcessor();
+        const old = f.runtime.stage({ mode: 'rnnoise', deviceId: 'old' });
+        const rejected = assert.rejects(old, { name: 'AbortError' });
+        await flush();
+        assert.equal(f.contexts[0].modules, 1);
+        if (phase === 'processor') assert.equal(f.processors.length, 1);
+        let completed = false;
+        const next = f.runtime.stage({ mode: 'off', deviceId: 'new' }).then(stream => {
+            completed = true;
+            return stream;
+        });
+        try {
+            await flush();
+            assert.equal(completed, true, `new settings waited for obsolete ${phase}`);
+            assert.equal(f.runtime.adopt(await next), active);
+            assert.equal(f.captures.at(-1).track.readyState, 'live');
+            assert.equal(f.pendingTimers.size, 0, 'obsolete initialization must release its timeout');
+            if (phase === 'processor') assert.equal(f.processors[0].destroyed, true);
+        } finally {
+            release();
+            await rejected;
+            await next;
+            f.runtime.dispose(active);
+        }
+    }));
 });
 
 test('VAD keyboard suppression toggles on the existing processor and survives device changes/mute', async () => {

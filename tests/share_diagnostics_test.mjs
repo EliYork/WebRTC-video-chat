@@ -378,3 +378,243 @@ test('Piik derived connections replace unrelated PeerJS stats without collecting
         piikConnections, pc: { getStats() { assert.fail('must not query voice connection'); } } }, { force: true });
     assert.equal(result.连接, piikConnections);
 });
+
+test('copying diagnostics immediately after a sample cannot turn one frame into a 60 FPS claim', async () => {
+    const { api, window } = load();
+    let now = 0, callback, dropped = 0;
+    window.performance = { now: () => now };
+    const video = { requestVideoFrameCallback(fn) { callback = fn; return 1; }, cancelVideoFrameCallback() {},
+        getVideoPlaybackQuality() { return { droppedVideoFrames: dropped }; } };
+    const input = { tile: new Element(), video, isScreenSharing: true };
+    const read = () => api.sync(input, { force: true });
+    await read();
+    callback(1000, { presentedFrames: 60 }); now = 1000; await read();
+    callback(2000, { presentedFrames: 110, processingDuration: 0.015,
+        receiveTime: 1975, presentationTime: 1990, expectedDisplayTime: 1999 }); now = 2000; dropped = 10;
+    const measured = (await read()).播放画面;
+    assert.equal(measured.提交合成器帧率, 50);
+    assert.equal(measured.最近帧解码准备_ms, 15);
+    assert.equal(measured.最近帧收齐到提交_ms, 15);
+    assert.equal(measured.最近帧回调滞后_ms, 1);
+    callback(2016, { presentedFrames: 111 }); now = 2016;
+    const immediate = await read();
+    assert.equal(immediate.播放画面.提交合成器帧率, null);
+    assert.equal(immediate.播放画面.区间播放丢帧, null);
+    callback(3000, { presentedFrames: 160 }); now = 3000; dropped = 20;
+    const next = await read();
+    assert.equal(next.播放画面.提交合成器帧率, 50, 'short read must not consume the baseline');
+    assert.equal(next.播放画面.区间播放丢帧, 10);
+    assert.equal(next.播放画面.播放采样间隔_ms, 1000);
+    api.remove(input.tile);
+});
+
+function controlledReads() {
+    const context = load();
+    const timers = new Map();
+    let nextTimer = 0;
+    context.window.setTimeout = (fn, delay) => {
+        const id = ++nextTimer;
+        timers.set(id, { fn, delay });
+        return id;
+    };
+    context.window.clearTimeout = id => timers.delete(id);
+    const requests = [];
+    const pc = { getStats: () => new Promise((resolve, reject) => requests.push({ resolve, reject })) };
+    const input = { tile: new Element(), isScreenSharing: true, stream: {}, pc };
+    return { ...context, timers, requests, input };
+}
+
+for (const outcome of ['resolve', 'reject']) {
+    test(`removing a share settles its pending stats before late ${outcome} and releases timers`, async () => {
+        const { api, timers, requests, input, window } = controlledReads();
+        let observed = 0, published = 0, settled = false;
+        window.VoiceScreenCodecs = { observeConnection: () => observed++ };
+        input.onSample = () => published++;
+        const pending = api.sync(input, { force: true });
+        pending.then(() => { settled = true; });
+        await flush();
+        assert.equal(timers.size, 1);
+        api.remove(input.tile);
+        await flush();
+        const beforeLate = { settled, timers: timers.size };
+        requests[0][outcome](outcome === 'resolve' ? new Map() : Error('late private stats'));
+        const result = await pending;
+        await flush();
+        assert.deepEqual(beforeLate, { settled: true, timers: 0 });
+        assert.equal(result, undefined);
+        assert.equal(observed, 0);
+        assert.equal(published, 0);
+        assert.equal(api.getCached(input.tile), undefined);
+    });
+}
+
+test('replacement starts new stats immediately and old cleanup cannot release its pending ownership', async () => {
+    const { api, timers, requests, input } = controlledReads();
+    const old = api.sync(input, { force: true });
+    await flush();
+    const next = { ...input, stream: {} };
+    const current = api.sync(next, { force: true });
+    await flush();
+    const beforeLate = { reads: requests.length, timers: timers.size, distinct: current !== old };
+    requests[0].resolve(new Map());
+    await flush();
+    const repeated = api.sync(next, { force: true });
+    await flush();
+    // Clean up even on the original implementation, which reuses the old read.
+    for (const request of requests) request.resolve(new Map());
+    await repeated;
+    await current;
+    api.remove(input.tile);
+    assert.deepEqual(beforeLate, { reads: 2, timers: 1, distinct: true });
+    assert.equal(repeated, current, 'old finally must not clear the current busy flag');
+    assert.equal(await old, undefined);
+    assert.equal(timers.size, 0);
+});
+
+test('removal before the stats microtask prevents querying the ended connection', async () => {
+    const { api, timers, requests, input } = controlledReads();
+    const pending = api.sync(input, { force: true });
+    api.remove(input.tile);
+    await flush();
+    const reads = requests.length;
+    for (const request of requests) request.resolve(new Map());
+    await pending;
+    assert.equal(reads, 0);
+    assert.equal(timers.size, 0);
+});
+
+test('removal releases every pending outgoing stats read', async () => {
+    const { api, timers, requests, input } = controlledReads();
+    const outgoing = { ...input, isLocal: true, outgoingConnections: [input.pc, input.pc] };
+    let settled = false;
+    const pending = api.sync(outgoing, { force: true });
+    pending.then(() => { settled = true; });
+    await flush();
+    assert.equal(timers.size, 2);
+    api.remove(input.tile);
+    await flush();
+    const beforeLate = { settled, timers: timers.size };
+    for (const request of requests) request.resolve(new Map());
+    await pending;
+    assert.deepEqual(beforeLate, { settled: true, timers: 0 });
+});
+
+test('current stats timeout is bounded and a following sample can recover', async () => {
+    const { api, timers, requests, input } = controlledReads();
+    const pending = api.sync(input, { force: true });
+    await flush();
+    const [timerId, timer] = [...timers][0];
+    assert.equal(timer.delay, 2500);
+    timers.delete(timerId);
+    timer.fn();
+    assert.match((await pending).连接[0].状态, /统计读取失败或超时/);
+    const next = api.sync(input, { force: true });
+    await flush();
+    requests[1].resolve(new Map());
+    assert.equal((await next).连接[0].状态, '等待视频统计');
+    requests[0].reject(Error('late timeout rejection'));
+    await flush();
+    api.remove(input.tile);
+    assert.equal(timers.size, 0);
+});
+
+function frameReads() {
+    const context = load();
+    let now = 0, nextId = 0;
+    const scheduled = [], cancelled = [];
+    context.window.performance = { now: () => now };
+    const video = () => ({
+        requestVideoFrameCallback(fn) {
+            const id = ++nextId;
+            scheduled.push({ id, fn, video: this });
+            return id;
+        },
+        cancelVideoFrameCallback(id) { cancelled.push({ id, video: this }); },
+    });
+    const input = { tile: new Element(), video: video(), stream: {}, isScreenSharing: true };
+    return { ...context, input, video, scheduled, cancelled, setNow: value => { now = value; } };
+}
+
+test('a late frame from a replaced video cannot erase the current callback handle', async () => {
+    const { api, input, video, scheduled, cancelled } = frameReads();
+    await api.sync(input, { force: true });
+    const old = scheduled.at(-1);
+    input.video = video();
+    await api.sync(input, { force: true });
+    const current = scheduled.at(-1);
+    old.fn(1000, { presentedFrames: 900 });
+    await api.sync(input, { force: true });
+    const beforeRemoval = scheduled.length;
+    api.remove(input.tile);
+    assert.equal(beforeRemoval, 2, 'old callback must not cause another current callback to be registered');
+    assert.equal(cancelled.at(-1).id, current.id);
+    assert.equal(cancelled.at(-1).video, input.video);
+});
+
+test('A to B to A video reuse cannot revive the first video callback', async () => {
+    const { api, input, video, scheduled, setNow } = frameReads();
+    const firstVideo = input.video;
+    await api.sync(input, { force: true });
+    const old = scheduled.at(-1);
+    input.video = video(); await api.sync(input, { force: true });
+    input.video = firstVideo; await api.sync(input, { force: true });
+    const current = scheduled.at(-1);
+    old.fn(1000, { presentedFrames: 900, processingDuration: 0.9 }); setNow(1001);
+    const stale = await api.sync(input, { force: true });
+    const afterOld = scheduled.length;
+    current.fn(2000, { presentedFrames: 60 }); setNow(2001);
+    const first = await api.sync(input, { force: true });
+    scheduled.at(-1).fn(3000, { presentedFrames: 120 }); setNow(3001);
+    const measured = await api.sync(input, { force: true });
+    api.remove(input.tile);
+    assert.equal(afterOld, 3, 'obsolete A callback must not start a second callback chain');
+    assert.equal(stale.播放画面.最近帧解码准备_ms, null);
+    assert.equal(first.播放画面.提交合成器帧率, null);
+    assert.equal(measured.播放画面.提交合成器帧率, 60);
+});
+
+test('changing streams on the same video discards the previously registered frame callback', async () => {
+    const { api, input, scheduled, cancelled, setNow } = frameReads();
+    await api.sync(input, { force: true });
+    const old = scheduled.at(-1);
+    input.stream = {};
+    await api.sync(input, { force: true });
+    const registrations = scheduled.length;
+    const oldCancelled = cancelled.some(row => row.id === old.id);
+    old.fn(1000, { presentedFrames: 900, processingDuration: 0.9 }); setNow(1001);
+    const result = await api.sync(input, { force: true });
+    api.remove(input.tile);
+    assert.equal(registrations, 2);
+    assert.equal(oldCancelled, true);
+    assert.equal(result.播放画面.最近帧解码准备_ms, null);
+    assert.equal(scheduled.length, 2);
+});
+
+test('closing and reopening sampling on the same video cannot revive its cancelled callback', async () => {
+    const { api, input, scheduled, setNow } = frameReads();
+    api.sync(input);
+    const panel = input.tile.children[0]; panel.open = true;
+    await api.sync(input);
+    const old = scheduled.at(-1);
+    panel.open = false; panel.listeners.toggle();
+    panel.open = true; await api.sync(input);
+    old.fn(1000, { presentedFrames: 900, processingDuration: 0.9 }); setNow(1001);
+    const snapshot = await api.sync(input);
+    const registrations = scheduled.length;
+    api.remove(input.tile);
+    assert.equal(registrations, 2);
+    assert.equal(snapshot.播放画面.最近帧解码准备_ms, null);
+});
+
+test('a removed collector frame cannot disturb a new collector on the same tile and video', async () => {
+    const { api, input, scheduled, cancelled } = frameReads();
+    await api.sync(input, { force: true });
+    const old = scheduled.at(-1); api.remove(input.tile);
+    await api.sync(input, { force: true });
+    const current = scheduled.at(-1);
+    old.fn(1000, { presentedFrames: 900 });
+    await api.sync(input, { force: true });
+    api.remove(input.tile);
+    assert.equal(scheduled.length, 2);
+    assert.equal(cancelled.at(-1).id, current.id);
+});

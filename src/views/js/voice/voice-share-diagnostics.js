@@ -191,12 +191,22 @@
         };
     };
     const panels = new WeakMap();
+    const stopFrames = (state) => {
+        const video = state.video;
+        const callback = state.frameCallback;
+        // Invalidate ownership before asking the browser to cancel the callback.
+        state.frameOwner = null;
+        state.frameCallback = null;
+        state.video = null;
+        if (callback != null) video?.cancelVideoFrameCallback?.(callback);
+    };
     const remove = (tile, { ended = true } = {}) => {
         const state = panels.get(tile);
         if (!state) return;
         state.disposed = true;
+        state.cancelPending?.();
         global.document.removeEventListener?.('visibilitychange', state.visibilityChanged);
-        state.video?.cancelVideoFrameCallback?.(state.frameCallback);
+        stopFrames(state);
         state.view?.remove();
         global.VoicePlayerMenu?.remove(tile);
         state.panel.remove();
@@ -245,10 +255,7 @@
             global.document.dispatchEvent?.(new global.CustomEvent('voice:share-started', { detail: { tile, isLocal: source.isLocal } }));
             panel.addEventListener('toggle', () => {
                 if (!panel.open && !state.autoSampling) {
-                    state.video?.cancelVideoFrameCallback?.(
-                        state.frameCallback
-                    );
-                    state.video = null;
+                    stopFrames(state);
                     state.playbackBaseline = null;
                     state.presentation = null;
                     state.baselines = new WeakMap();
@@ -256,6 +263,10 @@
             });
         }
         if (state.sourceStream !== source.stream || state.sourcePc !== source.pc || state.sourceVideo !== source.video) {
+            state.cancelPending?.();
+            stopFrames(state);
+            state.busy = false;
+            state.pending = undefined;
             state.sourceStream = source.stream;
             state.sourcePc = source.pc;
             state.sourceVideo = source.video;
@@ -272,18 +283,29 @@
         if (force) state.autoSampling = true;
         state.busy = true;
         const epoch = state.epoch;
+        const isCurrent = () => !state.disposed && panels.get(tile) === state && state.epoch === epoch;
+        const timers = new Set();
+        const cancelled = new Promise(resolve => {
+            state.cancelPending = () => {
+                for (const timer of timers) global.clearTimeout(timer);
+                timers.clear();
+                resolve();
+            };
+        });
         if (state.video !== source.video || state.frameCallback == null) {
-            state.video?.cancelVideoFrameCallback?.(state.frameCallback);
+            stopFrames(state);
             state.video = source.video;
             state.presentation = null;
             state.playbackBaseline = null;
             const video = source.video;
             const frame = (timestamp, metadata) => {
+                if (state.frameOwner !== frame) return;
                 if (
                     state.disposed ||
                     state.video !== video ||
                     (!state.panel.open && !state.autoSampling && !state.view?.isVisible())
                 ) {
+                    state.frameOwner = null;
                     state.frameCallback = null;
                     return;
                 }
@@ -291,9 +313,14 @@
                 // time. Visibility changes discard the background counter jump.
                 state.presentation = global.document.hidden ? null : {
                     id: 'presentation', timestamp, presented: metadata.presentedFrames,
+                    decodeReadyMs: number(metadata.processingDuration) === null ? null : rounded(metadata.processingDuration * 1000),
+                    receiveToPresentMs: number(metadata.receiveTime) === null || number(metadata.presentationTime) === null || metadata.presentationTime < metadata.receiveTime
+                        ? null : rounded(metadata.presentationTime - metadata.receiveTime),
+                    callbackLateMs: number(metadata.expectedDisplayTime) === null ? null : rounded(Math.max(0, timestamp - metadata.expectedDisplayTime)),
                 };
                 state.frameCallback = video.requestVideoFrameCallback(frame);
             };
+            state.frameOwner = frame;
             state.frameCallback = video?.requestVideoFrameCallback?.(frame);
         }
         const now = global.performance?.now?.() ?? Date.now();
@@ -306,18 +333,21 @@
         const presentation = !global.document.hidden && state.presentation &&
             now - state.presentation.timestamp <= 2500 ? state.presentation : null;
         const lastPlayback = state.playbackBaseline;
+        const presentationWindow = presentation && lastPlayback ? presentation.timestamp - lastPlayback.timestamp : null;
         const presentedDelta = presentation ? delta(presentation, lastPlayback, 'presented') : null;
         const displayedFps =
-            presentedDelta === null
+            presentedDelta === null || presentationWindow < 1000
                 ? null
                 : rounded(
                       (presentedDelta * 1000) /
                           (presentation.timestamp - lastPlayback.timestamp)
                   );
-        if (presentation) state.playbackBaseline = presentation;
-        else state.playbackBaseline = null;
-        const dropped = global.document.hidden ? null : delta(playback, state.dropBaseline, 'dropped');
-        state.dropBaseline = global.document.hidden ? null : playback;
+        if (presentation && (!lastPlayback || presentationWindow >= 1000 || presentation.presented < lastPlayback.presented)) state.playbackBaseline = presentation;
+        else if (!presentation) state.playbackBaseline = null;
+        const dropWindow = state.dropBaseline ? playback.timestamp - state.dropBaseline.timestamp : null;
+        const dropped = global.document.hidden || dropWindow < 1000 ? null : delta(playback, state.dropBaseline, 'dropped');
+        if (global.document.hidden) state.dropBaseline = null;
+        else if (!state.dropBaseline || dropWindow >= 1000 || playback.dropped < state.dropBaseline.dropped) state.dropBaseline = playback;
         const track = source.stream
             ?.getVideoTracks?.()
             .find((item) => item.readyState !== 'ended');
@@ -369,6 +399,11 @@
                 高: number(source.video?.videoHeight),
                 提交合成器帧率: displayedFps,
                 区间播放丢帧: dropped,
+                播放采样间隔_ms: displayedFps === null ? null : rounded(presentationWindow),
+                播放丢帧采样间隔_ms: dropped === null ? null : rounded(dropWindow),
+                最近帧解码准备_ms: presentation?.decodeReadyMs ?? null,
+                最近帧收齐到提交_ms: presentation?.receiveToPresentMs ?? null,
+                最近帧回调滞后_ms: presentation?.callbackLateMs ?? null,
                 暂停: Boolean(source.video?.paused),
                 就绪状态: number(source.video?.readyState),
                 页面后台: Boolean(global.document.hidden),
@@ -379,27 +414,34 @@
         };
         // One bounded read per connection. A stalled browser promise must not
         // freeze subsequent samples or retain an ended share's UI forever.
-        const readStats = (pc) =>
+        const readStats = (pc) => Promise.race([
+            cancelled,
             new Promise((resolve, reject) => {
                 const timer = global.setTimeout(
-                    () => reject(new Error('timeout')),
+                    () => { timers.delete(timer); reject(new Error('timeout')); },
                     2500
                 );
+                timers.add(timer);
                 Promise.resolve()
-                    .then(() => pc.getStats(source.isLocal ? undefined : track))
+                    .then(() => isCurrent() ? pc.getStats(source.isLocal ? undefined : track) : undefined)
                     .then(resolve, reject)
-                    .finally(() => global.clearTimeout(timer));
-            });
-        state.pending = Promise.all(
+                    .finally(() => {
+                        // A late result must not clear a reused timer ID.
+                        if (timers.delete(timer)) global.clearTimeout(timer);
+                    });
+            }),
+        ]);
+        const pending = Promise.all(
             (source.piikConnections ? [] : connections).map(async (pc, index) => {
                 if (!pc?.getStats)
                     return { 序号: index + 1, 状态: '统计暂不可用' };
                 try {
                     const stats = await readStats(pc);
+                    if (!isCurrent()) return undefined;
                     const reports = [];
                     stats.forEach((item) => reports.push(item));
-                    if (!source.isLocal && !state.disposed && state.epoch === epoch) source.routeControl?.observe?.(pc, reports);
-                    if (!state.disposed && state.epoch === epoch) global.VoiceScreenCodecs?.observeConnection?.(pc, reports);
+                    if (!source.isLocal && isCurrent()) source.routeControl?.observe?.(pc, reports);
+                    if (isCurrent()) global.VoiceScreenCodecs?.observeConnection?.(pc, reports);
                     const previous = state.baselines.get(pc) || new Map();
                     const next = new Map();
                     const videoReports = reports.filter(
@@ -424,7 +466,7 @@
                         if (capture) next.set(capture.id, capture);
                         return result;
                     });
-                    if (state.epoch === epoch) state.baselines.set(pc, next);
+                    if (isCurrent()) state.baselines.set(pc, next);
                     return {
                         序号: index + 1,
                         路径: pc.screenRoute === 'SFU' ? 'SFU' : 'P2P',
@@ -437,8 +479,9 @@
                         视频流: streams,
                     };
                 } catch {
-                    if (!state.disposed && state.epoch === epoch) global.VoiceScreenCodecs?.observeConnection?.(pc, []);
-                    if (state.epoch === epoch) state.baselines.delete(pc);
+                    if (!isCurrent()) return undefined;
+                    global.VoiceScreenCodecs?.observeConnection?.(pc, []);
+                    state.baselines.delete(pc);
                     return {
                         序号: index + 1,
                         状态: '统计读取失败或超时，下次重试',
@@ -447,7 +490,7 @@
             })
         )
             .then((results) => {
-                if (!state.disposed && panels.get(tile) === state && state.epoch === epoch) {
+                if (isCurrent()) {
                     snapshot.连接 = source.piikConnections || results;
                     if (state.panel.open) state.output.textContent = JSON.stringify(
                         snapshot,
@@ -459,12 +502,16 @@
                     state.view?.update(snapshot);
                     global.document.dispatchEvent?.(new global.CustomEvent('voice:share-sample', { detail: { tile, snapshot } }));
                 }
-                return state.epoch === epoch ? snapshot : undefined;
+                return isCurrent() ? snapshot : undefined;
             })
             .finally(() => {
-                state.busy = false;
+                if (state.pending === pending) {
+                    state.busy = false;
+                    state.cancelPending = undefined;
+                }
             });
-        return state.pending;
+        state.pending = pending;
+        return pending;
     };
     global.VoiceShareDiagnostics = {
         summarize, sync, remove,

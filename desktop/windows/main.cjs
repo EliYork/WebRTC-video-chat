@@ -4,17 +4,28 @@ const {
     session,
     desktopCapturer,
     ipcMain,
-    dialog,
+    screen,
     Menu,
     webContents,
     clipboard,
     ClipboardItem,
+    Tray,
+    nativeImage,
 } = require('electron');
 const { spawn } = require('node:child_process');
 const { join } = require('node:path');
-const { mkdirSync, appendFileSync, writeFileSync, readFileSync } = require('node:fs');
+const { mkdirSync, writeFileSync, readFileSync } = require('node:fs');
 const { createRefresh, isRefreshKey } = require('./refresh.cjs');
 const { createAbout } = require('./about.cjs');
+const { createPanels } = require('./panels.cjs');
+const { createWindowPreferences } = require('./window-preferences.cjs');
+const { createWindowLifecycle } = require('./window-lifecycle.cjs');
+const { createWindowStartup } = require('./window-startup.cjs');
+const { openRoom } = require('./startup-recovery.cjs');
+const { createNativeRuntime } = require('./native-runtime.cjs');
+const { createFileLog } = require(app.isPackaged
+    ? join(process.resourcesPath, 'file-log.cjs')
+    : '../../src/utils/RotatingFileLog.cjs');
 const smoke = process.argv.includes('--smoke-test');
 // Explicit development preview only; installed clients keep the fixed origin.
 const previewArg = !app.isPackaged && process.argv.find(arg => arg.startsWith('--preview-origin='));
@@ -41,7 +52,22 @@ let mainWindow,
     quitting = false,
     nativeReady,
     nativePort;
-let updates;
+let updates, panels, pendingNotice, windowLifecycle, windowStartup;
+let nativeNeedsRecovery = false;
+function nativeChanged({ state, port }) {
+    nativePort = port;
+    if (quitting) return;
+    if (state === 'failed') nativeNeedsRecovery = true;
+    if (!nativeNeedsRecovery) return;
+    const notice = state === 'ready'
+        ? { title: '共享组件已恢复', detail: '语音和聊天保持原状。需要共享时，请重新选择画面并开始共享。' }
+        : state === 'starting'
+          ? { title: '正在恢复共享组件', detail: '请稍候，语音和聊天仍可继续使用。' }
+          : { title: '原生共享组件不可用', detail: '语音和聊天仍可用。可以单独恢复组件，然后重新选择共享画面。', recover: true };
+    pendingNotice = state === 'ready' ? null : notice;
+    if (state === 'ready') nativeNeedsRecovery = false;
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('voice:notice', notice);
+}
 const mediaAllowed = new Set();
 const trusted = (value) => {
     try {
@@ -52,13 +78,9 @@ const trusted = (value) => {
 };
 const owned = (contents, value) =>
     contents === mainWindow?.webContents && trusted(value);
-function log(text) {
-    appendFileSync(
-        join(app.getPath('userData'), 'desktop.log'),
-        `${new Date().toISOString()} ${text}\n`
-    );
-}
-function startNative() {
+const desktopLog = createFileLog({ filePath: () => join(app.getPath('userData'), 'desktop.log') });
+function log(text) { desktopLog.write(`${new Date().toISOString()} ${text}`); }
+function launchNative() {
     const directory = join(app.getPath('userData'), 'native');
     mkdirSync(directory, { recursive: true });
     const runtime = app.isPackaged
@@ -75,66 +97,53 @@ function startNative() {
     ];
     if (smoke && process.env.ELIYORK_TEST_CAPTURE)
         args.push('--capture-process', process.env.ELIYORK_TEST_CAPTURE);
-    native = spawn(join(runtime, 'piik-app.exe'), args, {
+    native = spawn(smoke && process.env.ELIYORK_TEST_NATIVE || join(runtime, 'piik-app.exe'), args, {
         cwd: runtime,
         windowsHide: true,
         stdio: 'pipe',
         env: { ...process.env, PIIK_CLIENT_GATE_NO_BROWSER: 'true' },
     });
-    const child = native;
-    child.stdin.on('error', () => {});
-    log(`native-start pid=${child.pid}`);
-    let output = '';
-    nativeReady = new Promise((resolveReady, reject) => {
-        child.stdout.on('data', (bytes) => {
-            output = (output + bytes).slice(-65536); // Capability never written to disk or renderer.
-            const endpoint = output
-                .split(/\r?\n/)
-                .find(
-                    (line) =>
-                        line.startsWith('{') && line.includes('instanceToken')
-                );
-            if (endpoint) {
-                nativePort = JSON.parse(endpoint).port;
-                resolveReady();
-            }
-        });
-        child.on('error', reject);
-        child.on('exit', (code) => {
-            log(`native-exit code=${code}`);
-            reject(new Error('原生共享组件已退出，请重启客户端。'));
-            if (!quitting && !smoke)
-                void dialog.showMessageBox(mainWindow, {
-                    type: 'warning',
-                    message: '原生共享组件已退出',
-                    detail: '语音和聊天仍可用。需要原生共享时请重启 EliYork Voice。',
-                });
-        });
-    });
-    // App's structured diagnostics own native stderr; don't persist raw capability-bearing output.
-    child.stderr.on('data', () => {});
-    nativeReady.catch((error) => log(error.message));
+    return native;
 }
-async function stopNative() {
-    if (!native || native.exitCode !== null || native.signalCode !== null)
+function startNative() {
+    nativeReady = nativeRuntime.start();
+    void nativeReady.catch(error => log(`native-unavailable ${error.message}`));
+    return nativeReady;
+}
+async function stopNativeChild(child) {
+    if (!child || !Number.isInteger(child.pid) || child.exitCode !== null || child.signalCode !== null)
         return;
-    const child = native;
-    await new Promise((done) => {
+    await new Promise((done, reject) => {
+        let forced;
+        const finish = error => {
+            clearTimeout(timer); clearTimeout(forced);
+            child.removeListener('exit', exited);
+            if (error) reject(error); else done();
+        };
+        const exited = () => finish();
         const timer = setTimeout(() => {
+            forced = setTimeout(() => finish(Error('原生组件未能退出，请重试恢复。')), 5000);
             const kill = spawn(
                 'taskkill.exe',
                 ['/PID', String(child.pid), '/T', '/F'],
                 { windowsHide: true, stdio: 'ignore' }
             );
-            kill.once('exit', done);
-            kill.once('error', done);
+            kill.once('exit', code => {
+                if (child.exitCode !== null || child.signalCode !== null) finish();
+                else if (code !== 0) finish(Error('原生组件清理失败，请重试恢复。'));
+            });
+            kill.once('error', () => finish(Error('原生组件清理失败，请重试恢复。')));
         }, 8000);
-        child.once('exit', () => {
-            clearTimeout(timer);
-            done();
-        });
-        child.stdin.end('\n');
+        child.once('exit', exited);
+        try { child.stdin.end('\n'); } catch { /* Forced tree cleanup still owns the child. */ }
     });
+}
+const nativeRuntime = createNativeRuntime({ launch: launchNative, stopChild: stopNativeChild, changed: nativeChanged, log });
+const stopNative = () => nativeRuntime.stop();
+async function recoverNative() {
+    if (quitting) return { ok: false };
+    try { await startNative(); return { ok: !quitting }; }
+    catch { return { ok: false }; } // The state notification supplies a retry action.
 }
 async function chooseSource(request, callback) {
     if (
@@ -155,6 +164,11 @@ async function chooseSource(request, callback) {
         modal: true,
         width: 760,
         height: 680,
+        minWidth: 580,
+        minHeight: 480,
+        frame: false,
+        show: false,
+        backgroundColor: '#fbf7f9',
         autoHideMenuBar: true,
         webPreferences: {
             preload: join(__dirname, 'picker-preload.cjs'),
@@ -197,18 +211,19 @@ async function chooseSource(request, callback) {
         })),
         audioRequested: request.audioRequested,
     });
+    window.show();
 }
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
     app.on('second-instance', () => {
-        if (mainWindow) {
-            mainWindow.restore();
-            mainWindow.focus();
-        }
+        windowLifecycle?.restore();
     });
     app.whenReady()
         .then(async () => {
             mkdirSync(app.getPath('userData'), { recursive: true });
+            const windowPreferences = createWindowPreferences(join(app.getPath('userData'), 'window-preferences.json'), log);
+            panels = createPanels({ BrowserWindow, ipcMain, screen, window: () => mainWindow, hidden: smoke, log,
+                preferences: windowPreferences, trayAvailable: () => windowLifecycle?.trayAvailable() || false });
             startNative();
             ipcMain.handle('voice:clipboard-write', async (event, text) => {
                 if (
@@ -250,14 +265,11 @@ else {
                     if (permission !== 'media') return callback(false);
                     if (smoke || mediaAllowed.has(permission))
                         return callback(true);
-                    const result = await dialog.showMessageBox(mainWindow, {
-                        type: 'question',
-                        message: '允许 EliYork Voice 使用麦克风或摄像头？',
+                    const result = await panels.confirm({
+                        title: '允许使用麦克风或摄像头？',
                         detail: '仅授权 voice.eliyork.com；设备仍由频道中的媒体按钮控制。',
-                        buttons: ['允许', '拒绝'],
-                        defaultId: 1,
-                        cancelId: 1,
-                    });
+                        accept: '允许使用', cancel: '暂不允许',
+                    }).catch(() => ({ response: 1 }));
                     if (result.response === 0) mediaAllowed.add(permission);
                     callback(result.response === 0);
                 }
@@ -279,9 +291,11 @@ else {
                 height: 940,
                 minWidth: 800,
                 minHeight: 600,
-                show: !smoke,
-                backgroundColor: '#151923',
+                show: false,
+                backgroundColor: '#fbf7f9',
                 webPreferences: {
+                    // Tray mode must keep channel/media timers running.
+                    backgroundThrottling: false,
                     preload: join(__dirname, 'preload.cjs'),
                     sandbox: true,
                     contextIsolation: true,
@@ -289,21 +303,34 @@ else {
                 },
             });
             mainWindow.webContents.setAudioMuted(smoke);
+            const makeStartup = () => {
+                windowStartup?.dispose();
+                windowStartup = createWindowStartup({
+                    window: mainWindow, hidden: smoke, trusted,
+                    css: readFileSync(join(__dirname, 'titlebar.css'), 'utf8'), log,
+                });
+                return windowStartup;
+            };
             const refreshPage = createRefresh({
                 window: () => mainWindow,
                 blocked: () => quitting || Boolean(picker),
-                confirm: async (win) => (await dialog.showMessageBox(win, {
-                    type: 'question',
-                    message: '刷新频道页面？',
+                confirm: async () => (await panels.confirm({
+                    title: '刷新频道页面？',
                     detail: '刷新会断开当前语音并结束共享。页面加载后需要重新加入语音或开始共享。',
-                    buttons: ['取消', '刷新页面'],
-                    defaultId: 0,
-                    cancelId: 0,
-                    noLink: true,
-                })).response === 1,
+                    accept: '刷新页面', cancel: '留在频道',
+                })).response === 0,
             });
-            const showAbout = createAbout({ app, dialog, window: () => mainWindow,
+            const showAbout = createAbout({ app, panels, window: () => mainWindow,
                 updates: () => updates, origin });
+            windowLifecycle = createWindowLifecycle({
+                window: mainWindow, Tray, Menu,
+                icon: nativeImage.createFromPath(join(__dirname, 'assets/tray.png')),
+                preferences: windowPreferences, panels, showSettings: showAbout,
+                quit: () => app.quit(), isQuitting: () => quitting,
+                beforeHide: () => picker?.close(), log, enableTray: !smoke,
+                canRestore: () => windowStartup?.isReady() || false,
+            });
+            mainWindow.on('session-end', () => { quitting = true; void stopNative().catch(error => log(error.message)); });
             const allowedFrame = (event) =>
                 owned(event.sender, event.senderFrame?.url) &&
                 event.senderFrame === mainWindow.webContents.mainFrame;
@@ -315,9 +342,13 @@ else {
                 if (!allowedFrame(event)) throw Error('Menu denied');
                 Menu.getApplicationMenu()?.items[0]?.submenu?.popup({ window: mainWindow });
             });
-            mainWindow.webContents.on('dom-ready', () => {
-                if (trusted(mainWindow.webContents.getURL()))
-                    void mainWindow.webContents.insertCSS(readFileSync(join(__dirname, 'titlebar.css'), 'utf8'));
+            ipcMain.handle('voice:native-recover', (event) => {
+                if (!allowedFrame(event)) throw Error('Native recovery denied');
+                return recoverNative();
+            });
+            mainWindow.webContents.on('did-finish-load', () => {
+                if (pendingNotice && trusted(mainWindow.webContents.getURL()))
+                    mainWindow.webContents.send('voice:notice', pendingNotice);
             });
             mainWindow.webContents.on('before-input-event', (event, input) => {
                 if (isRefreshKey(input)) {
@@ -343,6 +374,7 @@ else {
             });
             const installUpdate = async () => {
                 quitting = true;
+                windowLifecycle?.dispose();
                 picker?.close();
                 await stopNative();
             };
@@ -360,7 +392,9 @@ else {
                                     label:
                                         updates?.label() || '检查更新（开发预览不可用）',
                                     enabled: Boolean(updates),
-                                    click: () => void updates?.check(),
+                                    click: () => void showAbout().then(() => {
+                                        if (!['available', 'downloaded'].includes(updates?.snapshot().status)) void updates?.check();
+                                    }).catch(error => log(`settings-error ${error.message}`)),
                                 },
                                 { type: 'separator' },
                                 {
@@ -368,6 +402,10 @@ else {
                                     accelerator: 'CmdOrCtrl+R',
                                     click: () =>
                                         void refreshPage().catch((error) => log(`refresh-error ${error.message}`)),
+                                },
+                                {
+                                    label: '恢复原生共享组件',
+                                    click: () => void recoverNative(),
                                 },
                                 {
                                     label: '诊断工具',
@@ -388,15 +426,24 @@ else {
                 updates = require('./updater.cjs').createUpdates({
                     updater: require('electron-updater').autoUpdater,
                     app,
-                    dialog,
                     window: () => mainWindow,
                     log,
                     changed: () => buildMenu(),
                     prepareInstall: installUpdate,
+                    confirmInstall: async (version) => (await panels.confirm({
+                        title: `退出并安装 ${version}？`,
+                        detail: '安装会结束当前语音和屏幕共享，然后重新打开客户端。\n选择稍后，下载好的更新会保留，不会自动安装。',
+                        accept: '退出并安装', cancel: '稍后安装',
+                    })).response === 0,
                 });
             }
             buildMenu();
-            await mainWindow.loadURL(`${origin}/room/lobby`);
+            const opened = await openRoom({
+                url: `${origin}/room/lobby`, createStartup: makeStartup,
+                confirm: options => smoke ? Promise.resolve({ response: 1 }) : panels.confirm(options),
+                cancelled: () => quitting || mainWindow.isDestroyed(), log,
+            });
+            if (!opened) { app.quit(); return; }
             if (smoke) {
                 try {
                     await Promise.race([
@@ -468,26 +515,21 @@ else {
                     result.windowTitle = mainWindow.getTitle();
                     result.menuHidden = !mainWindow.isMenuBarVisible();
                     result.settingsEntry = await mainWindow.webContents.executeJavaScript(`document.querySelector('.desktop-menu')?.textContent.includes('设置')`);
-                    const settingsDialog = dialog.showMessageBox;
-                    try {
-                        dialog.showMessageBox = async (_, options) => {
-                            result.aboutDialog = options.title === '关于与更新' &&
-                                options.detail.includes('客户端版本：') && options.detail.includes('网页版本：');
-                            return {response: options.cancelId};
-                        };
-                        await showAbout();
-                    } finally { dialog.showMessageBox = settingsDialog; }
+                    const settingsWindow = await showAbout();
+                    result.aboutDialog = await settingsWindow.webContents.executeJavaScript(`new Promise(resolve=>{const poll=()=>{const c=document.querySelector('#client-version');if(c?.textContent)resolve(document.querySelector('#window-title').textContent==='关于与更新'&&document.querySelector('#web-version').textContent.length>0);else setTimeout(poll,20)};poll()})`);
+                    result.aboutMuted = settingsWindow.webContents.isAudioMuted();
+                    settingsWindow.close();
                     await mainWindow.webContents.executeJavaScript(`document.querySelector('#stageJoinVoice').click()`);
                     await mainWindow.webContents.executeJavaScript(`new Promise((resolve,reject)=>{const end=Date.now()+10000;const poll=()=>{if(document.querySelector('#destroyPeer').dataset.sessionAction==='hangup')resolve();else if(Date.now()>end)reject(Error('fake voice join failed'));else setTimeout(poll,50)};poll()})`);
-                    const originalConfirm = dialog.showMessageBox;
+                    const originalConfirm = panels.confirm;
                     let confirmations = 0;
                     const originalPid = native.pid;
                     try {
-                        dialog.showMessageBox = async () => { confirmations++; return {response:0}; };
+                        panels.confirm = async () => { confirmations++; return {response:1}; };
                         await mainWindow.webContents.executeJavaScript(`window.__refreshMarker='preserved';document.querySelector('.desktop-refresh').click()`);
                         await new Promise(done => setTimeout(done, 150));
                         result.refreshCancelled = confirmations === 1 && await mainWindow.webContents.executeJavaScript(`window.__refreshMarker==='preserved' && document.querySelector('#destroyPeer').dataset.sessionAction==='hangup'`);
-                        dialog.showMessageBox = async () => { confirmations++; return {response:1}; };
+                        panels.confirm = async () => { confirmations++; return {response:0}; };
                         const reloaded = new Promise(resolve => mainWindow.webContents.once('did-finish-load', resolve));
                         // sendInputEvent targets this hidden test window only.
                         mainWindow.webContents.sendInputEvent({type:'keyDown',keyCode:'R',modifiers:['control']});
@@ -496,9 +538,30 @@ else {
                         await mainWindow.webContents.executeJavaScript(`new Promise((resolve,reject)=>{const end=Date.now()+10000;const poll=()=>{if(document.documentElement.dataset.roomBoot==='ready')resolve();else if(Date.now()>end)reject(Error('reload boot failed'));else setTimeout(poll,50)};poll()})`);
                         result.refreshKeptNative = confirmations === 2 && native.pid === originalPid && await mainWindow.webContents.executeJavaScript(`fetch('http://127.0.0.1:${nativePort}/health').then(r=>r.ok)`);
                     } finally {
-                        dialog.showMessageBox = originalConfirm;
+                        panels.confirm = originalConfirm;
                     }
                     if (!result.refreshCancelled || !result.refreshKeptNative || !result.menuHidden || result.windowTitle !== '语音据点') throw Error(JSON.stringify(result));
+                    // Stop only this isolated App. The page and joined voice
+                    // membership must survive a component-only recovery.
+                    await mainWindow.webContents.executeJavaScript(`document.querySelector('#stageJoinVoice').click()`);
+                    await mainWindow.webContents.executeJavaScript(`new Promise((resolve,reject)=>{const end=Date.now()+10000;const poll=()=>{if(document.querySelector('#main').dataset.voiceState==='joined')resolve();else if(Date.now()>end)reject(Error('voice rejoin before recovery failed'));else setTimeout(poll,50)};poll()})`);
+                    const failedPid = native.pid;
+                    await mainWindow.webContents.executeJavaScript(`window.__nativeRecoveryMarker = 'same-room'`);
+                    await stopNativeChild(native);
+                    await mainWindow.webContents.executeJavaScript(`new Promise((resolve,reject)=>{const end=Date.now()+3000;const poll=()=>{const button=document.querySelector('.desktop-notice button');if(button?.textContent==='恢复共享组件')resolve();else if(Date.now()>end)reject(Error('native recovery notice missing'));else setTimeout(poll,20)};poll()})`);
+                    await mainWindow.webContents.executeJavaScript(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))`);
+                    await new Promise(resolve => setTimeout(resolve, 150));
+                    writeFileSync(join(app.getPath('userData'), 'desktop-native-recovery.png'), (await mainWindow.webContents.capturePage()).toPNG());
+                    await mainWindow.webContents.executeJavaScript(`document.querySelector('.desktop-notice button').click()`);
+                    await mainWindow.webContents.executeJavaScript(`new Promise((resolve,reject)=>{const end=Date.now()+35000;const poll=()=>{if(document.querySelector('.desktop-notice strong')?.textContent==='共享组件已恢复')resolve();else if(Date.now()>end)reject(Error('native recovery notice timeout'));else setTimeout(poll,20)};poll()})`);
+                    result.nativeRecovery = native.pid !== failedPid &&
+                        await mainWindow.webContents.executeJavaScript(`window.__nativeRecoveryMarker === 'same-room' && document.querySelector('#main').dataset.voiceState === 'joined'`);
+                    result.recoveredNativeHealth = await mainWindow.webContents.executeJavaScript(`fetch('http://127.0.0.1:${nativePort}/health').then(r=>r.status)`);
+                    const recoveredPid = native.pid;
+                    await recoverNative();
+                    result.healthyNativeKept = native.pid === recoveredPid;
+                    if (!result.nativeRecovery || result.recoveredNativeHealth !== 200 || !result.healthyNativeKept)
+                        throw Error('Native recovery failed');
                     writeFileSync(join(app.getPath('userData'), 'desktop-chrome.png'), (await mainWindow.webContents.capturePage()).toPNG());
                     // Verify real renderer -> OS clipboard, without exposing or
                     // losing the user's clipboard. Do not restore over a new copy.
@@ -587,10 +650,15 @@ else {
                 app.quit();
             }
         })
-        .catch((error) => {
+        .catch(async (error) => {
+            if (quitting) return;
+            windowStartup?.dispose();
             log(error.stack);
-            if (!smoke)
-                dialog.showErrorBox('EliYork Voice 启动失败', error.message);
+            if (!smoke && panels) await panels.confirm({
+                title: '暂时无法打开语音据点',
+                detail: '请检查网络后重新打开客户端。原有设置会保留；详细原因已记录在本地日志中。',
+                accept: '关闭客户端', cancel: '关闭',
+            }).catch(() => {});
             process.exitCode = 1;
             app.quit();
         });
@@ -600,7 +668,10 @@ else {
         if (quitting) return;
         event.preventDefault();
         quitting = true;
+        windowStartup?.dispose();
+        windowLifecycle?.dispose();
         picker?.close();
-        void stopNative().finally(() => app.quit());
+        panels?.close();
+        void stopNative().catch(error => log(error.message)).finally(() => app.quit());
     });
 }

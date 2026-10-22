@@ -481,6 +481,19 @@
     width: 100%;
 }
 
+.voice-event-sound-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-top: 12px;
+    border-top: 1px solid var(--line, #eadfe5);
+    color: var(--muted);
+    font-size: 12px;
+}
+.voice-event-sound-toggle input { accent-color: var(--accent, #b56582); }
+.voice-event-sound-hint { margin: 0; color: var(--muted); font-size: 11px; }
+.voice-event-sound-hint:empty { display: none; }
+
 .media-select-row {
     display: grid;
     grid-template-columns: 72px minmax(0, 1fr);

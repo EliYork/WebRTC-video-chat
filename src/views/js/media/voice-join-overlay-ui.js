@@ -4,6 +4,7 @@
     const { setHidden, setText } = global.VoiceViewUtils;
     let overlayElement;
     let currentOptions = {};
+    let closeWatcher;
 
     const createButton = ({ id, className, text }) => {
         const button = global.document.createElement('button');
@@ -76,6 +77,7 @@
     };
 
     const hide = () => {
+        closeWatcher?.destroy(); closeWatcher = undefined;
         const overlay =
             overlayElement ||
             global.document.getElementById('voiceJoinOverlay');
@@ -145,6 +147,11 @@
         sync(options);
         bind();
         setHidden(getOverlay(), false);
+        closeWatcher?.destroy();
+        if (global.CloseWatcher) {
+            closeWatcher = new global.CloseWatcher();
+            closeWatcher.addEventListener('close', handleCancel);
+        }
     };
 
     global.document.addEventListener('keydown', (event) => {
@@ -157,6 +164,7 @@
             overlay &&
             !overlay.classList.contains('hidden')
         ) {
+            event.preventDefault?.();
             handleCancel();
         }
     });

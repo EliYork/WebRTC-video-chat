@@ -8,11 +8,14 @@
     });
 
     const outputSwitches = new WeakMap();
+    const supersededOutput = () => ({ cancelled: true, ok: false, reason: 'superseded' });
     const performOutputSwitch = async ({
         deviceId = 'default',
         mediaElement,
         supported = true,
+        isCurrent = () => true,
     } = {}) => {
+        if (!isCurrent()) return supersededOutput();
         if (
             !supported ||
             !mediaElement ||
@@ -27,11 +30,13 @@
             if (mediaElement.sinkId !== nativeSinkId) {
                 await mediaElement.setSinkId(nativeSinkId);
             }
+            if (!isCurrent()) return supersededOutput();
             if (mediaElement.dataset) {
                 mediaElement.dataset.outputSinkId = deviceId;
             }
             return { deviceId, ok: true };
         } catch (error) {
+            if (!isCurrent()) return supersededOutput();
             const errorType =
                 error?.name === 'AbortError'
                     ? 'operation-aborted'
@@ -45,11 +50,13 @@
                 if (mediaElement.sinkId !== '') {
                     await mediaElement.setSinkId('');
                 }
+                if (!isCurrent()) return supersededOutput();
                 if (mediaElement.dataset) {
                     mediaElement.dataset.outputSinkId = 'default';
                 }
                 fallbackApplied = true;
             } catch {
+                if (!isCurrent()) return supersededOutput();
                 fallbackApplied = false;
             }
             return {
@@ -68,7 +75,10 @@
         if (previous?.deviceId === deviceId) return previous.promise;
         const promise = (previous?.promise || Promise.resolve())
             .catch(() => {})
-            .then(() => performOutputSwitch(options));
+            .then(() => performOutputSwitch({
+                ...options,
+                isCurrent: () => outputSwitches.get(mediaElement) === entry,
+            }));
         const entry = { deviceId, promise };
         outputSwitches.set(mediaElement, entry);
         void promise.finally(() => {
@@ -118,10 +128,11 @@
                 return { ok: false, reason: 'unsupported' };
             }
             const revision = ++refreshRevision;
+            const isStale = () => disposed || revision !== refreshRevision;
             debug('refresh-start', { reason, revision });
             try {
                 const list = await enumerateDevices();
-                if (disposed || revision !== refreshRevision) {
+                if (isStale()) {
                     return { ok: false, reason: 'stale' };
                 }
                 Object.entries(DEVICE_KINDS).forEach(([type, kind]) => {
@@ -154,16 +165,20 @@
                 await Promise.all(
                     missingDevices.map((missing) => onMissing?.(missing))
                 );
+                if (isStale()) {
+                    return { ok: false, reason: 'stale' };
+                }
                 onDevices?.({ devices, reason, selected });
                 debug('refresh-success', { reason, revision });
                 return { devices, ok: true, selected };
             } catch (error) {
-                if (revision === refreshRevision && !disposed) {
-                    debug('refresh-failure', {
-                        errorType: error?.name || 'Error',
-                        reason,
-                    });
+                if (isStale()) {
+                    return { ok: false, reason: 'stale' };
                 }
+                debug('refresh-failure', {
+                    errorType: error?.name || 'Error',
+                    reason,
+                });
                 return { error, ok: false, reason: 'enumerate-failed' };
             }
         };

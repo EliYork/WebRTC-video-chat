@@ -54,7 +54,7 @@ export async function runNativeScenario({
     );
     const origin = `http://127.0.0.1:${port}`;
     const app = spawn(
-        join(build, 'piik-app.exe'),
+        process.env.PIIK_TEST_APP || join(build, 'piik-app.exe'),
         [
             '--site',
             origin,
@@ -161,6 +161,10 @@ export async function runNativeScenario({
         let checkedResolutionGuard = false;
         const start = async () => {
             await click(a, '#shareScreen');
+            // Product defaults to source audio; this isolated fixture has no
+            // audio capability and automatic media checks remain silent.
+            if (!checkedResolutionGuard) assert.equal(await evaluate(a, `document.querySelector('[data-screen-share-audio]').checked`), true, 'source sound is selected by default');
+            await evaluate(a, `document.querySelector('[data-screen-share-audio]').checked=false`);
             await evaluate(
                 a,
                 `(()=>{for(const [selector,value] of [['[data-screen-share-resolution]','720p'],['[data-screen-share-frame-rate]','30'],['[data-screen-share-provider]','native']]){const el=document.querySelector(selector);el.value=value;el.dispatchEvent(new Event('change',{bubbles:true}));}})()`

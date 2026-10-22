@@ -51,6 +51,19 @@ test('object coercion, nonfinite numbers and invalid acknowledgement arguments a
     }
 });
 
+test('history request IDs are optional positive safe integers', () => {
+    for (const joinRequestId of [0, -1, 0.5, Number.MAX_SAFE_INTEGER + 1, Infinity, '1', {}]) {
+        let accepted = false;
+        validateSocketPacket(['chat:join', { roomId: 'lobby', joinRequestId }], () => { accepted = true; });
+        assert.equal(accepted, false);
+    }
+    for (const payload of [{ roomId: 'lobby' }, { roomId: 'lobby', joinRequestId: 7 }]) {
+        let accepted = false;
+        validateSocketPacket(['chat:join', payload], () => { accepted = true; });
+        assert.equal(accepted, true);
+    }
+});
+
 test('normal requests and payload-free lifecycle events remain compatible', () => {
     for (const packet of [
         [

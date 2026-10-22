@@ -102,8 +102,14 @@ let outputMuted = false;
 let outputVolume = 1;
 let selectedInputDeviceId = 'default';
 let selectedCameraDeviceId = 'default';
+let committedCameraDeviceId = selectedCameraDeviceId;
 let selectedOutputDeviceId = 'default';
 let outputSelectionRevision = 0;
+const channelSounds = window.VoiceChannelSounds.createRuntime({
+    getOutput: () => ({ muted: outputMuted, volume: outputVolume, deviceId: selectedOutputDeviceId }),
+    getIdentity: () => ({ localSocketId: socket?.id, localPeerId }),
+    isConnected: () => Boolean(socket?.connected && voiceSessionRuntime.getSnapshot().state === 'joined'),
+});
 let mediaDevicesCache = {
     camera: [],
     mic: [],
@@ -179,6 +185,14 @@ const renderRemoteMedia = (peerId, baseStream, generation) => {
         screenStream: source?.stream,
         screenTrackRoles: source?.trackRoles || [],
     });
+    const member = presenceMembersByPeerId.get(peerId);
+    // replaceTrack(null) does not end the receiver track. Use the channel's
+    // media state to remove its cached video, retaining the live voice tracks
+    // and the registry's receiver stream for a later camera restart.
+    if (member?.cameraOn === false && !member.screenSharing && !screenSharers.has(peerId) &&
+        merged.stream?.getVideoTracks().length) {
+        merged.stream = new MediaStream(merged.stream.getAudioTracks());
+    }
     return addVideoStream(document.createElement('video'), merged.stream, peerId, {
         generation: generation ?? voicePeerRegistry.getQualitySource(peerId)?.generation ?? 0,
         trackRoles: merged.trackRoles,
@@ -232,6 +246,7 @@ const localScreenSharePreviewController =
             fullscreenControls.getFullscreenElement() === tile,
     });
 const voicePeerRegistry = voicePeerRegistryApi.createRegistry({
+    prepareConnection: ({ peer }) => preparePeerConnection(peer),
     attachRemoteStream: ({ generation, metadata, peerId, stream }) => {
         remoteP2pTrackRoles.set(peerId, metadata?.[voiceCallProtocol.MEDIA_TRACK_ROLES_METADATA] || []);
         return renderRemoteMedia(peerId, stream, generation);
@@ -529,6 +544,8 @@ const getCallStatusLabel = (
 ) => {
     const session = voiceSessionRuntime.getSnapshot();
     if (session.desiredVoiceState === 'joined' && session.state !== 'joined') {
+        if (session.state === 'failed' && session.failureReason === 'ice-configuration-unavailable')
+            return '网络连接暂未准备好，请重试加入语音';
         return voiceStatusViewApi.CONNECTION_LABELS[
             navigator.onLine === false ? 'offline' : session.state
         ];
@@ -576,6 +593,7 @@ const getMediaDockSnapshot = () => {
         availableCameras: mediaDevicesCache.camera,
         availableMicrophones: mediaDevicesCache.mic,
         availableOutputs: mediaDevicesCache.output,
+        browserScreenShareSupported: typeof navigator.mediaDevices?.getDisplayMedia === 'function',
         callDurationMs: callStartedAt ? Date.now() - callStartedAt : 0,
         callStatusText: getCallStatusLabel(),
         cameraEnabled: hasLiveCameraTrack(),
@@ -662,11 +680,6 @@ const applyOutputDevice = async (mediaElement, isRemote) => {
 
     const gainOutput = remoteAudioGain.getOutputTarget(mediaElement);
     const gainToken = remoteAudioGain.getBranchToken(mediaElement);
-    if (mediaElement.dataset.outputSinkId === sinkId &&
-        (!gainOutput || gainOutput.sinkId === (sinkId === 'default' ? '' : sinkId))) {
-        remoteAudioGain.activateOutput(mediaElement);
-        return true;
-    }
 
     let result = await voiceDeviceRuntimeApi.switchOutputDevice({
         deviceId: sinkId,
@@ -687,7 +700,9 @@ const applyOutputDevice = async (mediaElement, isRemote) => {
             supported: typeof gainOutput.setSinkId === 'function',
         });
         if (revision !== outputSelectionRevision || sinkId !== selectedOutputDeviceId) return result.ok;
-        if (!result.ok && gainToken === remoteAudioGain.getBranchToken(mediaElement)) {
+        // A volume/mute change can retire this branch while its sink is pending.
+        if (gainToken !== remoteAudioGain.getBranchToken(mediaElement)) return applyOutputDevice(mediaElement, isRemote);
+        if (!result.ok) {
             remoteAudioGain.fallback(mediaElement, gainToken);
         }
     }
@@ -768,6 +783,7 @@ const getPrimaryTileMediaElement = (tile) =>
     );
 
 const applyOutputSettingsToRemoteMedia = () => {
+    void channelSounds.syncOutput();
     const pending = Array.from(document.querySelectorAll('.video-tile')).map(
         (tile) => {
             const mediaElement = getPrimaryTileMediaElement(tile);
@@ -794,6 +810,9 @@ const voiceDeviceRuntime = voiceDeviceRuntimeApi.createDeviceRuntime({
         };
         selectedInputDeviceId = selected.mic;
         selectedCameraDeviceId = selected.camera;
+        if (!hasLiveCameraTrack() && !mediaOperationController.getSnapshot('camera').promise) {
+            committedCameraDeviceId = selected.camera;
+        }
         selectedOutputDeviceId = selected.output;
         notifyMediaDock();
     },
@@ -806,7 +825,7 @@ const selectInputDevice = (deviceId = 'default') => audioSettingsController.sele
 
 const selectCameraDevice = async (deviceId = 'default') => {
     const revision = ++cameraSelectionRevision;
-    const previousDeviceId = selectedCameraDeviceId;
+    const previousDeviceId = committedCameraDeviceId;
     selectedCameraDeviceId = deviceId;
     voiceDeviceRuntime.setSelected('camera', deviceId);
     notifyMediaDock();
@@ -829,6 +848,8 @@ const selectCameraDevice = async (deviceId = 'default') => {
             voiceDeviceRuntime.setSelected('camera', previousDeviceId);
             notifyMediaDock();
         }
+    } else {
+        committedCameraDeviceId = deviceId;
     }
 };
 
@@ -844,6 +865,9 @@ const selectOutputDevice = async (deviceId = 'default') => {
 };
 
 const resetLocalVoiceState = () => {
+    cameraSelectionRevision += 1;
+    selectedCameraDeviceId = committedCameraDeviceId;
+    voiceDeviceRuntime.setSelected('camera', selectedCameraDeviceId);
     localTrackEndedController.clear();
     destroyProcessedAudioStream();
     stopCurrentScreenStream();
@@ -865,6 +889,7 @@ const resetLocalVoiceState = () => {
 
 const pageVoiceTeardown = voiceMediaLifecycle.createPageTeardown({
     beforeStopMedia: () => {
+        channelSounds.destroy();
         audioRecoveryRuntime.dispose();
         chatPanelRuntime?.destroy();
         sidebarRuntime?.destroy();
@@ -886,6 +911,7 @@ const pageVoiceTeardown = voiceMediaLifecycle.createPageTeardown({
             reason: 'page-teardown',
         });
         voiceSessionRuntime.leave({ dispose: true, reason: 'page-teardown' });
+        iceConfigRuntime.stop();
         peerRetryController.reset('page-teardown');
         mediaOperationController.dispose();
         voiceDeviceRuntime?.dispose();
@@ -1180,6 +1206,7 @@ const reconcilePresenceState = ({
         session.desiredVoiceState !== 'joined' ||
         (clientSessionEpoch === session.epoch &&
             voiceSessionGeneration === session.serverGeneration);
+    const previousMembers = new Map(presenceMembersByPeerId);
 
     if (currentVoiceSnapshot) {
         presenceMembersByPeerId.clear();
@@ -1204,9 +1231,16 @@ const reconcilePresenceState = ({
     if (currentVoiceSnapshot) {
         syncPresenceTilesForJoinedRoom(channels);
         // A late join learns sharing state from presence, not screen:share.
-        voicePeerRegistry.getPeerIds().forEach((peerId) =>
-            voiceMediaQualityRuntime?.syncPeer(peerId)
-        );
+        voicePeerRegistry.getPeerIds().forEach((peerId) => {
+            const before = previousMembers.get(peerId);
+            const after = presenceMembersByPeerId.get(peerId);
+            const source = voicePeerRegistry.getQualitySource(peerId);
+            if (after && (source?.stream || remoteScreenSfuSources.has(peerId)) &&
+                (before?.cameraOn !== after.cameraOn || before?.screenSharing !== after.screenSharing)) {
+                renderRemoteMedia(peerId, source?.stream);
+            }
+            voiceMediaQualityRuntime?.syncPeer(peerId);
+        });
         voiceMediaDebug.record({
             epoch: session.epoch,
             event: 'presence-reconciled',
@@ -1246,6 +1280,49 @@ const emitWithAck = (
     });
 
 let activeVoiceRestore;
+let iceConnectionPending = false;
+const iceConfigRuntime = window.VoiceIceConfig.createRuntime({
+    // eslint-disable-next-line no-undef
+    enabled: roomBootstrap.turnEnabled === true,
+    // eslint-disable-next-line no-undef
+    baseServers: iceServers,
+    request: () => emitWithAck(ensureSocket(), 'rtc:ice'),
+    onUpdate: config => {
+        // PeerJS reads this configuration for each new RTCPeerConnection.
+        // Existing media connections keep their live TURN allocation/session.
+        if (currentPeer && !currentPeer.destroyed) {
+            currentPeer.options.config = config;
+            if (iceConnectionPending) {
+                iceConnectionPending = false;
+                voiceStatusView.clearMediaError('network-connection');
+                refreshVoiceCallsForLocalMedia(currentPeer);
+                notifyMediaDock();
+            }
+        }
+    },
+});
+const preparePeerConnection = peer => {
+    const session = voiceSessionRuntime.getSnapshot();
+    const current = () => peer === currentPeer && !peer?.destroyed &&
+        voiceSessionRuntime.isCurrent(session.epoch) && voiceSessionRuntime.getSnapshot().desiredVoiceState === 'joined';
+    if (!current()) return false;
+    const apply = config => {
+        if (!current()) return false;
+        peer.options.config = config;
+        voiceStatusView.clearMediaError('network-connection');
+        return true;
+    };
+    const cached = iceConfigRuntime.getConfiguration();
+    if (cached) return apply(cached);
+    return iceConfigRuntime.prepare().then(apply).catch(() => {
+        if (current()) {
+            iceConnectionPending = true;
+            voiceStatusView.setMediaError('network-connection', 'unknown', '新连接暂未准备好，正在重试');
+            notifyMediaDock();
+        }
+        return false;
+    });
+};
 
 async function requestVoiceSnapshot(reason = 'reconcile') {
     const session = voiceSessionRuntime.getSnapshot();
@@ -1333,6 +1410,8 @@ const restoreServerVoiceOwner = (reason = 'restore') => {
                 return false;
             }
 
+            await iceConfigRuntime.prepare();
+            if (!voiceSessionRuntime.isCurrent(epoch) || peer !== currentPeer || peer.destroyed) return false;
             joinedVoiceRoomId = roomId;
             selectedVoiceRoomId = roomId;
             adoptVoiceSessionGeneration(result.voiceSessionGeneration, {
@@ -1348,6 +1427,7 @@ const restoreServerVoiceOwner = (reason = 'restore') => {
                 return false;
             }
             voicePeerRegistry.setSessionDisconnected(false);
+            channelSounds.enter(roomId, sidebarRuntime?.getPresenceSnapshot());
             peerRetryController.reset('voice-restored');
             reconcileVoiceTargets(result.peerIds, { epoch });
             socket.emit('presence:joinVoice', {
@@ -1436,6 +1516,9 @@ const ensureSocket = () => {
                 screenSharers.add(peerId);
             } else {
                 screenSharers.delete(peerId);
+                if (member?.cameraOn === false) {
+                    renderRemoteMedia(peerId, voicePeerRegistry.getQualitySource(peerId)?.stream);
+                }
             }
             updateAllVideoTileStatus();
             voiceMediaQualityRuntime?.syncPeer(peerId);
@@ -1443,12 +1526,15 @@ const ensureSocket = () => {
         }
     );
     socket.on('connect', () => {
+        void iceConfigRuntime.reconnect().catch(() => {});
         const transport = socket.io?.engine?.transport?.name || 'unknown';
         voiceMediaDebug.record({ event: 'socket-connect', transport });
         chatPanelRuntime?.setConnectionState('connected');
         chatPanelRuntime?.rejoinCurrentRoom();
         if (voiceSessionRuntime.socketConnected('socket-connect')) {
-            void restoreServerVoiceOwner('socket-connect');
+            if (currentPeer && !currentPeer.destroyed) void restoreServerVoiceOwner('socket-connect');
+            else if (pendingPeerCreation?.epoch !== voiceSessionRuntime.getSnapshot().epoch)
+                void schedulePeerRecovery('recreate', 'socket-connect-before-peer');
         }
         socket.io?.engine?.once?.('upgrade', (nextTransport) => {
             voiceMediaDebug.record({
@@ -1458,6 +1544,7 @@ const ensureSocket = () => {
         });
     });
     socket.on('disconnect', (reason) => {
+        channelSounds.rebase();
         if (voiceSessionRuntime.socketDisconnected(reason)) {
             rebindLiveLocalTrackEndedHandlers();
         }
@@ -2110,7 +2197,7 @@ const bindPeerCallHandler = (peer) => {
             return;
         }
 
-        voicePeerRegistry.answerCall({ call });
+        voicePeerRegistry.answerCall({ call, peer });
     });
 };
 // ----------------------------------------------------------------------------------
@@ -2309,12 +2396,14 @@ const startCamera = async (
 ) => {
     const previousStream = cameraStream;
     const previousTrack = previousStream?.getVideoTracks?.()[0];
+    const cameraDeviceId = selectedCameraDeviceId;
+    const cameraConstraints = getCameraConstraints();
     const epoch = voiceSessionRuntime.getSnapshot().epoch;
     const pendingCamera = mediaOperationController.run(
         'camera',
         () =>
             navigator.mediaDevices.getUserMedia({
-                video: getCameraConstraints(),
+                video: cameraConstraints,
                 audio: false,
             }),
         {
@@ -2353,6 +2442,8 @@ const startCamera = async (
         localMediaTrackStopper.stopStream(previousStream);
     }
     cameraStream = nextStream;
+    selectedCameraDeviceId = cameraDeviceId;
+    committedCameraDeviceId = cameraDeviceId;
     mediaOperationController.setActive('camera', nextStream);
     bindLocalTrackEnded('camera', nextTrack);
     voiceDeviceRuntime.setSelected(
@@ -2378,18 +2469,15 @@ const toggleCamera = async (peer) => {
     const currentCameraTrack = cameraStream?.getVideoTracks()[0];
     const cameraOperation = mediaOperationController.getSnapshot('camera');
 
-    if (cameraOperation.promise && cameraOperation.desired) {
+    if ((cameraOperation.promise && cameraOperation.desired) ||
+        currentCameraTrack?.readyState === 'live') {
+        cameraSelectionRevision += 1;
         mediaOperationController.setDesired('camera', false);
         mediaOperationController.invalidate('camera');
-        setCameraButtonState(false);
-        return;
-    }
-
-    if (currentCameraTrack?.readyState === 'live') {
-        mediaOperationController.setDesired('camera', false);
-        mediaOperationController.invalidate('camera');
-        stopLocalTrack('camera', currentCameraTrack);
+        if (currentCameraTrack) stopLocalTrack('camera', currentCameraTrack);
         cameraStream = undefined;
+        selectedCameraDeviceId = committedCameraDeviceId;
+        voiceDeviceRuntime.setSelected('camera', selectedCameraDeviceId);
         setCameraButtonState(false);
         emitLocalPresenceUpdate();
         updateLocalUserCard();
@@ -2477,9 +2565,11 @@ const startScreenShare = async (peer, options = {}, preparedStream) => {
         }
     };
     let codecDecision;
+    let captureStarted = false;
     const capture = await mediaOperationController.run(
         'screen',
         async () => {
+            captureStarted = true;
             const result = preparedStream ? { ok: true, stream: preparedStream } : usingPiik && options.provider === 'native'
                 ? { ok: true, stream: await screenSfuRuntime.captureNative(voiceMediaLifecycle.normalizeScreenShareOptions(options), codecAbort.signal) }
                 : await voiceMediaLifecycle.requestScreenCapture({
@@ -2524,6 +2614,8 @@ const startScreenShare = async (peer, options = {}, preparedStream) => {
         }
     );
     if (!capture.ok) {
+        // A preflight cancellation never transfers this stream to the operation.
+        if (!captureStarted) localMediaTrackStopper.stopStream(preparedStream);
         const ownsRequest = screenCodecAbort === codecAbort;
         finishRequest();
         if (!ownsRequest || codecAbort.signal.aborted) return false;
@@ -2867,7 +2959,8 @@ const audioRecoveryRuntime = window.VoiceAudioRecovery.createRuntime({
     )),
     getProcessingState: () => {
         const pipeline = audioPipelines.get(activeAudioPipelineStream);
-        return pipeline ? { ...pipeline, stream: activeAudioPipelineStream } : undefined;
+        // Recovery belongs to this branch, even when its context/output is reused.
+        return pipeline;
     },
     getPeerStates: () => {
         if (!joinedVoiceRoomId || !currentPeer || currentPeer.destroyed || currentPeer.disconnected || !socket?.connected) return [];
@@ -2992,8 +3085,12 @@ async function handleUnexpectedLocalTrackEnded(type, track, epoch) {
         voiceDeviceRuntime.setSelected('camera', 'default');
         const recovered = await startCamera(currentPeer, { recovery: true });
         if (!recovered) {
-            cameraStream = undefined;
-            setActiveVideoTrack(currentPeer);
+            if (!mediaOperationController.getSnapshot('camera').promise &&
+                cameraStream?.getVideoTracks?.()[0] === track) {
+                cameraStream = undefined;
+                committedCameraDeviceId = selectedCameraDeviceId;
+                setActiveVideoTrack(currentPeer);
+            }
             localTrackEndedController.releaseRecovery('camera', epoch);
         }
         return recovered;
@@ -3017,7 +3114,12 @@ async function handleMissingMediaDevice(type) {
     }
     if (type === 'mic') return selectInputDevice('default');
     if (type === 'camera') {
+        cameraSelectionRevision += 1;
         selectedCameraDeviceId = 'default';
+        voiceDeviceRuntime.setSelected('camera', 'default');
+        if (mediaOperationController.getSnapshot('camera').promise) {
+            mediaOperationController.invalidate('camera', { state: 'switching' });
+        }
         notifyMediaDock();
         if (
             mediaOperationController.getSnapshot().desired.camera &&
@@ -3105,7 +3207,7 @@ const schedulePeerRecovery = (strategy, reason) => {
             retiredPeer?.destroy?.();
             voicePeerRegistry.teardown('peer-recreate');
             localVoiceMediaGeneration = 0;
-            const replacement = createPeerInstance(currentSession.roomId, {
+            const replacement = await createPeerInstance(currentSession.roomId, {
                 recreate: true,
             });
             return waitForPeerOpen(replacement);
@@ -3124,7 +3226,22 @@ const schedulePeerRecovery = (strategy, reason) => {
     });
 };
 
-const createPeerInstance = (roomToJoin, { recreate = false } = {}) => {
+let pendingPeerCreation;
+const createPeerInstance = (roomToJoin, options) => {
+    const epoch = voiceSessionRuntime.getSnapshot().epoch;
+    if (pendingPeerCreation?.epoch === epoch) return pendingPeerCreation.promise;
+    const promise = createPreparedPeerInstance(roomToJoin, options).finally(() => {
+        if (pendingPeerCreation?.promise === promise) pendingPeerCreation = undefined;
+    });
+    pendingPeerCreation = { epoch, promise };
+    return promise;
+};
+const createPreparedPeerInstance = async (roomToJoin, { recreate = false } = {}) => {
+    const session = voiceSessionRuntime.getSnapshot();
+    const iceConfiguration = await iceConfigRuntime.prepare();
+    const latest = voiceSessionRuntime.getSnapshot();
+    if (!voiceSessionRuntime.isCurrent(session.epoch) || latest.desiredVoiceState !== 'joined' || latest.roomId !== roomToJoin)
+        return undefined;
     const isSecurePeerConnection = window.location.protocol === 'https:';
     const peerPort =
         window.location.port || (isSecurePeerConnection ? 443 : 80);
@@ -3135,12 +3252,7 @@ const createPeerInstance = (roomToJoin, { recreate = false } = {}) => {
         path: '/peerjs',
         port: peerPort,
         secure: isSecurePeerConnection,
-        config: {
-            iceServers: [
-                // eslint-disable-next-line no-undef
-                ...iceServers,
-            ],
-        },
+        config: iceConfiguration,
     });
     currentPeer = peer;
     peerLifecycleMetadata.set(peer, { recreate, roomId: roomToJoin });
@@ -3242,6 +3354,9 @@ const createPeerInstance = (roomToJoin, { recreate = false } = {}) => {
 };
 
 const leaveVoiceSession = (reason = 'user-leave') => {
+    iceConnectionPending = false;
+    iceConfigRuntime.stop();
+    channelSounds.leave();
     callDiagnostics?.end(reason);
     screenSfuRuntime.leave();
     const nextRoomId = pendingVoiceRoomId;
@@ -3290,6 +3405,7 @@ const joinVoiceChannel = (roomId) => {
         console.warn(`Voice channel ${roomId} is not available.`);
         return false;
     }
+    void channelSounds.unlock();
     const currentSession = voiceSessionRuntime.getSnapshot();
     if (
         currentSession.state === 'failed' &&
@@ -3317,7 +3433,9 @@ const joinVoiceChannel = (roomId) => {
     setCameraButtonState(false);
     notifyMediaDock();
     syncRoomCompositionState();
-    createPeerInstance(roomId);
+    void createPeerInstance(roomId).catch(() => {
+        if (voiceSessionRuntime.isCurrent(sessionEpoch)) voiceSessionRuntime.fail('ice-configuration-unavailable');
+    });
     return true;
 };
 
@@ -3483,6 +3601,10 @@ const handleNetworkOnline = () => {
     notifyMediaDock();
     if (!socket?.connected) {
         socket?.connect?.();
+    } else {
+        // A brief offline interval may leave Socket.IO connected, so no new
+        // connect event will request the history needed to unlock chat.
+        chatPanelRuntime?.rejoinCurrentRoom();
     }
     const session = voiceSessionRuntime.getSnapshot();
     if (session.desiredVoiceState !== 'joined') {
@@ -3550,6 +3672,7 @@ sidebarRuntime = sidebarRuntimeApi.createSidebarRuntime({
     },
     onRequestVoiceRoom: setVoiceTargetRoom,
     onPresenceSnapshot: (snapshot) => {
+        channelSounds.observe(snapshot);
         reconcilePresenceState(snapshot);
         // The sidebar normalizes and stores its roster after this callback.
         queueMicrotask(() => stageLayout?.sync());
@@ -3573,6 +3696,9 @@ chatPanelRuntime = chatPanelRuntimeApi.createChatPanelRuntime({
     nameState: chatNameState,
     formatTime: window.VoiceViewUtils.formatTime,
     onDisplayNameChange: updatePresenceName,
+    onLiveMessage: (message) => stageLayout?.notifyChatMessage(message),
+    onRoomChange: () => stageLayout?.resetChatRoom(),
+    onConnectionStateChange: (state) => stageLayout?.setChatConnection(state),
 });
 chatPanelRuntime.init();
 chatPanelRuntime.setRoom(viewingRoomId);
@@ -3661,6 +3787,7 @@ stageLayout = window.VoiceStageLayout.createRuntime({
         return {
             joined: Boolean(joinedVoiceRoomId),
             pending: session.desiredVoiceState === 'joined' && !joinedVoiceRoomId,
+            connectionState: session.state,
             channelName: getChannelName(roomId),
             memberCount: channel?.count,
         };
@@ -3669,6 +3796,13 @@ stageLayout = window.VoiceStageLayout.createRuntime({
     onVolume: showPeerVolumePopover,
 });
 stageLayout.init();
+stageLayout.setChatConnection(chatPanelRoot.dataset.chatConnectionState || 'connecting');
+const shareWatchStatus = window.VoiceShareWatchStatus.createRuntime({
+    root: mainLayout,
+    getSource: getDiagnosticQualitySource,
+});
+shareWatchStatus.init();
+window.addEventListener('pagehide', (event) => { if (!event.persisted) shareWatchStatus.destroy(); });
 const speakingRuntime = window.VoiceSpeakingRuntime.createRuntime({
     getSources: () => getVideoTiles().map((tile) => ({
         id: tile.id,

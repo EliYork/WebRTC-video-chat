@@ -11,6 +11,7 @@ import { resolve, join, dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
 import { preparePiikGoOverlay } from './piik-go-overlay.mjs';
+import { preparePiikNativeOverlay } from './piik-native-overlay.mjs';
 const root = resolve(import.meta.dirname, '..');
 const home = join(root, 'integrations/piik');
 const pin = JSON.parse(readFileSync(join(home, 'source.json')));
@@ -133,7 +134,7 @@ if (!process.argv.includes('--web-only')) {
                 '-ExecutionPolicy',
                 'Bypass',
                 '-File',
-                join(source, 'native/capture/windows/build.ps1'),
+                preparePiikNativeOverlay(source, out),
                 '-OutputDirectory',
                 join(source, 'build/platform-native'),
             ],
@@ -157,6 +158,8 @@ if (!process.argv.includes('--web-only')) {
         ]);
         run(go, [
             'build',
+            '-overlay',
+            overlay,
             '-p',
             '4',
             '-o',

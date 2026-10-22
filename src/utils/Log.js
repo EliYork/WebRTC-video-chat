@@ -1,5 +1,5 @@
-import fs from 'fs';
 import path from 'path';
+import fileLog from './RotatingFileLog.cjs';
 
 const logFilePath = path.resolve('./logs/node.log');
 
@@ -44,22 +44,14 @@ export default class Logger {
     constructor(env) {
         this.env = env;
         this.logFilePath = logFilePath;
-        this.writeFailed = false;
+        this.fileLog = fileLog.createFileLog({ filePath: () => this.logFilePath, maxBytes: 10 * 1024 * 1024 });
     }
+
+    get writeFailed() { return this.fileLog.writeFailed; }
 
     #_log(type, msg) {
         const line = `${this.#_getTimestamp()} ${type}  ${msg}`;
-        try {
-            fs.appendFileSync(this.logFilePath, line + '\n', { encoding: 'utf8' });
-            this.writeFailed = false;
-        } catch (error) {
-            if (!this.writeFailed) {
-                // Disk-full/permission errors must not crash signaling handlers.
-                console.error(`[log] file write failed (${error.code || 'unknown'}); logging to stderr`);
-            }
-            this.writeFailed = true;
-            console.error(line);
-        }
+        this.fileLog.write(line);
         if (this.env !== 'production') {
             // eslint-disable-next-line no-console
             console.log(line);

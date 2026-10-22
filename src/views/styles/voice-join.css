@@ -1,6 +1,6 @@
 .voice-join-overlay {
     position: fixed;
-    z-index: 9999;
+    z-index: 30000;
     inset: 0;
     display: flex;
     align-items: center;
@@ -57,4 +57,9 @@
 .voice-join-cancel {
     background: var(--panel-soft);
     color: var(--text);
+}
+
+@media (max-width: 640px), (max-width: 1000px) and (max-height: 550px) {
+    .voice-join-dialog { box-sizing: border-box; width: min(360px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 22px; overflow: auto; }
+    .voice-join-actions button { min-width: 0; min-height: 44px; flex: 1; }
 }

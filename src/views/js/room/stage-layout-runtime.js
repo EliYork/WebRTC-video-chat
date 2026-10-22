@@ -3,21 +3,96 @@
 
     // Presentation only. The existing tiles continue to own their players,
     // diagnostics, route dialogs and independent audio controls.
-    const createRuntime = ({ root, stage, members, sources, chat, getTiles, getMember, getCameraStream = () => null, getChannelState = () => ({}), onJoin, onVolume } = {}) => {
+    const createRuntime = ({ root, stage, members, sources, chat, chatView = global.VoiceChatMessageUI, getTiles, getMember, getCameraStream = () => null, getChannelState = () => ({}), onJoin, onVolume } = {}) => {
         const proxies = new Map();
         const choices = new Map();
         const speaking = new Map();
         const cameraPreviews = new Map();
         const bindings = [];
+        const compactQuery = global.matchMedia?.('(max-width: 640px), (max-width: 1000px) and (max-height: 550px)');
+        const isCompactViewport = () => compactQuery?.matches ?? (global.innerWidth <= 640 ||
+            (global.innerWidth <= 1000 && global.innerHeight <= 550));
+        let compact = isCompactViewport();
+        let desktopChatOpen = true;
         let selectedId;
         let activeShares = [];
-        let chatOpen = true;
+        let chatOpen = !compact;
         let channelsOpen = false;
+        let toolsOpen = false;
         let initialized = false;
         let disposed = false;
-        let savedChatScroll = 0;
+        let savedChatPosition;
+        let unread = 0;
+        let chatConnection = 'connected';
+        let panelCloseWatcher;
+        let toolsCloseWatcher;
         const doc = root.ownerDocument || global.document;
         const byId = (id) => doc.getElementById(id);
+        const atLatest = () => {
+            const messages = byId('chatMessages');
+            return !messages || !(messages.scrollHeight - messages.scrollTop - messages.clientHeight > 48);
+        };
+        const resetUnread = () => { unread = 0; renderUnread(); };
+        const resetChatRoom = () => {
+            // A new channel owns a new message list, not the last panel offset.
+            savedChatPosition = undefined;
+            resetUnread();
+        };
+        const saveChatPosition = () => {
+            const messages = byId('chatMessages');
+            savedChatPosition = messages ? chatView.captureReadingPosition(messages) : undefined;
+        };
+        const restoreChatPosition = () => {
+            const messages = byId('chatMessages');
+            if (!messages) return;
+            if (savedChatPosition) chatView.restoreReadingPosition(messages, savedChatPosition);
+            else messages.scrollTop = messages.scrollHeight;
+        };
+        const renderUnread = () => {
+            const toggle = byId('stageChatToggle');
+            if (toggle) {
+                toggle.dataset.unreadCount = String(unread);
+                toggle.dataset.unreadLabel = unread > 99 ? '99+' : String(unread);
+                toggle.setAttribute('aria-label', unread ? `聊天，${unread} 条未读消息` : '聊天');
+            }
+            const jump = byId('chatJumpToLatest');
+            if (jump) { jump.hidden = !unread; jump.textContent = `查看 ${unread} 条新消息 ↓`; }
+        };
+        const notifyChatMessage = (message) => {
+            if (disposed || message?.type === 'system') return;
+            if (!doc.hidden && chatOpen && atLatest()) resetUnread();
+            else { unread = Math.min(999, unread + 1); renderUnread(); }
+        };
+        const setChatConnection = (state) => { chatConnection = state; renderConnection(); };
+        const renderConnection = () => {
+            const status = byId('stageConnectionStatus');
+            if (!status) return;
+            const state = getChannelState().connectionState;
+            const voiceMessage = {
+                joining: '正在加入语音…', 'reconnecting-socket': '频道正在重新连接，语音可能仍在继续…',
+                'reconnecting-peer': '语音正在重新连接…', restoring: '正在恢复语音…',
+                degraded: '部分语音连接异常，正在恢复…', failed: '语音连接失败，可使用下方通话按钮重试。',
+            }[state];
+            const chatMessage = { connecting: '正在连接聊天…', reconnecting: '聊天正在重新连接…',
+                offline: '聊天已离线，暂时无法发送消息。', failed: '聊天连接失败，请检查网络。' }[chatConnection];
+            const message = voiceMessage || chatMessage || '';
+            status.hidden = !message;
+            status.textContent = message;
+        };
+        const syncCloseWatchers = () => {
+            if (!global.CloseWatcher) return;
+            const panelOpen = compact && (chatOpen || channelsOpen);
+            if (!panelOpen) { panelCloseWatcher?.destroy(); panelCloseWatcher = undefined; }
+            else if (!panelCloseWatcher) {
+                panelCloseWatcher = new global.CloseWatcher();
+                panelCloseWatcher.addEventListener('close', () => { panelCloseWatcher = undefined; showStage(); });
+            }
+            if (!compact || !toolsOpen) { toolsCloseWatcher?.destroy(); toolsCloseWatcher = undefined; }
+            else if (!toolsCloseWatcher) {
+                toolsCloseWatcher = new global.CloseWatcher();
+                toolsCloseWatcher.addEventListener('close', () => { toolsCloseWatcher = undefined; toolsOpen = false; renderControls(); });
+            }
+        };
         const button = (label, className) => {
             const node = doc.createElement('button');
             node.type = 'button';
@@ -26,8 +101,8 @@
             return node;
         };
         const bind = (node, type, handler) => {
-            node?.addEventListener(type, handler);
-            if (node) bindings.push(() => node.removeEventListener(type, handler));
+            node?.addEventListener?.(type, handler);
+            if (node?.addEventListener) bindings.push(() => node.removeEventListener(type, handler));
         };
         const place = (node, host) => {
             if (node.parentElement === host) return;
@@ -45,14 +120,52 @@
         const renderControls = () => {
             const sharing = activeShares.length > 0;
             root.dataset.stageMode = sharing ? 'sharing' : 'voice';
+            root.dataset.viewportMode = compact ? 'compact' : 'wide';
             root.classList.toggle('stage-chat-closed', !chatOpen);
             root.classList.toggle('stage-channels-open', channelsOpen);
+            root.dataset.mobilePanel = channelsOpen ? 'channels' : chatOpen ? 'chat' : 'stage';
             const chatToggle = byId('stageChatToggle');
             chatToggle?.setAttribute('aria-expanded', String(chatOpen));
-            if (chatToggle) chatToggle.textContent = chatOpen ? '收起聊天' : '展开聊天';
+            if (chatToggle) chatToggle.textContent = compact ? '聊天' : chatOpen ? '收起聊天' : '展开聊天';
+            chatToggle?.setAttribute('aria-pressed', String(chatOpen));
             byId('stageChannelsToggle')?.setAttribute('aria-expanded', String(channelsOpen));
+            byId('stageChannelsToggle')?.setAttribute('aria-pressed', String(channelsOpen));
+            const stageToggle = byId('stageStageToggle');
+            if (stageToggle) stageToggle.textContent = sharing ? '共享' : '语音';
+            stageToggle?.setAttribute('aria-pressed', String(!chatOpen && !channelsOpen));
             chat.inert = !chatOpen;
             chat.setAttribute('aria-hidden', String(!chatOpen));
+            const channels = byId('stage-channels');
+            if (channels) channels.inert = compact && !channelsOpen;
+            const tools = byId('workspace-tools');
+            if (tools) tools.inert = compact && !toolsOpen;
+            byId('stageMoreToggle')?.setAttribute('aria-expanded', String(toolsOpen));
+            tools?.classList.toggle('is-open', toolsOpen);
+            renderUnread();
+            renderConnection();
+            syncCloseWatchers();
+        };
+        const syncViewport = () => {
+            if (disposed) return;
+            const nextCompact = isCompactViewport();
+            let restoreChat = false;
+            if (nextCompact !== compact) {
+                if (nextCompact) {
+                    desktopChatOpen = chatOpen;
+                    if (chatOpen) saveChatPosition();
+                    chatOpen = false;
+                }
+                else { restoreChat = !chatOpen && desktopChatOpen; chatOpen = desktopChatOpen; }
+                channelsOpen = false; toolsOpen = false;
+                compact = nextCompact;
+            }
+            const viewport = global.visualViewport;
+            const usableHeight = viewport && viewport.scale === 1 ? viewport.height : global.innerHeight;
+            root.style.setProperty?.('--stage-viewport-height', `${usableHeight}px`);
+            root.classList.toggle('stage-mobile-keyboard', Boolean(compact && chatOpen &&
+                viewport?.scale === 1 && global.innerHeight - viewport.height > 120 && chat.contains(doc.activeElement)));
+            renderControls();
+            if (restoreChat) restoreChatPosition();
         };
         const renderChannelState = (tiles) => {
             const state = getChannelState();
@@ -82,18 +195,25 @@
             const next = Boolean(open);
             if (next && channelsOpen) { channelsOpen = false; renderControls(); }
             if (next === chatOpen) return;
-            const messages = byId('chatMessages');
             if (!next) {
-                savedChatScroll = messages?.scrollTop || 0;
+                saveChatPosition();
                 if (chat.contains(doc.activeElement)) byId('stageChatToggle')?.focus();
             }
             chatOpen = next;
-            renderControls();
-            if (next && messages) messages.scrollTop = savedChatScroll;
+            toolsOpen = false;
+            syncViewport();
+            if (next) restoreChatPosition();
+            if (next && !doc.hidden && atLatest()) resetUnread();
         };
         const setChannelsOpen = (open) => {
+            if (open && compact) setChatOpen(false);
             channelsOpen = Boolean(open);
+            toolsOpen = false;
             renderControls();
+        };
+        const showStage = () => {
+            setChatOpen(false);
+            setChannelsOpen(false);
         };
         const focusShare = (id) => {
             if (!activeShares.some((tile) => tile.id === id)) return false;
@@ -209,6 +329,7 @@
                     choice.textContent = `▣ ${member.senderName || 'Guest'}`;
                     choice.setAttribute('aria-label', `观看 ${member.senderName || 'Guest'} 的共享`);
                 } else {
+                    if (tile.classList.contains('is-stage-focus')) global.VoiceFullscreenControls?.exitTileFullscreen(tile);
                     tile.classList.remove('is-stage-focus');
                     tile.inert = false;
                     tile.removeAttribute('aria-hidden');
@@ -223,20 +344,52 @@
         const init = () => {
             if (initialized || disposed) return;
             initialized = true;
-            bind(byId('stageChatToggle'), 'click', () => setChatOpen(!chatOpen));
-            bind(byId('stageChannelsToggle'), 'click', () => setChannelsOpen(!channelsOpen));
+            bind(byId('stageChatToggle'), 'click', () => { syncViewport(); setChatOpen(!chatOpen); });
+            bind(byId('stageChannelsToggle'), 'click', () => { syncViewport(); setChannelsOpen(!channelsOpen); });
+            bind(byId('stageStageToggle'), 'click', showStage);
+            bind(byId('stageMoreToggle'), 'click', () => { toolsOpen = !toolsOpen; renderControls(); });
+            bind(doc, 'click', (event) => {
+                if (toolsOpen && !byId('workspace-tools')?.contains(event.target) &&
+                    !byId('stageMoreToggle')?.contains(event.target)) {
+                    toolsOpen = false; renderControls();
+                }
+            });
+            bind(doc, 'keydown', (event) => {
+                if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;
+                if (toolsOpen) { event.preventDefault(); toolsOpen = false; renderControls(); byId('stageMoreToggle')?.focus(); }
+                else if (compact && (channelsOpen || chatOpen) && !event.defaultPrevented) {
+                    event.preventDefault();
+                    showStage(); byId('stageStageToggle')?.focus();
+                }
+            });
+            bind(global.visualViewport, 'resize', syncViewport);
+            bind(compactQuery, 'change', syncViewport);
+            bind(doc, 'visibilitychange', syncViewport);
+            bind(doc, 'visibilitychange', () => { if (!doc.hidden && chatOpen && atLatest()) resetUnread(); });
+            bind(chat, 'focusin', syncViewport);
+            bind(chat, 'focusout', () => global.queueMicrotask?.(syncViewport));
             bind(byId('stageJoinVoice'), 'click', () => onJoin?.());
+            bind(byId('chatMessages'), 'scroll', () => { if (!doc.hidden && chatOpen && atLatest()) resetUnread(); });
+            bind(byId('chatJumpToLatest'), 'click', () => {
+                const messages = byId('chatMessages');
+                if (messages) messages.scrollTop = messages.scrollHeight;
+                resetUnread();
+            });
             bind(root.querySelector('.sidebar-channel-tree'), 'click', (event) => {
                 if (event.target.closest('a')) setChannelsOpen(false);
             });
             sync();
+            syncViewport();
         };
         return {
             init, sync, focusShare, setChatOpen, setChannelsOpen, setSpeaking,
-            syncViewport: renderControls,
-            snapshot: () => ({ mode: activeShares.length ? 'sharing' : 'voice', selectedId, chatOpen, channelsOpen, shareIds: activeShares.map((tile) => tile.id) }),
+            syncViewport,
+            notifyChatMessage, resetUnread, resetChatRoom, setChatConnection,
+            snapshot: () => ({ mode: activeShares.length ? 'sharing' : 'voice', selectedId, chatOpen, channelsOpen, unread, shareIds: activeShares.map((tile) => tile.id) }),
             destroy: () => {
                 disposed = true;
+                savedChatPosition = undefined;
+                panelCloseWatcher?.destroy(); toolsCloseWatcher?.destroy();
                 bindings.splice(0).forEach((unbind) => unbind());
                 Array.from(cameraPreviews.keys()).forEach(releaseCameraPreview);
                 proxies.forEach((proxy) => proxy.remove());

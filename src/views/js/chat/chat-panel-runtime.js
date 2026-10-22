@@ -29,6 +29,9 @@
         nameState = global.VoiceChatNameState,
         formatTime = global.VoiceViewUtils?.formatTime,
         onDisplayNameChange = () => {},
+        onLiveMessage = () => {},
+        onRoomChange = () => {},
+        onConnectionStateChange = () => {},
         logger = global.console,
     } = {}) => {
         if (!root) {
@@ -67,6 +70,8 @@
         let destroyed = false;
         let currentRoomId;
         let roomRevision = 0;
+        let draftRevision = 0;
+        let focusRevision = 0;
         let sending = false;
         let composing = false;
         let connectionState = 'connecting';
@@ -74,11 +79,18 @@
         let refs;
         let statusElement;
         let emptyStateElement;
-        let statusKind;
+        let sendError;
+        let persistenceStatus;
+        let sendOutcomeWarning;
+        let historyError;
+        let historyRetryButton;
         let maxLength = 500;
         const subscriptions = [];
         const renderedMessageIds = new Set();
         const pendingLiveMessages = [];
+        const messageLimit = messageView.MESSAGE_LIMIT || 500;
+        const duplicateLimit = messageLimit * 2;
+        let pendingHistoryTruncated = false;
 
         const assertActive = () => !destroyed && initialized;
         const resolveRefs = () => {
@@ -148,20 +160,45 @@
                 return;
             }
 
-            statusKind = kind || undefined;
             statusElement.textContent = message;
             statusElement.hidden = !message;
             statusElement.dataset.statusKind = kind;
         };
         const syncStatus = () => {
-            if (statusKind === 'error') {
-                return;
-            }
-
+            const historyNotice = currentRoomId && loadingHistory ? '正在同步聊天记录…' : '';
+            const persistenceWarning = persistenceStatus?.state === 'failed'
+                ? '部分聊天记录暂未保存，正在自动重试；已发送的消息无需重发。'
+                : persistenceStatus?.state === 'disabled' ? '当前聊天记录仅临时保留，服务重启后可能丢失。' : '';
             setStatus(
-                CONNECTION_MESSAGES[connectionState] || '',
-                connectionState === 'connected' ? '' : 'connection'
+                CONNECTION_MESSAGES[connectionState] || sendOutcomeWarning || sendError || historyError || persistenceWarning || historyNotice,
+                connectionState !== 'connected' ? 'connection'
+                    : sendOutcomeWarning ? 'warning' : sendError || historyError ? 'error' : persistenceWarning ? 'warning' : historyNotice ? 'history' : ''
             );
+            if (historyRetryButton) {
+                historyRetryButton.hidden = !historyError;
+                historyRetryButton.disabled = !isConnected();
+            }
+        };
+        const handleHistoryFailure = ({ roomId, requestRevision } = {}) => {
+            if (!assertActive() || !isConnected() || !loadingHistory || roomId !== currentRoomId || requestRevision !== roomRevision) return;
+            historyError = '聊天记录同步超时，请重试。';
+            root.setAttribute('aria-busy', 'false');
+            syncStatus();
+        };
+        const releasePendingSend = () => {
+            if (!sending) return false;
+            sending = false;
+            sendOutcomeWarning = '发送时连接中断，请先核对聊天记录，避免重复发送。';
+            return true;
+        };
+        const setPersistence = ({ roomId, ...status } = {}) => {
+            if (!assertActive() || roomId !== currentRoomId ||
+                !['saved', 'pending', 'failed', 'disabled'].includes(status.state) ||
+                !Number.isSafeInteger(status.revision) || status.revision < 0 ||
+                (persistenceStatus && status.revision < persistenceStatus.revision)) return false;
+            persistenceStatus = status;
+            syncStatus();
+            return true;
         };
         const syncFormState = () => {
             if (!refs) {
@@ -175,11 +212,12 @@
             formView.renderSubmitState({
                 refs: getFormRefs(),
                 disabled:
-                    !currentRoomId || !isConnected() || !getMessageContent(),
+                    !currentRoomId || !isConnected() || loadingHistory || !getMessageContent(),
                 loading: sending,
             });
         };
         const getMessageViewModel = (message) => ({
+            id: message?.id,
             content: String(message?.content || ''),
             isLocal: message?.senderName === getDisplayName(),
             isSystem: message?.type === 'system',
@@ -198,6 +236,8 @@
         const rememberMessage = (message) => {
             if (message?.id) {
                 renderedMessageIds.add(message.id);
+                if (renderedMessageIds.size > duplicateLimit)
+                    renderedMessageIds.delete(renderedMessageIds.values().next().value);
             }
         };
         const isDuplicateMessage = (message) =>
@@ -212,13 +252,15 @@
             emptyStateElement = undefined;
             renderedMessageIds.clear();
             pendingLiveMessages.length = 0;
+            pendingHistoryTruncated = false;
             if (showLoading) {
                 renderEmptyState('正在加载消息…');
             }
         };
 
-        const renderHistory = (messages = [], { roomId } = {}) => {
-            if (!assertActive() || (roomId && roomId !== currentRoomId)) {
+        const renderHistory = (messages = [], { roomId, persistence, requestRevision } = {}) => {
+            if (!assertActive() || !isConnected() || (roomId && roomId !== currentRoomId) ||
+                (requestRevision !== undefined && requestRevision !== roomRevision)) {
                 return false;
             }
 
@@ -229,10 +271,17 @@
                     message?.content && isMessageForCurrentRoom(message, roomId)
             );
             const pendingMessages = pendingLiveMessages.splice(0);
+            const historyMessages = safeMessages.slice(-messageLimit);
+            const historyIds = new Set(historyMessages.map(message => message.id).filter(Boolean));
+            // Live events may precede the server's bounded history snapshot.
+            // A shared ID locates the earlier live prefix without sorting by
+            // timestamps, which can tie or move backwards with the server clock.
+            const overlapIndex = pendingMessages.findIndex(message => message.id && historyIds.has(message.id));
+            const prefixLength = Math.max(0, overlapIndex);
             const nextMessages = [];
             const nextIds = new Set();
 
-            [...safeMessages, ...pendingMessages].forEach((message) => {
+            [...pendingMessages.slice(0, prefixLength), ...historyMessages, ...pendingMessages.slice(prefixLength)].forEach((message) => {
                 if (message?.id && nextIds.has(message.id)) {
                     return;
                 }
@@ -241,16 +290,24 @@
                 }
                 nextMessages.push(message);
             });
+            const truncated = pendingHistoryTruncated || safeMessages.length > messageLimit || nextMessages.length > messageLimit;
+            const visibleMessages = nextMessages.slice(-messageLimit);
+            pendingHistoryTruncated = false;
 
             removeEmptyState();
             renderedMessageIds.clear();
-            nextMessages.forEach(rememberMessage);
+            visibleMessages.forEach(rememberMessage);
             messageView.renderChatHistory(
                 refs.messages,
-                nextMessages.map(getMessageViewModel)
+                visibleMessages.map(getMessageViewModel),
+                { truncated, preserveReadingPosition: true }
             );
             loadingHistory = false;
+            historyError = undefined;
+            if (persistence) setPersistence({ roomId: currentRoomId, ...persistence });
+            syncStatus();
             root.setAttribute('aria-busy', 'false');
+            syncFormState();
             if (!nextMessages.length) {
                 renderEmptyState();
             }
@@ -271,11 +328,16 @@
             rememberMessage(message);
             if (loadingHistory) {
                 pendingLiveMessages.push(message);
+                if (pendingLiveMessages.length > messageLimit) {
+                    pendingLiveMessages.shift();
+                    pendingHistoryTruncated = true;
+                }
             }
             messageView.appendChatMessage(
                 refs.messages,
                 getMessageViewModel(message)
             );
+            onLiveMessage(message);
             return true;
         };
 
@@ -285,7 +347,17 @@
             }
 
             connectionState = state;
+            if (state !== 'connected') {
+                historyError = undefined;
+                persistenceStatus = undefined;
+                if (currentRoomId) {
+                    loadingHistory = true;
+                    root.setAttribute('aria-busy', 'true');
+                }
+                if (releasePendingSend()) roomRevision += 1;
+            }
             root.dataset.chatConnectionState = state;
+            onConnectionStateChange(state);
             syncStatus();
             syncFormState();
             return true;
@@ -302,15 +374,21 @@
             }
 
             currentRoomId = roomId;
+            historyError = undefined;
+            persistenceStatus = undefined;
+            sendOutcomeWarning = undefined;
+            sendError = undefined;
             roomRevision += 1;
             loadingHistory = true;
             sending = false;
             clearMessages({ showLoading: true });
             loadingHistory = true;
             root.dataset.chatRoomId = roomId;
+            onRoomChange(roomId);
             root.setAttribute('aria-busy', 'true');
+            syncStatus();
             syncFormState();
-            transport.joinRoom(roomId);
+            transport.joinRoom(roomId, { requestRevision: roomRevision });
             return true;
         };
 
@@ -320,10 +398,15 @@
             }
 
             roomRevision += 1;
+            releasePendingSend();
+            historyError = undefined;
             loadingHistory = true;
-            pendingLiveMessages.length = 0;
+            // Same-room retries still need live rows older than the server's
+            // bounded snapshot. Room changes and accepted history clear them.
             root.setAttribute('aria-busy', 'true');
-            return transport.joinRoom(currentRoomId);
+            syncStatus();
+            syncFormState();
+            return transport.joinRoom(currentRoomId, { requestRevision: roomRevision });
         };
 
         const sendCurrentMessage = async () => {
@@ -331,6 +414,7 @@
                 !assertActive() ||
                 sending ||
                 composing ||
+                loadingHistory ||
                 !currentRoomId ||
                 !isConnected()
             ) {
@@ -347,12 +431,18 @@
             const revision = roomRevision;
             const roomId = currentRoomId;
             const submittedValue = refs.input.value;
+            const submittedDraftRevision = draftRevision;
+            const submittedFocusRevision = focusRevision;
+            const focusAtSubmit = global.document.activeElement;
             const senderName = commitDisplayName();
+            sendOutcomeWarning = undefined;
+            sendError = undefined;
             setStatus('', '');
+            syncStatus();
             setSendingState(true);
 
             try {
-                await transport.sendMessage({ content, roomId, senderName });
+                const result = await transport.sendMessage({ content, roomId, senderName });
                 if (
                     !assertActive() ||
                     revision !== roomRevision ||
@@ -360,10 +450,18 @@
                 ) {
                     return false;
                 }
-                if (refs.input.value === submittedValue) {
+                if (result?.persistence) setPersistence({ roomId, ...result.persistence });
+                // Equal text can belong to a newer edit or composition session.
+                if (draftRevision === submittedDraftRevision && refs.input.value === submittedValue) {
+                    const activeElement = global.document.activeElement;
+                    // Disabling the clicked submit button can blur it to body.
+                    // Restore that focus only if no newer control was focused.
+                    const implicitButtonBlur = focusAtSubmit === refs.submitButton && focusRevision === submittedFocusRevision &&
+                        (!activeElement || activeElement === global.document.body);
                     formView.resetForm({
                         refs: getFormRefs(),
-                        focus: true,
+                        focus: !global.document.hidden && (global.document.hasFocus?.() ?? true) &&
+                            (activeElement === refs.input || activeElement === refs.submitButton || implicitButtonBlur),
                     });
                 }
                 return true;
@@ -373,7 +471,13 @@
                     revision === roomRevision &&
                     roomId === currentRoomId
                 ) {
-                    setStatus('消息发送失败，请检查连接后重试。', 'error');
+                    if (error?.deliveryUncertain) {
+                        sendOutcomeWarning = '消息发送结果未确认，请先核对聊天记录，避免重复发送。';
+                        syncStatus();
+                    } else {
+                        sendError = '消息发送失败，请检查连接后重试。';
+                        syncStatus();
+                    }
                     logger?.warn?.('Chat message send failed.', error);
                 }
                 return false;
@@ -406,13 +510,17 @@
             void sendCurrentMessage();
         };
         const handleInput = () => {
-            if (statusKind === 'error') {
+            draftRevision += 1;
+            if (sendError || sendOutcomeWarning) {
+                sendOutcomeWarning = undefined;
+                sendError = undefined;
                 setStatus('', '');
                 syncStatus();
             }
             syncFormState();
         };
         const handleCompositionStart = () => {
+            draftRevision += 1;
             composing = true;
         };
         const handleCompositionEnd = () => {
@@ -422,6 +530,8 @@
         const handleNameChange = () => {
             commitDisplayName();
         };
+        const handleDocumentFocus = () => { focusRevision += 1; };
+        const retryHistory = () => rejoinCurrentRoom();
 
         const init = () => {
             if (destroyed) {
@@ -451,19 +561,29 @@
                 statusElement.setAttribute('role', 'status');
                 statusElement.setAttribute('aria-live', 'polite');
                 root.append(statusElement);
+                historyRetryButton = global.document.createElement('button');
+                historyRetryButton.type = 'button';
+                historyRetryButton.className = 'chat-history-retry';
+                historyRetryButton.textContent = '重新同步聊天记录';
+                historyRetryButton.hidden = true;
+                historyRetryButton.addEventListener('click', retryHistory);
+                root.append(historyRetryButton);
                 initialized = true;
 
                 stagedSubscriptions.push(
-                    transport.subscribeHistory(({ messages, roomId } = {}) =>
-                        renderHistory(messages, { roomId })
+                    transport.subscribeHistory(({ messages, roomId, persistence, requestRevision } = {}) =>
+                        renderHistory(messages, { roomId, persistence, requestRevision })
                     )
                 );
                 stagedSubscriptions.push(
                     transport.subscribeMessage(appendMessage)
                 );
+                if (transport.subscribeHistoryFailure)
+                    stagedSubscriptions.push(transport.subscribeHistoryFailure(handleHistoryFailure));
                 stagedSubscriptions.push(
                     transport.subscribeConnectionState(setConnectionState)
                 );
+                if (transport.subscribePersistence) stagedSubscriptions.push(transport.subscribePersistence(setPersistence));
                 if (
                     stagedSubscriptions.some(
                         (unsubscribe) => typeof unsubscribe !== 'function'
@@ -486,12 +606,17 @@
                     handleCompositionEnd
                 );
                 refs.nameInput?.addEventListener('change', handleNameChange);
+                global.document.addEventListener('focusin', handleDocumentFocus);
                 syncFormState();
                 return true;
             } catch (error) {
+                global.document.removeEventListener('focusin', handleDocumentFocus);
                 stagedSubscriptions.forEach((unsubscribe) => unsubscribe?.());
                 initialized = false;
                 statusElement?.remove();
+                historyRetryButton?.removeEventListener('click', retryHistory);
+                historyRetryButton?.remove();
+                historyRetryButton = undefined;
                 statusElement = undefined;
                 refs = undefined;
                 throw error;
@@ -535,13 +660,20 @@
                 handleCompositionEnd
             );
             refs?.nameInput?.removeEventListener('change', handleNameChange);
+            global.document.removeEventListener('focusin', handleDocumentFocus);
             subscriptions.splice(0).forEach((unsubscribe) => unsubscribe?.());
             removeEmptyState();
             statusElement?.remove();
+            historyRetryButton?.removeEventListener('click', retryHistory);
+            historyRetryButton?.remove();
+            historyRetryButton = undefined;
             statusElement = undefined;
             sending = false;
             composing = false;
             loadingHistory = false;
+            renderedMessageIds.clear();
+            pendingLiveMessages.length = 0;
+            pendingHistoryTruncated = false;
             return true;
         };
 

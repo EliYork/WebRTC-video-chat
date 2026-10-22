@@ -74,6 +74,100 @@ const publish = (fixture, peerId, generation, mediaStream, options = {}) =>
         stream: mediaStream,
     });
 
+test('new outgoing calls wait for current connection configuration', async () => {
+    const network = new StrictMediaNetwork();
+    let ready;
+    const a = createFixture('A', network, { prepareConnection: () => new Promise(resolve => { ready = resolve; }) });
+    createFixture('B', network);
+    const pending = publish(a, 'B', 1, stream(audio('mic')));
+    assert.equal(a.peer.calls.length, 0, 'must not construct RTC using expired ICE configuration');
+    ready(true); const call = await pending;
+    assert.equal(a.peer.calls.length, 1); assert.equal(call, a.peer.calls[0]);
+});
+
+test('incoming calls wait for current connection configuration before answering', async () => {
+    const network = new StrictMediaNetwork();
+    const a = createFixture('A', network);
+    let ready;
+    const b = createFixture('B', network, { prepareConnection: () => new Promise(resolve => { ready = resolve; }) });
+    let answering;
+    b.peer.onCall = call => { answering = b.registry.answerCall({ call }); };
+    publish(a, 'B', 1, stream(audio('mic'))); network.flush();
+    const incoming = network.calls[0].answerer;
+    assert.equal(incoming.answerCount, 0, 'answer must not construct RTC with expired credentials');
+    ready(true); await answering;
+    assert.equal(incoming.answerCount, 1);
+});
+
+test('newer outgoing preparations supersede older generations and teardown releases waiting callers', async () => {
+    const network = new StrictMediaNetwork(), ready = [];
+    const a = createFixture('A', network, { prepareConnection: () => new Promise(resolve => ready.push(resolve)) });
+    createFixture('B', network);
+    const first = publish(a, 'B', 1, stream(audio('old')));
+    const second = publish(a, 'B', 2, stream(audio('new')));
+    assert.equal(await first, undefined, 'superseded caller need not wait for credentials');
+    assert.equal(publish(a, 'B', 2, stream(audio('duplicate'))), second);
+    ready[0](true); ready[1](true); await second;
+    assert.equal(a.peer.calls.length, 1); assert.equal(a.peer.calls[0].localStream.getAudioTracks()[0].id, 'new');
+    const pending = publish(a, 'B', 3, stream(audio('cancelled')));
+    a.registry.teardown(); assert.equal(await pending, undefined); ready[2](true);
+    await Promise.resolve(); assert.equal(a.peer.calls.length, 1);
+});
+
+test('stopping local media or disconnecting cancels pending outgoing preparation without reviving it', async () => {
+    const network = new StrictMediaNetwork(), ready = [];
+    const a = createFixture('A', network, { prepareConnection: () => new Promise(resolve => ready.push(resolve)) });
+    createFixture('B', network);
+    const first = publish(a, 'B', 1, stream(audio('stopped')));
+    publish(a, 'B', 2, new StrictStream()); assert.equal(await first, undefined);
+    const next = publish(a, 'B', 3, stream(audio('disconnected')));
+    a.registry.setSessionDisconnected(true); a.registry.setSessionDisconnected(false);
+    assert.equal(await next, undefined); ready.forEach(resolve => resolve(true));
+    await Promise.resolve(); assert.equal(a.peer.calls.length, 0);
+});
+
+test('failed connection preparation preserves the existing send direction and sanitized warning', async () => {
+    const network = new StrictMediaNetwork(), warnings = [];
+    let prepare = () => true;
+    const a = createFixture('A', network, { prepareConnection: () => prepare(), onWarning: (...args) => warnings.push(args) });
+    createFixture('B', network);
+    const live = publish(a, 'B', 1, stream(audio('live'))); network.flush();
+    prepare = () => Promise.reject(Error('secret-credential-must-not-log'));
+    assert.equal(await publish(a, 'B', 2, stream(audio('new'))), undefined);
+    assert.equal(a.registry.getSnapshot('B').outgoingCall, live); assert.equal(live.closeCount, 0);
+    assert.equal(warnings.length, 1); assert.doesNotMatch(JSON.stringify(warnings), /secret-credential/);
+});
+
+test('incoming preparations close superseded and departed calls once and never answer after cleanup', async () => {
+    const network = new StrictMediaNetwork(), ready = [];
+    const a = createFixture('A', network);
+    const b = createFixture('B', network, { prepareConnection: () => new Promise(resolve => ready.push(resolve)) });
+    const answers = [];
+    b.peer.onCall = call => answers.push(b.registry.answerCall({ call }));
+    publish(a, 'B', 1, stream(audio('first'))); network.flush();
+    const first = network.calls[0].answerer;
+    publish(a, 'B', 2, stream(audio('second'))); network.flush();
+    const second = network.calls[1].answerer;
+    assert.equal(first.answerCount, 0); assert.equal(first.closeCount, 1);
+    b.registry.cleanupPeer('A'); await Promise.all(answers);
+    ready.forEach(resolve => resolve(true)); await Promise.resolve();
+    assert.equal(second.answerCount, 0); assert.equal(second.closeCount, 1);
+});
+
+test('remote close or preparation rejection cannot answer a waiting incoming call', async () => {
+    const network = new StrictMediaNetwork(), ready = [];
+    const a = createFixture('A', network);
+    const b = createFixture('B', network, { prepareConnection: () => new Promise((resolve, reject) => ready.push({ resolve, reject })) });
+    const answers = [];
+    b.peer.onCall = call => answers.push(b.registry.answerCall({ call }));
+    const caller = publish(a, 'B', 1, stream(audio('first'))); network.flush();
+    caller.close(); network.flush(); await answers[0]; ready[0].resolve(true);
+    publish(a, 'B', 2, stream(audio('second'))); network.flush();
+    ready[1].reject(Error('test-unavailable')); await answers[1];
+    assert.equal(network.calls[0].answerer.answerCount, 0);
+    assert.equal(network.calls[1].answerer.answerCount, 0); assert.equal(network.calls[1].answerer.closeCount, 1);
+});
+
 test('empty local snapshots never create data-only MediaConnections', () => {
     const network = new StrictMediaNetwork();
     const a = createFixture('A', network);

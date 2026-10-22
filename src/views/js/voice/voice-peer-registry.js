@@ -28,6 +28,7 @@
         onCodecFallback,
         onCodecFeedback,
         onWarning,
+        prepareConnection,
         removeRemoteTile,
     } = {}) => {
         const entries = new Map();
@@ -51,6 +52,7 @@
             lastOutgoingGeneration: 0,
             outgoing: createDirectionState(),
             outgoingCreatingGeneration: 0,
+            preparing: { incoming: null, outgoing: null },
             peerId,
             remoteStream: null,
             streamListeners: [],
@@ -106,6 +108,57 @@
                 warn(`Could not close peer call ${call.peer || ''}.`, error);
             }
             return true;
+        };
+
+        const cancelPreparation = (entry, direction) => {
+            const pending = entry.preparing[direction];
+            if (!pending) return;
+            entry.preparing[direction] = null;
+            pending.detach?.();
+            pending.cancel?.();
+            if (pending.call) closeCallOnce(pending.call);
+        };
+
+        const withPreparedConnection = (entry, direction, request, operation) => {
+            const pending = { generation: request.generation, call: request.call };
+            entry.preparing[direction] = pending;
+            if (pending.call) {
+                const cancelled = () => {
+                    if (entry.preparing[direction] === pending) cancelPreparation(entry, direction);
+                };
+                pending.call.on('close', cancelled);
+                pending.call.on('error', cancelled);
+                pending.detach = () => {
+                    removeEmitterListener(pending.call, 'close', cancelled);
+                    removeEmitterListener(pending.call, 'error', cancelled);
+                };
+            }
+            const owns = () => entries.get(entry.peerId) === entry && entry.preparing[direction] === pending;
+            const finish = ready => {
+                if (!owns()) return undefined;
+                if (ready === false || sessionDisconnected || request.peer?.destroyed) {
+                    cancelPreparation(entry, direction);
+                    return undefined;
+                }
+                pending.detach?.();
+                entry.preparing[direction] = null;
+                return operation();
+            };
+            const failed = () => {
+                if (owns()) {
+                    warn('Media connection configuration is unavailable.');
+                    cancelPreparation(entry, direction);
+                }
+                return undefined;
+            };
+            try {
+                const ready = prepareConnection(request);
+                if (!ready || typeof ready.then !== 'function') return finish(ready);
+                const cancelled = new Promise(resolve => { pending.cancel = resolve; });
+                if (!owns()) pending.cancel();
+                pending.promise = Promise.race([Promise.resolve(ready).then(finish).catch(failed), cancelled]);
+                return pending.promise;
+            } catch { return failed(); }
         };
 
         const retireRecord = (entry, record, { close = true } = {}) => {
@@ -448,7 +501,7 @@
                 );
         };
 
-        const callPeer = ({
+        const callPeerNow = ({
             generation,
             options = {},
             peer,
@@ -660,7 +713,7 @@
             return { ok: true };
         };
 
-        const answerCall = ({ call } = {}) => {
+        const answerCallNow = ({ call } = {}) => {
             const peerId = call?.peer;
             const generation = Number(
                 call?.metadata?.[MEDIA_GENERATION_METADATA]
@@ -729,6 +782,37 @@
             return call;
         };
 
+        const callPeer = (request = {}) => {
+            const { peer, peerId, stream } = request;
+            const generation = Number(request.generation);
+            if (!prepareConnection || sessionDisconnected || !peer || !peerId ||
+                !isGeneration(generation) || getLiveTracks(stream).length === 0)
+                return callPeerNow(request);
+            const entry = ensureEntry(peerId);
+            if (generation <= entry.lastOutgoingGeneration) return callPeerNow(request);
+            const pending = entry.preparing.outgoing;
+            if (pending && generation <= pending.generation) return pending.promise;
+            cancelPreparation(entry, 'outgoing');
+            return withPreparedConnection(entry, 'outgoing', { peer, peerId, generation }, () => callPeerNow(request));
+        };
+
+        const answerCall = (request = {}) => {
+            const { call, peer } = request;
+            const peerId = call?.peer, generation = Number(call?.metadata?.[MEDIA_GENERATION_METADATA]);
+            if (!prepareConnection || sessionDisconnected || !isCall(call) || !peerId ||
+                call.metadata?.[MEDIA_DIRECTION_METADATA] !== SEND_DIRECTION || !isGeneration(generation))
+                return answerCallNow(request);
+            const entry = ensureEntry(peerId);
+            if (generation <= entry.lastIncomingGeneration) return answerCallNow(request);
+            const pending = entry.preparing.incoming;
+            if (pending && generation <= pending.generation) {
+                if (call !== pending.call) closeCallOnce(call);
+                return pending.promise;
+            }
+            cancelPreparation(entry, 'incoming');
+            return withPreparedConnection(entry, 'incoming', { call, peer, peerId, generation }, () => answerCallNow(request));
+        };
+
         const stopOutgoing = (
             peerId,
             { generation, reason = 'stop-outgoing' } = {}
@@ -745,6 +829,8 @@
                 }
                 entry.lastOutgoingGeneration = normalizedGeneration;
             }
+            if (!isGeneration(normalizedGeneration) || normalizedGeneration >= (entry.preparing.outgoing?.generation || 0))
+                cancelPreparation(entry, 'outgoing');
 
             const records = [
                 entry.outgoing.pending,
@@ -796,6 +882,8 @@
             }
 
             entry.cleanupGeneration += 1;
+            cancelPreparation(entry, 'incoming');
+            cancelPreparation(entry, 'outgoing');
             [entry.incoming, entry.outgoing].forEach((state) => {
                 retireRecord(entry, state.pending);
                 retireRecord(entry, state.current);
@@ -924,6 +1012,10 @@
             replaceOutgoingTracks,
             setSessionDisconnected: (value) => {
                 sessionDisconnected = Boolean(value);
+                if (sessionDisconnected) entries.forEach(entry => {
+                    cancelPreparation(entry, 'incoming');
+                    cancelPreparation(entry, 'outgoing');
+                });
             },
             stopOutgoing,
             teardown,

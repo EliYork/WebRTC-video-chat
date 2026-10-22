@@ -6,16 +6,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title><%= channelName %> - 语音据点</title>
     <style>
-        html[data-room-boot='pending'] body { background: #fbf7f9; }
-        html[data-room-boot='pending'] #main,
-        html[data-room-boot='pending'] .workspace-topbar { visibility: hidden; }
+        body { background: #fbf7f9; }
         .room-boot-status { display: none; }
-        html[data-room-boot='pending'] .room-boot-status { display: flex; position: fixed; inset: 0; align-items: center; justify-content: center; color: #887681; font: 14px system-ui, sans-serif; }
         html[data-room-boot='fallback'] .room-boot-status { display: flex; position: fixed; top: 58px; left: 50%; transform: translateX(-50%); z-index: 30000; gap: 12px; padding: 12px 16px; border-radius: 10px; background: #fff; color: #887681; box-shadow: 0 4px 24px #44364118; }
         .room-boot-status button { display: none; }
         html[data-room-boot='fallback'] .room-boot-status button { display: block; }
     </style>
-    <noscript><style>html[data-room-boot='pending'] #main, html[data-room-boot='pending'] .workspace-topbar { visibility: visible; } .room-boot-status { display: none !important; }</style></noscript>
+    <noscript><style>.room-boot-status { display: none !important; }</style></noscript>
     <script src="/js/shared/room-boot.js"></script>
     <link rel="stylesheet" href="/style.css?v=stage-voice-20261018">
     <link rel="stylesheet" href="/vendor/fontawesome/css/fontawesome.min.css">
@@ -35,17 +32,25 @@
     </script>
 </head>
 <body>
-    <div class="room-boot-status" role="status"><span data-room-load-message>正在加载布局…</span><button type="button" data-room-reload>刷新重试</button></div>
+    <div class="room-boot-status" role="status"><span data-room-load-message></span><button type="button" data-room-reload>刷新重试</button></div>
     <header class="workspace-topbar" aria-label="语音据点">
         <div class="workspace-brand">
             <span class="workspace-mark" aria-hidden="true">◖◗</span>
             <strong>语音据点</strong>
         </div>
         <div class="workspace-actions">
+            <nav class="workspace-navigation" aria-label="切换频道、舞台和聊天">
             <button type="button" id="stageChannelsToggle" aria-controls="stage-channels" aria-expanded="false">频道</button>
+            <button type="button" id="stageStageToggle" aria-controls="member-cards canvas" aria-pressed="true">语音</button>
             <button type="button" id="stageChatToggle" aria-controls="chat-panel" aria-expanded="true">聊天</button>
+            </nav>
+            <button type="button" id="stageMoreToggle" aria-controls="workspace-tools" aria-expanded="false" aria-label="更多操作">•••</button>
+            <div class="workspace-tools" id="workspace-tools">
             <button type="button" class="workspace-copy-diagnostics" data-copy-call-diagnostics aria-live="polite" aria-atomic="true">复制诊断</button>
+            <a class="workspace-download" href="/download/windows" target="_blank" rel="noopener" title="下载 Windows 客户端（Windows 10/11，64 位）" aria-label="下载 Windows 客户端（64 位）"><i class="fa-solid fa-download" aria-hidden="true"></i><span>下载客户端</span></a>
+            </div>
         </div>
+        <p id="stageConnectionStatus" class="stage-connection-status" role="status" hidden></p>
     </header>
     <div id="main" class="room-layout stage-layout" data-stage-mode="voice">
         <div class="stage-sidebar-column">
@@ -123,7 +128,7 @@
                         <div class="media-dock-control-group control-button-wrap" data-device-control="camera">
                             <button id="toggleVideo" class="media-dock-action-button" type="button" title="摄像头" aria-label="摄像头" aria-pressed="false">
                                 <i class="fas fa-video"></i>
-                                <span>视频</span>
+                                <span>摄像头</span>
                             </button>
                             <button class="control-menu-toggle" type="button" aria-label="摄像头设置" aria-expanded="false" data-control-menu="camera">
                                 <i class="fas fa-chevron-up"></i>
@@ -152,6 +157,7 @@
                         <div class="media-device-popover-header">
                             <strong>麦克风</strong>
                             <span id="micDeviceStatus">默认设备</span>
+                            <button type="button" data-control-close aria-label="关闭麦克风设置">完成</button>
                         </div>
                         <div class="media-device-list" data-device-list="mic"></div>
                         <label class="media-volume-row">
@@ -188,6 +194,7 @@
                         <div class="media-device-popover-header">
                             <strong>摄像头</strong>
                             <span id="cameraDeviceStatus">默认设备</span>
+                            <button type="button" data-control-close aria-label="关闭摄像头设置">完成</button>
                         </div>
                         <div class="media-device-list" data-device-list="camera"></div>
                     </section>
@@ -195,6 +202,7 @@
                         <div class="media-device-popover-header">
                             <strong>耳机</strong>
                             <span id="outputDeviceStatus">默认设备</span>
+                            <button type="button" data-control-close aria-label="关闭播放设置">完成</button>
                         </div>
                         <p class="media-device-warning hidden" data-output-unsupported>当前浏览器不支持选择输出设备</p>
                         <div class="media-device-list" data-device-list="output"></div>
@@ -203,6 +211,14 @@
                             <input id="outputVolume" type="range" min="0" max="1" step="0.05" value="1">
                             <strong id="outputVolumeValue">100%</strong>
                         </label>
+                        <label class="voice-event-sound-toggle"><input id="voiceEventSounds" type="checkbox" checked><span>成员加入 / 离开提示音</span></label>
+                        <label class="media-volume-row">
+                            <span>提示音量</span>
+                            <input id="voiceEventVolume" type="range" min="0" max="1" step="0.05" value="0.35">
+                            <strong id="voiceEventVolumeValue">35%</strong>
+                        </label>
+                        <p class="voice-event-sound-hint">加入 do–re，离开 re–do。跟随总静音和当前输出设备。</p>
+                        <p id="voiceEventSoundStatus" class="voice-event-sound-hint" role="status"></p>
                     </section>
                     <%- include('share-dialog', { piikPrototype }) %>
                 </div>
@@ -216,6 +232,7 @@
             <section id="canvas" class="stage-canvas" aria-label="共享画面"><div id="video-grid"></div></section>
         </main>
         <section class="stage-members" aria-label="语音成员舞台">
+            <p id="stageShareNotice" class="stage-share-notice" role="status" hidden></p>
             <header class="members-heading"><div><strong id="stageChannelName"><%= channelName %></strong><span id="stageChannelStatus">语音成员舞台</span></div><span id="member-count">0 人</span></header>
             <div id="members-empty" class="members-empty" role="status">
                 <div class="stage-welcome-mark" aria-hidden="true">◖◗</div>
@@ -227,7 +244,7 @@
         </section>
 
         <aside id="chat-panel" class="chat-panel" aria-label="频道聊天">
-            <header class="stage-chat-heading"><h2 id="chatTitle">频道聊天</h2><p id="chatDescription" hidden></p></header>
+            <header class="stage-chat-heading"><h2 id="chatTitle">频道聊天</h2><p id="chatDescription" hidden></p><button id="chatJumpToLatest" type="button" hidden>查看新消息</button></header>
             <input id="chatName" type="hidden" maxlength="32" autocomplete="nickname">
             <ol id="chatMessages" class="chat-messages"></ol>
             <form id="chatForm" class="chat-form">
@@ -277,11 +294,13 @@
     <script src="/js/voice/voice-media-lifecycle.js"></script>
     <script src="/js/voice/voice-retry-controller.js"></script>
     <script src="/js/voice/voice-session-runtime.js"></script>
+    <script src="/js/voice/voice-ice-config.js"></script>
     <script src="/js/voice/voice-media-operation-runtime.js"></script>
     <script src="/js/voice/voice-device-runtime.js"></script>
     <script src="/js/voice/voice-audio-recovery.js"></script>
     <script src="/js/voice/voice-audio-processing.js"></script>
     <script src="/js/voice/voice-audio-settings-controller.js"></script>
+    <script src="/js/voice/voice-channel-sounds.js"></script>
     <script src="/js/voice/voice-status-view.js"></script>
     <script src="/js/voice/voice-media-quality-view.js"></script>
     <script src="/js/voice/voice-share-stats-view.js"></script>
@@ -292,6 +311,7 @@
     <script src="/js/voice/voice-media-quality-runtime.js"></script>
     <script src="/js/room/stage-layout-runtime.js"></script>
     <script src="/js/voice/voice-speaking-runtime.js"></script>
+    <script src="/js/voice/share-watch-status.js"></script>
     <script type="module" src="/script.js"></script> <!-- So we defined the static files of the server so we can use it here-->
 </body>
 </html>

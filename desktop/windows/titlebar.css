@@ -62,3 +62,13 @@ html[data-desktop-chrome] .server-navigation { display: none; }
 /* Old production pages may still have a repeated sidebar brand. The title
    bar is owned by the installed client, so it also works before a web release. */
 html[data-desktop-chrome] body:not(:has(#main.stage-layout)) { padding-top: env(titlebar-area-height, 40px); }
+html[data-desktop-chrome] .desktop-notice {
+    position: fixed; top: 54px; right: 18px; z-index: 19000;
+    width: min(360px, calc(100vw - 36px)); padding: 17px 18px;
+    background: #fff9fc; color: #49333f; border: 1px solid #e8d3de;
+    border-radius: 14px; box-shadow: 0 8px 30px #49333f18; font-size: 13px;
+}
+html[data-desktop-chrome] .desktop-notice p { margin: 7px 0 12px; color: #887681; line-height: 1.6; }
+html[data-desktop-chrome] .desktop-notice button { padding: 5px 10px; border-radius: 7px; background: #f8e9f0; color: #8e425f; border: 0; cursor: pointer; }
+html[data-desktop-chrome] .desktop-notice button + button { margin-left: 8px; }
+html[data-desktop-chrome] .desktop-notice button:disabled { opacity: .65; cursor: wait; }

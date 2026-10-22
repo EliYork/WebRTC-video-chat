@@ -54,13 +54,25 @@
             .sort((a, b) => ((Date.parse(a.event.时间) - Date.parse(b.event.时间)) || a.index - b.index) * (newest ? -1 : 1));
     let active;
     const show = ({ getLogs, subscribe, showRaw, shareOrdinal, host } = {}) => {
-        active?.close();
+        active?.(false);
         const node = (tag, text) => { const el = global.document.createElement(tag); if (text !== undefined) el.textContent = String(text); return el; };
         const dialog = node('dialog');
-        active = dialog;
         dialog.className = 'voice-log-dialog voice-events-dialog no-drag';
         dialog.setAttribute('aria-label', '播放事件日志');
         const previousFocus = global.document.activeElement;
+        let disposed = false, shown = false, unsubscribe;
+        const cleanup = (restoreFocus = true) => {
+            if (disposed) return;
+            disposed = true;
+            const ownsFocus = restoreFocus && active === cleanup && !global.document.hidden &&
+                (dialog.contains(global.document.activeElement) || global.document.activeElement === global.document.body);
+            unsubscribe?.(); unsubscribe = undefined;
+            if (dialog.open) dialog.close();
+            dialog.remove();
+            if (active === cleanup) active = null;
+            if (ownsFocus && previousFocus?.isConnected) previousFocus.focus();
+        };
+        active = cleanup;
         const header = node('div'); header.className = 'voice-player-heading';
         const close = node('button', '关闭'); close.type = 'button';
         header.append(node('h2', '播放事件'), close);
@@ -83,7 +95,8 @@
         let selectedScope = shareOrdinal ? String(shareOrdinal) : 'all';
         const expanded = new Set();
         const render = () => {
-            if (dialog.open && !dialog.isConnected) { dialog.close(); return; }
+            if (disposed) return;
+            if (shown && (!dialog.open || !dialog.isConnected)) { cleanup(false); return; }
             const logs = getLogs();
             const sessions = logs.sessions;
             const latest = sessions[logs.currentIndex] || sessions.at(-1);
@@ -126,12 +139,18 @@
         order.addEventListener('change', render);
         refresh.addEventListener('click', render);
         raw.addEventListener('click', showRaw);
-        close.addEventListener('click', () => dialog.close());
+        close.addEventListener('click', () => cleanup());
         dialog.addEventListener('keydown', (event) => { if (event.key === 'Escape') event.stopPropagation(); });
-        const unsubscribe = subscribe?.(render);
-        dialog.addEventListener('close', () => { unsubscribe?.(); dialog.remove(); if (active === dialog) active = null; previousFocus?.isConnected && previousFocus.focus(); });
-        (host || global.document.fullscreenElement || global.document.querySelector?.('.is-web-fullscreen') || global.document.body).append(dialog);
-        render(); dialog.showModal();
+        dialog.addEventListener('close', () => cleanup());
+        try {
+            (host || global.document.fullscreenElement || global.document.querySelector?.('.is-web-fullscreen') || global.document.body).append(dialog);
+            render(); dialog.showModal(); shown = true;
+            const release = subscribe?.(render);
+            if (disposed) release?.();
+            else unsubscribe = release;
+        } catch (error) {
+            cleanup(false); throw error;
+        }
         return dialog;
     };
     global.VoicePlayerEvents = { show, describe, selectEvents };

@@ -140,6 +140,8 @@
         let unsubscribe;
         let lastSnapshot = {};
         let openPopoverType;
+        let popoverRevision = 0;
+        let closeWatcher;
         let popoverOpenedByHover = false;
         let popovers = [];
         let fallbackPopup;
@@ -219,11 +221,12 @@
             iconName,
             label,
             pending,
+            cancelPending = false,
             unavailable,
         }) => {
             const isOff = unavailable || !enabled;
             button.classList.toggle('is-off', isOff);
-            button.disabled = Boolean(disabled || pending);
+            button.disabled = Boolean(disabled || (pending && !cancelPending));
             button.setAttribute('aria-busy', String(Boolean(pending)));
             button.setAttribute('aria-pressed', String(Boolean(enabled)));
             setButtonLabel(button, label);
@@ -504,12 +507,15 @@
                 enabled: Boolean(lastSnapshot.cameraEnabled),
                 iconClass: 'fas fa-video',
                 iconName: lastSnapshot.cameraEnabled ? 'video' : 'video-off',
-                label: lastSnapshot.cameraError
+                label: lastSnapshot.cameraPending
+                    ? lastSnapshot.cameraEnabled ? '关闭摄像头' : '取消开启摄像头'
+                    : lastSnapshot.cameraError
                     ? '摄像头不可用'
                     : lastSnapshot.cameraEnabled
                       ? '关闭摄像头'
                       : '打开摄像头',
                 pending: cameraPending,
+                cancelPending: Boolean(lastSnapshot.cameraPending),
                 unavailable:
                     lastSnapshot.cameraPermissionState === 'denied' ||
                     Boolean(lastSnapshot.cameraError),
@@ -530,7 +536,11 @@
             );
             const native = screenField('[data-screen-share-provider]')?.value === 'native';
             const sourceReady = !native || (sharing && editorMode === 'quality') || Boolean(screenField('[data-piik-native-source]')?.value);
-            refs.screenStartButton.disabled = !mediaAvailable || screenPending || !sourceReady;
+            const browserUnsupported = !native && lastSnapshot.browserScreenShareSupported === false;
+            const pickerUnavailable = browserUnsupported && (!sharing || editorMode !== 'quality');
+            refs.screenStartButton.disabled = !mediaAvailable || screenPending || !sourceReady || pickerUnavailable;
+            setText(screenField('[data-share-browser-title]'), browserUnsupported ? '此浏览器不支持共享屏幕' : '使用浏览器选择屏幕或窗口');
+            setText(screenField('[data-share-browser-hint]'), browserUnsupported ? '你仍可用通话卡片上的“摄像头”分享视频，或观看其他成员的共享。共享电脑屏幕请使用电脑浏览器或 Windows 客户端。' : '点击“选择来源并共享”后，将打开浏览器的来源选择器；选中画面后确认共享。');
             setText(refs.screenStartButton, screenPending ? '正在处理…' : sharing ? (editorMode === 'quality' ? '应用画质' : '切换来源') : native ? '开始共享' : '选择来源并共享');
             refs.screenStatus.classList.toggle('hidden', !sharing && !screenPending && !observedSharing);
             refs.resolutionSelect.value = resolutionPreset;
@@ -548,6 +558,7 @@
             }
             const stateText = screenPending ? '正在处理共享…' : sharing ? `正在共享 · ${lastSnapshot.screenShareAudioActive ? '含来源声音' : '不含来源声音'}` : '已停止共享';
             setText(refs.screenStatus, stateText);
+            refs.screenStatus.dataset.shareState = screenPending ? 'pending' : sharing ? 'active' : 'stopped';
             const stageControls = global.document.querySelector?.('[data-local-share-controls]');
             if (stageControls) {
                 stageControls.hidden = !sharing && !screenPending;
@@ -621,8 +632,9 @@
             intentRevisions.set(key, revision);
             pendingActions.add(key);
             render(lastSnapshot);
+            const isCurrent = () => isActive() && intentRevisions.get(key) === revision;
             try {
-                return await action();
+                return await action(isCurrent);
             } catch (error) {
                 logger?.warn?.(`Media Dock ${key} action failed.`, error);
                 return false;
@@ -647,7 +659,8 @@
             void runIntent('microphone', () => adapter.toggleMicrophone());
         };
         const handleCameraClick = () => {
-            void runIntent('camera', () => adapter.toggleCamera());
+            void runIntent('camera', () => adapter.toggleCamera(),
+                Boolean(getCurrentAdapterSnapshot().cameraPending));
         };
         const handleScreenClick = () => {
             const snapshot = getCurrentAdapterSnapshot();
@@ -664,7 +677,8 @@
             if (!snapshot.mediaControlsAvailable || snapshot.screenSharePending) return;
             if (refs.resolutionSelect.reportValidity?.() === false) return;
             // Call capture directly from this click to preserve browser user activation.
-            void runIntent('screen', async () => {
+            void runIntent('screen', async (isCurrent) => {
+                const dialogRevision = popoverRevision;
                 setText(screenField('[data-share-dialog-feedback]'), '');
                 const options = {
                           frameRate,
@@ -678,6 +692,7 @@
                           maxBitrate: Number(screenField('[data-screen-share-bitrate]')?.value) || 15000000,
                       };
                 const started = await (snapshot.screenShareEnabled ? adapter.updateScreenShare?.(options, editorMode) : adapter.startScreenShare(options));
+                if (!isCurrent() || dialogRevision !== popoverRevision || openPopoverType !== 'screen') return started;
                 if (started !== false && started !== undefined) closePopovers();
                 else if (openPopoverType === 'screen') setText(screenField('[data-share-dialog-feedback]'), getCurrentAdapterSnapshot().screenShareError || '操作未完成或已取消。请检查来源后重试。');
                 return started;
@@ -740,14 +755,17 @@
             );
         };
         const handleCopyClick = () => {
-            void runIntent('copy', async () => {
+            void runIntent('copy', async (isCurrent) => {
                 const copied = await adapter.copyRoomLink?.();
+                if (!isCurrent()) return copied;
                 setCopyState(copied === false ? 'failure' : 'success');
                 scheduleCopyRestore();
                 return copied;
             });
         };
         const closePopovers = () => {
+            popoverRevision++;
+            closeWatcher?.destroy(); closeWatcher = undefined;
             if (openPopoverType === 'screen') signalDialog('voice-share-dialog-close');
             cancelHoverClose();
             root.querySelectorAll('[data-device-control]').forEach((control) =>
@@ -866,6 +884,12 @@
             }
             toggle.setAttribute('aria-expanded', 'true');
             openPopoverType = type;
+            // Modal dialogs already participate in browser close requests.
+            // Manual device popovers need an explicit watcher for Android Back.
+            if (type !== 'screen' && !fromHover && global.CloseWatcher) {
+                closeWatcher = new global.CloseWatcher();
+                closeWatcher.addEventListener('close', closePopovers);
+            }
             if (type === 'screen') signalDialog('voice-share-dialog-open', { mode, nativeSourceKey: getCurrentAdapterSnapshot().screenShareOptions?.nativeSourceKey });
             popoverOpenedByHover = fromHover;
             if (DEVICE_TYPES.includes(type)) {
@@ -875,6 +899,11 @@
             return true;
         };
         const handleRootClick = (event) => {
+            if (event.target.closest?.('[data-control-close]')) {
+                event.preventDefault();
+                closePopovers();
+                return;
+            }
             const menuToggle = event.target.closest?.('[data-control-menu]');
             if (menuToggle && root.contains(menuToggle)) {
                 event.preventDefault();
@@ -921,6 +950,7 @@
             }
         };
         const handleDocumentKeydown = (event) => {
+            if (event.defaultPrevented || event.isComposing) return;
             if (fallbackPopup && openPopoverType === 'screen' && event.key === 'Tab') {
                 const focusable = Array.from(fallbackPopup.querySelectorAll('select, button, input, [tabindex="0"]')).filter((element) => !element.disabled);
                 const index = focusable.indexOf(global.document.activeElement);
@@ -930,6 +960,7 @@
                 }
             }
             if (event.key === 'Escape') {
+                if (openPopoverType) event.preventDefault();
                 if (openPopoverType === 'screen') { event.preventDefault(); cancelShareDialog(); }
                 else closePopovers();
             }
@@ -965,6 +996,8 @@
 
             refs = resolveRefs();
             popovers = Array.from(root.querySelectorAll('[data-device-popover]'));
+            const shareProvider = screenField('[data-screen-share-provider]');
+            if (shareProvider && global.EliYorkDesktop) shareProvider.value = 'native';
             initialized = true;
             root.dataset.mediaDockInitialized = 'true';
             refs.resolutionSelect.value = resolutionPreset;

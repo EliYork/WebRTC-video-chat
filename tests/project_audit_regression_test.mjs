@@ -1,3 +1,4 @@
+/* eslint-disable no-await-in-loop -- Bounded polls observe the isolated server startup. */
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import vm from 'node:vm';
@@ -149,7 +150,7 @@ test('real server supports both WebSocket protocols and survives malformed PeerJ
     try {
         let ready = false;
         for (let i = 0; i < 100 && !ready; i++) {
-            try { ready = (await fetch(`http://127.0.0.1:${port}/`)).ok; } catch {}
+            try { ready = (await fetch(`http://127.0.0.1:${port}/`)).ok; } catch { /* Server may still be binding. */ }
             if (app.exitCode !== null) throw new Error(output);
             if (!ready) await new Promise((done) => setTimeout(done, 50));
         }
@@ -161,6 +162,7 @@ test('real server supports both WebSocket protocols and survives malformed PeerJ
             const scriptPolicy = policy.split(';').find((rule) => rule.startsWith('script-src '));
             assert.ok(scriptPolicy.includes("'wasm-unsafe-eval'"), 'RNNoise WASM compilation allowed');
             assert.equal(scriptPolicy.includes("'unsafe-eval'"), false, 'JavaScript eval remains blocked');
+            assert.doesNotMatch(policy, /unpkg\.com|(?:kit|ka-f)\.fontawesome\.com/, 'local assets do not need external CDN permissions');
         }));
         const socket = await opened(`ws://127.0.0.1:${port}/socket.io/?EIO=4&transport=websocket`, (msg) => msg.startsWith('0'));
         assert.ok(JSON.parse(socket.message.slice(1)).sid);

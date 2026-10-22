@@ -96,8 +96,12 @@ try {
     assert.equal(data.menuHidden, true);
     assert.equal(data.settingsEntry, true);
     assert.equal(data.aboutDialog, true);
+    assert.equal(data.aboutMuted, true);
     assert.equal(data.refreshCancelled, true);
     assert.equal(data.refreshKeptNative, true);
+    assert.equal(data.nativeRecovery, true);
+    assert.equal(data.recoveredNativeHealth, 200);
+    assert.equal(data.healthyNativeKept, true);
     assert.equal(data.chromeCases.length, 5);
     assert.throws(
         () => process.kill(data.nativePid, 0),
@@ -107,6 +111,7 @@ try {
     mkdirSync(artifacts, { recursive: true });
     copyFileSync(report, join(artifacts, 'desktop-smoke.json'));
     copyFileSync(join(work, 'desktop-chrome.png'), join(artifacts, 'desktop-chrome.png'));
+    copyFileSync(join(work, 'desktop-native-recovery.png'), join(artifacts, 'desktop-native-recovery.png'));
     process.stdout.write(
         `PASS hidden Electron: single overlay title bar, guarded refresh/Ctrl+R, retained native PID, sandbox, diagnostics clipboard, updater, fake media, muted output and App cleanup. Logs ${work}\n`
     );

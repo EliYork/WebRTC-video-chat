@@ -4,7 +4,7 @@ const fieldsByEvent = {
         peerId: 'string',
         clientSessionEpoch: 'number',
     },
-    'chat:join': { roomId: 'string' },
+    'chat:join': { roomId: 'string', joinRequestId: 'number' },
     'chat:send': { roomId: 'string', senderName: 'string', content: 'string' },
     'presence:joinVoice': {
         senderName: 'string',
@@ -54,7 +54,9 @@ export const validateSocketPacket = (packet, next) => {
         }
         valid &&=
             acknowledge === undefined || typeof acknowledge === 'function';
-    } else if (event === 'voice:snapshot' || event === 'voice:diagnostics:collect') {
+        if (valid && event === 'chat:join' && payload.joinRequestId !== undefined)
+            valid = Number.isSafeInteger(payload.joinRequestId) && payload.joinRequestId > 0;
+    } else if (event === 'voice:snapshot' || event === 'voice:diagnostics:collect' || event === 'rtc:ice') {
         valid = payload === undefined || typeof payload === 'function';
     }
     if (!valid) {

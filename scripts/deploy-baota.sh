@@ -89,6 +89,56 @@ probe() {
     code="$(curl --silent --show-error --connect-timeout 3 --max-time 8 -o /dev/null -w '%{http_code}' "$1")" || return 1
     [[ "$code" == 200 ]]
 }
+probe_ready() {
+    # One Node process owns the request, deadline and bounded JSON parsing.
+    # Require exactly 200; redirects and invalid TLS must never pass this gate.
+    "$NODE" -e '
+let request;
+let deadline;
+let settled = false;
+const finish = ready => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(deadline);
+    request?.destroy();
+    process.exitCode = ready ? 0 : 1;
+};
+try {
+    const url = new URL(process.argv[1]);
+    if (url.protocol !== "http:" && url.protocol !== "https:") throw Error("unsupported protocol");
+    const client = require(url.protocol === "https:" ? "node:https" : "node:http");
+    deadline = setTimeout(() => finish(false), 8000);
+    request = client.get(url, { agent: false, rejectUnauthorized: true, headers: { Accept: "application/json" } }, response => {
+        if (response.statusCode !== 200) {
+            response.destroy();
+            finish(false);
+            return;
+        }
+        const chunks = [];
+        let bytes = 0;
+        response.on("data", chunk => {
+            bytes += chunk.length;
+            if (bytes > 65536) {
+                finish(false);
+                return;
+            }
+            chunks.push(chunk);
+        });
+        response.on("end", () => {
+            try {
+                const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+                finish(body?.ok === true && body?.mediaReady === true);
+            } catch { finish(false); }
+        });
+        response.on("aborted", () => finish(false));
+        response.on("error", () => finish(false));
+    });
+    request.on("error", () => finish(false));
+} catch { finish(false); }
+' "$1"
+}
+LOCAL_READY_URL="${LOCAL_URL%/room/lobby}/readyz"
+PUBLIC_READY_URL="${PUBLIC_URL%/room/lobby}/readyz"
 probe "$LOCAL_URL" || { echo '旧服务本机检查失败，请核对地址/协议，尚未停服。'; exit 1; }
 MOVED=()
 INSTALLED=()
@@ -122,13 +172,14 @@ done
 "$PM2" restart "$PM2_APP"
 HEALTH_OK=0
 for i in $(seq 1 15); do
-    if probe "$LOCAL_URL"; then HEALTH_OK=1; break; fi
-    echo "等待启动 ($i/15)"; sleep 2
+    if probe "$LOCAL_URL" && probe_ready "$LOCAL_READY_URL"; then HEALTH_OK=1; break; fi
+    echo "等待页面与媒体服务就绪 ($i/15)"; sleep 2
 done
 [[ "$HEALTH_OK" == 1 ]]
 probe "$PUBLIC_URL"
+probe_ready "$PUBLIC_READY_URL"
 "$PM2" save
 trap - ERR
 echo "部署完成：$ZIP"
 echo "旧程序备份：$RUN_DIR/old"
-echo 'HTTP 检查通过；请再验收聊天、双端语音和屏幕共享。'
+echo '页面与媒体就绪检查通过；请再验收聊天、双端语音和屏幕共享。'

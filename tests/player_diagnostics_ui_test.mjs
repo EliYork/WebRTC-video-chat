@@ -189,3 +189,75 @@ test('native reported FPS remains explicitly sourced; a hidden local preview is 
     assert.match(text, /编码 FPS（浏览器报告）","30/); assert.match(text, /采集 FPS（浏览器报告）","60/);
     assert.match(text, /本机预览已隐藏/);
 });
+
+const queuedEventsFixture = () => {
+    const f = fixture(), closeEvents = [], subscribers = new Set();
+    const create = f.document.createElement;
+    let failOpen = false, reads = 0, unsubscribed = 0, lastRender;
+    f.document.createElement = tag => {
+        const element = create(tag);
+        if (tag === 'dialog') {
+            element.showModal = () => {
+                if (failOpen) throw new Error('dialog unavailable');
+                element.open = true; element.querySelector('button').focus();
+            };
+            element.close = () => {
+                if (!element.open) return;
+                element.open = false;
+                closeEvents.push(() => element.dispatchEvent({ type: 'close' }));
+            };
+        }
+        return element;
+    };
+    vm.runInNewContext(read('voice-player-events'), { window: f.window });
+    const options = {
+        getLogs: () => { reads++; return { sessions: [], currentIndex: -1, storageState: '可用' }; },
+        subscribe: render => { lastRender = render; subscribers.add(render); return () => { unsubscribed++; subscribers.delete(render); }; },
+    };
+    return { ...f, closeEvents, subscribers, show: () => f.window.VoicePlayerEvents.show(options),
+        failOpen: value => { failOpen = value; }, reads: () => reads, unsubscribed: () => unsubscribed,
+        lastRender: () => lastRender, flushClose: () => closeEvents.splice(0).forEach(callback => callback()) };
+};
+
+test('replacing an events dialog releases the old subscription before its queued close event', () => {
+    const f = queuedEventsFixture(), first = f.show();
+    const oldRender = f.lastRender(), second = f.show();
+    assert.equal(first.isConnected, false);
+    assert.equal(f.subscribers.size, 1);
+    const reads = f.reads(); oldRender(); assert.equal(f.reads(), reads, 'late notifications do not rebuild a retired dialog');
+    f.flushClose(); assert.equal(f.subscribers.size, 1); assert.equal(second.open, true);
+    second.querySelector('button').click(); f.flushClose(); assert.equal(f.subscribers.size, 0);
+});
+
+test('an obsolete close event cannot steal focus from a newer events dialog', () => {
+    const f = queuedEventsFixture(), opener = f.document.createElement('button'); f.document.body.append(opener); opener.focus();
+    f.show(); const second = f.show(), focused = f.document.activeElement;
+    f.flushClose();
+    assert.equal(f.document.activeElement, focused);
+    assert.equal(second.contains(focused), true);
+    second.querySelector('button').click(); f.flushClose();
+});
+
+test('failed events dialog opening leaves no subscription or detached dialog owner', () => {
+    const f = queuedEventsFixture(); f.failOpen(true);
+    assert.throws(() => f.show(), /dialog unavailable/);
+    assert.equal(f.subscribers.size, 0); assert.equal(f.document.body.querySelector('dialog'), undefined);
+    f.failOpen(false); const dialog = f.show();
+    assert.equal(f.subscribers.size, 1);
+    dialog.querySelector('button').click(); f.flushClose(); assert.equal(f.subscribers.size, 0);
+});
+
+test('the close button releases an events subscription once before the native close notification', () => {
+    const f = queuedEventsFixture(), dialog = f.show();
+    dialog.querySelector('button').click();
+    assert.equal(f.subscribers.size, 0); assert.equal(dialog.isConnected, false);
+    assert.equal(f.unsubscribed(), 1); f.flushClose(); assert.equal(f.unsubscribed(), 1);
+});
+
+test('queued native close preserves a newer page focus choice', () => {
+    const f = queuedEventsFixture(), opener = f.document.createElement('button'), other = f.document.createElement('button');
+    f.document.body.append(opener, other); opener.focus();
+    const dialog = f.show(); dialog.close(); other.focus(); f.flushClose();
+    assert.equal(f.document.activeElement, other);
+    assert.equal(f.subscribers.size, 0);
+});

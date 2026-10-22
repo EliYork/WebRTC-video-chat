@@ -134,8 +134,8 @@ export function createNativeSourcePicker(authorize: () => Promise<unknown>) {
                     if (audioHint)
                         audioHint.textContent =
                             source.kind === 'display'
-                                ? '声音来源：整台电脑的系统声音，可能包含本频道通话。默认关闭，勾选前请确认不会回传。'
-                                : '声音来源：所选窗口对应应用的声音，可能包含该应用的其他窗口。默认关闭。';
+                                ? '声音来源：整台电脑的系统声音，可能包含本频道通话。可取消勾选以避免回传。'
+                                : '声音来源：所选窗口对应应用的声音，可能包含该应用的其他窗口。';
                     notify();
                 });
                 grid.append(card);

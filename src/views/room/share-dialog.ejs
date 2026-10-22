@@ -5,12 +5,12 @@
     </header>
     <div class="share-dialog-body">
         <% if (piikPrototype) { %>
-        <label class="share-provider-row"><span>共享方式</span><select data-screen-share-provider><option value="web">网页共享</option><option value="native">客户端原生共享</option></select></label>
+        <label class="share-provider-row"><span>共享方式</span><select data-screen-share-provider><option value="web">网页共享</option><option value="native">Windows 客户端共享</option></select></label>
         <% } %>
         <section data-share-source-section aria-label="选择共享来源">
             <div class="share-browser-source" data-share-browser-source>
-                <span aria-hidden="true">▣</span><h3>使用浏览器选择屏幕或窗口</h3>
-                <p>点击“选择来源并共享”后，将打开浏览器的来源选择器；选中画面后确认共享。</p>
+                <span aria-hidden="true">▣</span><h3 data-share-browser-title>使用浏览器选择屏幕或窗口</h3>
+                <p data-share-browser-hint>点击“选择来源并共享”后，将打开浏览器的来源选择器；选中画面后确认共享。</p>
             </div>
             <% if (piikPrototype) { %>
             <div data-piik-native-options hidden>
@@ -36,7 +36,7 @@
                 <label><span>流畅度</span><select id="screenShareFrameRate" data-screen-share-frame-rate><option value="15">15 帧/秒</option><option value="30">30 帧/秒</option><option value="60" selected>60 帧/秒</option></select></label>
             </div>
         </section>
-        <label class="share-audio-choice"><input type="checkbox" data-screen-share-audio data-piik-native-audio><span>共享来源的声音<small data-share-audio-hint>默认关闭，语音通话不受影响。整屏声音可能包含通话，请优先选择独立窗口或标签页。</small></span></label>
+        <label class="share-audio-choice"><input type="checkbox" checked data-screen-share-audio data-piik-native-audio><span>共享来源的声音<small data-share-audio-hint>默认开启。整屏声音可能包含本频道通话，可取消勾选以避免回传；建议选择独立窗口或标签页。</small></span></label>
         <details class="share-advanced"><summary>高级设置</summary>
             <label class="media-select-row" data-share-mode-row><span>画面偏好</span><select data-screen-share-mode><option value="game" selected>流畅优先</option><option value="detail">文字清晰优先</option></select></label>
             <% if (piikPrototype) { %>

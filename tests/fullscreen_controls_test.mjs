@@ -156,9 +156,9 @@ class FakeDocument extends FakeEventTarget {
     }
 }
 
-const createFixture = () => {
+const createFixture = (options = {}) => {
     const document = new FakeDocument();
-    const window = { document };
+    const window = { document, ...options };
     vm.runInNewContext(viewUtilsSource, { window });
     vm.runInNewContext(fullscreenSource, { window });
 
@@ -197,6 +197,109 @@ const event = (type, target) => ({
     stopPropagation() {},
 });
 
+for (const cancel of ['exit', 'detach', 'destroy']) {
+    test(`${cancel} invalidates a pending native fullscreen request before it enters`, async () => {
+        const f = createFixture(); f.api.bindFullscreenChange();
+        f.api.attachTileButton({ tile: f.tile, actions: f.headerActions });
+        const stream = {}; f.video.srcObject = stream;
+        let finish;
+        f.tile.requestFullscreen = () => new Promise(resolve => {
+            finish = async () => {
+                f.document.fullscreenElement = f.tile;
+                await f.document.dispatchEvent({ type: 'fullscreenchange' });
+                resolve();
+            };
+        });
+        const pending = f.api.toggleTileFullscreen({ tile: f.tile });
+        if (cancel === 'exit') f.api.exitTileFullscreen(f.tile);
+        if (cancel === 'detach') f.api.detachTile(f.tile);
+        if (cancel === 'destroy') f.api.destroy();
+        await finish();
+        assert.equal(await pending, false, 'a cancelled request must not report a successful entry');
+        assert.equal(f.document.fullscreenElement, null, 'late entry must leave fullscreen again');
+        assert.equal(f.document.exitCount, 1);
+        assert.equal(f.api.isTileLayoutWriteBlocked(f.tile), false);
+        assert.equal(f.tile.getAttribute('style'), f.originalStyle);
+        assert.equal(f.video.srcObject, stream);
+        f.api.destroy();
+    });
+}
+
+for (const completion of ['resolve', 'reject']) {
+    test(`an obsolete fullscreen ${completion} preserves a newer request for the same tile`, async () => {
+        const f = createFixture(); f.api.bindFullscreenChange();
+        f.api.attachTileButton({ tile: f.tile, actions: f.headerActions });
+        const request = f.tile.requestFullscreen;
+        let finish, fail;
+        f.tile.requestFullscreen = () => new Promise((resolve, reject) => { finish = resolve; fail = reject; });
+        const errors = [];
+        const old = f.api.toggleTileFullscreen({ tile: f.tile, onError: error => errors.push(error) });
+        f.api.exitTileFullscreen(f.tile);
+        f.tile.requestFullscreen = request;
+        assert.equal(await f.api.toggleTileFullscreen({ tile: f.tile }), true);
+        if (completion === 'resolve') finish();
+        else fail(new Error('obsolete fullscreen request rejected'));
+        assert.equal(await old, false);
+        assert.equal(f.document.fullscreenElement, f.tile);
+        assert.equal(f.document.exitCount, 0, 'old completion cannot exit the newer fullscreen');
+        assert.equal(f.api.isTileLayoutWriteBlocked(f.tile), true);
+        assert.deepEqual(errors, []);
+        f.api.destroy();
+    });
+}
+
+test('an old completion cannot exit a newer fullscreen on a different tile', async () => {
+    const f = createFixture(); f.api.bindFullscreenChange();
+    f.api.attachTileButton({ tile: f.tile, actions: f.headerActions });
+    let finish;
+    f.tile.requestFullscreen = () => new Promise(resolve => { finish = resolve; });
+    const old = f.api.toggleTileFullscreen({ tile: f.tile });
+    const other = f.document.createElement('section'); other._connected = true;
+    other.append(f.document.createElement('video')); f.api.attachTileButton({ tile: other });
+    other.requestFullscreen = async () => {
+        f.document.fullscreenElement = other;
+        await f.document.dispatchEvent({ type: 'fullscreenchange' });
+    };
+    assert.equal(await f.api.toggleTileFullscreen({ tile: other }), true);
+    finish(); assert.equal(await old, false);
+    assert.equal(f.document.fullscreenElement, other);
+    assert.equal(f.document.exitCount, 0);
+    f.api.destroy();
+});
+
+test('a current native fullscreen failure restores layout and reports the failure once', async () => {
+    const f = createFixture(); f.api.bindFullscreenChange();
+    const errors = [];
+    f.tile.requestFullscreen = () => Promise.reject(new Error('current fullscreen request denied'));
+    assert.equal(await f.api.toggleTileFullscreen({ tile: f.tile, onError: error => errors.push(error.message) }), false);
+    assert.deepEqual(errors, ['current fullscreen request denied']);
+    assert.equal(f.api.isTileLayoutWriteBlocked(f.tile), false);
+    assert.equal(f.tile.getAttribute('style'), f.originalStyle);
+    f.api.destroy();
+});
+
+test('switching to web fullscreen cancels a pending native entry and keeps the web view', async () => {
+    const f = createFixture(); f.api.bindFullscreenChange();
+    f.api.attachTileButton({ tile: f.tile, actions: f.headerActions });
+    let finish;
+    f.tile.requestFullscreen = () => new Promise(resolve => {
+        finish = async () => {
+            f.document.fullscreenElement = f.tile;
+            await f.document.dispatchEvent({ type: 'fullscreenchange' }); resolve();
+        };
+    });
+    const pending = f.api.toggleTileFullscreen({ tile: f.tile });
+    const web = f.tile.querySelector('.web-fullscreen-btn');
+    await web.dispatchEvent(event('click', web));
+    await finish();
+    assert.equal(await pending, false);
+    assert.equal(f.document.fullscreenElement, null);
+    assert.equal(f.tile.classList.contains('is-web-fullscreen'), true);
+    assert.equal(f.api.isTileLayoutWriteBlocked(f.tile), true);
+    assert.equal(web.getAttribute('aria-pressed'), 'true');
+    f.api.destroy();
+});
+
 test('web fullscreen stays inside page, blocks layout writes and restores on Escape', async () => {
     const { api, document, headerActions, originalStyle, tile } = createFixture();
     api.bindFullscreenChange();
@@ -213,6 +316,71 @@ test('web fullscreen stays inside page, blocks layout writes and restores on Esc
     assert.equal(api.isTileLayoutWriteBlocked(tile), false);
     api.destroy();
     assert.equal(document.listenerCount('keydown'), 0);
+});
+
+for (const overlayType of ['dialog', 'device-popover']) {
+    test(`Escape leaves web fullscreen while an external ${overlayType} owns the close request`, async () => {
+        const { api, document, tile, headerActions } = createFixture();
+        api.bindFullscreenChange(); api.attachTileButton({ tile, actions: headerActions });
+        const web = tile.querySelector('.web-fullscreen-btn');
+        await web.dispatchEvent(event('click', web));
+        let overlayOpen = true;
+        const overlay = document.createElement(overlayType === 'dialog' ? 'dialog' : 'div');
+        document.querySelector = () => overlayOpen ? overlay : null;
+        await document.dispatchEvent({ type: 'keydown', key: 'Escape', preventDefault() { this.defaultPrevented = true; } });
+        const retained = tile.classList.contains('is-web-fullscreen');
+        overlayOpen = false;
+        await document.dispatchEvent({ type: 'keydown', key: 'Escape', preventDefault() { this.defaultPrevented = true; } });
+        assert.equal(retained, true);
+        assert.equal(tile.classList.contains('is-web-fullscreen'), false);
+        api.destroy();
+    });
+}
+
+test('Escape used by an input method cannot exit web fullscreen', async () => {
+    const { api, document, tile, headerActions } = createFixture();
+    api.bindFullscreenChange(); api.attachTileButton({ tile, actions: headerActions });
+    const web = tile.querySelector('.web-fullscreen-btn'); await web.dispatchEvent(event('click', web));
+    await document.dispatchEvent({ type: 'keydown', key: 'Escape', isComposing: true });
+    const retained = tile.classList.contains('is-web-fullscreen'); api.destroy();
+    assert.equal(retained, true);
+});
+
+test('mobile immersive controls hide, reveal on touch and release timers and close requests', async () => {
+    const timers = new Map(), watchers = []; let timerId = 0;
+    const f = createFixture({ matchMedia: () => ({ matches: true }),
+        setTimeout: callback => { timers.set(++timerId, callback); return timerId; }, clearTimeout: id => timers.delete(id),
+        CloseWatcher: class {
+            constructor() { watchers.push(this); }
+            addEventListener(_, handler) { this.close = handler; }
+            destroy() { this.destroyed = true; }
+        },
+    });
+    f.api.bindFullscreenChange(); f.api.attachTileButton({ tile: f.tile, actions: f.headerActions });
+    const stream = {}; f.video.srcObject = stream;
+    const web = f.tile.querySelector('.web-fullscreen-btn');
+    await web.dispatchEvent(event('click', web));
+    assert.equal(f.tile.classList.contains('is-immersive-player'), true);
+    assert.equal(f.tile.querySelector('.fullscreen-btn').getAttribute('aria-label'), '退出全屏');
+    [...timers.values()].at(-1)();
+    assert.equal(f.tile.classList.contains('player-controls-hidden'), true);
+    await f.tile.dispatchEvent(event('pointerup', f.video));
+    assert.equal(f.tile.classList.contains('player-controls-hidden'), false);
+    watchers[0].close();
+    assert.equal(f.tile.classList.contains('is-web-fullscreen'), false);
+    assert.equal(f.tile.classList.contains('player-controls-hidden'), false);
+    assert.equal(f.video.srcObject, stream);
+    await web.dispatchEvent(event('click', web));
+    await f.tile.querySelector('.fullscreen-btn').dispatchEvent(event('click', web));
+    assert.equal(f.tile.requestCount, 0, 'exit icon leaves page fullscreen rather than entering native fullscreen');
+    await f.tile.querySelector('.fullscreen-btn').dispatchEvent(event('click', web));
+    assert.equal(f.document.fullscreenElement, f.tile);
+    f.api.exitTileFullscreen(f.tile);
+    assert.equal(f.document.fullscreenElement, null);
+    f.api.detachTile(f.tile);
+    assert.equal(f.tile.listenerCount('pointerup'), 0);
+    assert.equal(timers.size, 0);
+    assert.equal(watchers.at(-1).destroyed, true);
 });
 
 test('button, double click, and Esc share fullscreenchange restoration without duplicate listeners', async () => {

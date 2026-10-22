@@ -19,7 +19,7 @@
         "test": "node --test tests/*.mjs",
         "test:stage-browser": "node scripts/test-stage-browser.mjs",
         "start": "node ./src/server.js",
-        "dev": "nodemon ./src/server.js",
+        "dev": "node --watch ./src/server.js",
         "eslint": "eslint",
         "eslint:fix": "eslint . --fix",
         "prettier": "prettier . --check",
@@ -47,7 +47,6 @@
         "eslint": "^9.31.0",
         "eslint-config-prettier": "^10.1.8",
         "globals": "^16.3.0",
-        "nodemon": "^3.1.14",
         "prettier": "3.6.2"
     },
     "optionalDependencies": {

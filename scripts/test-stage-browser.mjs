@@ -26,6 +26,7 @@ let appLog = ''; app.stdout.on('data', (value) => { appLog += value; }); app.std
 let browser; let ws; let counter = 0;
 const pending = new Map(); const errors = []; const requests = []; const warnings = [];
 const delay = (ms) => new Promise((done) => setTimeout(done, ms));
+const compactViewport = (width, height) => width <= 640 || (width <= 1000 && height <= 550);
 const wait = async (check, label, timeout = 15000) => {
     const deadline = Date.now() + timeout;
     while (Date.now() < deadline) { if (await check()) return; await delay(100); }
@@ -60,17 +61,35 @@ const probe = `(() => {
     };
     localStorage.setItem('voicePageLayout:v4:lobby', JSON.stringify({ items: [{ id: 'page-chatPanel', visible: false, grid: {x:999,y:999,w:0,h:0} }] }));
 })();`;
-const open = async () => {
+const open = async ({ width = 1920, height = 1080, mobile = false } = {}) => {
     const { targetId } = await send('Target.createTarget', { url: 'about:blank' });
     const { sessionId } = await send('Target.attachToTarget', { targetId, flatten: true });
     await send('Page.enable', {}, sessionId); await send('Runtime.enable', {}, sessionId); await send('Network.enable', {}, sessionId);
-    await send('Emulation.setDeviceMetricsOverride', { width: 1920, height: 1080, deviceScaleFactor: 1, mobile: false }, sessionId);
+    await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile }, sessionId);
+    await send('Emulation.setTouchEmulationEnabled', { enabled: mobile }, sessionId);
     await send('Page.addScriptToEvaluateOnNewDocument', { source: probe }, sessionId);
     await send('Page.navigate', { url: `http://127.0.0.1:${port}/room/lobby` }, sessionId);
     await wait(() => evaluate(sessionId, `document.documentElement?.dataset.roomBoot === 'ready'`), 'room entry point');
     return sessionId;
 };
 const click = (session, selector) => evaluate(session, `document.querySelector(${JSON.stringify(selector)}).click()`);
+const viewportReady = async (session, width, height) => {
+    // Headless media/dialog activity can change tab visibility. Keep this
+    // isolated document active during viewport inspection so Chromium delivers
+    // real resize/media-query events; never synthesize those events in the app.
+    await send('Emulation.setFocusEmulationEnabled', { enabled:true }, session);
+    await send('Page.bringToFront', {}, session);
+    await wait(() => evaluate(session, `!document.hidden && document.querySelector('#main').dataset.viewportMode === '${compactViewport(width,height) ? 'compact' : 'wide'}'`), `viewport navigation reconciled ${width}x${height}`);
+};
+const tap = async (session, selector) => {
+    let point;
+    await wait(async () => {
+        point = await evaluate(session, `(() => { const n=document.querySelector(${JSON.stringify(selector)}); if (!n) return {hit:false}; const r=n.getBoundingClientRect(), x=r.x+r.width/2, y=r.y+r.height/2; return {x,y,hit:r.width>0 && r.height>0 && n.contains(document.elementFromPoint(x,y))}; })()`);
+        return point.hit;
+    }, `touch target is visible and unobstructed: ${selector}`);
+    await send('Input.dispatchTouchEvent', { type:'touchStart', touchPoints:[{ x:point.x,y:point.y }] }, session);
+    await send('Input.dispatchTouchEvent', { type:'touchEnd', touchPoints:[] }, session);
+};
 const screenshot = async (session, name) => {
     if (!artifacts) return;
     const { data } = await send('Page.captureScreenshot', { format: 'png' }, session);
@@ -99,16 +118,20 @@ const checkDock = (result) => {
     assert.ok(result.dock.y + result.dock.h <= height + 1, `dock within viewport ${width}x${height}`);
     assert.equal(result.dockCount, 1, 'only the real Dock');
     assert.equal(result.sidebarBrand, false, 'sidebar starts with channels, not a second brand');
-    assert.ok(result.dock.w <= 320 && result.dock.x === result.sidebar.x, 'Dock parent bounded to the left column');
-    if (width > 640) {
+    const compact = compactViewport(width, height);
+    if (!compact) {
+        assert.ok(result.dock.w <= 320 && result.dock.x === result.sidebar.x, 'Dock parent bounded to the left column');
         assert.ok(Math.abs(result.sidebar.y + result.sidebar.h - height) <= 1, 'left column reaches bottom');
         assert.ok(result.nav.y + result.nav.h <= result.dock.y + 1, 'channel list never overlaps Dock');
         assert.ok(result.members.x >= result.dock.x + result.dock.w, 'Dock never overlaps central stage');
         if(result.chat.display !== 'none') assert.ok(result.chat.y + result.chat.h >= height - 1, 'no footer row below right chat');
         if(result.mode === 'voice') assert.ok(result.members.y + result.members.h >= height - 1, 'no footer row below voice stage');
+    } else {
+        assert.ok(result.dock.x >= 8 && result.dock.x + result.dock.w <= width - 8, 'mobile Dock is inset, without a full-width footer');
+        assert.ok(result.dock.h <= 132, 'mobile Dock leaves room for the main view');
     }
     assert.ok(result.icons.length >= 4 && result.icons.every(i=>i.w<=24 && i.h<=24 && i.inside), `bounded icons ${width}x${height}: ${JSON.stringify(result.icons)}`);
-    assert.ok(result.controls.every(b=>b.h===44 && b.x>=0 && b.right<=width+1), `aligned controls ${width}: ${JSON.stringify(result.controls)}`);
+    assert.ok(result.controls.every(b=>(compact ? b.h>=40 && b.h<=48 : b.h===44) && b.x>=0 && b.right<=width+1), `aligned controls ${width}: ${JSON.stringify(result.controls)}`);
     assert.ok(result.cardActions.every(Boolean), `member actions contained ${width}x${height}`);
 };
 
@@ -133,13 +156,32 @@ try {
         else if (message.method === 'Network.responseReceived' && message.params.response.status >= 400 &&
             !message.params.response.url.endsWith('/favicon.ico')) requests.push(message.params.response.url);
     });
-    const a = await open();
+    const a = await open({ width:390, height:844, mobile:true });
     assert.equal((await geometry(a)).stage.display, 'none');
     await wait(() => evaluate(a, `document.querySelector('#main').dataset.channelOccupancy === 'empty'`), 'empty channel guide');
     assert.equal(await evaluate(a, `document.querySelector('#members-empty').hidden`), false);
+    assert.equal(await evaluate(a, `document.querySelector('#main').dataset.mobilePanel`), 'stage', 'mobile never starts behind the chat panel');
+    await screenshot(a, 'mobile-idle');
+    await tap(a, '#stageChannelsToggle');
+    assert.equal(await evaluate(a, `getComputedStyle(document.querySelector('#stage-channels')).display !== 'none' && document.querySelector('#chat-panel').inert`), true);
+    await screenshot(a, 'mobile-channels');
+    await tap(a, '#stageChatToggle');
+    assert.equal(await evaluate(a, `getComputedStyle(document.querySelector('.stage-members')).display === 'none' && !document.querySelector('#chat-panel').inert`), true, 'chat is an explicit view, not an overlay on the stage');
+    await evaluate(a, `document.querySelector('#chatInput').value='mobile unsent draft';`);
+    await tap(a, '#stageStageToggle');
+    await tap(a, '#stageMoreToggle');
+    assert.equal(await evaluate(a, `document.querySelector('#workspace-tools').inert`), false);
+    await tap(a, '#stageStageToggle');
+    assert.equal(await evaluate(a, `document.querySelector('#workspace-tools').inert`), true, 'tap outside dismisses secondary operations');
+    assert.equal(await evaluate(a, `document.querySelector('#chatInput').value`), 'mobile unsent draft');
+    await send('Emulation.setDeviceMetricsOverride', { width:1920,height:1080,deviceScaleFactor:1,mobile:false }, a);
+    await send('Emulation.setTouchEmulationEnabled', { enabled:false }, a);
+    await delay(100);
     await screenshot(a, 'not-joined');
     await click(a, '#stageJoinVoice');
     await wait(() => evaluate(a, `document.querySelector('#destroyPeer').dataset.sessionAction === 'hangup' && Boolean(document.querySelector('#local-video'))`), 'first voice join');
+    await click(a, '#toggleAudio');
+    await wait(() => evaluate(a, `document.querySelector('#toggleAudio').getAttribute('aria-pressed') === 'true'`), 'synthetic microphone enabled');
     await click(a, '#toggleVideo');
     await wait(() => evaluate(a, `document.querySelector('#member-cards #local-video video')?.videoWidth > 0`), 'fake camera in member card');
     const b = await open();
@@ -147,14 +189,37 @@ try {
     await click(b, '#stageJoinVoice');
     await wait(() => evaluate(a, `document.querySelectorAll('#member-cards > *').length === 2`), 'second participant');
     await wait(() => evaluate(b, `document.querySelector('#destroyPeer').dataset.sessionAction === 'hangup'`), 'second voice join');
+    await wait(() => evaluate(b, `document.querySelector('#member-cards > :not(#local-video) video')?.videoWidth > 0 && document.querySelector('#member-cards > :not(#local-video) video').srcObject.getAudioTracks().length === 1`), 'remote camera and voice reception');
+    await evaluate(b, `window.__cameraTile = document.querySelector('#member-cards > :not(#local-video)'); window.__cameraPlayer = __cameraTile.querySelector('video'); window.__cameraMic = __cameraPlayer.srcObject.getAudioTracks()[0];`);
+    // Exercise the compact mobile sender UI; no physical device or camera is used.
+    await send('Emulation.setDeviceMetricsOverride', { width:390,height:844,deviceScaleFactor:3,mobile:true }, a);
+    await click(a, '#toggleVideo');
+    await wait(() => evaluate(b, `__cameraTile.classList.contains('is-audio-only') && !__cameraTile.querySelector('video') && Boolean(__cameraTile.querySelector('.voice-placeholder'))`), 'camera off clears remote last frame');
+    assert.equal(await evaluate(b, `__cameraPlayer.srcObject === null`), true, 'old video player is detached and cleared');
+    assert.equal(await evaluate(b, `__cameraTile.querySelector('audio').srcObject.getAudioTracks()[0] === __cameraMic && __cameraMic.readyState === 'live'`), true, 'camera off preserves the exact live voice track');
+    await click(a, '#toggleVideo');
+    await wait(() => evaluate(b, `__cameraTile.querySelector('video')?.videoWidth > 0 && __cameraTile.classList.contains('has-video')`), 'camera reopens on the same member card');
+    await evaluate(b, `window.__cameraFrames = 0; const player = __cameraTile.querySelector('video'); const frame = () => { if (++__cameraFrames < 3) player.requestVideoFrameCallback(frame); }; player.requestVideoFrameCallback(frame);`);
+    await wait(() => evaluate(b, `__cameraFrames >= 3`), 'reopened camera produces new frames');
+    assert.equal(await evaluate(b, `__cameraTile.querySelector('video').srcObject.getAudioTracks()[0] === __cameraMic && __cameraMic.readyState === 'live'`), true, 'camera reopen preserves voice');
+    await evaluate(a, `document.querySelector('#chatInput').value='camera lifecycle regression'; document.querySelector('#chatForm').requestSubmit();`);
+    await wait(() => evaluate(b, `document.querySelector('#chatMessages').textContent.includes('camera lifecycle regression')`), 'chat after camera restart');
+    await send('Emulation.setDeviceMetricsOverride', { width:1920,height:1080,deviceScaleFactor:1,mobile:false }, a);
     await screenshot(a, 'voice-two-members');
     await share(a);
-    await wait(() => evaluate(b, `document.querySelector('#main').dataset.stageMode === 'sharing' && document.querySelector('#video-grid > .is-stage-focus video')?.videoWidth > 0`), 'remote screen reception');
+    await wait(() => evaluate(b, `document.querySelector('#main').dataset.stageMode === 'sharing' && document.querySelector('#video-grid > .is-stage-focus video')?.videoWidth === 1280`), 'remote synthetic screen reception, not the preceding camera frame');
+    await evaluate(b, `window.__screenPlayer = document.querySelector('#video-grid > .is-stage-focus video'); window.__screenTrack = __screenPlayer.srcObject.getVideoTracks()[0];`);
+    await click(a, '#toggleVideo');
+    await wait(() => evaluate(a, `document.querySelector('#toggleVideo').getAttribute('aria-pressed') === 'false'`), 'camera off during screen share');
+    await delay(250);
+    assert.equal(await evaluate(b, `document.querySelector('#video-grid > .is-stage-focus video').srcObject.getVideoTracks()[0] === __screenTrack && __screenTrack.readyState === 'live'`), true, 'camera off must not hide or stop the active screen share');
     await delay(1800); // Let initial microphone/camera/share negotiations settle.
     const viewports = [[3840,2160,1], [2560,1440,1], [1920,1080,1], [1600,900,1], [1366,768,1], [2560,1440,1.5], [900,700,1], [800,600,1.5], [640,700,1], [390,844,3], [320,640,2], [844,390,2]];
     await evaluate(a, `window.__realDock=document.querySelector('#buttons');window.__realShareDialog=document.querySelector('[data-device-popover="screen"]');`);
+    await send('Page.bringToFront', {}, a);
     for (const [width,height,dpr] of viewports) {
         await send('Emulation.setDeviceMetricsOverride', { width,height,deviceScaleFactor:dpr,mobile:false }, a);
+        await viewportReady(a,width,height);
         await click(a, '[data-local-share-controls] [data-share-action="quality"]');
         const dialog = await evaluate(a, `(()=>{const d=document.querySelector('[data-device-popover="screen"]'), r=d.getBoundingClientRect(), f=d.querySelector('footer').getBoundingClientRect();return {x:r.x,y:r.y,w:r.width,h:r.height,bottom:r.bottom,footerBottom:f.bottom,sameDock:__realDock===document.querySelector('#buttons'),sameDialog:__realShareDialog===d};})()`);
         assert.ok(Math.abs(dialog.x + dialog.w/2-width/2)<2 && Math.abs(dialog.y + dialog.h/2-height/2)<2, `centered dialog ${width}x${height}: ${JSON.stringify(dialog)}`);
@@ -167,19 +232,22 @@ try {
     await screenshot(a, 'sharing-local-controls');
     const layouts = [];
     const counters = await evaluate(b, `({offers:__stageProbe.offers,replaceTracks:__stageProbe.replaceTracks,captures:__stageProbe.captures})`);
+    await send('Page.bringToFront', {}, b);
     // Save real DOM identities; resize/chat/focus must leave players attached.
     await evaluate(b, `window.__originalPlayers = [...document.querySelectorAll('.video-tile video, .video-tile audio')].map(node=>({node,stream:node.srcObject})); document.querySelector('#chatInput').value='preserved draft';`);
     for (const [width,height,dpr] of viewports) {
         await send('Emulation.setDeviceMetricsOverride', { width,height,deviceScaleFactor:dpr,mobile:false }, b);
+        await viewportReady(b,width,height);
         await delay(120);
         const expanded = await evaluate(b, `document.querySelector('#stageChatToggle').getAttribute('aria-expanded')`);
-        if ((width > 640) !== (expanded === 'true')) await click(b, '#stageChatToggle');
+        if ((!compactViewport(width,height)) !== (expanded === 'true')) await click(b, '#stageChatToggle');
         const result = await geometry(b);
         assert.equal(result.overflow, false, `horizontal overflow ${width}x${height}`);
         assert.ok(result.stage.w > 0 && result.stage.h > 0, `visible stage ${width}`);
         checkDock(result);
-        assert.ok(result.stage.y + result.stage.h <= result.members.y + 1, 'stage above member strip');
-        if (width > 640) {
+        if (width <= 1000 && width > 640 && height <= 550) assert.ok(result.stage.x + result.stage.w <= result.members.x + 1, 'landscape stage beside members');
+        else assert.ok(result.stage.y + result.stage.h <= result.members.y + 1, 'stage above member strip');
+        if (!compactViewport(width,height)) {
             assert.ok(result.dock.w <= 320 && result.dock.x < result.stage.x, 'real dock remains in left column');
             assert.ok(result.chat.y + result.chat.h >= height - 1, 'chat uses released bottom space');
         } else assert.ok(result.members.y + result.members.h <= result.dock.y + 1, 'compact viewport member strip above dock');
@@ -188,21 +256,94 @@ try {
         layouts.push(result);
         if (width===1920 || width===390) await screenshot(b, `sharing-${width}`);
         await click(b, '#stageChatToggle');
-        if (width>640) assert.ok((await geometry(b)).stage.w>result.stage.w,`closing chat expands sharing stage ${width}`);
+        if (!compactViewport(width,height)) assert.ok((await geometry(b)).stage.w>result.stage.w,`closing chat expands sharing stage ${width}`);
         await click(b, '#stageChatToggle');
         assert.equal(await evaluate(b, `document.querySelector('#chatInput').value`), 'preserved draft');
     }
     const playerChanges = await evaluate(b, `__originalPlayers.filter(({node,stream})=>!node.isConnected || node.srcObject!==stream).map(({node,stream})=>({tag:node.tagName,id:node.closest('.video-tile')?.id,connected:node.isConnected,oldTracks:stream?.getTracks().map(t=>t.kind+':'+t.id),newTracks:node.srcObject?.getTracks().map(t=>t.kind+':'+t.id)}))`);
     assert.deepEqual(playerChanges, [], 'layout preserves players and stream identity');
     assert.deepEqual(await evaluate(b, `({offers:__stageProbe.offers,replaceTracks:__stageProbe.replaceTracks,captures:__stageProbe.captures})`), counters, 'layout must not negotiate or capture');
+    // Real touch events in the isolated browser, never the user's desktop.
+    for (const [width,height] of [[390,844], [320,640], [844,390]]) {
+        await send('Emulation.setDeviceMetricsOverride', { width,height,deviceScaleFactor:1,mobile:true }, b);
+        await send('Emulation.setTouchEmulationEnabled', { enabled:true }, b);
+        await delay(100);
+        await tap(b, '#stageStageToggle');
+        await tap(b, '#stageChatToggle');
+        await screenshot(b, `mobile-chat-${width}`);
+        assert.equal(await evaluate(b, `getComputedStyle(document.querySelector('.room-stage')).display === 'none' && getComputedStyle(document.querySelector('#chat-panel')).display !== 'none'`), true);
+        await tap(b, '#stageChannelsToggle');
+        assert.equal(await evaluate(b, `document.querySelector('#chat-panel').inert && getComputedStyle(document.querySelector('#stage-channels')).display !== 'none'`), true);
+        await tap(b, '#stageStageToggle');
+        await tap(b, '[data-control-menu="mic"]');
+        await wait(() => evaluate(b, `document.querySelector('[data-device-popover="mic"]').classList.contains('is-open')`), 'touch opens microphone settings');
+        if (width === 390) await screenshot(b, 'mobile-microphone-settings');
+        await tap(b, '[data-device-popover="mic"] [data-control-close]');
+        assert.equal(await evaluate(b, `document.querySelector('[data-device-popover="mic"]').classList.contains('is-open')`), false, 'settings have an explicit close action');
+        await tap(b, '#video-grid > .is-stage-focus .voice-player-more');
+        assert.equal(await evaluate(b, `document.querySelector('.voice-player-menu').textContent.includes('连接方式') && document.querySelector('.voice-player-menu').textContent.includes('调整音量')`), true, 'secondary share controls remain accessible');
+        await tap(b, '.voice-player-menu button:nth-child(4)');
+        await wait(() => evaluate(b, `document.querySelector('.voice-route-dialog')?.open`), 'mobile share menu opens the real route dialog');
+        await tap(b, '.voice-route-dialog .voice-route-close');
+        await wait(() => evaluate(b, `!document.querySelector('.voice-route-dialog')?.open`), 'touch closes route dialog');
+        await tap(b, '#stageStageToggle');
+        assert.equal(await evaluate(b, `document.querySelector('#chatInput').value`), 'preserved draft');
+        assert.deepEqual(await evaluate(b, `__originalPlayers.filter(({node,stream})=>!node.isConnected || node.srcObject!==stream).map(({node})=>node.tagName)`), [], 'mobile navigation preserves exact players and streams');
+        await screenshot(b, `mobile-sharing-${width}`);
+    }
+    assert.deepEqual(await evaluate(b, `({offers:__stageProbe.offers,replaceTracks:__stageProbe.replaceTracks,captures:__stageProbe.captures})`), counters, 'mobile tabs and settings never capture or negotiate');
+    // Exercise actual playback and UI events without replacing any media tracks.
+    await send('Emulation.setDeviceMetricsOverride', { width:390,height:844,deviceScaleFactor:1,mobile:true }, b);
+    await viewportReady(b,390,844);
+    await tap(b, '#stageStageToggle');
+    await wait(() => evaluate(b, `document.querySelector('#video-grid > .is-stage-focus').dataset.playbackState === 'playing'`), 'shared playback feedback sees live video');
+    await evaluate(b, `document.querySelector('#video-grid > .is-stage-focus video').pause()`);
+    await wait(() => evaluate(b, `document.querySelector('#video-grid > .is-stage-focus').dataset.playbackState === 'paused'`), 'paused player shows resume action');
+    await screenshot(b, 'mobile-resume');
+    await tap(b, '#video-grid > .is-stage-focus .share-watch-message button');
+    await wait(() => evaluate(b, `document.querySelector('#video-grid > .is-stage-focus').dataset.playbackState === 'playing'`), 'resume action plays original screen video');
+    await tap(b, '#video-grid > .is-stage-focus .voice-player-more');
+    await evaluate(b, `[...document.querySelectorAll('.voice-player-menu button')].find(n=>n.textContent === '网页内全屏').click()`);
+    await wait(() => evaluate(b, `document.querySelector('.is-web-fullscreen')?.classList.contains('is-immersive-player')`), 'mobile immersive player');
+    await screenshot(b, 'mobile-fullscreen-controls');
+    await wait(() => evaluate(b, `document.querySelector('.is-web-fullscreen').classList.contains('player-controls-hidden')`), 'fullscreen controls auto-hide');
+    await wait(() => evaluate(b, `getComputedStyle(document.querySelector('.is-web-fullscreen .tile-header')).opacity === '0'`), 'fullscreen fade completes');
+    await screenshot(b, 'mobile-fullscreen-clean');
+    await tap(b, '.is-web-fullscreen video');
+    await wait(() => evaluate(b, `!document.querySelector('.is-web-fullscreen').classList.contains('player-controls-hidden')`), 'touch reveals fullscreen controls');
+    await tap(b, '.is-web-fullscreen .fullscreen-btn');
+    await wait(() => evaluate(b, `!document.querySelector('.is-web-fullscreen') && !document.fullscreenElement`), 'fullscreen exit restores original stage');
+    await tap(b, '[data-control-menu="mic"]');
+    await send('Input.dispatchKeyEvent', { type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27 }, b);
+    await send('Input.dispatchKeyEvent', { type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27 }, b);
+    await wait(() => evaluate(b, `!document.querySelector('[data-device-popover="mic"]').classList.contains('is-open') && document.querySelector('#main').dataset.mobilePanel === 'stage'`), 'close request dismisses only device settings');
+    await tap(b, '#video-grid > .is-stage-focus .voice-player-more');
+    await tap(b, '.voice-player-menu button:first-child');
+    await wait(() => evaluate(b, `!document.querySelector('#video-grid > .is-stage-focus .voice-share-stats').hidden`), 'real video statistics open');
+    await wait(() => evaluate(b, `document.querySelector('#video-grid > .is-stage-focus .voice-share-stats').textContent.includes('解码 FPS')`), 'statistics distinguish decode and playback');
+    await screenshot(b, 'mobile-video-statistics');
+    await tap(b, '#video-grid > .is-stage-focus .voice-share-stats button');
+    await send('Page.bringToFront', {}, a);
+    await evaluate(a, `document.querySelector('#chatInput').value='mobile unread regression'; document.querySelector('#chatForm').requestSubmit()`);
+    await wait(() => evaluate(b, `Number(document.querySelector('#stageChatToggle').dataset.unreadCount) > 0`), 'hidden chat receives unread notification');
+    await send('Page.bringToFront', {}, b);
+    await screenshot(b, 'mobile-unread');
+    await tap(b, '#stageChatToggle');
+    await wait(() => evaluate(b, `document.querySelector('#stageChatToggle').dataset.unreadCount === '0'`), 'opening latest chat marks visible messages read');
+    await tap(b, '#stageStageToggle');
+    assert.deepEqual(await evaluate(b, `__originalPlayers.filter(({node,stream})=>!node.isConnected || node.srcObject!==stream).map(({node})=>node.tagName)`), [], 'immersive and resume retain actual players and streams');
+    assert.deepEqual(await evaluate(b, `({offers:__stageProbe.offers,replaceTracks:__stageProbe.replaceTracks,captures:__stageProbe.captures})`), counters, 'immersive, resume and unread UI never capture or negotiate');
     const routeSession = b; // The first publisher has SFU admission; the second may legitimately use P2P.
     const routeTile = await evaluate(routeSession, `document.querySelector('#video-grid > .is-stage-focus').id`);
     assert.notEqual(routeTile, 'local-video', 'the receiver route controls must be exercised');
     if (routeTile !== 'local-video') {
         await wait(() => evaluate(routeSession, `Boolean(document.getElementById('${routeTile}').querySelector('.voice-route-toggle'))`), 'remote route control');
         await click(routeSession, `[id="${routeTile}"] .voice-route-toggle`);
-        assert.equal(await evaluate(routeSession, `document.querySelector('[id="${routeTile}"] .voice-route-auto input').checked`), useSfu);
-        if (useSfu) await wait(() => evaluate(routeSession, `document.querySelector('[id="${routeTile}"] .voice-route-toggle').title.includes('服务器转发')`), 'automatic SFU route');
+        assert.equal(await evaluate(routeSession, `document.querySelector('[id="${routeTile}"] .voice-route-auto input').checked`), false, 'current server defaults to P2P first');
+        if (useSfu) {
+            await click(routeSession, `[id="${routeTile}"] .voice-route-auto input`);
+            await wait(() => evaluate(routeSession, `document.querySelector('[id="${routeTile}"] .voice-route-toggle').title.includes('服务器转发')`), 'automatic SFU route');
+        }
         if (useSfu) await click(routeSession, `[id="${routeTile}"] .voice-route-auto input`);
         await wait(() => evaluate(routeSession, `!document.querySelector('[id="${routeTile}"] .voice-route-choices button').disabled`), 'manual P2P entry');
         await click(routeSession, `[id="${routeTile}"] .voice-route-choices button`);
@@ -236,20 +377,25 @@ try {
     await click(a, '.local-screen-preview-toggle');
     await click(b, '#shareScreen');
     await wait(() => evaluate(a, `document.querySelectorAll('#share-sources button').length === 1`), 'focus fallback to remaining share');
+    await evaluate(b, `window.__shareMic = __cameraTile.querySelector('video').srcObject.getAudioTracks()[0];`);
     await click(a, '#shareScreen');
     await wait(() => evaluate(b, `document.querySelector('#main').dataset.stageMode === 'voice'`), 'last share end');
+    await wait(() => evaluate(b, `!document.querySelector('#stageShareNotice').hidden && document.querySelector('#stageShareNotice').textContent.includes('共享已结束')`), 'share end is visible without interrupting voice');
+    await wait(() => evaluate(b, `__cameraTile.classList.contains('is-audio-only') && !__cameraTile.querySelector('video') && __cameraTile.querySelector('audio').srcObject.getAudioTracks()[0] === __shareMic && __shareMic.readyState === 'live'`), 'screen end with camera off leaves voice without a frozen frame');
     const voiceLayouts = [];
+    await send('Page.bringToFront', {}, a);
     for (const [width,height,dpr] of viewports) {
         await send('Emulation.setDeviceMetricsOverride', { width,height,deviceScaleFactor:dpr,mobile:false }, a);
+        await viewportReady(a,width,height);
         const expanded = await evaluate(a, `document.querySelector('#stageChatToggle').getAttribute('aria-expanded')`);
-        if ((width > 640) !== (expanded === 'true')) await click(a, '#stageChatToggle');
+        if ((!compactViewport(width,height)) !== (expanded === 'true')) await click(a, '#stageChatToggle');
         await delay(60);
         const result = await geometry(a);
         assert.equal(result.overflow, false, `voice horizontal overflow ${width}`);
         assert.equal(result.stage.display, 'none', 'no empty black stage in voice mode');
         assert.ok(result.members.h > 0 && result.members.w > 0, `voice members ${width}`);
         assert.ok(result.cards.every((card) => card.w <= 720 && card.h >= 140));
-        if (width > 640) {
+        if (!compactViewport(width,height)) {
             assert.ok(result.chat.w > 0 && result.chat.h > 0);
             assert.ok(result.members.x + result.members.w <= result.chat.x + 1, 'voice members precede right chat');
             await click(a, '#stageChatToggle');
@@ -259,7 +405,10 @@ try {
         }
         checkDock(result);
         voiceLayouts.push(result);
+        if (width === 390) await screenshot(a, 'mobile-voice');
     }
+    await click(b, '#destroyPeer');
+    await wait(() => evaluate(a, `document.querySelectorAll('#member-cards > *').length === 1`), 'member departure');
     // Geometry fixtures use the actual card markup, with media removed. Real
     // two-party WebRTC behavior is exercised above; these are count/layout cases.
     const memberGrids = [];
@@ -267,8 +416,9 @@ try {
     for (const count of [1,2,3,4,8,12]) {
         for (const [width,height,dpr] of viewports) {
             await send('Emulation.setDeviceMetricsOverride', { width,height,deviceScaleFactor:dpr,mobile:false }, a);
+            await viewportReady(a,width,height);
             const expanded = await evaluate(a, `document.querySelector('#stageChatToggle').getAttribute('aria-expanded')`);
-            if ((width > 640) !== (expanded === 'true')) await click(a, '#stageChatToggle');
+            if ((!compactViewport(width,height)) !== (expanded === 'true')) await click(a, '#stageChatToggle');
             await evaluate(a, `(() => {
                 const host=document.querySelector('#member-cards');host.replaceChildren();host.hidden=false;
                 for(let i=0;i<${count};i++) {
@@ -284,7 +434,7 @@ try {
             assert.equal(result.overflow,false,`member grid overflow ${count}/${width}`);
             assert.equal(result.cards.length,count);
             assert.ok(result.cards.every(c=>c.w>90 && c.x>=result.members.x && c.x+c.w<=result.members.x+result.members.w+1),'cards fit central region');
-            if(width>640) assert.ok(result.members.x+result.members.w<=result.chat.x+1,'chat remains right sidebar');
+            if(!compactViewport(width,height)) assert.ok(result.members.x+result.members.w<=result.chat.x+1,`chat remains right sidebar ${count}/${width}x${height}: ${JSON.stringify({members:result.members,chat:result.chat})}`);
             else assert.equal(result.chat.display,'none','mobile starts with central members visible');
             if(count===1 && width>=1366) assert.ok(result.cards[0].w>=400,'single large central card');
             memberGrids.push({count,viewport:result.viewport});
@@ -292,8 +442,6 @@ try {
         }
     }
     await evaluate(a, `document.querySelector('#member-cards').replaceChildren(...__gridOriginals);`);
-    await click(b, '#destroyPeer');
-    await wait(() => evaluate(a, `document.querySelectorAll('#member-cards > *').length === 1`), 'member departure');
     await click(a, '[data-copy-call-diagnostics]');
     await wait(() => evaluate(a, `Boolean(window.__copiedDiagnostics)`), 'diagnostics after peer departure');
     const diagnostics = await evaluate(a, `window.__copiedDiagnostics`);
@@ -302,10 +450,11 @@ try {
     assert.deepEqual(errors, [], 'no unhandled browser runtime errors');
     assert.deepEqual(requests, [], 'no failed runtime resources');
     const report = { status:'passed', browser: (await send('Browser.getVersion')).product, syntheticMediaOnly:true, serverForwardingEnabled:useSfu,
-        shareUiChecks: ['centered dialog with visible footer at twelve viewport/DPR cases', 'same Dock and dialog DOM throughout resize', 'compact left Dock parent with full-height desktop chat'],
+        shareUiChecks: ['centered dialog with visible footer at twelve viewport/DPR cases', 'same Dock and dialog DOM throughout resize', 'compact left Dock parent with full-height desktop chat', 'mobile starts on stage', 'touch navigation, settings close and share menu at 320/390/844 CSS pixels', 'mobile navigation preserves actual players, streams and chat draft without media negotiation'],
         viewportCases: layouts.length + voiceLayouts.length, memberGridCases:memberGrids.length, memberCounts:[1,2,3,4,8,12], cssViewports:layouts.map((row)=>row.viewport),
         routeChecks:useSfu ? ['automatic SFU','manual P2P','manual SFU','per-sharer preference retention'] : ['P2P','manual P2P','per-sharer preference retention'],
-        tests:['empty and occupied channel guides','central join action','voice join','camera','two voice peers','synthetic share','responsive geometry in both modes','1/2/3/4/8/12 member grid fixtures','bounded dock icons and member actions','closing chat expands central stage','chat draft','no layout renegotiation/capture','two shares','focus retention/fallback','manual route retention','preview hide retains capture','last share end','member departure'],
+        tests:['empty and occupied channel guides','central join action','voice join','camera off clears remote player and preserves voice','camera restart renders fresh frames','chat after camera restart','camera off preserves active screen share','screen end with camera off clears video','two voice peers','synthetic share','responsive geometry in both modes','1/2/3/4/8/12 member grid fixtures','bounded dock icons and member actions','closing chat expands central stage','chat draft','no layout renegotiation/capture','two shares','focus retention/fallback','manual route retention','preview hide retains capture','last share end','member departure'],
+        mobilePolishChecks:['pause and resume original player','immersive auto-hide and touch reveal','fullscreen exit restores stage','close request dismisses settings','actual decode and playback statistics','unread badge and read acknowledgement','share end notice','no extra media capture or negotiation'],
         diagnosticChecks:['compact export','checkpoint survives peer departure'], runtimeErrors:errors.length, failedResources:requests.length };
     if (artifacts) writeFileSync(join(artifacts, 'report.json'), JSON.stringify(report, null, 2));
     console.log(JSON.stringify(report, null, 2));

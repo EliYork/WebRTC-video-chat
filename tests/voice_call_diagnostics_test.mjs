@@ -328,3 +328,76 @@ test('SFU recovery events reuse the original health decision without attributing
     assert.equal(recovered.length, 1); assert.equal(recovered[0].内容.视频序号, undefined);
     assert.equal(recovered[0].内容.序号, 9); runtime.destroy();
 });
+
+test('destroy cancels a pending share sample before it enumerates audio connections', async () => {
+    const connections = [], f = fixture({ connections, shares: [{}] }); let finish, reads = 0, settled = false;
+    f.window.VoiceShareDiagnostics.sync = () => new Promise(resolve => { finish = resolve; });
+    connections.push({ getStats: async () => { reads++; return new Map(); } });
+    const pending = f.runtime.sample(); pending.then(() => { settled = true; }); await flush();
+    try {
+        f.runtime.destroy(); await flush();
+        assert.equal(settled, true, 'module-owned waiting ends without waiting for the shared collector');
+        assert.equal(await pending, null); assert.equal(f.timers.size, 0);
+        finish({}); await flush(); assert.equal(reads, 0);
+    } finally { finish({}); f.runtime.destroy(); }
+});
+
+for (const outcome of ['resolve', 'reject']) {
+    test(`destroy clears an audio stats timeout and ignores its late ${outcome}`, async () => {
+        let finish, settled = false;
+        const f = fixture({ connections: [{ getStats: () => new Promise((resolve, reject) => {
+            finish = outcome === 'resolve' ? resolve : reject;
+        }) }] });
+        const pending = f.runtime.sample(); pending.then(() => { settled = true; }); await flush();
+        try {
+            assert.equal(f.timers.size, 1); f.runtime.destroy(); await flush();
+            assert.equal(f.timers.size, 0); assert.equal(settled, true);
+            assert.equal(await pending, null);
+            finish(outcome === 'resolve' ? new Map() : new Error('obsolete stats')); await flush();
+            assert.equal(f.timers.size, 0); assert.equal(f.saved.size, 0);
+        } finally { finish(outcome === 'resolve' ? new Map() : new Error('obsolete stats')); f.runtime.destroy(); }
+    });
+}
+
+test('starting a call cancels a pending idle report instead of combining it with the new call', async () => {
+    const f = fixture({ shares: [{}] }); let finish, requests = 0;
+    f.window.VoiceShareDiagnostics.sync = () => ++requests === 1 ? new Promise(resolve => { finish = resolve; }) : Promise.resolve({});
+    const old = f.runtime.report(); old.catch(() => {}); await flush();
+    try {
+        f.state.会话.generation = 2; f.state.本机音频.麦克风增益_百分比 = 77;
+        f.runtime.start(); await flush();
+        finish({});
+        await assert.rejects(old, /session-changed/);
+        const report = await f.runtime.report();
+        assert.ok(report.当前会话); assert.equal(report.当前状态.本机音频.麦克风增益_百分比, 77);
+    } finally { finish({}); f.runtime.destroy(); }
+});
+
+test('a failed old sampling tick cannot append a failure event to the next call', async () => {
+    const f = fixture({ shares: [{}] }); let fail, requests = 0;
+    f.window.VoiceShareDiagnostics.sync = () => ++requests === 1 ? new Promise((_resolve, reject) => { fail = reject; }) : Promise.resolve({});
+    f.runtime.start(); await flush(); f.runtime.start(); await flush();
+    fail(new Error('old share sampling failed')); await flush();
+    const logs = f.runtime.getLogs();
+    assert.equal(logs.sessions.at(-1).事件.some(event => event.类型 === '采样失败'), false);
+    f.runtime.destroy();
+});
+
+test('destroyed diagnostics cannot restart sampling or create another call', async () => {
+    let reads = 0;
+    const f = fixture({ connections: [{ getStats: async () => { reads++; return new Map(); } }] });
+    f.runtime.destroy(); f.runtime.start(); await f.runtime.sample(); await flush();
+    try {
+        assert.equal(reads, 0); assert.equal(f.runtime.getLogs().sessions.length, 0); assert.equal(f.timers.size, 0);
+    } finally { f.runtime.destroy(); }
+});
+
+test('a current audio stats timeout still reports failure and permits the next sample', async () => {
+    const pc = { getStats: () => new Promise(() => {}) }, f = fixture({ connections: [pc] });
+    const pending = f.runtime.sample(); await flush();
+    [...f.timers.values()][0]();
+    const failed = await pending; assert.match(failed.连接[0].状态, /统计读取失败或超时/);
+    pc.getStats = async () => new Map();
+    const recovered = await f.runtime.sample(); assert.equal(recovered.连接[0].状态, undefined);
+    assert.equal(recovered.连接[0].路径, 'P2P'); f.runtime.destroy();
+});

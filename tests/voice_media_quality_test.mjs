@@ -167,7 +167,9 @@ test('diagnostics mount immediately on late sharing state and return after resta
 
 test('presence reconciliation resynchronizes quality after shared-room snapshot', () => {
     const script = readFileSync(new URL('../src/views/script.js', import.meta.url), 'utf8');
-    assert.match(script, /syncPresenceTilesForJoinedRoom\(channels\);\s*\/\/[^\n]*\n\s*voicePeerRegistry.getPeerIds\(\).forEach\(\(peerId\) =>\s*voiceMediaQualityRuntime\?\.syncPeer\(peerId\)/);
+    const reconcile = script.slice(script.indexOf('const reconcilePresenceState ='), script.indexOf('const emitWithAck ='));
+    assert.match(reconcile, /syncPresenceTilesForJoinedRoom\(channels\)/);
+    assert.match(reconcile, /voicePeerRegistry.getPeerIds\(\).forEach\(\(peerId\) => \{[\s\S]*voiceMediaQualityRuntime\?\.syncPeer\(peerId\)/);
 });
 
 async function sampleLabel(

@@ -115,23 +115,36 @@
             record.state = state;
             debug('start', type, record);
 
+            const isStale = () =>
+                disposed ||
+                record.token !== token ||
+                (!surviveEpochChange && getEpoch() !== epoch);
+            const cancel = () => {
+                // A late result must never release a newer operation's slot.
+                if (record.token === token) {
+                    record.promise = undefined;
+                    record.errorType = undefined;
+                    record.state = record.value ? 'active' : 'idle';
+                }
+                debug('cancelled', type, record, {
+                    reason: 'stale-operation',
+                });
+                return {
+                    cancelled: true,
+                    ok: false,
+                    reason: 'stale-operation',
+                };
+            };
+
             const promise = Promise.resolve()
-                .then(operation)
-                .then((value) => {
-                    if (
-                        disposed ||
-                        record.token !== token ||
-                        (!surviveEpochChange && getEpoch() !== epoch)
-                    ) {
+                .then(async () => {
+                    if (isStale()) {
+                        return cancel();
+                    }
+                    const value = await operation();
+                    if (isStale()) {
                         stopStream?.(value);
-                        debug('cancelled', type, record, {
-                            reason: 'stale-operation',
-                        });
-                        return {
-                            cancelled: true,
-                            ok: false,
-                            reason: 'stale-operation',
-                        };
+                        return cancel();
                     }
                     record.promise = undefined;
                     record.state = 'active';
@@ -140,12 +153,8 @@
                     return { ok: true, token, value };
                 })
                 .catch((error) => {
-                    if (record.token !== token || disposed) {
-                        return {
-                            cancelled: true,
-                            ok: false,
-                            reason: 'stale-operation',
-                        };
+                    if (isStale()) {
+                        return cancel();
                     }
                     const errorType = classifyMediaError(error, {
                         operation: type,

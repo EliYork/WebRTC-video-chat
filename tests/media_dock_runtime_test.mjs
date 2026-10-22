@@ -508,6 +508,26 @@ const createFixture = () => {
     return { document, refs, root, window };
 };
 
+for (const type of ['mic', 'screen']) {
+    for (const flag of ['defaultPrevented', 'isComposing']) {
+        test(`${type} settings ignore Escape already owned by ${flag}`, () => {
+            const fixture = createFixture();
+            const { runtimeApi } = loadApis(fixture);
+            const stub = createAdapterStub();
+            const runtime = runtimeApi.createMediaDockRuntime({ root: fixture.root, adapter: stub.adapter });
+            runtime.init();
+            const toggle = fixture.root.querySelector(`[data-control-menu="${type}"]`);
+            const panel = fixture.root.querySelector(`[data-device-popover="${type}"]`);
+            fixture.root.dispatchEvent(new FakeEvent('click', { target: toggle }));
+            assert.equal(panel.classList.contains('is-open'), true);
+            fixture.document.dispatchEvent(new FakeEvent('keydown', { key: 'Escape', [flag]: true }));
+            const retained = panel.classList.contains('is-open');
+            runtime.destroy();
+            assert.equal(retained, true);
+        });
+    }
+}
+
 test('device popover stays within viewport and follows scrolling without moving its DOM', () => {
     const fixture = createFixture();
     const { runtimeApi } = loadApis(fixture);
@@ -802,6 +822,24 @@ test('runtime owns one real root, renders state, devices, permission and failure
     assert.equal(stub.subscriberCount(), 1);
 });
 
+test('browsers without screen capture explain the limitation while keeping camera and voice available', () => {
+    const fixture = createFixture();
+    const panel = fixture.root.querySelector('[data-device-popover="screen"]');
+    const hint = createElement(fixture.document, 'p', { data: { 'share-browser-hint': '' } });
+    panel.append(hint);
+    const { runtimeApi } = loadApis(fixture);
+    const stub = createAdapterStub({ browserScreenShareSupported: false });
+    const runtime = runtimeApi.createMediaDockRuntime({ root: fixture.root, adapter: stub.adapter });
+    runtime.init();
+    assert.equal(fixture.root.querySelector('[data-screen-share-start]').disabled, true);
+    assert.match(hint.textContent, /摄像头/);
+    assert.equal(fixture.refs.cameraButton.disabled, false);
+    assert.equal(fixture.refs.micButton.disabled, false);
+    stub.emit({ browserScreenShareSupported: true });
+    assert.equal(fixture.root.querySelector('[data-screen-share-start]').disabled, false);
+    runtime.destroy();
+});
+
 test('buttons, device selection, output volume and mute emit one adapter intent', async () => {
     const fixture = createFixture();
     const { runtimeApi } = loadApis(fixture);
@@ -844,6 +882,54 @@ test('buttons, device selection, output volume and mute emit one adapter intent'
     fixture.refs.sessionButton.click();
     await flush();
     assert.equal(stub.calls.get('leaveVoice').length, 1);
+});
+
+test('camera can be closed while its device is switching and cancelled while first capture waits', async () => {
+    const fixture = createFixture();
+    const { runtimeApi } = loadApis(fixture);
+    const stub = createAdapterStub();
+    let finish;
+    stub.results.set('toggleCamera', new Promise(resolve => { finish = resolve; }));
+    const runtime = runtimeApi.createMediaDockRuntime({ root: fixture.root, adapter: stub.adapter });
+    runtime.init();
+    fixture.refs.cameraButton.click();
+    stub.emit({ cameraEnabled: false, cameraPending: true });
+    assert.equal(fixture.refs.cameraButton.disabled, false);
+    assert.equal(fixture.refs.cameraButton.getAttribute('aria-busy'), 'true');
+    assert.match(fixture.refs.cameraButton.getAttribute('aria-label'), /取消/);
+    stub.results.set('toggleCamera', true);
+    fixture.refs.cameraButton.click();
+    assert.equal(stub.calls.get('toggleCamera').length, 2, 'cancel supersedes the pending open intent');
+    stub.emit({ cameraPending: false });
+    await flush();
+    finish(true);
+    await flush();
+    assert.equal(fixture.refs.cameraButton.getAttribute('aria-pressed'), 'false');
+    stub.emit({ cameraEnabled: true, cameraPending: true });
+    assert.equal(fixture.refs.cameraButton.disabled, false);
+    assert.match(fixture.refs.cameraButton.getAttribute('aria-label'), /关闭摄像头/);
+    fixture.refs.cameraButton.click();
+    await flush();
+    assert.equal(stub.calls.get('toggleCamera').length, 3);
+    runtime.destroy();
+});
+
+test('desktop prefers native sharing while browser keeps web; reopening respects the user selection', () => {
+    for (const desktop of [false, true]) {
+        const fixture = createFixture();
+        if (desktop) fixture.window.EliYorkDesktop = {};
+        const provider = createElement(fixture.document, 'select', { data: { 'screen-share-provider': '' } });
+        provider.value = 'web';
+        fixture.root.append(provider);
+        const { runtimeApi } = loadApis(fixture);
+        const runtime = runtimeApi.createMediaDockRuntime({ root: fixture.root, adapter: createAdapterStub().adapter });
+        runtime.init();
+        assert.equal(provider.value, desktop ? 'native' : 'web');
+        provider.value = 'web';
+        fixture.refs.screenButton.click();
+        assert.equal(provider.value, 'web', 'explicit choice survives opening the picker');
+        runtime.destroy();
+    }
 });
 
 test('screen options persist, rapid clicks start once, cancellation recovers, and active sharing remains editable', async () => {
@@ -1043,6 +1129,95 @@ test('stage quality and source actions edit the active share and stage stop does
     assert.equal(stub.calls.has('hangUp'), false);
     runtime.destroy();
 });
+
+for (const copied of [true, false]) {
+    test(`destroyed dock ignores late copy ${copied} after a new dock owns the same buttons`, async () => {
+        const fixture = createFixture(), { runtimeApi } = loadApis(fixture), timers = new Map();
+        let timerId = 0, finish;
+        fixture.window.setTimeout = callback => { timers.set(++timerId, callback); return timerId; };
+        fixture.window.clearTimeout = id => timers.delete(id);
+        const old = createAdapterStub();
+        old.results.set('copyRoomLink', new Promise(resolve => { finish = resolve; }));
+        const first = runtimeApi.createMediaDockRuntime({ root: fixture.root, adapter: old.adapter }); first.init();
+        fixture.refs.copyButton.click(); first.destroy();
+        const fresh = createAdapterStub(); fresh.results.set('copyRoomLink', !copied);
+        const second = runtimeApi.createMediaDockRuntime({ root: fixture.root, adapter: fresh.adapter }); second.init();
+        try {
+            fixture.refs.copyButton.click(); await flush();
+            const before = fixture.refs.copyButton.getAttribute('aria-label');
+            assert.equal(timers.size, 1);
+            finish(copied); await flush();
+            assert.equal(fixture.refs.copyButton.getAttribute('aria-label'), before);
+            assert.equal(timers.size, 1, 'old completions cannot create timers after destroy');
+        } finally { second.destroy(); }
+        assert.equal(timers.size, 0);
+    });
+}
+
+for (const change of ['other-popover', 'reopened', 'superseded', 'new-request', 'destroyed']) {
+    for (const started of [true, false]) {
+        test(`late screen ${started} cannot alter ${change} settings`, async () => {
+            const fixture = createFixture(), { runtimeApi } = loadApis(fixture), stub = createAdapterStub();
+            const feedback = createElement(fixture.document, 'p', { data: { 'share-dialog-feedback': '' } });
+            const screen = fixture.root.querySelector('[data-device-popover="screen"]'); screen.append(feedback);
+            const first = runtimeApi.createMediaDockRuntime({ root: fixture.root, adapter: stub.adapter }); first.init();
+            let finish, finishNew, second;
+            stub.results.set('startScreenShare', new Promise(resolve => { finish = resolve; }));
+            fixture.refs.screenButton.click(); fixture.refs.screenStartButton.click();
+            const toggle = type => fixture.root.dispatchEvent(new FakeEvent('click', {
+                target: fixture.root.querySelector(`[data-control-menu="${type}"]`),
+            }));
+            try {
+                if (change === 'destroyed') {
+                    first.destroy();
+                    second = runtimeApi.createMediaDockRuntime({ root: fixture.root, adapter: createAdapterStub().adapter });
+                    second.init(); fixture.refs.screenButton.click();
+                } else if (change === 'superseded' || change === 'new-request') {
+                    const stop = createElement(fixture.document, 'button', { data: { 'share-action': 'stop' } }); screen.append(stop);
+                    stub.emit({ screenSharePending: true });
+                    fixture.document.dispatchEvent(new FakeEvent('click', { target: stop })); await flush();
+                    stub.emit({ screenSharePending: false });
+                    fixture.refs.screenButton.click();
+                    if (change === 'new-request') {
+                        stub.results.set('startScreenShare', new Promise(resolve => { finishNew = resolve; }));
+                        fixture.refs.screenStartButton.click();
+                    }
+                } else {
+                    toggle('mic');
+                    if (change === 'reopened') toggle('screen');
+                }
+                const panel = change === 'other-popover' ? fixture.root.querySelector('[data-device-popover="mic"]') : screen;
+                feedback.textContent = '当前设置提示';
+                assert.equal(panel.classList.contains('is-open'), true);
+                finish(started); await flush();
+                assert.equal(panel.classList.contains('is-open'), true, 'the latest settings stay open');
+                assert.equal(feedback.textContent, '当前设置提示');
+                if (finishNew) {
+                    assert.equal(fixture.refs.screenStartButton.disabled, true, 'old completion does not clear a new pending action');
+                    finishNew(true); await flush(); assert.equal(screen.classList.contains('is-open'), false);
+                }
+            } finally { first.destroy(); second?.destroy(); }
+        });
+    }
+}
+
+for (const started of [true, false]) {
+    test(`current screen ${started} still updates its own source dialog`, async () => {
+        const fixture = createFixture(), { runtimeApi } = loadApis(fixture), stub = createAdapterStub();
+        const screen = fixture.root.querySelector('[data-device-popover="screen"]');
+        const feedback = createElement(fixture.document, 'p', { data: { 'share-dialog-feedback': '' } }); screen.append(feedback);
+        const runtime = runtimeApi.createMediaDockRuntime({ root: fixture.root, adapter: stub.adapter }); runtime.init();
+        let finish;
+        stub.results.set('startScreenShare', new Promise(resolve => { finish = resolve; }));
+        try {
+            fixture.refs.screenButton.click(); fixture.refs.screenStartButton.click();
+            assert.equal(stub.calls.get('startScreenShare').length, 1, 'capture adapter is invoked synchronously from the click');
+            finish(started); await flush();
+            assert.equal(screen.classList.contains('is-open'), !started);
+            if (!started) assert.match(feedback.textContent, /操作未完成或已取消/);
+        } finally { runtime.destroy(); }
+    });
+}
 
 test('component source cannot own media capture, layout reconstruction, Peer or Socket flows', () => {
     const adapterSource = readSource(

@@ -12,7 +12,7 @@
 - 浏览频道与加入语音相互独立：单击切换所查看的频道，双击频道请求加入对应语音房间。
 - 加入语音时优先请求麦克风；摄像头由用户按需开启。
 - 支持麦克风静音、摄像头、屏幕画面与系统音频共享、输出设备/音量控制、远端音量和全屏观看；参与者麦克风与屏幕共享系统音频可分别调节音量和静音，本地共享 Tile 也可隐藏预览而不停止发送。开始屏幕共享前可选择自动、720p、1080p、1440p 或原始分辨率，以及 15/30/60 fps 目标值。
-- 同频道文字聊天；服务端在内存中保存每个频道最近 50 条消息，每条消息最多 500 个字符。
+- 同频道文字聊天；服务端保留每个频道最近 50 条消息并异步保存到磁盘，每条消息最多 500 个字符。已打开页面最多显示最近 500 条，裁剪后显示提示；这不是完整聊天归档，见 [保留窗口](docs/CHAT-RETENTION-2026-10-22.md)。
 - 同频道在线成员、麦克风/摄像头/屏幕共享状态和全页面共享鼠标。
 - 浏览、聊天、共享鼠标和语音均按频道隔离；服务端以 Socket 所拥有的房间状态校验实时事件。
 - 页面级布局支持真实 DOM 组件的移动、缩放、隐藏、恢复、网格吸附和浏览器本地保存。
@@ -78,11 +78,11 @@ B -> A：只携带 B 当前发布的媒体
 - `@sapphi-red/web-noise-suppressor` 与 RNNoise WASM
 - Node 内置 test runner、ESLint、Prettier
 
-浏览器端 PeerJS 当前由 EJS 入口通过 CDN 加载；PeerServer、Socket.IO、页面和静态资源由同一个 Node 服务提供。
+浏览器端 PeerJS、Font Awesome 样式与字体使用 `src/views/vendor/` 中的本地资源，许可证随文件保留；PeerServer、Socket.IO、页面和静态资源由同一个 Node 服务提供。
 
 ## 本地运行
 
-要求：安装受支持的 Node.js/npm，并使用现代 Chromium 系浏览器进行媒体测试。
+要求：安装 Node.js 22 或更新版本及 npm，并使用现代 Chromium 系浏览器进行媒体测试。
 
 ```bash
 npm install
@@ -103,18 +103,27 @@ npm.cmd start
 npm run dev
 ```
 
-仓库没有定义 `npm test` 脚本；测试命令见下文。
+开发命令使用 Node 内置 watch：服务入口或已导入模块修改后自动重启，无需安装 nodemon。前端静态文件和 EJS 模板修改后刷新页面；此命令不提供浏览器热更新。生产启动继续使用 `npm start`。
+
+运行 `npm test` 执行自动回归测试；浏览器和实机验收命令见下文。
 
 ## 环境变量
 
 | 变量 | 必需/默认值 | 实际作用 |
 | --- | --- | --- |
 | `USE_HTTPS` | 必需，必须是 `true` 或 `false` | 决定 Node 创建 HTTP 还是 HTTPS 服务；缺失或其他值会直接启动失败。 |
+| `TLS_KEY_FILE` / `TLS_CERT_FILE` | 可选，必须成对配置 | Node 直接提供 HTTPS 时的私钥和证书路径；相对路径以项目根目录为基准。 |
 | `PORT` | 默认 `443`；示例为 `3000` | Node 服务监听端口。 |
-| `HOST` | 默认 `localhost` | 目前只用于启动日志中的 URL；代码调用 `listen(PORT)`，不会用它限制绑定地址。 |
+| `HOST` | 默认 `localhost` | 服务实际绑定的地址；同机反向代理可使用 `127.0.0.1`，需要外部直连时明确配置监听地址。 |
 | `ENV` | 示例为 `dev` | 传给项目 Logger；`production` 使用生产日志格式，其余值按开发模式处理。 |
+| `TURN_URLS` / `TURN_SHARED_SECRET` | 可选，必须成对配置 | coturn REST 模式的中继地址（逗号分隔，最多 8 个）及仅留在服务器的共享密钥（32–1024 字符）。留空时继续只用 STUN。 |
+| `TURN_TTL_SECONDS` | 默认 `3600` | 临时凭据有效期，整数 `600`–`86400` 秒；浏览器提前刷新新连接所用配置。 |
 
-当 `USE_HTTPS=true` 时，服务端固定读取 `cert/selfsigned.key` 与 `cert/selfsigned.crt`。生产环境更推荐由 Nginx/宝塔终止 TLS，并让 Node 使用 `USE_HTTPS=false`。当前 ICE 配置只有公共 STUN，没有 TURN 环境变量或 TURN 凭据配置。
+当 `USE_HTTPS=true` 时，可成对指定 `TLS_KEY_FILE`、`TLS_CERT_FILE`；两项留空时仍读取 `cert/selfsigned.key` 与 `cert/selfsigned.crt`。证书无法读取、格式损坏或与私钥不匹配时启动失败，不会降级到 HTTP。现有 Nginx/宝塔终止 TLS 的部署继续使用 `USE_HTTPS=false`。
+
+TURN 默认不启用。配置后，服务器通过当前 Socket.IO 连接按需签发带到期时间的临时用户名和密码，房间 HTML 不包含 TURN 地址或凭据。共享密钥不发给浏览器；已有通话不会因刷新配置重建。部分配置或无效值会阻止服务启动。此功能面向固定频道的匿名连接，房间校验不是账号认证；签发有每 socket 和全进程限流，中继服务仍须另设带宽与会话配额。配置及验收见 [发布说明](docs/RELEASE.md#可选-turn-中继)。
+
+`GET /healthz` 是进程存活检查，返回 HTTP 200，响应中的 `mediaReady` 单独表示媒体服务就绪状态。`GET /readyz` 在媒体服务未就绪时返回 503，就绪时返回 200；两者均禁止缓存。传统模式要求配置有效，且启用的 SFU 已启动并未处于资源异常状态；Piik 模式检查其内部健康接口。显式关闭 SFU 的 P2P 模式可就绪。这些检查不证明公网 ICE/TURN、声音听感或屏幕画质。
 
 ## 生产部署
 
@@ -189,16 +198,16 @@ exportVoiceMediaDebug();
 
 ## 已知限制
 
-- WebRTC 使用 P2P mesh；参与者越多，每个浏览器的上行带宽、连接数和 CPU 压力越大。
-- 目前只有公共 STUN，没有 TURN；严格 NAT、企业网、校园网或受限防火墙下可能无法建立媒体连接。
+- 麦克风、摄像头与屏幕 P2P 回退仍使用浏览器间连接；屏幕可使用 SFU 转发。参与者越多，浏览器连接数、CPU 和服务端带宽压力越大，仍需按实际拓扑验收容量。
+- 默认只有公共 STUN；可选 TURN 临时凭据接入已实现，但仍需配置实际中继并验收受限网络连通性。当前本地自动测试不证明公网 TURN 可用。
 - 没有账号、登录、持久身份、权限或房间管理；显示名不是可信身份。
-- presence、频道聊天历史和相关服务端状态只存在内存中，服务重启即丢失。
-- 线上 Socket.IO WebSocket 曾出现 `Invalid frame header`，业务端可回退 polling，但代理/Upgrade 根因尚未完成独立诊断。
-- 没有真实浏览器自动 E2E；当前自动化主要是 Node 行为、模型和源码合同测试。
+- presence 和相关实时状态仍在内存中；频道聊天历史会异步保存到磁盘并在失败时提示、重试，异常断电或强制退出仍可能丢失尚未保存的消息。
+- 应用中 PeerJS/Socket.IO 的 WebSocket upgrade 接管冲突已修复，当前本地真实双协议测试通过；线上异常仍需用当前日志与代理配置单独核对。
+- 已有隔离浏览器完整页面测试，覆盖聊天保存、TURN 配置与过期连接等流程；合成媒体不代表真实麦克风、屏幕画质、手机或公网弱网验收通过。
 - Voice Session Resilience、权限/设备错误恢复、Chat Panel、Sidebar、Media Dock，以及屏幕共享选择、独立音量、本地预览显隐和质量标签仍需要更多真实浏览器、弱网与设备拔插复测。
 - Mobile Nav 尚未正式组件化；Stage / Video Grid 和 script loader/bootstrap 也仍待收敛。
-- 生产依赖仍有待单独处理的 high/moderate 漏洞，升级前后需要完整回归。
-- 第三方 CDN、自托管资源策略、安全 header、CSS/z-index、旧布局组件和重复 popover owner 仍待整理。
+- 根项目已移除 nodemon 带入的已知开发依赖漏洞链，独立全量与生产依赖审计均为 0；范围与验证记录见 [依赖检查](docs/DEPENDENCY-AUDIT-2026-10-22.md)。其他子项目需分别审计，依赖变化后仍需复核。
+- 核心网页资源已本地化，过时的 CDN CSP 许可已移除，见 [本地资源验证](docs/LOCAL-ASSETS-CSP-2026-10-22.md)。WebSocket 来源、其他安全策略、CSS/z-index、旧布局组件和重复 popover owner 仍待进一步整理。
 
 完整、持续更新的状态见[架构修复待办](./docs/architecture-repair-backlog.md)。
 
@@ -209,7 +218,7 @@ exportVoiceMediaDebug();
 - 服务端会限制显示名和聊天正文长度并拒绝跨 owner room 的聊天；这不等同于账号认证、授权、审计或反滥用系统。
 - 项目没有账号系统，任何人只要能访问部署地址就可能加入固定频道；公开部署应在反向代理或网络层增加访问控制。
 - 调试日志刻意排除完整 SDP、candidate、IP、track ID、设备 label 和完整昵称，但导出文件仍应按敏感诊断数据处理。
-- 依赖 CDN 与当前缺少统一安全 header 基线是公开部署前需要处理的风险。
+- 当前由 Helmet 提供 CSP 等响应头，核心资源不依赖 CDN；仍需按实际反向代理、原生桥接及部署环境核对安全策略，不能把本地响应头测试视为公网安全验收。
 - 安全问题请通过 GitHub 仓库的私密漏洞报告功能联系维护者，不要在公开 Issue 中发布凭据、IP、SDP、日志原文或可复现的敏感部署信息。
 
 ## 文档导航

@@ -58,6 +58,30 @@ button enabled/disabled and `aria-busy`, success reset/focus, and controlled
 failure status. Sending is disabled without a room or while chat is connecting,
 reconnecting, offline, or failed.
 
+Connection notices take precedence over retained send errors. The runtime
+stores explicit send rejection separately from rendered status, so reconnecting
+does not hide connection state or discard an unchanged draft's rejection.
+Editing input, a new send, or switching rooms clears that send error; storage
+warnings remain independent and resume when higher-priority notices clear.
+
+While connected and awaiting the current room history, the same status area
+shows a history synchronization notice if no connection, delivery, send, or
+storage warning takes precedence. Accepted history clears this notice even
+without persistence metadata; an obsolete history response cannot clear it.
+
+Successful send cleanup checks both submitted text and a local draft revision.
+Input events and composition start advance that revision, so changing the text
+away and back or beginning a new composition prevents an older acknowledgement
+from clearing or focusing the current draft. An unchanged draft submitted later
+still clears normally; this revision stays local and does not identify messages.
+
+Clearing accepted text does not always restore focus. Automatic focus requires
+a visible, focused document and current focus in the input or submit button.
+The submit button's native disabled blur may restore input only when no later
+focusin event claimed another control. The runtime owns one document focusin
+listener and removes it on destroy or failed initialization; explicit
+`focusInput()` remains available to user-requested navigation.
+
 `chat-form-ui.js` is a ref-only helper. It does not query global DOM or send
 messages. `chat-message-ui.js` is the single message DOM renderer used by both
 history and live paths. Nickname and message text are assigned with
@@ -103,3 +127,47 @@ that needs chat focus must call `chatPanelRuntime.focusInput()` rather than
 finding `#chatInput` itself.
 
 There must always be exactly one EJS-created Chat Panel business DOM tree.
+
+## Bounded page retention
+
+The message renderer keeps at most 500 message rows and one retention notice.
+The runtime keeps at most 1000 recent message IDs and 500 live messages while
+waiting for history, then merges history and live messages into the same
+500-row window. Clear, room switch, and destroy release the corresponding
+business records. This does not change the server's separate 50-message
+history or delete stored records; it does not provide a complete archive or
+permanent duplicate suppression.
+
+When history overlaps queued live messages, the first shared stable ID locates
+the live prefix that precedes the bounded snapshot. The runtime merges that
+prefix, the snapshot, and remaining live events, deduplicates IDs with snapshot
+content taking precedence, then keeps the latest 500 rows. It preserves stream
+order without sorting by timestamps. Without shared IDs it retains history-first
+ordering; it cannot infer a complete timeline from disjoint segments.
+
+The renderer owns scroll compensation when trimming: readers keep a surviving
+row at the same position inside the list viewport, while readers already at
+the bottom follow new messages. CSS disables native scroll anchoring for this
+container, and the renderer carries subpixel remainders between corrections.
+History refresh uses the same reading intent: if the reader is above the bottom,
+a surviving visible message ID anchors the replacement rows to the old viewport
+offset. The renderer stores IDs by node in a WeakMap, without adding DOM
+attributes. Missing or unidentified anchors fall back to the remaining top;
+readers already at the bottom, initial loads, and room switches follow latest.
+See [validation and limits](CHAT-RETENTION-2026-10-22.md).
+
+The composition callback for an actual room change also calls the stage's
+`resetChatRoom()` to clear its saved panel scroll offset and unread count.
+Reopening chat in the new room follows latest; a same-room close and reopen
+still restores its reading position. Clearing unread alone does not discard
+that position. This keeps the stage's hidden-panel restoration from overriding
+the renderer's new-room scroll policy.
+
+For same-room panel restoration, the stage asks the message renderer to capture
+a stable message ID and its offset inside the list before hiding it. After the
+panel becomes measurable again, the renderer finds the current node with that
+ID and restores its offset, including after trimming or history replacement.
+The saved record contains only primitives. If the identified message no longer
+exists, restoration falls back to the remaining top; an unidentified position
+uses its saved scroll offset. The stage clears the record on room change and
+destroy. Publish the stage and message-renderer changes together.

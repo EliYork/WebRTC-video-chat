@@ -6,12 +6,24 @@
     let rootDocument = global.document;
     let documentBinding;
     let activePopover;
+    let popoverAnchor;
+    let popoverOpener;
+    let closeWatcher;
 
     const getPopover = () => rootDocument.querySelector(popoverSelector);
 
-    const closePopover = () => {
-        (activePopover || getPopover())?.remove();
+    const closePopover = ({ restoreFocus = false } = {}) => {
+        const popover = activePopover || getPopover();
+        const opener = popoverOpener;
+        const ownsFocus = popover?.contains?.(rootDocument.activeElement);
+        const watcher = closeWatcher;
+        closeWatcher = undefined;
         activePopover = null;
+        popoverAnchor = null;
+        popoverOpener = null;
+        watcher?.destroy();
+        popover?.remove();
+        if (restoreFocus && ownsFocus && opener?.isConnected) opener.focus();
     };
 
     const clampVolumePercent = (volume) =>
@@ -28,14 +40,23 @@
     };
 
     const positionPopover = (popover, event) => {
+        const viewport = global.visualViewport;
+        const width = viewport?.width > 0 ? viewport.width : global.innerWidth;
+        const height = viewport?.height > 0 ? viewport.height : global.innerHeight;
+        const x = Number.isFinite(viewport?.offsetLeft) ? viewport.offsetLeft : 0;
+        const y = Number.isFinite(viewport?.offsetTop) ? viewport.offsetTop : 0;
+        const minLeft = x + 8, minTop = y + 8;
+        // Constrain the border box before measuring, including keyboard/zoom viewports.
+        popover.style.maxWidth = `${Math.max(0, width - 16)}px`;
+        popover.style.maxHeight = `${Math.max(0, height - 16)}px`;
         const popoverRect = popover.getBoundingClientRect();
         const left = Math.min(
-            Math.max(8, event.clientX),
-            global.innerWidth - popoverRect.width - 8
+            Math.max(minLeft, Number.isFinite(event.clientX) ? event.clientX : minLeft),
+            Math.max(minLeft, x + width - popoverRect.width - 8)
         );
         const top = Math.min(
-            Math.max(8, event.clientY),
-            global.innerHeight - popoverRect.height - 8
+            Math.max(minTop, Number.isFinite(event.clientY) ? event.clientY : minTop),
+            Math.max(minTop, y + height - popoverRect.height - 8)
         );
 
         popover.style.left = `${left}px`;
@@ -138,6 +159,9 @@
         }
 
         closePopover();
+        const opener = typeof event.currentTarget?.focus === 'function'
+            ? event.currentTarget : rootDocument.activeElement;
+        const keyboard = event.detail === 0 && event.clientX === 0 && event.clientY === 0;
 
         const popover = controls?.length ? rootDocument.createElement('div') : createPopover({
             currentVolume,
@@ -158,11 +182,30 @@
                 popover.append(section);
             });
         }
+        popover.setAttribute('role', 'dialog');
+        popover.setAttribute('aria-label', titleText || '成员音量');
+        popover.tabIndex = -1;
         // Fullscreen hides everything outside its top-layer subtree.
         const fullscreen = rootDocument.fullscreenElement || rootDocument.webkitFullscreenElement;
         (fullscreen || rootDocument.querySelector('.is-web-fullscreen') || rootDocument.body).append(popover);
         activePopover = popover;
-        positionPopover(popover, event);
+        popoverOpener = opener;
+        popoverAnchor = { clientX: event.clientX, clientY: event.clientY };
+        if (keyboard && typeof opener?.getBoundingClientRect === 'function') {
+            const rect = opener.getBoundingClientRect();
+            popoverAnchor = { clientX: rect.left, clientY: rect.bottom + 4 };
+        }
+        if (global.CloseWatcher) {
+            closeWatcher = new global.CloseWatcher();
+            closeWatcher.addEventListener('close', () => {
+                if (activePopover === popover) closePopover({ restoreFocus: true });
+            });
+        }
+        positionPopover(popover, popoverAnchor);
+        if (keyboard) {
+            const control = popover.querySelector('input:enabled') || popover.querySelector('button:enabled');
+            (control || popover).focus();
+        }
 
         return popover;
     };
@@ -180,9 +223,14 @@
             }
         };
         const handleDocumentKeydown = (event) => {
-            if (event.key === 'Escape') {
-                closePopover();
+            if (event.key === 'Escape' && activePopover && !event.defaultPrevented && !event.isComposing) {
+                event.preventDefault();
+                closePopover({ restoreFocus: true });
             }
+        };
+        const viewport = global.visualViewport;
+        const reposition = () => {
+            if (activePopover && popoverAnchor) positionPopover(activePopover, popoverAnchor);
         };
         const binding = {
             root,
@@ -192,6 +240,9 @@
                 root.removeEventListener('keydown', handleDocumentKeydown);
                 root.removeEventListener('fullscreenchange', closePopover);
                 root.removeEventListener('webkitfullscreenchange', closePopover);
+                global.removeEventListener?.('resize', reposition);
+                viewport?.removeEventListener('resize', reposition);
+                viewport?.removeEventListener('scroll', reposition);
                 closePopover();
                 if (documentBinding === binding) {
                     documentBinding = undefined;
@@ -204,6 +255,9 @@
         root.addEventListener('keydown', handleDocumentKeydown);
         root.addEventListener('fullscreenchange', closePopover);
         root.addEventListener('webkitfullscreenchange', closePopover);
+        global.addEventListener?.('resize', reposition);
+        viewport?.addEventListener('resize', reposition);
+        viewport?.addEventListener('scroll', reposition);
         documentBinding = binding;
         return binding;
     };

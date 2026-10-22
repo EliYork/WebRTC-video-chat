@@ -19,6 +19,7 @@
         const players = new Map();
         const peers = new Map();
         const processing = new WeakSet();
+        const processingTimers = new Set();
         let disposed = false;
         let timer;
         let started = false;
@@ -31,8 +32,10 @@
                 !stream
                     ?.getTracks?.()
                     .some((track) => track.readyState === 'live')
-            )
+            ) {
+                players.delete(element);
                 return;
+            }
             let state = players.get(element);
             if (!state || state.stream !== stream) {
                 state = { stream, pending: false, blocked: false };
@@ -96,6 +99,7 @@
                         () => reject(new Error('audio-resume-timeout')),
                         1500
                     );
+                    processingTimers.add(timeout);
                 }),
             ])
                 .then(() => {
@@ -103,16 +107,14 @@
                         throw new Error('audio-context-not-running');
                 })
                 .catch(() => {
-                    if (
-                        !disposed &&
-                        getProcessingState()?.context === context
-                    ) {
+                    if (!disposed && getProcessingState() === state && context.state !== 'running') {
                         return onProcessingFailure?.(state);
                     }
                 })
                 .catch(() => {})
                 .finally(() => {
                     clearTimer(timeout);
+                    processingTimers.delete(timeout);
                     processing.delete(context);
                 });
         };
@@ -141,18 +143,15 @@
                     continue;
                 }
                 let state = peers.get(peerId);
-                if (!state) {
+                if (!state || state.connection !== connection) {
                     state = {
                         connection,
                         since: time,
-                        attempts: 0,
-                        nextAttempt: 0,
+                        attempts: state?.attempts || 0,
+                        nextAttempt: state?.nextAttempt || 0,
+                        pending: false,
                     };
                     peers.set(peerId, state);
-                }
-                if (state.connection !== connection) {
-                    state.connection = connection;
-                    state.since = time;
                 }
                 if (userGesture) {
                     state.attempts = 0;
@@ -171,13 +170,31 @@
                     continue;
                 }
                 if (time < state.nextAttempt) continue;
-                state.attempts += 1;
-                state.nextAttempt = time + 3000 * 2 ** (state.attempts - 1);
                 state.pending = true;
                 void Promise.resolve()
                     .then(() => {
-                        if (!disposed && peers.get(peerId) === state)
-                            return onPeerRecovery?.(peerId);
+                        if (disposed || peers.get(peerId) !== state) return;
+                        const current = Array.from(getPeerStates()).find(
+                            (peer) => peer.peerId === peerId
+                        );
+                        if (
+                            !current ||
+                            current.hasMedia === false ||
+                            current.connection !== connection
+                        )
+                            return;
+                        const currentStatus =
+                            connection?.connectionState ||
+                            connection?.iceConnectionState;
+                        if (
+                            currentStatus === 'connected' ||
+                            currentStatus === 'completed'
+                        )
+                            return;
+                        state.attempts += 1;
+                        state.nextAttempt =
+                            now() + 3000 * 2 ** (state.attempts - 1);
+                        return onPeerRecovery?.(peerId);
                     })
                     .catch(() => {})
                     .finally(() => {
@@ -226,6 +243,8 @@
             dispose: () => {
                 disposed = true;
                 clearTimer(timer);
+                processingTimers.forEach(pending => clearTimer(pending));
+                processingTimers.clear();
                 players.clear();
                 peers.clear();
             },

@@ -1,17 +1,24 @@
-// Only the main process owns updates; the remote page gets no install IPC.
+// Only main and its trusted local settings window own update privileges.
 function createUpdates({
     updater,
     app,
-    dialog,
     window,
     log,
     changed,
     prepareInstall,
+    confirmInstall,
 }) {
     let status = 'idle',
         version = '',
         busy = false,
         stopped = false;
+    let progress = null,
+        error = '',
+        lastChecked = null,
+        token = null;
+    let cancelled = false,
+        phase = 'check';
+    const listeners = new Set();
     updater.autoDownload = false;
     updater.autoInstallOnAppQuit = false;
     updater.allowDowngrade = false;
@@ -23,107 +30,187 @@ function createUpdates({
         error: (message) => log(`update ${message}`),
         debug: () => {},
     };
+    const label = () =>
+        ({
+            downloaded: `安装更新 ${version}…`,
+            available: `发现新版 ${version}…`,
+            downloading: `正在下载 ${version}…`,
+            verifying: '正在校验更新…',
+            installing: '正在退出并安装…',
+            checking: '正在检查更新…',
+            error: '更新未完成，点击重试…',
+            cancelled: '更新下载已取消…',
+        })[status] || '检查客户端更新…';
+    const snapshot = () => ({
+        status,
+        version,
+        currentVersion: app.getVersion(),
+        busy,
+        progress: progress && { ...progress },
+        error,
+        lastChecked,
+        canCancel: status === 'downloading' && Boolean(token),
+    });
+    const publish = () => {
+        if (stopped) return;
+        changed?.(label());
+        for (const listener of listeners) listener(snapshot());
+    };
     const update = (next) => {
         status = next;
-        changed?.(label());
+        publish();
     };
-    const label = () =>
-        status === 'downloaded'
-            ? `安装更新 ${version}…`
-            : status === 'available'
-              ? `发现新版 ${version}…`
-              : status === 'downloading'
-                ? `正在下载 ${version}…`
-                : status === 'checking'
-                  ? '正在检查更新…'
-                  : '检查客户端更新…';
-    const message = (options) =>
-        dialog.showMessageBox(window(), {
-            type: 'info',
-            buttons: ['确定'],
-            noLink: true,
-            ...options,
-        });
-    updater.on('error', (error) => {
-        log(`update-error ${error.message}`);
-        if (status !== 'downloaded') update('error');
+    const taskbar = (value) => {
+        const win = window();
+        if (win && !win.isDestroyed()) win.setProgressBar(value);
+    };
+    const failed = (failure) => {
+        if (stopped) return;
+        taskbar(-1);
+        if (cancelled) {
+            error = '';
+            update('cancelled');
+            return;
+        }
+        log(`update-${phase}-failed ${failure.message}`);
+        error =
+            phase === 'check'
+                ? '暂时无法连接更新服务，请检查网络后重试。'
+                : phase === 'install'
+                  ? '未能启动安装，请重试。当前客户端仍可继续使用。'
+                  : '下载或完整性校验失败。请重新检查更新，未通过校验的文件不会安装。';
+        update('error');
+    };
+    // Keep an error listener after stop: late updater events must not crash Electron.
+    updater.on('error', (failure) => {
+        if (status !== 'downloaded') failed(failure);
+        else log(`update-error ${failure.message}`);
     });
     updater.on('update-available', (info) => {
+        if (stopped) return;
         version = info.version;
         update('available');
     });
-    updater.on('update-not-available', () => update('idle'));
-    updater.on('download-progress', (progress) => {
-        window()?.setProgressBar(progress.percent / 100);
+    updater.on('update-not-available', () => {
+        if (!stopped) {
+            version = '';
+            update('current');
+        }
     });
-    updater.on('update-downloaded', () => {
-        window()?.setProgressBar(-1);
+    updater.on('download-progress', (value) => {
+        if (
+            stopped ||
+            cancelled ||
+            !['downloading', 'verifying'].includes(status)
+        )
+            return;
+        const number = (n) => (Number.isFinite(n) ? Math.max(0, n) : 0);
+        progress = {
+            percent: Math.min(100, number(value.percent)),
+            transferred: number(value.transferred),
+            total: number(value.total),
+            bytesPerSecond: number(value.bytesPerSecond),
+            updatedAt: Date.now(),
+        };
+        taskbar(progress.percent / 100);
+        update(progress.percent >= 100 ? 'verifying' : 'downloading');
+    });
+    updater.on('update-downloaded', (info) => {
+        if (stopped || cancelled) return;
+        if (info?.version) version = info.version;
+        taskbar(-1);
         update('downloaded');
     });
-    async function check(manual = true) {
-        if (busy || stopped) return;
+    async function check() {
+        if (busy || stopped || ['downloaded', 'installing'].includes(status))
+            return;
         busy = true;
+        phase = 'check';
+        error = '';
+        progress = null;
+        token = null;
+        cancelled = false;
+        update('checking');
         try {
-            if (status === 'downloading') return;
-            if (status !== 'downloaded') {
-                update('checking');
-                await updater.checkForUpdates();
-            }
-            if (!manual || stopped) return;
-            if (status === 'available') {
-                const answer = await message({
-                    message: `发现 EliYork Voice ${version}`,
-                    detail: `当前版本 ${app.getVersion()}。下载会占用网络，可在通话结束后操作。下载完成后由你决定何时退出安装。`,
-                    buttons: ['下载更新', '稍后'],
-                    defaultId: 1,
-                    cancelId: 1,
-                });
-                if (answer.response !== 0 || stopped) return;
-                update('downloading');
-                await updater.downloadUpdate();
-            }
+            const result = await updater.checkForUpdates();
             if (stopped) return;
-            if (status === 'downloaded') {
-                const answer = await message({
-                    message: `${version} 已下载并通过完整性校验`,
-                    detail: '退出安装会结束当前语音和屏幕共享。选择“稍后”不会在关闭客户端时自动安装。',
-                    buttons: ['退出并更新', '稍后'],
-                    defaultId: 1,
-                    cancelId: 1,
-                });
-                if (answer.response === 0 && !stopped) {
-                    await prepareInstall();
-                    updater.quitAndInstall(false, true);
-                }
-            } else if (status === 'idle') {
-                await message({
-                    message: `当前已是最新版本 ${app.getVersion()}`,
-                });
-            }
-        } catch (error) {
-            window()?.setProgressBar(-1);
-            update('error');
-            log(`update-failed ${error.message}`);
-            if (manual && !stopped)
-                await message({
-                    type: 'warning',
-                    message: '客户端更新失败',
-                    detail: '当前客户端可继续使用。请检查网络后重试；下载或校验失败的文件不会安装。',
-                });
+            if (!result) throw Error('Update service unavailable');
+            token = result.cancellationToken || null;
+            lastChecked = new Date().toISOString();
+            if (status === 'checking')
+                update(result.isUpdateAvailable ? 'available' : 'current');
+        } catch (failure) {
+            failed(failure);
         } finally {
             busy = false;
+            publish();
         }
     }
-    // Quiet checks only update the menu. Never download, show a dialog or restart.
-    const startup = setTimeout(() => void check(false), 15000);
-    const periodic = setInterval(() => void check(false), 6 * 60 * 60 * 1000);
+    async function download() {
+        if (busy || stopped || status !== 'available') return;
+        busy = true;
+        phase = 'download';
+        cancelled = false;
+        error = '';
+        progress = null;
+        taskbar(2);
+        update('downloading');
+        try {
+            await updater.downloadUpdate(token || undefined);
+        } catch (failure) {
+            failed(failure);
+        } finally {
+            busy = false;
+            if (status !== 'downloading') taskbar(-1);
+            publish();
+        }
+    }
+    function cancel() {
+        if (stopped || status !== 'downloading' || !token) return;
+        cancelled = true;
+        token.cancel();
+        taskbar(-1);
+        update('cancelled');
+    }
+    async function install() {
+        if (busy || stopped || status !== 'downloaded') return;
+        busy = true;
+        phase = 'install';
+        publish();
+        try {
+            if (!(await confirmInstall(version)) || stopped) return;
+            update('installing');
+            taskbar(2);
+            await prepareInstall();
+            if (!stopped) updater.quitAndInstall(false, true);
+        } catch (failure) {
+            failed(failure);
+        } finally {
+            busy = false;
+            publish();
+        }
+    }
+    // Quiet checks never open UI, download, play sounds or restart.
+    const startup = setTimeout(() => void check(), 15000);
+    const periodic = setInterval(() => void check(), 6 * 60 * 60 * 1000);
     startup.unref?.();
     periodic.unref?.();
     return {
         check,
+        download,
+        cancel,
+        install,
         label,
+        snapshot,
+        subscribe(listener) {
+            listeners.add(listener);
+            return () => listeners.delete(listener);
+        },
         stop() {
             stopped = true;
+            token?.cancel();
+            taskbar(-1);
+            listeners.clear();
             clearTimeout(startup);
             clearInterval(periodic);
         },

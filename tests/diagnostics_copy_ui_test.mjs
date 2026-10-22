@@ -202,6 +202,57 @@ test('denied or absent clipboard preserves the full export in the text dialog an
     }
 });
 
+for (const outcome of ['resolve', 'reject']) {
+    test(`destroyed diagnostics ignores clipboard ${outcome} and releases its button immediately`, async () => {
+        const f = fixture(); let finish;
+        f.window.navigator.clipboard.writeText = () => new Promise((resolve, reject) => { finish = outcome === 'resolve' ? resolve : reject; });
+        const pending = f.runtime.copyCombined(f.button); await flush();
+        f.runtime.destroy();
+        assert.equal(f.button.disabled, false); assert.equal(f.button.attributes['aria-busy'], 'false');
+        f.button.textContent = '新界面反馈'; finish(new Error('old clipboard request')); await pending;
+        assert.equal(f.button.textContent, '新界面反馈');
+        assert.equal(f.window.document.body.children.length, 0);
+        assert.equal(f.timers.size, 0);
+    });
+}
+
+test('destroying idle diagnostics while collecting prevents a later clipboard write', async () => {
+    const f = fixture(); let finish;
+    f.window.VoiceShareDiagnostics.sync = () => new Promise(resolve => { finish = resolve; });
+    f.shares.push({ tile: {}, isScreenSharing: true });
+    const pending = f.runtime.copyCombined(f.button); await flush();
+    f.runtime.destroy(); finish({}); await pending;
+    assert.equal(f.copied.length, 0); assert.equal(f.timers.size, 0);
+    assert.equal(f.button.textContent, '复制诊断'); assert.equal(f.button.disabled, false);
+});
+
+for (const outcome of ['resolve', 'reject']) {
+    test(`clipboard ${outcome} from the previous session requests retry without opening its manual export`, async () => {
+        const f = fixture(); let finish;
+        f.window.navigator.clipboard.writeText = () => new Promise((resolve, reject) => { finish = outcome === 'resolve' ? resolve : reject; });
+        const pending = f.runtime.copyCombined(f.button); await flush();
+        f.state.会话 = { state: 'joined', generation: 2 };
+        finish(new Error('old session clipboard result')); await pending;
+        assert.equal(f.window.document.body.children.length, 0);
+        assert.match(f.button.textContent, /会话已变化/); assert.equal(f.button.disabled, false);
+        f.runtime.destroy();
+    });
+}
+
+test('copy after diagnostics destruction does not collect or write clipboard data', async () => {
+    const f = fixture(); f.runtime.destroy();
+    await f.runtime.copyCombined(f.button);
+    assert.equal(f.copied.length, 0); assert.equal(f.timers.size, 0);
+    assert.equal(f.button.textContent, '复制诊断'); assert.equal(f.button.disabled, false);
+});
+
+test('a retired diagnostics feedback callback cannot overwrite a new owner after destroy', async () => {
+    const f = fixture(); await f.runtime.copyCombined(f.button);
+    const restore = [...f.timers.values()][0]; f.runtime.destroy();
+    f.button.textContent = '新界面反馈'; restore();
+    assert.equal(f.button.textContent, '新界面反馈'); assert.equal(f.timers.size, 0);
+});
+
 test('a session change reports retry and releases the copy button without copying stale diagnostics', async () => {
     const f = fixture();
     let finish;

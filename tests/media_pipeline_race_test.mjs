@@ -9,15 +9,15 @@ import { StrictStream, StrictTrack } from './helpers/strict_media_peer.mjs';
 const appSource = readFileSync(process.env.AUDIT_SCRIPT_SOURCE || new URL('../src/views/script.js', import.meta.url), 'utf8');
 const section = (start, end) => appSource.slice(appSource.indexOf(start), appSource.indexOf(end, appSource.indexOf(start)));
 const deferred = () => {
-    let resolve;
-    const promise = new Promise((done) => { resolve = done; });
-    return { promise, resolve };
+    let resolve, reject;
+    const promise = new Promise((done, fail) => { resolve = done; reject = fail; });
+    return { promise, resolve, reject };
 };
 const fixture = () => {
     const contexts = [];
     const rawStreams = [];
     const sent = [];
-    let captureGate;
+    let captureGate, processorGate;
     const stopStream = (stream) => stream?.getTracks().forEach((track) => { track.readyState = 'ended'; });
     const window = { setTimeout, clearTimeout };
     vm.runInNewContext(readFileSync(new URL('../src/views/js/voice/voice-media-operation-runtime.js', import.meta.url), 'utf8'), { window });
@@ -26,11 +26,13 @@ const fixture = () => {
         console: { warn() {}, log() {} }, setTimeout, clearTimeout, WeakMap,
         AudioContext: class {
             constructor() {
-                this.state = 'running';
+                this.gate = processorGate;
+                processorGate = undefined;
+                this.state = this.gate ? 'suspended' : 'running';
                 this.sampleRate = 48000;
                 contexts.push(this);
             }
-            async resume() { this.state = 'running'; }
+            async resume() { await this.gate?.promise; this.state = 'running'; }
             async close() { this.state = 'closed'; }
             createMediaStreamSource() { return { connect() {}, disconnect() {} }; }
             createMediaStreamDestination() { return { stream: new StrictStream([new StrictTrack('audio', `processed-${contexts.length}`)]) }; }
@@ -84,6 +86,7 @@ const fixture = () => {
         contexts, rawStreams, sent, controller: context.mediaOperationController,
         read, start: () => read('restartLocalMicrophone({}, { preserveOldTrack: true })'),
         blockNextPipeline() { captureGate = deferred(); return captureGate; },
+        blockNextProcessor() { processorGate = deferred(); return processorGate; },
         hangup() {
             context.mediaOperationController.setDesired('microphone', false);
             context.mediaOperationController.invalidate('microphone');
@@ -167,6 +170,80 @@ test('duplicate microphone requests share one pipeline without stopping the adop
     f.hangup();
 });
 
+test('a late processor failure after hangup cannot start another microphone capture', async () => {
+    const f = fixture();
+    f.controller.setDesired('microphone', true);
+    const gate = f.blockNextProcessor();
+    const pending = f.start();
+    await flush();
+    assert.equal(f.contexts.length, 1);
+    f.hangup();
+    gate.reject(new Error('late audio context failure'));
+    assert.equal(await pending, false);
+    assert.equal(f.rawStreams.length, 1, 'cancelled processor failure must not capture browser fallback');
+    assert.equal(f.contexts.length, 1);
+    assert.equal(f.contexts[0].state, 'closed');
+    assert.equal(f.rawStreams[0].getAudioTracks()[0].readyState, 'ended');
+    assert.equal(f.read('myVideoStream'), null);
+    assert.equal(f.sent.length, 0);
+});
+
+test('hangup immediately stops a captured microphone while its audio context is still starting', async () => {
+    const f = fixture();
+    f.controller.setDesired('microphone', true);
+    const gate = f.blockNextProcessor();
+    const pending = f.start();
+    await flush();
+    assert.equal(f.rawStreams[0].getAudioTracks()[0].readyState, 'live');
+    f.hangup();
+    try {
+        assert.equal(f.rawStreams[0].getAudioTracks()[0].readyState, 'ended');
+        assert.equal(f.contexts[0].state, 'closed');
+    } finally {
+        gate.reject(new Error('context startup finished after hangup'));
+        await pending;
+    }
+    assert.equal(f.rawStreams.length, 1);
+    assert.equal(f.sent.length, 0);
+});
+
+test('an old processor failure cannot capture a fallback after a newer microphone has been adopted', async () => {
+    const f = fixture();
+    f.controller.setDesired('microphone', true);
+    const gate = f.blockNextProcessor();
+    const old = f.start();
+    await flush();
+    f.hangup();
+    f.controller.setDesired('microphone', true);
+    assert.equal(await f.start(), true);
+    const active = f.read('myVideoStream');
+    gate.reject(new Error('old context failed after new join'));
+    assert.equal(await old, false);
+    assert.equal(f.rawStreams.length, 2, 'old failure must not start a third capture');
+    assert.equal(f.read('myVideoStream'), active);
+    assert.equal(active.getAudioTracks()[0].readyState, 'live');
+    assert.equal(f.contexts[1].state, 'running');
+    assert.equal(f.sent.length, 1);
+    f.hangup();
+});
+
+test('a current processor startup failure still permits the browser audio fallback', async () => {
+    const f = fixture();
+    f.controller.setDesired('microphone', true);
+    const gate = f.blockNextProcessor();
+    const pending = f.start();
+    await flush();
+    gate.reject(new Error('current audio context failed'));
+    assert.equal(await pending, true);
+    assert.equal(f.rawStreams.length, 2);
+    assert.equal(f.rawStreams[0].getAudioTracks()[0].readyState, 'ended');
+    assert.equal(f.rawStreams[1].getAudioTracks()[0].readyState, 'live');
+    assert.equal(f.contexts[0].state, 'closed');
+    assert.equal(f.contexts[1].state, 'running');
+    assert.equal(f.sent.length, 1);
+    f.hangup();
+});
+
 for (const type of ['microphone', 'camera']) {
     test(`late failed ${type} selection cannot overwrite a newer selected device`, async () => {
         const pending = deferred();
@@ -186,6 +263,7 @@ for (const type of ['microphone', 'camera']) {
         });
         vm.runInContext(`
             let selectedInputDeviceId = 'default', selectedCameraDeviceId = 'default';
+            let committedCameraDeviceId = selectedCameraDeviceId;
             let inputSelectionRevision = 0, cameraSelectionRevision = 0;
             const myVideoStream = { getAudioTracks: () => [{ readyState: 'live' }] };
             ${section('const selectInputDevice =', 'const selectOutputDevice =')}

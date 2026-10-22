@@ -18,6 +18,7 @@ import { join, resolve } from 'node:path';
 import WebSocket from 'ws';
 import { startPiikLocal } from './piik-local-service.mjs';
 import { runNativeScenario } from './piik-native-scenario.mjs';
+import { runNativePerformance } from './piik-performance-scenario.mjs';
 const work = mkdtempSync(join(tmpdir(), 'piik-platform-'));
 const artifacts = resolve('integrations/piik/artifacts');
 mkdirSync(artifacts, { recursive: true });
@@ -172,7 +173,7 @@ try {
         [
             '--headless=new',
             '--mute-audio',
-            '--disable-gpu',
+            ...(process.argv.includes('--gpu-receiver') ? [] : ['--disable-gpu']),
             '--disable-background-timer-throttling',
             '--disable-renderer-backgrounding',
             '--disable-backgrounding-occluded-windows',
@@ -218,7 +219,11 @@ try {
                 m.params.args.map((a) => a.value ?? a.description).join(' ')
             );
     });
-    if (process.argv.includes('--native')) {
+    if (process.argv.some(a => a.startsWith('--performance='))) {
+        const report = await runNativePerformance({ open, evaluate, click, wait, port, work });
+        console.log(JSON.stringify({ tag: report.tag, preset: report.preset, appCpuCores: report.appCpuCores,
+            retainedLogBytes: report.retainedLogBytes, intervals: report.intervals }, null, 2));
+    } else if (process.argv.includes('--native')) {
         const report = await runNativeScenario({
             open,
             evaluate,
@@ -268,7 +273,7 @@ try {
         await share(a);
         await wait(() => receiving(b), 'Piik video in original stage');
         await wait(() => evaluate(a, `!document.querySelector('dialog').open`), 'sharing dialog closes on success');
-        assert.equal(await evaluate(a, '__lastCaptureOptions.audio'), false, 'share audio requires explicit opt-in');
+        assert.notEqual(await evaluate(a, '__lastCaptureOptions.audio'), false, 'capture follows the existing checked source-audio preference; test output remains muted');
         const publicationId = (await mediaRequest(b, { action: 'list' })).shares[0].id;
         const originalTrackId = await evaluate(a, '__capture.getVideoTracks()[0].id');
         await click(a, '[data-local-share-controls] [data-share-action="quality"]');
@@ -285,12 +290,14 @@ try {
         assert.equal((await mediaRequest(b, { action: 'list' })).shares[0].id, publicationId, 'cancel keeps old publication');
         assert.equal(await evaluate(a, '__capture.getVideoTracks()[0].readyState'), 'live');
         await evaluate(a, 'window.__oldCapture=__capture');
+        await evaluate(a, `document.querySelector('[data-screen-share-audio]').checked=false`);
         await click(a, '[data-screen-share-start]');
         await wait(() => evaluate(a, `!document.querySelector('dialog').open`), 'controlled browser source replacement');
         const replaced = await mediaRequest(b, { action: 'list' });
         assert.equal(replaced.shares.length, 1);
         assert.notEqual(replaced.shares[0].id, publicationId);
         assert.equal(await evaluate(a, '__oldCapture.getVideoTracks()[0].readyState'), 'ended');
+        assert.equal(await evaluate(a, '__lastCaptureOptions.audio'), false, 'explicit audio opt-out reaches the capture API');
         await wait(() => receiving(b), 'browser receiver after replacement');
         const list = await mediaRequest(b, { action: 'list' });
         assert.equal(list.shares.length, 1);

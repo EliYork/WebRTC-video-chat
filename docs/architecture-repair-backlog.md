@@ -15,11 +15,11 @@
 | Desktop Window System 收口                       | 代码完成，待浏览器复测       | Sidebar、Members、Media Dock、Chat 与音视频 tile 已统一使用共享标题栏/内容壳；桌面端常驻拖动、resize、有限层级置顶、隐藏恢复及持久化由页面布局系统统一管理，移动端保留静态布局。 |
 | 实时协议信任客户端 roomId / peerId               | 已完成                       | 全事件扫描完成；view/chat 使用已记录 owner，voice/presence/screen-share 使用 socket voice owner 与 session generation，伪造 roomId/peerId 行为测试已通过。 |
 | Socket.IO `MaxListenersExceededWarning`          | 代码修复完成，待线上日志复测 | 每个 socket 固定一个 disconnecting 与一个 disconnect listener；集中 cleanup、socket 级 guard、异常隔离及 20-socket/重复操作测试已通过。                    |
-| Socket.IO WebSocket `Invalid frame header`       | 未处理                       | 业务代码已兼容 polling fallback，但线上 WebSocket frame/Nginx/宝塔代理问题仍保留独立诊断，本轮未修改反代。                                                 |
-| 生产依赖的 high / moderate 漏洞                  | 未开始                       | 保留依赖升级与回归验证任务。                                                                                                                               |
-| 核心实时协议行为测试不足                         | 部分完成                     | strict SDP、registry、session/retry/media/device/server rejoin 行为测试已覆盖；仍没有真实浏览器自动 E2E。                                                  |
-| 真实浏览器 E2E                                   | 未开始                       | 当前只有 Node 行为/合同测试；浏览器自动化留作独立任务。                                                                                                    |
-| TURN                                             | 未开始                       | 公网/NAT 场景的 TURN 配置、凭据与连通性验证尚未实施。                                                                                                      |
+| Socket.IO WebSocket `Invalid frame header`       | 应用接管冲突已修复           | 当前真实服务器和隐藏页面双协议测试通过；线上代理/网络异常仍需当前日志证据，不能以本地测试替代。参见 [项目检查](PROJECT-AUDIT-2026-10-12.md)。 |
+| 根项目依赖的 high / moderate 漏洞                | 本地修复，未部署             | 独立全量与生产依赖审计均为 0；nodemon 改为 Node 内置 watch，移除已知开发漏洞链，535 项回归通过。范围及复审记录见 [依赖检查](DEPENDENCY-AUDIT-2026-10-22.md)。其他子项目需独立审计。 |
+| 核心实时协议行为测试不足                         | 持续补充                     | 当前 535 项 Node 回归，加隔离完整页面测试；仍需真实网络、设备和主观媒体体验验收。 |
+| 真实浏览器 E2E                                   | 已有隔离页面测试             | 聊天保存、TURN 配置/过期恢复与本地资源/CSP 已有隐藏 Chromium 测试；不是手机、真实媒体或公网长期验收。 |
+| TURN                                             | 接入完成，待中继验收         | 可选短期凭据、刷新及每次新连接前校验已完成；实际 TURN 分配、公网中继和超过 TTL 的真实通话仍待验收，见 [TURN 记录](TURN-CONFIG-2026-10-22.md)。 |
 | 远端 call / stream / tile 缺少统一生命周期 owner | 已完成                       | registry 分别持有 incoming/outgoing call generation、remote stream、tile、listener、方向替换与幂等 cleanup；行为测试已覆盖。                               |
 | 屏幕共享状态已广播但远端没有实际 screen video    | 已完成并浏览器验收通过       | 双向 screen video、system audio、RTP、停止共享后的 placeholder/camera 恢复与最后一帧清理均保持已完成状态。                                                 |
 | 页面刷新时本地 screen capture 未立即停止         | 已完成并浏览器验收通过       | 非 BFCache `pagehide` 会停止 screen/camera/mic track，并销毁 Peer、registry 和 Socket transport；真实刷新后共享标志立即消失。                              |
@@ -29,7 +29,7 @@
 | 完整媒体权限与设备错误恢复                       | 代码完成，待浏览器复测       | mic/camera/screen 操作 token、错误分类、独立 UI、devicechange/default fallback、输出 sink 回退与 track ended 单次恢复已有行为测试。                        |
 | 真实网络断开与 reconnect                         | 代码完成，待浏览器复测       | desired/actual 状态、client epoch、Socket owner restore、Peer reconnect/recreate、bounded backoff、presence/target reconcile 已完成；尚未做真实断网验收。  |
 | CSS 重复规则、`!important` 和 z-index 层级未统一 | 部分完成                     | Window System 的标题栏、resize 与普通/固定窗口层级已统一；媒体浮层、恢复工具条等全局 overlay 层级仍待独立收口，不进行全量视觉重写。                          |
-| 第三方 CDN、自托管资源和安全 header 基线         | 未开始                       | 公开部署前处理。                                                                                                                                           |
+| 第三方 CDN、自托管资源和安全 header 基线         | 本地资源与 CDN 权限已收口     | 资源已有本地副本和许可，移除 CSP 旧 CDN 来源；阻断外网的完整页面测试通过。仍保留 WebSocket/Piik 桥接来源等策略，见 [验证记录](LOCAL-ASSETS-CSP-2026-10-22.md)。 |
 | 文档、格式化门禁和死页面漂移                     | 未开始                       | 作为独立 housekeeping 任务。                                                                                                                               |
 
 - 屏幕共享右上角显示实际接收分辨率和帧率：代码完成，待浏览器复测。实现仅显示 screen-sharing 远端 live video 的观看者实际接收质量；自动化覆盖标准/非标准分辨率、fps 字段/差值/平滑、camera/audio-only/ended/cleanup/call replacement/多人独立 timer/异常降级。

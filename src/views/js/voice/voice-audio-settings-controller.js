@@ -36,14 +36,16 @@
             onRequested?.(config);
             notify();
             let ok;
+            let failureType = null;
             try {
                 ok = await apply(config);
             } catch (failure) {
-                error = failure?.name || 'Error';
+                failureType = failure?.name || 'Error';
                 ok = false;
             }
             if (token !== revision) return false;
             pending = false;
+            error = failureType;
             if (ok) adopt(config);
             else {
                 error ||= 'switch-failed';
