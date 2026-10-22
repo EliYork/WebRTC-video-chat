@@ -32,4 +32,3 @@ if ($AdaptiveSource) {
   $name = 'candidate'
 }
 Run ('link.exe /nologo /out:"{0}/{1}.exe" "{0}/probe.obj" "{2}" "{3}/build/platform-native/h264_encoder.obj" "{4}/lib/webrtc.lib" ole32.lib evr.lib mfplat.lib mf.lib mfuuid.lib d3d11.lib dxgi.lib dxguid.lib oleaut32.lib windowsapp.lib winmm.lib ws2_32.lib strmiids.lib crypt32.lib dmoguids.lib iphlpapi.lib msdmo.lib secur32.lib wmcodecdspuuid.lib user32.lib gdi32.lib' -f $out,$name,$adapter,$source,$sdk)
-
