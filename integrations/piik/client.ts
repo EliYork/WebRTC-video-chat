@@ -59,9 +59,10 @@ function createRuntime({
         });
     const nativeCapture = createNativeCapture(
         () => request({ action: 'list' }),
-        () => {
+        (message?: string) => {
             desired = null;
-            onPublicationFailure?.();
+            if (message) onWarning?.(message);
+            onPublicationFailure?.(message);
         }
     );
     const send = (edge: any, message: any) => {

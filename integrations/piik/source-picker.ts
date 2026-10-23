@@ -11,7 +11,7 @@ export const sourceLabel = (source: NativeCaptureTarget, index: number) =>
 // One short-lived, authorized control connection belongs to the selector.
 // Closing it cancels pending upstream preview work without stopping an active
 // share, which owns a separate control connection. No video capture loop here.
-export function createNativeSourcePicker(authorize: () => Promise<unknown>) {
+export function createNativeSourcePicker(authorize: () => Promise<unknown>, audioPicker?: {load(client: NativeClient): Promise<void>; close(): void}) {
     const gallery = document.querySelector<HTMLElement>(
         '[data-piik-native-gallery]'
     );
@@ -128,14 +128,6 @@ export function createNativeSourcePicker(authorize: () => Promise<unknown>) {
                         );
                     if (status)
                         status.textContent = `已选择：${name.textContent}`;
-                    const audioHint = document.querySelector<HTMLElement>(
-                        '[data-share-audio-hint]'
-                    );
-                    if (audioHint)
-                        audioHint.textContent =
-                            source.kind === 'display'
-                                ? '声音来源：整台电脑的系统声音，可能包含本频道通话。可取消勾选以避免回传。'
-                                : '声音来源：所选窗口对应应用的声音，可能包含该应用的其他窗口。';
                     notify();
                 });
                 grid.append(card);
@@ -176,6 +168,7 @@ export function createNativeSourcePicker(authorize: () => Promise<unknown>) {
     };
     const close = () => {
         visible = false;
+        audioPicker?.close();
         generation++;
         queue = [];
         lifetime?.abort();
@@ -224,6 +217,7 @@ export function createNativeSourcePicker(authorize: () => Promise<unknown>) {
                     ? '之前选择的窗口或屏幕已不可用，请重新选择。'
                     : '点击一张卡片，选择要共享的画面。';
             render();
+            void audioPicker?.load(next);
         } catch (error: any) {
             if (visible && token === generation) {
                 if (status) status.textContent = error.message;

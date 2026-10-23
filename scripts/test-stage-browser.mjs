@@ -84,8 +84,12 @@ const viewportReady = async (session, width, height) => {
 const tap = async (session, selector) => {
     let point;
     await wait(async () => {
-        point = await evaluate(session, `(() => { const n=document.querySelector(${JSON.stringify(selector)}); if (!n) return {hit:false}; const r=n.getBoundingClientRect(), x=r.x+r.width/2, y=r.y+r.height/2; return {x,y,hit:r.width>0 && r.height>0 && n.contains(document.elementFromPoint(x,y))}; })()`);
-        return point.hit;
+        const next = await evaluate(session, `(() => { const n=document.querySelector(${JSON.stringify(selector)}); if (!n) return {hit:false}; const r=n.getBoundingClientRect(), x=r.x+r.width/2, y=r.y+r.height/2; return {x,y,hit:r.width>0 && r.height>0 && n.contains(document.elementFromPoint(x,y))}; })()`);
+        // Device enumeration and the popover's animation frame can move the
+        // target after it first becomes visible. Dispatch only at stable bounds.
+        const stable = point?.hit && next.hit && Math.abs(point.x-next.x)<0.5 && Math.abs(point.y-next.y)<0.5;
+        point = next;
+        return stable;
     }, `touch target is visible and unobstructed: ${selector}`);
     await send('Input.dispatchTouchEvent', { type:'touchStart', touchPoints:[{ x:point.x,y:point.y }] }, session);
     await send('Input.dispatchTouchEvent', { type:'touchEnd', touchPoints:[] }, session);
@@ -180,7 +184,7 @@ try {
     await screenshot(a, 'not-joined');
     await click(a, '#stageJoinVoice');
     await wait(() => evaluate(a, `document.querySelector('#destroyPeer').dataset.sessionAction === 'hangup' && Boolean(document.querySelector('#local-video'))`), 'first voice join');
-    await click(a, '#toggleAudio');
+    if (await evaluate(a, `document.querySelector('#toggleAudio').getAttribute('aria-pressed') !== 'true'`)) await click(a, '#toggleAudio');
     await wait(() => evaluate(a, `document.querySelector('#toggleAudio').getAttribute('aria-pressed') === 'true'`), 'synthetic microphone enabled');
     await click(a, '#toggleVideo');
     await wait(() => evaluate(a, `document.querySelector('#member-cards #local-video video')?.videoWidth > 0`), 'fake camera in member card');
@@ -279,7 +283,7 @@ try {
         await wait(() => evaluate(b, `document.querySelector('[data-device-popover="mic"]').classList.contains('is-open')`), 'touch opens microphone settings');
         if (width === 390) await screenshot(b, 'mobile-microphone-settings');
         await tap(b, '[data-device-popover="mic"] [data-control-close]');
-        assert.equal(await evaluate(b, `document.querySelector('[data-device-popover="mic"]').classList.contains('is-open')`), false, 'settings have an explicit close action');
+        await wait(() => evaluate(b, `!document.querySelector('[data-device-popover="mic"]').classList.contains('is-open')`), 'settings have an explicit close action');
         await tap(b, '#video-grid > .is-stage-focus .voice-player-more');
         assert.equal(await evaluate(b, `document.querySelector('.voice-player-menu').textContent.includes('连接方式') && document.querySelector('.voice-player-menu').textContent.includes('调整音量')`), true, 'secondary share controls remain accessible');
         await tap(b, '.voice-player-menu button:nth-child(4)');

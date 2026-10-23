@@ -546,7 +546,9 @@
             const sourceReady = !native || (sharing && editorMode === 'quality') || Boolean(screenField('[data-piik-native-source]')?.value);
             const browserUnsupported = !native && lastSnapshot.browserScreenShareSupported === false;
             const pickerUnavailable = browserUnsupported && (!sharing || editorMode !== 'quality');
-            refs.screenStartButton.disabled = !mediaAvailable || screenPending || !sourceReady || pickerUnavailable;
+            const nativeApplication = screenField('[data-native-audio-target]');
+            const audioReady = !native || screenField('[data-native-audio-mode]')?.value !== 'application' || (Boolean(nativeApplication?.value) && !nativeApplication?.selectedOptions?.[0]?.disabled);
+            refs.screenStartButton.disabled = !mediaAvailable || screenPending || !sourceReady || !audioReady || pickerUnavailable;
             setText(screenField('[data-share-browser-title]'), browserUnsupported ? '此浏览器不支持共享屏幕' : '使用浏览器选择屏幕或窗口');
             setText(screenField('[data-share-browser-hint]'), browserUnsupported ? '你仍可用通话卡片上的“摄像头”分享视频，或观看其他成员的共享。共享电脑屏幕请使用电脑浏览器或 Windows 客户端。' : '点击“选择来源并共享”后，将打开浏览器的来源选择器；选中画面后确认共享。');
             setText(refs.screenStartButton, screenPending ? '正在处理…' : sharing ? (editorMode === 'quality' ? '应用画质' : '切换来源') : native ? '开始共享' : '选择来源并共享');
@@ -588,11 +590,13 @@
             if (webOnly) webOnly.hidden = native;
             const modeRow = screenField('[data-share-mode-row]');
             if (modeRow) modeRow.hidden = native;
-            screenPanel()?.querySelectorAll('[data-screen-share-audio], [data-screen-share-bitrate]').forEach(el => { el.disabled = screenPending; });
+            screenPanel()?.querySelectorAll('[data-screen-share-audio], [data-screen-share-bitrate], [data-native-audio-mode], [data-native-audio-target]').forEach(el => { el.disabled = screenPending; });
             setText(screenField('[data-share-dialog-title]'), sharing ? (editorMode === 'quality' ? '调整共享画质' : '切换共享内容') : '选择共享内容');
             const old = lastSnapshot.screenShareOptions;
-            const audio = screenField('[data-screen-share-audio]')?.checked === true;
+            const audioMode = screenField('[data-native-audio-mode]')?.value || 'none';
+            const audio = native ? audioMode !== 'none' : screenField('[data-screen-share-audio]')?.checked === true;
             const restart = sharing && (old?.provider !== (native ? 'native' : 'web') || old?.shareAudio !== audio ||
+                (native && (old?.nativeAudioMode !== audioMode || old?.nativeAudioTargetKey !== (screenField('[data-native-audio-target]')?.value || '') || (editorMode === 'source' && !['none', 'source'].includes(audioMode)))) ||
                 (!native && (old?.codecMode !== codecMode || !provider || (resolutionPreset === 'original' && old?.resolutionPreset !== 'original'))));
             setText(
                 refs.screenSettingsStatus,
@@ -697,7 +701,9 @@
                           startBitrate,
                           provider: screenField('[data-screen-share-provider]')?.value || 'web',
                           nativeSourceKey: screenField('[data-piik-native-source]')?.value || snapshot.screenShareOptions?.nativeSourceKey || '',
-                          shareAudio: screenField('[data-screen-share-audio]')?.checked === true,
+                          nativeAudioMode: screenField('[data-native-audio-mode]')?.value || 'none',
+                          nativeAudioTargetKey: screenField('[data-native-audio-target]')?.value || '',
+                          shareAudio: screenField('[data-screen-share-provider]')?.value === 'native' ? (screenField('[data-native-audio-mode]')?.value || 'none') !== 'none' : screenField('[data-screen-share-audio]')?.checked === true,
                           maxBitrate: Number(screenField('[data-screen-share-bitrate]')?.value) || 15000000,
                       };
                 const started = await (snapshot.screenShareEnabled ? adapter.updateScreenShare?.(options, editorMode) : adapter.startScreenShare(options));
@@ -850,7 +856,7 @@
                     shareMode = options.mode;
                     codecMode = options.codecMode;
                     startBitrate = options.startBitrate;
-                    const values = [['[data-screen-share-provider]', options.provider], ['[data-screen-share-bitrate]', options.maxBitrate]];
+                    const values = [['[data-screen-share-provider]', options.provider], ['[data-screen-share-bitrate]', options.maxBitrate], ['[data-native-audio-mode]', options.nativeAudioMode || (options.shareAudio ? 'source' : 'none')]];
                     values.forEach(([selector, value]) => { const el = screenField(selector); if (el) el.value = String(value); });
                     const audio = screenField('[data-screen-share-audio]');
                     if (audio) audio.checked = options.shareAudio === true;
@@ -899,7 +905,7 @@
                 closeWatcher = new global.CloseWatcher();
                 closeWatcher.addEventListener('close', closePopovers);
             }
-            if (type === 'screen') signalDialog('voice-share-dialog-open', { mode, nativeSourceKey: getCurrentAdapterSnapshot().screenShareOptions?.nativeSourceKey });
+            if (type === 'screen') signalDialog('voice-share-dialog-open', { mode, nativeSourceKey: getCurrentAdapterSnapshot().screenShareOptions?.nativeSourceKey, nativeAudioTargetKey: getCurrentAdapterSnapshot().screenShareOptions?.nativeAudioTargetKey });
             popoverOpenedByHover = fromHover;
             if (DEVICE_TYPES.includes(type)) {
                 adapter.refreshDevices?.(type);
@@ -1018,7 +1024,7 @@
             listen(refs.screenButton, 'click', handleScreenClick);
             listen(refs.screenStartButton, 'click', handleScreenStart);
             root.querySelectorAll('[data-screen-share-cancel]').forEach(button => listen(button, 'click', cancelShareDialog));
-            for (const selector of ['[data-screen-share-provider]', '[data-piik-native-source]', '[data-screen-share-audio]', '[data-screen-share-bitrate]']) listen(screenField(selector), 'change', () => render(getCurrentAdapterSnapshot()));
+            for (const selector of ['[data-screen-share-provider]', '[data-piik-native-source]', '[data-screen-share-audio]', '[data-screen-share-bitrate]', '[data-native-audio-mode]', '[data-native-audio-target]']) listen(screenField(selector), 'change', () => render(getCurrentAdapterSnapshot()));
             listen(refs.outputButton, 'click', handleOutputClick);
             listen(refs.statusMessages, 'click', (event) => {
                 if (event.target.closest?.('[data-audio-recovery]')) {

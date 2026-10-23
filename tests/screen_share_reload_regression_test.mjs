@@ -235,7 +235,7 @@ test('screen capture constraints accept 15 30 and 60 fps targets and normalize i
                 resolutionPreset: '8k',
             })
         ),
-        { frameRate: 60, resolutionPreset: '1080p', mode: 'game', codecMode: 'auto', startBitrate: 'browser', provider: 'web', nativeSourceKey: '', shareAudio: false, maxBitrate: 15000000 }
+        { frameRate: 60, resolutionPreset: '1080p', mode: 'game', codecMode: 'auto', startBitrate: 'browser', provider: 'web', nativeSourceKey: '', nativeAudioMode: 'none', nativeAudioTargetKey: '', shareAudio: false, maxBitrate: 15000000 }
     );
 });
 

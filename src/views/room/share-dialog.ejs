@@ -36,7 +36,22 @@
                 <label><span>流畅度</span><select id="screenShareFrameRate" data-screen-share-frame-rate><option value="15">15 帧/秒</option><option value="30">30 帧/秒</option><option value="60" selected>60 帧/秒</option></select></label>
             </div>
         </section>
-        <label class="share-audio-choice"><input type="checkbox" checked data-screen-share-audio data-piik-native-audio><span>共享来源的声音<small data-share-audio-hint>默认开启。整屏声音可能包含本频道通话，可取消勾选以避免回传；建议选择独立窗口或标签页。</small></span></label>
+        <section class="share-audio-section" aria-label="共享音频">
+            <h3>共享音频</h3>
+            <label class="share-audio-choice" data-web-audio-section><input type="checkbox" checked data-screen-share-audio><span>共享浏览器选择器支持的声音<small data-share-audio-hint>声音来源由浏览器选择器决定。整屏声音可能包含本频道通话，建议选择独立窗口或标签页。</small></span></label>
+            <% if (piikPrototype) { %>
+            <div data-native-audio-section hidden>
+                <label class="media-select-row"><span>声音来源</span><select data-native-audio-mode aria-label="共享音频模式">
+                    <option value="none" selected>不共享声音</option><option value="system">系统声音（排除本客户端）</option><option value="application">指定应用声音</option><option value="source" data-native-audio-legacy hidden>随画面声音（旧客户端）</option>
+                </select></label>
+                <div class="share-audio-app" data-native-audio-application hidden>
+                    <img data-native-audio-icon alt="" width="24" height="24" hidden>
+                    <label><span>选择应用</span><select data-native-audio-target aria-label="应用音源"><option value="">选择应用（含无窗口进程）</option></select></label>
+                </div>
+                <p class="media-device-hint" data-native-audio-hint role="status">仅共享画面，麦克风语音保持独立。</p>
+            </div>
+            <% } %>
+        </section>
         <details class="share-advanced"><summary>高级设置</summary>
             <label class="media-select-row" data-share-mode-row><span>画面偏好</span><select data-screen-share-mode><option value="game" selected>流畅优先</option><option value="detail">文字清晰优先</option></select></label>
             <% if (piikPrototype) { %>
@@ -45,6 +60,18 @@
             <label class="media-select-row" data-share-web-only><span>视频编码</span><select data-screen-share-codec><option value="auto" selected>自动</option><% if (!piikPrototype) { %><option value="av1">AV1（实验）</option><% } %><option value="h264">H.264 优先</option><option value="vp8">VP8</option></select></label>
             <label class="media-select-row" <%= piikPrototype ? 'hidden' : '' %>><span>服务器启动码率</span><select data-screen-share-start-bitrate><option value="browser" selected>默认</option><option value="1500">1.5 Mbps</option><option value="5500">5.5 Mbps</option></select></label>
             <% if (piikPrototype) { %><p class="media-device-hint" data-piik-provider-hint>原生共享使用 H.264；最多三位观看者。实际帧率取决于设备和网络。</p><% } %>
+            <% if (piikPrototype) { %>
+            <div data-native-encoder-section hidden>
+                <p class="media-device-hint">发送端编码状态；与观看端硬件解码无关。</p>
+                <dl class="share-encoder-status" aria-live="polite">
+                    <dt>视频编码</dt><dd data-native-encoder-codec>未确认</dd>
+                    <dt>编码方式</dt><dd data-native-encoder-method>未确认</dd>
+                    <dt>实际编码器</dt><dd data-native-encoder-encoder>未确认</dd>
+                    <dt>GPU 适配器</dt><dd data-native-encoder-adapter>未确认</dd>
+                    <dt>状态</dt><dd data-native-encoder-state>等待开始共享</dd>
+                </dl>
+            </div>
+            <% } %>
         </details>
         <p class="share-dialog-feedback" data-share-dialog-feedback role="status" aria-live="polite"></p>
     </div>

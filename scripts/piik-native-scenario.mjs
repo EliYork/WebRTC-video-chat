@@ -233,7 +233,7 @@ export async function runNativeScenario({
                     row.framesDecoded > 0
             );
         for (const s of [a, b]) {
-            await click(s, '#toggleAudio');
+            if (!(await evaluate(s, `document.querySelector('#toggleAudio').getAttribute('aria-pressed') === 'true'`))) await click(s, '#toggleAudio');
             await wait(
                 () =>
                     evaluate(
@@ -301,7 +301,12 @@ export async function runNativeScenario({
         await wait(() => evaluate(a, `document.querySelector('[data-piik-native-source]').value.startsWith('window:')`), 'selected window restored');
         writeFileSync(windowGone, 'synthetic enumeration change');
         await click(a, '[data-piik-native-refresh]');
-        await wait(() => evaluate(a, `document.querySelector('[data-piik-native-status]').textContent.includes('已不可用')`), 'vanished source explained');
+        try {
+            await wait(() => evaluate(a, `document.querySelector('[data-piik-native-status]').textContent.includes('已不可用')`), 'vanished source explained');
+        } catch (error) {
+            const pickerState = await evaluate(a, `({status:document.querySelector('[data-piik-native-status]').textContent,selected:document.querySelector('[data-piik-native-source]').value,refreshDisabled:document.querySelector('[data-piik-native-refresh]').disabled,sources:[...document.querySelectorAll('[data-native-source-key]')].map(n=>n.dataset.nativeSourceKey)})`);
+            throw Error(error.message + '\n' + JSON.stringify(pickerState));
+        }
         assert.equal(await evaluate(a, `document.querySelector('[data-screen-share-start]').disabled`), true, 'vanished selection cannot be submitted');
         await click(a, '[data-screen-share-cancel]');
         assert.equal(await evaluate(a, `document.querySelector('[data-piik-native-gallery]').children.length`), 0, 'closing picker releases thumbnails');

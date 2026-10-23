@@ -12,6 +12,7 @@ import { pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
 import { preparePiikGoOverlay } from './piik-go-overlay.mjs';
 import { preparePiikNativeOverlay } from './piik-native-overlay.mjs';
+import { piikClientOverlay, checkPiikTypes } from './piik-client-overlay.mjs';
 const root = resolve(import.meta.dirname, '..');
 const home = join(root, 'integrations/piik');
 const pin = JSON.parse(readFileSync(join(home, 'source.json')));
@@ -51,21 +52,14 @@ run(process.execPath, [
     '--no-audit',
     '--no-fund',
 ]);
-run(
-    process.execPath,
-    [
-        join(source, 'node_modules/typescript/bin/tsc'),
-        '-p',
-        join(home, 'tsconfig.json'),
-    ],
-    root
-);
+await checkPiikTypes(source, home);
 await build({
     entryPoints: [join(home, 'client.ts')],
     bundle: true,
     format: 'iife',
     platform: 'browser',
     target: 'es2022',
+    plugins: [piikClientOverlay],
     define: {
         'import.meta.url': '"/vendor/piik-client.js"',
         'import.meta.env': '{}',

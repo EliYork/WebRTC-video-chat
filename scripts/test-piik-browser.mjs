@@ -260,7 +260,7 @@ try {
             );
         }
         for (const s of [a, b]) {
-            await click(s, '#toggleAudio');
+            if (await evaluate(s, `document.querySelector('#toggleAudio').getAttribute('aria-pressed') !== 'true'`)) await click(s, '#toggleAudio');
             await wait(
                 () =>
                     evaluate(

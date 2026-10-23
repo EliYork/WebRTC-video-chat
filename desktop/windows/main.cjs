@@ -101,7 +101,7 @@ function launchNative() {
         cwd: runtime,
         windowsHide: true,
         stdio: 'pipe',
-        env: { ...process.env, PIIK_CLIENT_GATE_NO_BROWSER: 'true' },
+        env: { ...process.env, PIIK_CLIENT_GATE_NO_BROWSER: 'true', PIIK_SHARE_AUDIO_HOST_PID: String(process.pid) },
     });
     return native;
 }

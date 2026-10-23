@@ -39,10 +39,14 @@
     const normalizeScreenShareOptions = (options = {}) => {
         const requestedFrameRate = Number(options.frameRate);
         const requestedResolution = options.resolutionPreset;
+        const nativeAudioMode = options.nativeAudioMode === undefined ? (options.shareAudio === true ? 'source' : 'none') :
+            ['none', 'system', 'application', 'source'].includes(options.nativeAudioMode) ? options.nativeAudioMode : 'none';
         return {
             provider: options.provider === 'native' ? 'native' : 'web',
             nativeSourceKey: typeof options.nativeSourceKey === 'string' ? options.nativeSourceKey : '',
-            shareAudio: options.shareAudio === true,
+            nativeAudioMode,
+            nativeAudioTargetKey: typeof options.nativeAudioTargetKey === 'string' ? options.nativeAudioTargetKey : '',
+            shareAudio: options.provider === 'native' ? nativeAudioMode !== 'none' : options.shareAudio === true,
             maxBitrate: [3000000, 6000000, 10000000, 15000000].includes(Number(options.maxBitrate)) ? Number(options.maxBitrate) : 15000000,
             mode: options.mode === 'detail' ? 'detail' : 'game',
             codecMode: ['av1', 'h264', 'vp8'].includes(options.codecMode) ? options.codecMode : 'auto',

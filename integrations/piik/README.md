@@ -1,5 +1,7 @@
 # Piik 融合开发版
 
+2026-10-23 本地独立应用音频与发送端硬件编码状态见 [实现、API、测试及实机验收记录](../../docs/NATIVE-INDEPENDENT-AUDIO-2026-10-23.md)。此次未发布安装包或部署线上。
+
 2026-10-19本地性能修复与真实WGC测试见 [H.264流畅度记录](../../docs/PIIK-PERFORMANCE-2026-10-19.md)。`build:piik:app` 通过固定版本overlay应用日志过滤和采集节奏修复；不修改上游checkout，不自动发布或替换安装版。
 
 代码在 `codex/piik-integration` 分支。第一阶段回退基线为 `378f2b8`，第二阶段原生融合基线为 `bd1ad99`。开发入口是现有语音平台；没有挂载 Piik 网站、房间聊天或 iframe。生产配置、原 checkout 的 `native/` AV1 实验均未修改；未 Push、部署或生成发布 ZIP。

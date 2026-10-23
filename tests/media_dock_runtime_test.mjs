@@ -986,7 +986,7 @@ test('screen options persist, rapid clicks start once, cancellation recovers, an
     assert.equal(stub.calls.get('startScreenShare').length, 1);
     assert.deepEqual(
         JSON.parse(JSON.stringify(stub.calls.get('startScreenShare')[0])),
-        [{ frameRate: 60, resolutionPreset: '1440p', mode: 'game', codecMode: 'auto', startBitrate: 'browser', provider: 'web', nativeSourceKey: '', shareAudio: false, maxBitrate: 15000000 }]
+        [{ frameRate: 60, resolutionPreset: '1440p', mode: 'game', codecMode: 'auto', startBitrate: 'browser', provider: 'web', nativeSourceKey: '', nativeAudioMode: 'none', nativeAudioTargetKey: '', shareAudio: false, maxBitrate: 15000000 }]
     );
     assert.equal(fixture.refs.resolutionSelect.disabled, true);
     assert.equal(fixture.refs.frameRateSelect.disabled, true);

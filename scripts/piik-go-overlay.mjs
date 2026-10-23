@@ -3,6 +3,7 @@
 // Generated full files stay ignored. The upstream checkout is never mutated.
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { preparePiikShareOverlay } from './piik-share-overlay.mjs';
 
 export function preparePiikGoOverlay(source, out) {
     const directory = join(out, 'go-overlay');
@@ -54,6 +55,7 @@ export function preparePiikGoOverlay(source, out) {
     writeFileSync(generated, text);
     Replace[logging] = generated;
     Replace[join(source, 'internal/diagnostics/media_log_filter.go')] = resolve(import.meta.dirname, 'piik-media-log-filter.go');
+    preparePiikShareOverlay(source, out, Replace);
     const manifest = join(directory, 'overlay.json');
     writeFileSync(manifest, JSON.stringify({ Replace }, null, 2));
     return manifest;

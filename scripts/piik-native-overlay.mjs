@@ -2,6 +2,7 @@
 // linked WebRTC controller. Generated sources/build script stay ignored.
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { editOnce } from './piik-client-overlay.mjs';
 
 export function patchCaptureCadence(text) {
     const edits = [
@@ -37,7 +38,11 @@ export function preparePiikNativeOverlay(source, out) {
     const directory = join(out, 'native-overlay');
     const native = join(source, 'native/capture/windows');
     mkdirSync(directory, { recursive: true });
-    writeFileSync(join(directory, 'main.cpp'), patchCaptureCadence(readFileSync(join(native, 'main.cpp'), 'utf8')));
+    let main = patchCaptureCadence(readFileSync(join(native, 'main.cpp'), 'utf8'));
+    main = editOnce(main, 'int wmain(int argc, wchar_t** argv) {\n  try {\n    ProductArguments',
+        'namespace piik::capture { int WriteAudioApplications(); }\nint wmain(int argc, wchar_t** argv) {\n  if (argc == 2 && wcscmp(argv[1], L"--list-audio-applications") == 0) return piik::capture::WriteAudioApplications();\n  try {\n    ProductArguments');
+    main = editOnce(main, '<< ",\\"microphone\\":true,\\"softwareVP8\\":true"', '<< ",\\"independentAudio\\":true,\\"microphone\\":true,\\"softwareVP8\\":true"');
+    writeFileSync(join(directory, 'main.cpp'), main);
     // Reuse upstream SDK discovery, compiler, libraries and checks unchanged.
     const quote = path => `'${path.replaceAll("'", "''")}'`;
     let script = readFileSync(join(native, 'build.ps1'), 'utf8').replaceAll('\r\n', '\n');
@@ -51,6 +56,8 @@ export function preparePiikNativeOverlay(source, out) {
             throw Error('Piik native build overlay context changed');
         script = script.replace(before, after);
     }
+    script = editOnce(script, "@('main', 'process_audio', 'capture_target', 'h264_encoder', 'adaptive_encoder')", "@('main', 'audio_applications', 'process_audio', 'capture_target', 'h264_encoder', 'adaptive_encoder')");
+    script = editOnce(script, "$source = if ($name -eq 'main')", `$source = if ($name -eq 'audio_applications') { ${quote(join(import.meta.dirname, 'piik-share/audio-applications.cpp'))} } elseif ($name -eq 'main')`);
     const path = join(directory, 'build.ps1');
     writeFileSync(path, script);
     return path;

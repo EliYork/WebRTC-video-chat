@@ -303,7 +303,13 @@ const voicePeerRegistry = voicePeerRegistryApi.createRegistry({
     removeRemoteTile: ({ peerId, tile }) => removeRemoteTile(peerId, tile),
 });
 screenSfuRuntime = (usingPiik ? window.PiikScreenMedia : window.VoiceScreenSfuRuntime).createRuntime({
-    onPublicationFailure: () => { if (sharingNow || screenShareRequestPending) stopScreenShare(currentPeer); },
+    onPublicationFailure: (message) => {
+        if (sharingNow || screenShareRequestPending) stopScreenShare(currentPeer);
+        if (typeof message === 'string' && message) {
+            voiceStatusView.setMediaError('screen', 'unknown', message);
+            notifyMediaDock();
+        }
+    },
     config: window.voiceScreenSfuConfig || {},
     onRouteEvent: (event) => callDiagnostics?.record('共享路径事件', event),
     onReceiverFailure: (failure) => callDiagnostics?.record('SFU接收回退诊断', failure),
@@ -2746,6 +2752,8 @@ const updateScreenShare = async (peer, options, change = 'quality') => {
     const next = voiceMediaLifecycle.normalizeScreenShareOptions(options);
     const old = session.shareOptions;
     const inPlace = usingPiik && next.provider === old.provider && next.shareAudio === old.shareAudio &&
+        (next.provider !== 'native' || (next.nativeAudioMode === old.nativeAudioMode && next.nativeAudioTargetKey === old.nativeAudioTargetKey &&
+            !(change === 'source' && !['none', 'source'].includes(next.nativeAudioMode)))) &&
         (next.provider === 'native' || (change === 'quality' && next.codecMode === old.codecMode &&
             !(next.resolutionPreset === 'original' && old.resolutionPreset !== 'original')));
     const controller = new AbortController();

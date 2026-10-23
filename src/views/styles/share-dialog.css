@@ -19,6 +19,13 @@ dialog.screen-share-settings-popover.is-open { display: grid; grid-template-rows
 .share-browser-source h3 { font-size: 16px; margin: 8px 0; }
 .share-browser-source p { color: var(--muted); margin: 0 auto; max-width: 480px; line-height: 1.7; }
 .share-quality-section h3 { margin: 0 0 10px; font-size: 14px; }
+.share-audio-section h3 { margin: 0 0 10px; font-size: 14px; }
+.share-audio-app { display: flex; align-items: center; gap: 10px; margin-top: 10px; min-width: 0; }
+.share-audio-app label { display: grid; gap: 7px; flex: 1; min-width: 0; }
+.share-audio-app img { flex: 0 0 24px; }
+.share-encoder-status { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 7px 16px; font-size: 12px; }
+.share-encoder-status dt { color: var(--muted); }
+.share-encoder-status dd { margin: 0; overflow-wrap: anywhere; }
 .share-quality-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .share-quality-controls label { display: grid; gap: 7px; }
 .share-audio-choice { display: flex; gap: 10px; align-items: start; }

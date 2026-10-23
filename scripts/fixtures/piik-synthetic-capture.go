@@ -43,7 +43,10 @@ func run() error {
 	}
 	switch args[0] {
 	case "--probe":
-		fmt.Print(`{"protocol":7,"platform":"windows","platformBuild":"synthetic-fixture","videoCapture":true,"processAudio":false,"systemAudio":false,"softwareVP8":false,"adapters":[{"index":0,"name":"Synthetic fixture; no GPU evidence","identity":"fixture","hardwareH264":[{"index":0,"name":"Prerecorded H264; not a hardware encoder","identity":"fixture"}]}]}`)
+		fmt.Print(`{"protocol":7,"platform":"windows","platformBuild":"synthetic-fixture","independentAudio":true,"videoCapture":true,"processAudio":false,"systemAudio":false,"softwareVP8":false,"adapters":[{"index":0,"name":"Synthetic fixture; no GPU evidence","identity":"fixture","hardwareH264":[{"index":0,"name":"Prerecorded H264; not a hardware encoder","identity":"fixture"}]}]}`)
+		return nil
+	case "--list-audio-applications":
+		fmt.Print(`[]`)
 		return nil
 	case "--list":
 		if _, err := os.Stat(os.Getenv("PIIK_SYNTHETIC_WINDOW_GONE")); err == nil {
