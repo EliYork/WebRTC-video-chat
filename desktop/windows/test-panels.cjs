@@ -132,6 +132,9 @@ app.whenReady()
             webPreferences: { sandbox: true },
         });
         parent.webContents.setAudioMuted(true);
+        const openedLinks = [];
+        let creditOpened;
+        const creditClick = new Promise(resolve => { creditOpened = resolve; });
         const panels = createPanels({
             BrowserWindow,
             ipcMain,
@@ -139,6 +142,7 @@ app.whenReady()
             window: () => parent,
             hidden: true,
             log: () => {},
+            openExternal: async url => { openedLinks.push(url); creditOpened(); },
         });
         let confirmations = 0,
             releaseMedia = 0;
@@ -178,6 +182,15 @@ app.whenReady()
             results.singleton = true;
             assert.equal(win.isVisible(), false);
             assert.equal(win.webContents.isAudioMuted(), true);
+            assert.equal(await win.webContents.executeJavaScript(`document.querySelectorAll('#project-credits a[href^="https://github.com/"]').length`), 12);
+            await win.webContents.executeJavaScript(`document.querySelector('#project-credits').open=true; document.querySelector('#project-credits a').click()`);
+            await creditClick;
+            assert.deepEqual(openedLinks, ['https://github.com/TNTcraftHIM/Piik']);
+            assert.equal(await win.webContents.executeJavaScript(`voiceSettings.action('open-credit', 'https://untrusted.invalid/').then(()=>false,()=>true)`), true);
+            assert.equal(openedLinks.length, 1);
+            await shot(win, 'credits');
+            await win.webContents.executeJavaScript(`document.querySelector('#project-credits').open=false`);
+            results.projectCredits = { count: 12, defaultBrowserDispatch: true, unknownURLRejected: true };
             win.webContents.executeJavaScript(
                 `document.querySelector('#primary').click()`
             );

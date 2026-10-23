@@ -54,6 +54,21 @@ F12 打开诊断工具。页面“复制诊断”提供摘要；原生日志位�
 
 ## 来源和许可证
 
+### 关于与开源致谢
+
+感谢以下项目的作者与贡献者，为语音据点提供基础能力与实现参考。项目名称均附有原项目链接：
+
+- [Piik](https://github.com/TNTcraftHIM/Piik)：原生共享、采集与硬件编码。
+- [Pion WebRTC](https://github.com/pion/webrtc)：原生媒体连接基础。
+- [WebRTC-video-chat](https://github.com/nlukic97/WebRTC-video-chat)：通话与屏幕共享实现参考。
+- [WebSocket-Cursor-Room](https://github.com/nlukic97/WebSocket-Cursor-Room)：共享鼠标实现参考。
+- [PeerJS](https://github.com/peers/peerjs) 与 [mediasoup](https://github.com/versatica/mediasoup)：P2P 连接与 SFU 转发。
+- [web-noise-suppressor](https://github.com/sapphi-red/web-noise-suppressor)、[RNNoise](https://github.com/xiph/rnnoise) 与 [rnnoise-wasm](https://github.com/shiguredo/rnnoise-wasm)：浏览器实时降噪。
+- [WorkAdventure noise-suppression](https://github.com/workadventure/noise-suppression) 与 [DeepFilterNet](https://github.com/Rikorose/DeepFilterNet)：增强降噪浏览器封装、模型与核心。
+- [Electron](https://github.com/electron/electron)：Windows 客户端运行框架。
+
+客户端「关于与更新 → 开源致谢」也提供这些链接，点击后在默认浏览器打开。以上仅列出主要项目，完整依赖与许可分别遵循随附声明。
+
 Piik 上游固定版本见 `build.json`，原 MIT 声明在 `resources/native/LICENSE-Piik.txt`，Go/Pion/WebRTC 等声明在 `resources/native/THIRD-PARTY-NOTICES.txt`。Electron LICENSE、LICENSES.chromium.html 随运行库保留。EliYork 项目 LICENSE 同包保留，不把第三方许可笼统归为项目 ISC。
 
 ## 窗口与托盘（0.1.4）

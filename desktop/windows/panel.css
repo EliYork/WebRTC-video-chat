@@ -283,6 +283,22 @@ dd {
     color: var(--muted);
     font-size: 11px;
 }
+.project-credits {
+    border-top: 1px solid var(--line);
+    margin-top: 20px;
+    padding-top: 12px;
+    font-size: 12px;
+    color: var(--muted);
+}
+.project-credits summary { cursor: pointer; color: var(--text); font-weight: 600; }
+.project-credits ul { padding-left: 20px; }
+.project-credits li { margin: 7px 0; }
+.project-credits a { color: var(--strong); text-underline-offset: 3px; }
+.project-credits a:hover { color: var(--accent); }
+.project-credits a:focus-visible, .project-credits summary:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+}
 .notes p {
     margin: 4px 0;
 }

@@ -233,17 +233,26 @@ exportVoiceMediaDebug();
 - [页面布局合同与恢复测试](./tests/page_layout_contract_test.mjs)
 - [架构修复待办](./docs/architecture-repair-backlog.md)
 
-## 特别感谢 / Credits
+## 关于与开源致谢 / Credits
 
-本项目在开发过程中参考和学习了以下开源项目，感谢这些项目作者的分享：
+语音据点（EliYork Voice）的通话、共享与降噪能力得益于以下开源项目。感谢各项目作者与贡献者的实现、维护和分享；点击项目名称可访问原项目：
 
 | 项目 | 参考内容 | 协议 |
 | --- | --- | --- |
 | [nlukic97/WebRTC-video-chat](https://github.com/nlukic97/WebRTC-video-chat) | 视频通话、WebRTC / PeerJS、屏幕共享相关实现思路 | ISC |
 | [nlukic97/WebSocket-Cursor-Room](https://github.com/nlukic97/WebSocket-Cursor-Room) | 多用户鼠标位置同步 / 共享鼠标思路 | MIT |
 | [sapphi-red/web-noise-suppressor](https://github.com/sapphi-red/web-noise-suppressor) | Web Audio API 降噪节点与降噪方案参考 | MIT |
+| [TNTcraftHIM/Piik](https://github.com/TNTcraftHIM/Piik) | Windows 原生画面/音频采集、硬件编码与共享媒体链路 | MIT |
+| [Pion WebRTC](https://github.com/pion/webrtc) | Piik 原生媒体连接使用的 Go WebRTC 基础 | MIT |
+| [PeerJS](https://github.com/peers/peerjs) | 浏览器语音、摄像头及 P2P 连接 | MIT |
+| [mediasoup](https://github.com/versatica/mediasoup) | SFU 媒体转发 | ISC |
+| [Xiph RNNoise](https://github.com/xiph/rnnoise) | 实时语音降噪核心与模型 | BSD-3-Clause |
+| [shiguredo/rnnoise-wasm](https://github.com/shiguredo/rnnoise-wasm) | RNNoise WebAssembly 运行时 | Apache-2.0 |
+| [WorkAdventure noise-suppression](https://github.com/workadventure/noise-suppression) | DeepFilterNet3 的 WASM / AudioWorklet 浏览器封装 | MIT |
+| [DeepFilterNet](https://github.com/Rikorose/DeepFilterNet) | 增强降噪核心与 DeepFilterNet3 模型 | MIT / Apache-2.0，详见上游及随附许可 |
+| [Electron](https://github.com/electron/electron) | Windows 客户端运行框架 | MIT，内含组件遵循各自许可 |
 
-以上项目仍归原作者所有，并遵循各自仓库中的开源协议。本项目自己的协议见下方 License。
+以上仅列出主要引用项目，各项目版权归原作者所有，分别遵循其开源协议；致谢不替代完整许可声明。Piik 固定版本与许可见 [集成说明](./integrations/piik/README.md#源码依赖与许可证)，降噪资源来源见 [DeepFilterNet 集成记录](./docs/DEEPFILTER-2026-10-22.md)及 [RNNoise notices](./src/views/wasm/rnnoise-v2.NOTICES.txt)。客户端完整声明随包保留于 LICENSE / THIRD-PARTY-NOTICES 文件。本项目自己的协议见下方 License。
 
 ## License
 

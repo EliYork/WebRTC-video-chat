@@ -43,6 +43,7 @@ function render(state) {
     $('#window-title').textContent = prompt ? '客户端更新' : '关于与更新';
     document.title = prompt ? '客户端更新' : '关于与更新';
     $('#version-details').hidden = prompt;
+    $('#project-credits').hidden = prompt;
     $('#prompt-actions').hidden = !prompt;
     $('#ignore-explanation').hidden = !prompt;
     $('#ignore-update').disabled = u?.busy || u?.status !== 'available';
@@ -219,6 +220,12 @@ async function action(value, payload) {
     }
 }
 $('#close').addEventListener('click', () => void action('close'));
+$('#project-credits').addEventListener('click', (event) => {
+    const link = event.target.closest('a[href]');
+    if (!link) return;
+    event.preventDefault();
+    void action('open-credit', link.href);
+});
 $('#primary').addEventListener(
     'click',
     () => void action($('#primary').dataset.action)

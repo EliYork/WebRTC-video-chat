@@ -1,5 +1,19 @@
 const { join } = require('node:path');
 const { pathToFileURL } = require('node:url');
+const creditLinks = new Set([
+    'https://github.com/TNTcraftHIM/Piik',
+    'https://github.com/pion/webrtc',
+    'https://github.com/nlukic97/WebRTC-video-chat',
+    'https://github.com/nlukic97/WebSocket-Cursor-Room',
+    'https://github.com/peers/peerjs',
+    'https://github.com/versatica/mediasoup',
+    'https://github.com/sapphi-red/web-noise-suppressor',
+    'https://github.com/xiph/rnnoise',
+    'https://github.com/shiguredo/rnnoise-wasm',
+    'https://github.com/workadventure/noise-suppression',
+    'https://github.com/Rikorose/DeepFilterNet',
+    'https://github.com/electron/electron',
+]);
 function createPanels({
     BrowserWindow,
     ipcMain,
@@ -9,6 +23,7 @@ function createPanels({
     log,
     preferences,
     trayAvailable = () => false,
+    openExternal = (url) => require('electron').shell.openExternal(url),
 }) {
     const entries = new Map();
     const url = pathToFileURL(join(__dirname, 'panel.html')).href;
@@ -38,6 +53,11 @@ function createPanels({
     ipcMain.handle('voice-panel:read', (event) => valid(event).state);
     ipcMain.handle('voice-panel:action', async (event, action, value) => {
         const entry = valid(event);
+        if (action === 'open-credit') {
+            if (entry.state.kind !== 'about' || !creditLinks.has(value)) throw Error('Unknown project link');
+            await openExternal(value);
+            return;
+        }
         if (action === 'close') {
             entry.win.close();
             return;
