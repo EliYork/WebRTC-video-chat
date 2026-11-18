@@ -669,6 +669,7 @@ function createRuntime({
             provider: 'piik',
             route: 'p2p',
             sharing: !!local,
+            原生共享音频: nativeCapture.audioDiagnostics(),
             viewing: watchers.size,
             sfu: false,
             relay: false,

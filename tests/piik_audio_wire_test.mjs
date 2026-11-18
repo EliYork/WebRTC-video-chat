@@ -5,6 +5,7 @@ import {existsSync} from 'node:fs';
 import vm from 'node:vm';
 import {build} from 'esbuild';
 import {piikClientOverlay} from '../scripts/piik-client-overlay.mjs';
+import {nativeAudioSelection} from '../integrations/piik/share-audio.ts';
 
 const entry = 'integrations/piik/.deps/upstream/src/client/native/client.ts';
 test('pinned native control wire validates independent audio, status identity, errors and legacy compatibility', {skip: !existsSync(entry) && 'Piik upstream must be prepared by build:piik'}, async () => {
@@ -37,6 +38,9 @@ test('pinned native control wire validates independent audio, status identity, e
                 adapterIndex:0,encoderIndex:0,edgeCapacity:3,codec:'h264',profile:{resolution:{width:1920,height:1080},maxFramerate:60,maxBitrate:15000000,maxAudioBitrate:128000,degradationPreference:'maintain-resolution'}};
             if (independentAudio) {
                 const list=await client.audioSources();assert.equal(list.sources[0].hasSession,false);
+                const selection=nativeAudioSelection({nativeAudioMode:'source',shareAudio:true},{health:{nativeMedia:{independentAudio:true,systemAudio:true,processAudioExclusion:true}}},input.source);
+                await client.startShare({...input,...selection,audioTarget:undefined});
+                assert.equal(requests.at(-1).type,'platform-start-share');assert.equal(requests.at(-1).audioMode,'system');assert.equal(requests.at(-1).microphoneMixing,false);
                 for(const mode of ['none','system','application']) {
                     await client.startShare({...input,audioMode:mode,audio:mode!=='none',audioTarget:mode==='application'?input.audioTarget:undefined});
                     const request=requests.at(-1);assert.equal(request.type,'platform-start-share');assert.equal(request.microphoneMixing,false);assert.equal(request.source.sourceId,'7');

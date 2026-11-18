@@ -1,12 +1,13 @@
 {
     "name": "WebRTC-video-chat",
-    "version": "1.0.5",
+    "version": "1.0.6",
     "description": "",
     "main": "index.js",
     "type": "module",
     "scripts": {
         "package:release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-release.ps1",
         "build:sfu": "node scripts/build-sfu-client.mjs",
+        "build:web": "node scripts/build-room-assets.mjs",
         "build:piik": "node scripts/build-piik.mjs",
         "build:piik:app": "node scripts/build-piik.mjs --native",
         "dev:piik": "node scripts/start-piik-dev.mjs",

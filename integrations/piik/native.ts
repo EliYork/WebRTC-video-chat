@@ -270,6 +270,7 @@ export function createNativeCapture(
                 source,
                 audio: audio.audio,
                 audioMode: options.nativeAudioMode || (options.shareAudio ? 'source' : 'none'),
+                captureAudioMode: 'audioMode' in audio ? audio.audioMode : (audio.audio ? 'source' : 'none'),
                 audioTargetKey: options.nativeAudioTargetKey || '',
                 path,
                 codec: 'h264',
@@ -357,7 +358,7 @@ export function createNativeCapture(
             if (options.shareAudio !== owner.audio)
                 throw new Error('更改声音来源需要重新开始共享');
             if ((options.nativeAudioMode || (options.shareAudio ? 'source' : 'none')) !== owner.audioMode ||
-                (options.nativeAudioTargetKey || '') !== owner.audioTargetKey || (changeSource && !['none', 'source'].includes(owner.audioMode)))
+                (options.nativeAudioTargetKey || '') !== owner.audioTargetKey || (changeSource && owner.audioMode !== 'none'))
                 throw Error('更改独立音源或画面需要重新开始共享');
             const previousProfile = owner.profile;
             await owner.client.updateShare(owner.shareId, nextProfile);
@@ -388,6 +389,19 @@ export function createNativeCapture(
         },
         get: (stream: MediaStream) =>
             active?.stream === stream ? active : null,
+        audioDiagnostics: () => {
+            if (!active) return null;
+            const state = active.encoderStatus;
+            return {
+                共享音频状态: state?.audio || '未确认',
+                捕获来源: !active.audio ? '不共享声音' : active.captureAudioMode === 'system' ? '系统声音（请求排除本客户端进程树）' :
+                    active.captureAudioMode === 'application' ? '指定应用进程树' : '旧版随画面声音',
+                请求排除通话声音: active.captureAudioMode === 'system',
+                // The existing protocol confirms capture startup, not the audio
+                // content. Do not present that as a paired listening result.
+                实际排除通话声音: null,
+            };
+        },
         isActive: () => !!active,
         stop: () => {
             picker.close();

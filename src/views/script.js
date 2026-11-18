@@ -5,6 +5,7 @@ import { sanitizeVoiceDiagnostic } from '/js/shared/voice-diagnostic-schema.js';
 console.info('[stage-layout] script boot ' + new Date().toISOString());
 let socket;
 let callDiagnostics;
+const connectionQuality = window.VoiceConnectionQuality.createRuntime();
 
 const { byId } = window.VoiceViewUtils;
 
@@ -615,6 +616,7 @@ const getMediaDockSnapshot = () => {
                   : 'prompt',
         channelName: getChannelName(joinedVoiceRoomId || viewingRoomId),
         connectionState,
+        connectionQuality: connectionQuality.snapshot({ state: connectionState, online: navigator.onLine !== false }),
         desiredVoiceJoined: session.desiredVoiceState === 'joined',
         displayName: getChatName(),
         mediaControlsAvailable: actualVoiceJoined,
@@ -2753,7 +2755,7 @@ const updateScreenShare = async (peer, options, change = 'quality') => {
     const old = session.shareOptions;
     const inPlace = usingPiik && next.provider === old.provider && next.shareAudio === old.shareAudio &&
         (next.provider !== 'native' || (next.nativeAudioMode === old.nativeAudioMode && next.nativeAudioTargetKey === old.nativeAudioTargetKey &&
-            !(change === 'source' && !['none', 'source'].includes(next.nativeAudioMode)))) &&
+            !(change === 'source' && next.nativeAudioMode !== 'none'))) &&
         (next.provider === 'native' || (change === 'quality' && next.codecMode === old.codecMode &&
             !(next.resolutionPreset === 'original' && old.resolutionPreset !== 'original')));
     const controller = new AbortController();
@@ -3387,6 +3389,7 @@ const leaveVoiceSession = (reason = 'user-leave') => {
     iceConfigRuntime.stop();
     channelSounds.leave();
     callDiagnostics?.end(reason);
+    connectionQuality.reset();
     screenSfuRuntime.leave();
     const nextRoomId = pendingVoiceRoomId;
     pendingVoiceRoomId = undefined;
@@ -3456,6 +3459,7 @@ const joinVoiceChannel = (roomId) => {
         return false;
     }
     callDiagnostics?.start();
+    connectionQuality.reset();
     selectedVoiceRoomId = roomId;
     setAudioButtonNoMic();
     setCameraButtonState(false);
@@ -3506,6 +3510,7 @@ window.addEventListener('popstate', () => {
 });
 
 callDiagnostics = window.VoiceCallDiagnostics.createRuntime({
+    onConnectionQuality: sample => { connectionQuality.accept(sample); mediaDockAdapter?.notify(); },
     sanitize: sanitizeVoiceDiagnostic,
     getReceiverHealth: () => screenSfuRuntime.getReceiverHealth(),
     getState: () => {
@@ -3514,6 +3519,7 @@ callDiagnostics = window.VoiceCallDiagnostics.createRuntime({
         const processing = audioProcessingRuntime.diagnostics(myVideoStream);
         const track = myVideoStream?.getAudioTracks()[0];
         const actual = track?.getSettings?.() || {};
+        const sharePath = screenSfuRuntime.snapshot();
         return {
             会话: { state: session.state, generation: session.serverGeneration },
             本机音频: {
@@ -3550,8 +3556,8 @@ callDiagnostics = window.VoiceCallDiagnostics.createRuntime({
                 输出增益_百分比: Math.round(outputVolume * 100),
                 放大播放: remoteAudioGain.getSnapshot(),
             },
-            共享路径变化: screenSfuRuntime.snapshot(),
-            共享音频采集: voiceMediaLifecycle.describeScreenAudio(currentScreenStream, navigator.mediaDevices?.getSupportedConstraints?.()),
+            共享路径变化: sharePath,
+            共享音频采集: sharePath.原生共享音频 || voiceMediaLifecycle.describeScreenAudio(currentScreenStream, navigator.mediaDevices?.getSupportedConstraints?.()),
             输出播放: voicePeerRegistry.getPeerIds().map((peerId, index) => {
                 const screen = screenShareVolumeController.getSnapshot(peerId);
                 const tile = document.getElementById(peerId);
@@ -3844,6 +3850,9 @@ const speakingRuntime = window.VoiceSpeakingRuntime.createRuntime({
         enabled: getTileMember(tile).hasMic && !getTileMember(tile).muted,
     })),
     onSpeaking: (id, speaking) => stageLayout.setSpeaking(id, speaking),
+    onLevel: (id, level) => {
+        if (id === 'local-video') window.VoiceMorphIconUI.syncMicLevel(byId('toggleAudio'), level);
+    },
 });
 speakingRuntime.start();
 window.addEventListener('pagehide', (event) => { if (!event.persisted) speakingRuntime.destroy(); });

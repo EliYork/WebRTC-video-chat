@@ -17,6 +17,8 @@
 .stage-layout .video-tile.is-immersive-player .tile-header { position: absolute; inset: 0 0 auto; z-index: 20; padding-top: max(4px, env(safe-area-inset-top)); padding-left: max(8px, env(safe-area-inset-left)); padding-right: max(8px, env(safe-area-inset-right)); color: #fff; background: #241d26b8; border: 0; transition: opacity .18s ease; }
 .stage-layout .video-tile.is-immersive-player .tile-footer { display: none; }
 .video-tile.is-immersive-player.player-controls-hidden .tile-header { opacity: 0; pointer-events: none; }
+.video-tile .player-orientation-hint { position: absolute; bottom: max(18px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); z-index: 25; width: max-content; max-width: calc(100% - 32px); padding: 8px 12px; border-radius: 10px; background: #241d26d9; color: #fff; text-align: center; font-size: 13px; line-height: 1.5; pointer-events: none; }
+@media (orientation: landscape) { .video-tile .player-orientation-hint { display: none; } }
 @media (prefers-reduced-motion: reduce) { .stage-layout .video-tile.is-immersive-player .tile-header { transition: none; } }
 .workspace-actions button { min-width: 32px; min-height: 32px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); font-size: 12px; cursor: pointer; }
 #stageStageToggle { display: none; }
@@ -90,6 +92,7 @@ html[data-desktop-chrome] .workspace-download { display: none; }
 #member-cards .voice-media-quality-pill { display: none; }
 #member-cards .tile-badges { gap: 4px; }
 /* Every active control has a bounded icon and a consistent 44px main action. */
+.stage-dock { position: relative; }
 .stage-sidebar-column > .stage-dock { flex: 0 0 auto; width: 100%; min-width: 0; padding: 12px; background: var(--panel); border-top: 1px solid var(--line-soft); }
 .stage-dock .local-user-card { padding: 0; border: 0; background: none; box-shadow: none; }
 .stage-dock #buttons.media-dock { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-areas: 'user' 'controls' 'session' 'status'; align-items: center; gap: 10px; min-height: 0; padding: 0; border: 0; box-shadow: none; border-radius: 0; background: none; }
@@ -195,6 +198,11 @@ html[data-desktop-chrome] .workspace-download { display: none; }
     .stage-sidebar-column > .stage-dock { width: 100%; padding: 8px; border: 0; border-radius: inherit; }
     .stage-dock #buttons.media-dock { grid-template-areas: 'controls' 'session' 'status'; gap: 6px; }
     .stage-dock #buttons .media-dock-header { display: none; }
+    #main[data-voice-state='joined'] .stage-dock #buttons.media-dock { grid-template-columns: auto minmax(0, 1fr); grid-template-areas: 'controls controls' 'quality session' 'status status'; }
+    #main[data-voice-state='joined'] .stage-dock #buttons :is(.media-dock-header, .media-dock-info) { display: contents; }
+    .stage-dock .media-dock-header :is(.media-dock-user, #localVoiceChannelName) { display: none; }
+    .stage-dock .media-dock-timer { grid-area: quality; }
+    .stage-dock #buttons .call-signal { width: 44px; min-height: 40px; }
     .stage-dock #buttons .media-dock-actions { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
     .stage-dock [data-device-control='mic'] { order: 0; }
     .stage-dock [data-device-control='camera'] { order: 1; }
@@ -283,6 +291,7 @@ html[data-desktop-chrome] .workspace-download { display: none; }
     .stage-layout[data-stage-mode='sharing'] #member-cards .member-card { flex: 0 0 90px; width: 100%; max-width: none; }
     .stage-layout[data-stage-mode='sharing'] #member-cards .member-volume-button { min-height: 32px; }
     .stage-dock #buttons.media-dock { grid-template-columns: minmax(0, 1fr) 150px; grid-template-areas: 'controls session' 'status status'; gap: 8px; }
+    #main[data-voice-state='joined'] .stage-dock #buttons.media-dock { grid-template-columns: minmax(0, 1fr) auto 150px; grid-template-areas: 'controls quality session' 'status status status'; }
     .stage-layout .stage-sidebar-column, #main.stage-layout[data-mobile-panel='channels'] .stage-dock { width: min(620px, calc(100% - 16px)); }
     .stage-dock #buttons .media-dock-activity-row { grid-template-columns: 36px minmax(0, 1fr); }
     .stage-dock #buttons :is(#copyRoomLink, #destroyPeer) { height: 48px; min-height: 48px; }

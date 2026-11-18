@@ -10,11 +10,12 @@ const section=(start,end)=>{
 };
 const fixture=()=>{
     const window={},calls=[];
-    for(const name of ['voice-session-runtime','voice-media-operation-runtime'])
+    for(const name of ['voice-session-runtime','voice-media-operation-runtime','voice-connection-quality'])
         vm.runInNewContext(readFileSync(new URL(`../src/views/js/voice/${name}.js`,import.meta.url),'utf8'),{window});
     const session=window.VoiceSessionRuntime.createSessionRuntime();
+    const connectionQuality=window.VoiceConnectionQuality.createRuntime();
     const context=vm.createContext({
-        console:{log(){},warn(){}},voiceMediaOperationApi:window.VoiceMediaOperationRuntime,voiceSessionRuntime:session,
+        console:{log(){},warn(){}},voiceMediaOperationApi:window.VoiceMediaOperationRuntime,voiceSessionRuntime:session,connectionQuality,
         voiceMediaDebug:{record(){}},localMediaTrackStopper:{stopStream:s=>s?.getAudioTracks().forEach(t=>t.stop())},disposeAudioPipeline(){},
         isKnownRoom:r=>['lobby','game'].includes(r),channelSounds:{unlock(){},leave(){}},callDiagnostics:{start(){},end(){}},
         setAudioButtonNoMic(){},setAudioButtonState(){},setCameraButtonState(){},notifyMediaDock(){},syncRoomCompositionState(){},
@@ -39,12 +40,23 @@ const fixture=()=>{
         ${section('const handleMicClick =','async function handleUnexpectedLocalTrackEnded')}
         ${section('const leaveVoiceSession =','function removeRemoteTile')}
     `,context);
-    return {calls,session,run:code=>vm.runInContext(code,context)};
+    return {calls,session,connectionQuality,run:code=>vm.runInContext(code,context)};
 };
 
 test('fresh page defaults to join with microphone, but does not capture while outside',()=>{
     const f=fixture();assert.equal(f.run("mediaOperationController.getSnapshot('microphone').desired"),true);
     assert.deepEqual(f.calls,[]);f.run("joinVoiceChannel('lobby')");assert.deepEqual(f.calls,['capture']);
+});
+
+test('joining and leaving discard the previous call quality without changing microphone preference',()=>{
+    const f=fixture();
+    f.connectionQuality.accept([{state:'connected',rttMs:20}]);
+    f.run("joinVoiceChannel('lobby')");
+    assert.equal(f.connectionQuality.snapshot({state:'joined'}).bars,null);
+    f.connectionQuality.accept([{state:'connected',rttMs:20}]);
+    f.run('leaveVoiceSession()');
+    assert.equal(f.connectionQuality.snapshot({state:'joined'}).bars,null);
+    assert.equal(f.run("mediaOperationController.getSnapshot('microphone').desired"),true);
 });
 
 test('outside microphone choice is retained across join, leave and another channel',async()=>{

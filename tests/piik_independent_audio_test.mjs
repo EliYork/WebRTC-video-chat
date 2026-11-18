@@ -21,6 +21,22 @@ test('invalid identities and old clients cannot silently select system audio', (
     assert.equal(nativeAudioSelection({nativeAudioMode:'none'},old,{}).audio,false);
     assert.equal(nativeAudioSelection({nativeAudioMode:'source',shareAudio:true},old,{kind:'window'}).audio,true);
 });
+test('legacy full-screen audio reuses client-tree exclusion, and never falls back to endpoint loopback', () => {
+    for (const kind of ['display', 'picker']) {
+        const options = {nativeAudioMode:'source',shareAudio:true};
+        assert.deepEqual(nativeAudioSelection(options,client,{kind}),{audioMode:'system',audio:true,microphoneMixing:false});
+        assert.deepEqual(nativeAudioSelection({shareAudio:true},client,{kind}),{audioMode:'system',audio:true,microphoneMixing:false});
+        for (const capabilities of [{independentAudio:false}, {processAudioExclusion:false}]) {
+            const unsafe={health:{nativeMedia:{...client.health.nativeMedia,...capabilities}}};
+            assert.throws(()=>nativeAudioSelection(options,unsafe,{kind}),/回传通话/);
+            assert.equal(nativeAudioSelection({...options,shareAudio:false},unsafe,{kind}).audio,false);
+        }
+    }
+    const window={kind:'window',pid:234,creationTime:'123456'};
+    assert.deepEqual(nativeAudioSelection({nativeAudioMode:'source',shareAudio:true},client,window),
+        {audioMode:'application',audioTarget:{pid:234,creationTime:'123456'},audio:true,microphoneMixing:false});
+    assert.throws(()=>nativeAudioSelection({nativeAudioMode:'source',shareAudio:true},client,{...window,creationTime:'0'}),/失效/);
+});
 test('hardware UI requires active H264 evidence and keeps unknown and failures explicit', () => {
     for (const value of [null,{}, {state:'starting',codec:'h264',hardware:true,encoder:'GPU'}, {state:'active',codec:'vp8',hardware:true}]) assert.equal(encoderSummary(value).method,'未确认');
     const active=encoderSummary({state:'active',codec:'h264',hardware:true,encoder:'Actual MFT',adapter:'Actual GPU'});
@@ -45,7 +61,7 @@ function fixture() {
     const clients=[], bridges=[], timers=new Map(), failures=[];
     const delay={};
     class FakeClient {
-        health=client.health; inputs=[]; closed=0; stopped=0; sourceCalls=0;
+        health=delay.health || client.health; inputs=[]; closed=0; stopped=0; sourceCalls=0;
         static async connect() {const result=new FakeClient();clients.push(result); if(delay.connect) await delay.connect; return result;}
         async captureOptions(){const pending=delay.options;delay.options=null;if(pending)await pending;return [];}
         async sources(){this.sourceCalls++;const pending=delay.sources;delay.sources=null;if(pending)await pending;return [{kind:'display',sourceId:'A',title:'A'}];}
@@ -125,4 +141,27 @@ test('concurrent starts and in-place audio-source changes are rejected without e
     await assert.rejects(f.capture.update(stream,{...f.options,nativeAudioTargetKey:'235:123456'},false),/重新开始/);
     await assert.rejects(f.capture.update(stream,f.options,true),/重新开始/);
     assert.equal(f.bridges.length,1);f.capture.stop();await flush();
+});
+test('legacy full-screen capture uses one excluded source, restarts on source change and clears native diagnostics', async () => {
+    const f=fixture();
+    const options={...f.options,nativeAudioMode:'source',nativeAudioTargetKey:''};
+    const stream=await f.capture.capture(options,new AbortController().signal);await flush();
+    assert.equal(f.clients[0].inputs.length,1);
+    assert.equal(f.clients[0].inputs[0].audioMode,'system');
+    assert.equal(f.clients[0].inputs[0].microphoneMixing,false);
+    assert.equal(f.capture.audioDiagnostics().请求排除通话声音,true);
+    assert.equal(f.capture.audioDiagnostics().共享音频状态,'active');
+    assert.equal(f.capture.audioDiagnostics().实际排除通话声音,null);
+    await assert.rejects(f.capture.update(stream,options,true),/重新开始/);
+    assert.equal(f.bridges.length,1);
+    f.capture.stop();await flush();assert.equal(f.capture.audioDiagnostics(),null);
+    await f.capture.capture(options,new AbortController().signal);await flush();
+    assert.equal(f.capture.audioDiagnostics().实际排除通话声音,null,'old status must not be presented as confirmed exclusion');
+    f.capture.stop();await flush();assert.equal(f.timers.size,0);
+});
+test('an old native component refuses unsafe full-screen audio before opening a media bridge', async () => {
+    const f=fixture();f.delay.health={nativeMedia:{...client.health.nativeMedia,independentAudio:false,processAudioExclusion:false}};
+    await assert.rejects(f.capture.capture({...f.options,nativeAudioMode:'source'},new AbortController().signal),/回传通话/);
+    await flush();assert.equal(f.clients[0].inputs.length,0);assert.equal(f.bridges.length,0);
+    assert.equal(f.clients[0].closed,1);assert.equal(f.capture.audioDiagnostics(),null);
 });

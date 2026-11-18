@@ -197,9 +197,172 @@ const event = (type, target) => ({
     stopPropagation() {},
 });
 
+const mobileFixture = (overrides = {}) => {
+    const calls = [];
+    const orientation = { lock: async mode => { calls.push(mode); }, unlock: () => { calls.push('unlock'); } };
+    const f = createFixture({ matchMedia: () => ({ matches: true }), navigator: { maxTouchPoints: 1 }, screen: { orientation }, ...overrides });
+    f.video.videoWidth = 1920; f.video.videoHeight = 1080;
+    f.api.bindFullscreenChange();
+    f.api.attachTileButton({ tile: f.tile, actions: f.headerActions });
+    return { ...f, calls, orientation };
+};
+
+test('mobile landscape fullscreen locks after native entry and unlocks on browser exit', async () => {
+    const f = mobileFixture(); const stream = {}; f.video.srcObject = stream;
+    f.orientation.lock = async mode => {
+        assert.equal(f.document.fullscreenElement, f.tile, 'only lock inside native fullscreen');
+        f.calls.push(mode);
+    };
+    assert.equal(await f.api.toggleTileFullscreen({ tile: f.tile }), true);
+    f.api.updateButtonStates();
+    assert.deepEqual(f.calls, ['landscape'], 'fullscreenchange and completion must not lock twice');
+    await f.document.exitFullscreen();
+    assert.deepEqual(f.calls, ['landscape', 'unlock']);
+    assert.equal(f.video.srcObject, stream);
+    assert.equal(f.video.listenerCount('loadedmetadata'), 1, 'only attached web-fullscreen listener remains');
+    f.api.destroy();
+    assert.equal(f.video.listenerCount('loadedmetadata'), 0);
+    assert.equal(f.video.listenerCount('resize'), 0);
+});
+
+for (const dimensions of [[1080, 1920], [1080, 1080], [0, 0]]) {
+    test(`mobile ${dimensions.join('x')} video does not assume landscape`, async () => {
+        const f = mobileFixture(); [f.video.videoWidth, f.video.videoHeight] = dimensions;
+        await f.api.toggleTileFullscreen({ tile: f.tile });
+        assert.deepEqual(f.calls, []);
+        assert.equal(f.tile.querySelector('.player-orientation-hint'), null);
+        f.api.destroy();
+    });
+}
+
+for (const narrow of [false, true]) {
+    test(`${narrow ? 'narrow ' : ''}desktop fullscreen does not lock screen orientation`, async () => {
+        const calls = [];
+        const f = createFixture({ matchMedia: query => ({ matches: narrow && !query.includes('pointer') }),
+            navigator: { maxTouchPoints: 0 }, screen: { orientation: { lock: () => calls.push('lock'), unlock: () => calls.push('unlock') } } });
+        f.video.videoWidth = 1920; f.video.videoHeight = 1080;
+        await f.api.toggleTileFullscreen({ tile: f.tile });
+        assert.deepEqual(calls, []);
+        f.api.destroy();
+    });
+}
+
+test('metadata arriving after fullscreen locks once, and a portrait source releases the lock', async () => {
+    const f = mobileFixture(); f.video.videoWidth = f.video.videoHeight = 0;
+    await f.api.toggleTileFullscreen({ tile: f.tile });
+    f.video.videoWidth = 1920; f.video.videoHeight = 1080;
+    await f.video.dispatchEvent({ type: 'loadedmetadata' });
+    await f.video.dispatchEvent({ type: 'resize' });
+    assert.deepEqual(f.calls, ['landscape']);
+    f.video.videoWidth = 1080; f.video.videoHeight = 1920;
+    await f.video.dispatchEvent({ type: 'resize' });
+    assert.deepEqual(f.calls, ['landscape', 'unlock']);
+    f.api.destroy();
+});
+
+for (const support of ['absent', 'reject', 'throw']) {
+    test(`orientation lock ${support} keeps fullscreen successful with a rotation hint`, async () => {
+        const f = mobileFixture(); const errors = [];
+        if (support === 'absent') f.orientation.lock = undefined;
+        if (support === 'reject') f.orientation.lock = () => Promise.reject(new Error('NotSupportedError'));
+        if (support === 'throw') f.orientation.lock = () => { throw new Error('SecurityError'); };
+        assert.equal(await f.api.toggleTileFullscreen({ tile: f.tile, onError: error => errors.push(error) }), true);
+        assert.equal(f.document.fullscreenElement, f.tile);
+        assert.deepEqual(errors, []);
+        const hint = f.tile.querySelector('.player-orientation-hint');
+        assert.ok(hint.textContent.includes('请将手机横过来'));
+        assert.equal(hint.getAttribute('role'), 'status');
+        f.api.updateButtonStates();
+        assert.equal(f.tile.querySelector('.player-orientation-hint'), hint, 'no repeated hint or lock request');
+        f.api.exitTileFullscreen(f.tile);
+        assert.equal(f.tile.querySelector('.player-orientation-hint'), null);
+        f.api.destroy();
+    });
+}
+
+test('fullscreen rejection never starts an orientation lock', async () => {
+    const f = mobileFixture(); const errors = [];
+    f.tile.requestFullscreen = async () => { throw new Error('denied'); };
+    assert.equal(await f.api.toggleTileFullscreen({ tile: f.tile, onError: error => errors.push(error.message) }), false);
+    assert.deepEqual(f.calls, []);
+    assert.deepEqual(errors, ['denied']);
+    assert.equal(f.video.listenerCount('resize'), 1);
+    f.api.destroy();
+});
+
+for (const cancel of ['exit', 'detach', 'destroy']) {
+    for (const result of ['resolve', 'reject']) {
+        test(`${cancel} releases a pending orientation lock and ignores late ${result}`, async () => {
+            const f = mobileFixture(); let finish, fail;
+            f.orientation.lock = () => { f.calls.push('landscape'); return new Promise((resolve, reject) => { finish = resolve; fail = reject; }); };
+            assert.equal(await f.api.toggleTileFullscreen({ tile: f.tile }), true, 'fullscreen must not wait for orientation promise');
+            if (cancel === 'exit') f.api.exitTileFullscreen(f.tile);
+            if (cancel === 'detach') f.api.detachTile(f.tile);
+            if (cancel === 'destroy') f.api.destroy();
+            assert.deepEqual(f.calls, ['landscape', 'unlock']);
+            if (result === 'resolve') finish(); else fail(new Error('AbortError'));
+            await Promise.resolve(); await Promise.resolve();
+            assert.equal(f.tile.querySelector('.player-orientation-hint'), null);
+            assert.equal(f.document.fullscreenElement, null);
+            f.api.destroy();
+            assert.equal(f.video.listenerCount('resize'), 0);
+        });
+    }
+}
+
+for (const sameTile of [true, false]) {
+    for (const result of ['resolve', 'reject']) {
+        test(`late orientation ${result} cannot unlock newer fullscreen (${sameTile ? 'same' : 'different'} tile)`, async () => {
+            const f = mobileFixture(); let finish, fail;
+            f.orientation.lock = () => new Promise((resolve, reject) => { finish = resolve; fail = reject; });
+            await f.api.toggleTileFullscreen({ tile: f.tile });
+            f.api.exitTileFullscreen(f.tile);
+            const next = sameTile ? f.tile : f.document.createElement('section');
+            if (!sameTile) {
+                next._connected = true;
+                const video = f.document.createElement('video'); video.videoWidth = 1280; video.videoHeight = 720;
+                next.append(video);
+                next.requestFullscreen = async () => { f.document.fullscreenElement = next; await f.document.dispatchEvent({ type: 'fullscreenchange' }); };
+                f.api.attachTileButton({ tile: next });
+            }
+            f.orientation.lock = async mode => f.calls.push(mode);
+            await f.api.toggleTileFullscreen({ tile: next });
+            const before = [...f.calls];
+            if (result === 'resolve') finish(); else fail(new Error('AbortError'));
+            await Promise.resolve(); await Promise.resolve();
+            assert.deepEqual(f.calls, before, 'old completion cannot release the new lease');
+            assert.equal(f.document.fullscreenElement, next);
+            assert.equal(next.querySelector('.player-orientation-hint'), null);
+            f.api.destroy();
+        });
+    }
+}
+
+test('web fullscreen offers manual rotation without requesting system orientation', async () => {
+    const f = mobileFixture();
+    const button = f.tile.querySelector('.web-fullscreen-btn');
+    await button.dispatchEvent(event('click', button));
+    assert.deepEqual(f.calls, []);
+    assert.ok(f.tile.querySelector('.player-orientation-hint'));
+    await f.document.dispatchEvent({ type: 'keydown', key: 'Escape' });
+    assert.equal(f.tile.querySelector('.player-orientation-hint'), null);
+    f.api.destroy();
+});
+
+test('iOS video-only fullscreen preserves native playback without retaining orientation listeners', async () => {
+    const f = mobileFixture(); let entered = 0;
+    f.tile.requestFullscreen = undefined;
+    f.video.webkitEnterFullscreen = () => { entered++; };
+    assert.equal(await f.api.toggleTileFullscreen({ tile: f.tile }), true);
+    assert.equal(entered, 1);
+    assert.deepEqual(f.calls, []);
+    assert.equal(f.video.listenerCount('resize'), 1);
+    f.api.destroy();
+});
+
 for (const cancel of ['exit', 'detach', 'destroy']) {
     test(`${cancel} invalidates a pending native fullscreen request before it enters`, async () => {
-        const f = createFixture(); f.api.bindFullscreenChange();
+        const f = mobileFixture(); f.api.bindFullscreenChange();
         f.api.attachTileButton({ tile: f.tile, actions: f.headerActions });
         const stream = {}; f.video.srcObject = stream;
         let finish;
@@ -221,6 +384,7 @@ for (const cancel of ['exit', 'detach', 'destroy']) {
         assert.equal(f.api.isTileLayoutWriteBlocked(f.tile), false);
         assert.equal(f.tile.getAttribute('style'), f.originalStyle);
         assert.equal(f.video.srcObject, stream);
+        assert.deepEqual(f.calls, [], 'cancelled fullscreen cannot acquire an orientation lock');
         f.api.destroy();
     });
 }

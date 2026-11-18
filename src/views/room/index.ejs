@@ -12,20 +12,15 @@
     <style>
         body { background: #fbf7f9; }
         .room-boot-status { display: none; }
-        html[data-room-boot='fallback'] .room-boot-status { display: flex; position: fixed; top: 58px; left: 50%; transform: translateX(-50%); z-index: 30000; gap: 12px; padding: 12px 16px; border-radius: 10px; background: #fff; color: #887681; box-shadow: 0 4px 24px #44364118; }
-        .room-boot-status button { display: none; }
-        html[data-room-boot='fallback'] .room-boot-status button { display: block; }
+        html[data-room-boot]:not([data-room-boot='ready']):not([data-room-boot='pending']) .room-boot-status { display: flex; }
+        .room-boot-status { box-sizing: border-box; position: fixed; top: calc(var(--workspace-bar-height, 56px) + env(safe-area-inset-top) + 8px); left: 50%; transform: translateX(-50%); z-index: 30000; align-items: center; gap: 12px; width: max-content; max-width: calc(100vw - 24px); margin: 0; padding: 10px 14px; border: 1px solid #eadfe5; border-radius: 12px; background: #fff; color: #887681; box-shadow: 0 4px 16px #44364110; font: 13px/1.6 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+        .room-boot-status span { min-width: 0; overflow-wrap: anywhere; }
+        .room-boot-status button { display: none; flex: 0 0 auto; min-height: 40px; padding: 6px 10px; border: 1px solid #eadfe5; border-radius: 8px; background: #fbf7f9; color: #6b4d5c; font: inherit; white-space: nowrap; }
+        html[data-room-boot='fallback'] .room-boot-status button, html[data-room-boot='stalled'] .room-boot-status button { display: block; }
+        html[data-room-boot]:not([data-room-boot='ready']):not([data-room-boot='pending']) #main.stage-layout { padding-top: calc(var(--workspace-bar-height, 56px) + env(safe-area-inset-top) + 52px); }
     </style>
     <noscript><style>.room-boot-status { display: none !important; }</style></noscript>
-    <script src="/js/shared/room-boot.js"></script>
-    <link rel="stylesheet" href="/style.css?v=stage-voice-20261018">
-    <link rel="stylesheet" href="/vendor/fontawesome/css/fontawesome.min.css">
-    <link rel="stylesheet" href="/vendor/fontawesome/css/solid.min.css">
-    <link rel="stylesheet" href="/vendor/fontawesome/css/regular.min.css">
-    
-    <script src="/socket.io/socket.io.js"></script>
-    
-    <script src="/vendor/peerjs/peerjs.min.js" defer></script>
+    <script nonce="<%= cspNonce %>"><%- include('../js/shared/room-boot.js') %></script>
     <script nonce="<%= cspNonce %>">
         const roomBootstrap = <%- roomBootstrap %>
         const ROOM_ID = roomBootstrap.roomId
@@ -34,10 +29,16 @@
         window.voiceScreenSfuConfig = roomBootstrap.screenSfu || {}
         window.voiceScreenMediaProvider = roomBootstrap.screenMediaProvider || 'legacy'
     </script>
+    <link rel="stylesheet" data-room-startup-style href="/style.css?v=<%= roomAssetVersions.stylesheet %>">
+    <link rel="stylesheet" href="/vendor/fontawesome/css/fontawesome.min.css">
+    <link rel="stylesheet" href="/vendor/fontawesome/css/solid.min.css">
+    <link rel="stylesheet" href="/vendor/fontawesome/css/regular.min.css">
+    <script defer src="/socket.io/socket.io.js"></script>
+    <script src="/vendor/peerjs/peerjs.min.js" defer></script>
 </head>
 <body>
-    <div class="room-boot-status" role="status"><span data-room-load-message></span><button type="button" data-room-reload>刷新重试</button></div>
-    <header class="workspace-topbar" aria-label="语音据点">
+    <div class="room-boot-status" role="status" aria-live="polite" aria-atomic="true"><span data-room-load-message></span><button type="button" data-room-reload>重新加载</button></div>
+    <header class="workspace-topbar" aria-label="语音据点" aria-busy="true" inert>
         <div class="workspace-brand">
             <img class="workspace-mark" src="/assets/brand/voice.svg?v=brand-20261022" width="30" height="30" alt="" aria-hidden="true">
             <strong>语音据点</strong>
@@ -56,7 +57,7 @@
         </div>
         <p id="stageConnectionStatus" class="stage-connection-status" role="status" hidden></p>
     </header>
-    <div id="main" class="room-layout stage-layout" data-stage-mode="voice">
+    <div id="main" class="room-layout stage-layout" data-stage-mode="voice" data-mobile-panel="stage" aria-busy="true" inert>
         <div class="stage-sidebar-column">
         <aside id="stage-channels" class="room-sidebar" aria-label="频道列表">
             <h2 class="channel-section-title">语音频道</h2>
@@ -102,7 +103,10 @@
                             <span class="media-dock-kicker">语音详情</span>
                             <strong id="localVoiceChannelName">大厅</strong>
                             <span class="media-dock-timer">
-                                <i class="fas fa-signal" aria-hidden="true"></i>
+                                <button type="button" id="callSignal" class="call-signal" data-quality="unknown" data-bars="0" aria-label="通话质量" aria-expanded="false" aria-controls="callSignalDetail">
+                                    <svg viewBox="0 0 27 24" width="24" height="20" aria-hidden="true"><rect x="1" y="18" width="3" height="5" rx="1"/><rect x="6" y="14" width="3" height="9" rx="1"/><rect x="11" y="10" width="3" height="13" rx="1"/><rect x="16" y="6" width="3" height="17" rx="1"/><rect x="21" y="2" width="3" height="21" rx="1"/><path class="signal-disconnected" d="M3 3 24 23"/></svg>
+                                </button>
+                                <span id="callSignalDetail" class="call-signal-detail" hidden>通话质量尚未测量</span>
                                 <span id="callDuration">00:00</span>
                             </span>
                         </div>
@@ -260,64 +264,8 @@
         </aside>
 
     </div> 
-    <script src="/js/shared/view-utils.js"></script>
-    <script src="/js/chat/chat-name-state.js"></script>
-    <script src="/js/media/noise-settings-ui.js"></script>
-    <script src="/js/media/audio-processing-view.js"></script>
-    <script src="/js/shared/control-popovers-ui.js"></script>
-    <script src="/js/media/peer-volume-ui.js"></script>
-    <script src="/js/shared/copy-link-ui.js"></script>
-    <script src="/js/media/output-volume-state.js"></script>
-    <script src="/js/media/remote-audio-gain.js"></script>
-    <script src="/js/media/output-volume-ui.js"></script>
-    <script src="/js/media/media-controls-ui.js"></script>
-    <script src="/js/media/media-dock-adapter.js"></script>
-    <script src="/js/media/media-dock-runtime.js"></script>
-    <script src="/js/media/screen-share-volume-controller.js"></script>
-    <script src="/js/media/fullscreen-controls.js"></script>
-    <script src="/js/media/local-screen-share-preview-controller.js"></script>
-    <script src="/js/media/voice-join-overlay-ui.js"></script>
-    <script src="/js/room/room-ui-state.js"></script>
-    <script src="/js/room/presence-view-model.js"></script>
-    <script src="/js/room/participants-list-ui.js"></script>
-    <script src="/js/room/tile-status-ui.js"></script>
-    <script src="/js/room/video-tile-structure-ui.js"></script>
-    <script src="/js/chat/chat-message-ui.js"></script>
-    <script src="/js/chat/chat-form-ui.js"></script>
-    <script src="/js/chat/chat-socket-transport.js"></script>
-    <script src="/js/chat/chat-panel-runtime.js"></script>
-    <script src="/js/room/channel-sidebar-ui.js"></script>
-    <script src="/js/sidebar/sidebar-socket-transport.js"></script>
-    <script src="/js/sidebar/sidebar-runtime.js"></script>
-    <script src="/js/room/cursor-share-ui.js"></script>
-    <script src="/js/voice/voice-call-protocol.js"></script>
-    <script src="/js/voice/voice-screen-codecs.js"></script>
-    <script src="/js/voice/voice-screen-send-policy.js"></script>
-    <script src="/vendor/screen-sfu-client.js"></script>
-    <script src="/js/voice/voice-screen-sfu-runtime.js"></script>
-    <% if (typeof piikEnabled !== 'undefined' && piikEnabled) { %><script src="/vendor/piik-client.js"></script><% } %>
-    <script src="/js/voice/voice-peer-registry.js"></script>
-    <script src="/js/voice/voice-media-lifecycle.js"></script>
-    <script src="/js/voice/voice-retry-controller.js"></script>
-    <script src="/js/voice/voice-session-runtime.js"></script>
-    <script src="/js/voice/voice-ice-config.js"></script>
-    <script src="/js/voice/voice-media-operation-runtime.js"></script>
-    <script src="/js/voice/voice-device-runtime.js"></script>
-    <script src="/js/voice/voice-audio-recovery.js"></script>
-    <script src="/js/voice/voice-audio-processing.js"></script>
-    <script src="/js/voice/voice-audio-settings-controller.js"></script>
-    <script src="/js/voice/voice-channel-sounds.js"></script>
-    <script src="/js/voice/voice-status-view.js"></script>
-    <script src="/js/voice/voice-media-quality-view.js"></script>
-    <script src="/js/voice/voice-share-stats-view.js"></script>
-    <script src="/js/voice/voice-player-menu.js"></script>
-    <script src="/js/voice/voice-share-diagnostics.js"></script>
-    <script src="/js/voice/voice-player-events.js"></script>
-    <script src="/js/voice/voice-call-diagnostics.js"></script>
-    <script src="/js/voice/voice-media-quality-runtime.js"></script>
-    <script src="/js/room/stage-layout-runtime.js"></script>
-    <script src="/js/voice/voice-speaking-runtime.js"></script>
-    <script src="/js/voice/share-watch-status.js"></script>
-    <script type="module" src="/script.js"></script> <!-- So we defined the static files of the server so we can use it here-->
+    <% if (piikPrototype) { %><script defer src="/vendor/piik-client.js"></script><% } else { %><script defer src="/vendor/screen-sfu-client.js"></script><% } %>
+    <script defer src="/js/room/boot-runtime.js?v=<%= roomAssetVersions.runtime %>"></script>
+    <script type="module" src="/script.js?v=<%= roomAssetVersions.mainScript %>"></script>
 </body>
 </html>

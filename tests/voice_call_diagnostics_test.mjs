@@ -7,7 +7,7 @@ import { createVoiceDiagnosticsRelay } from '../src/utils/VoiceDiagnosticsRelay.
 /* eslint-disable no-await-in-loop -- Exercise sequential samples and call lifecycles. */
 
 const source = readFileSync(new URL('../src/views/js/voice/voice-call-diagnostics.js', import.meta.url), 'utf8');
-function fixture({ storage, connections = [], shares = [], getReceiverHealth } = {}) {
+function fixture({ storage, connections = [], shares = [], getReceiverHealth, onConnectionQuality } = {}) {
     const timers = new Map();
     let id = 0;
     const state = { 会话: { state: 'joined', generation: 1 }, 本机音频: { 请求模式: 'rnnoise', 静音: true, deviceId: 'secret-device' } };
@@ -21,10 +21,54 @@ function fixture({ storage, connections = [], shares = [], getReceiverHealth } =
         VoiceShareDiagnostics: { sync: async (share, options) => { assert.equal(options.force, true); return share; } },
     };
     vm.runInNewContext(source, { window });
-    const runtime = window.VoiceCallDiagnostics.createRuntime({ sanitize: sanitizeVoiceDiagnostic, getState: () => state, getConnections: () => connections, getSources: () => shares, getReceiverHealth });
+    vm.runInNewContext(readFileSync(new URL('../src/views/js/voice/voice-connection-quality.js', import.meta.url), 'utf8'), { window });
+    const runtime = window.VoiceCallDiagnostics.createRuntime({ sanitize: sanitizeVoiceDiagnostic, getState: () => state, getConnections: () => connections, getSources: () => shares, getReceiverHealth, onConnectionQuality });
     return { runtime, state, saved, window, timers };
 }
 const flush = () => new Promise((resolve) => setImmediate(resolve));
+
+test('connection signal reuses deduplicated diagnostic stats, omits SFU and ignores cancelled samples', async () => {
+    let calls = 0, lost = 0, received = 0;
+    const updates = [];
+    const pc = { connectionState: 'connected', getStats: async () => {
+        calls++;
+        return new Map([['rtp', { id: 'rtp', type: 'inbound-rtp', kind: 'audio', timestamp: calls * 1000,
+            packetsReceived: received, packetsLost: lost, jitter: .01 }], ['pair', { id: 'pair', type: 'candidate-pair', state: 'succeeded', selected: true, currentRoundTripTime: .042, localCandidateId: 'secret-candidate' }]]);
+    } };
+    const sfu = { screenRoute: 'SFU', connectionState: 'connected', getStats: async () => new Map() };
+    const f = fixture({ connections: [pc, pc, sfu], onConnectionQuality: rows => updates.push(rows) });
+    f.runtime.start(); await flush();
+    assert.equal(calls, 1); assert.equal(updates.length, 1); assert.equal(updates[0].length, 1);
+    received = 99; lost = 1;
+    const sample = await f.runtime.sample();
+    assert.equal(calls, 2); assert.equal(updates.at(-1)[0].lossPercent, 1);
+    assert.equal(updates.at(-1)[0].jitterMs, 10);
+    assert.deepEqual(sanitizeVoiceDiagnostic(sample).连接[0].quality, { state: 'connected', rttMs: 42, lossPercent: 1, jitterMs: 10 });
+    assert.doesNotMatch(JSON.stringify(sample), /localCandidateId|secret-candidate/);
+    let finish; pc.getStats = () => new Promise(resolve => { finish = resolve; });
+    const pending = f.runtime.sample(); await flush();
+    const count = updates.length;
+    f.runtime.end('leave'); finish(new Map()); await pending;
+    assert.equal(updates.length, count, 'late sample cannot update a new call signal');
+    f.runtime.destroy();
+});
+
+test('connection quality includes later P2P links while diagnostics remain capped', async () => {
+    const stats = new Map([['pair', { id: 'pair', type: 'candidate-pair', state: 'succeeded', selected: true, currentRoundTripTime: .025 }]]);
+    const connections = Array.from({ length: 17 }, (_, index) => ({
+        connectionState: index === 16 ? 'failed' : 'connected',
+        getStats: async () => stats,
+    }));
+    let sfuSamples = 0;
+    connections.push({ screenRoute: 'SFU', getStats: async () => { sfuSamples++; return stats; } });
+    const f = fixture({ connections, onConnectionQuality: rows => quality.accept(rows) });
+    const quality = f.window.VoiceConnectionQuality.createRuntime();
+    const sample = await f.runtime.sample();
+    assert.equal(sample.连接.length, 16);
+    assert.equal(quality.snapshot({ state: 'joined' }).status, 'disconnected');
+    assert.equal(sfuSamples, 0);
+    f.runtime.destroy();
+});
 
 test('diagnostics distinguish website, desktop and schema versions without exporting raw user agents', async () => {
     const f = fixture();

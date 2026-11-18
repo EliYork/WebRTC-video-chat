@@ -59,6 +59,7 @@ await build({
     format: 'iife',
     platform: 'browser',
     target: 'es2022',
+    minify: true,
     plugins: [piikClientOverlay],
     define: {
         'import.meta.url': '"/vendor/piik-client.js"',

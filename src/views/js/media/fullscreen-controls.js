@@ -12,9 +12,82 @@
     const fullscreenSnapshots = new Map();
     let fullscreenChangeBinding;
     let nativeRequest;
+    let orientationOwner;
+    const orientationHints = new Map();
     let webFullscreenTile;
     let webCloseWatcher;
     const compact = () => global.matchMedia?.('(max-width: 640px), (max-width: 1000px) and (max-height: 550px)').matches === true;
+    const touchScreen = () => compact() && (
+        global.matchMedia?.('(pointer: coarse)').matches === true ||
+        global.navigator?.maxTouchPoints > 0 || global.navigator?.userAgentData?.mobile === true
+    );
+    const landscapeVideo = (video) => video?.videoWidth > video?.videoHeight && video.videoHeight > 0;
+    const showOrientationHint = (tile, visible) => {
+        if (!visible) {
+            orientationHints.get(tile)?.remove();
+            orientationHints.delete(tile);
+            return;
+        }
+        if (orientationHints.has(tile)) return;
+        const hint = global.document.createElement('div');
+        hint.className = 'player-orientation-hint';
+        hint.setAttribute('role', 'status');
+        hint.textContent = '请将手机横过来；如未旋转，请关闭方向锁定';
+        tile.append(hint);
+        orientationHints.set(tile, hint);
+    };
+    const releaseOrientation = (request) => {
+        const lease = request?.orientationLease;
+        if (!lease) return;
+        request.orientationLease = undefined;
+        lease.cancelled = true;
+        if (orientationOwner !== lease) return;
+        orientationOwner = undefined;
+        // unlock also cancels a pending lock; never release another request's lock.
+        try { lease.orientation.unlock(); } catch { /* Browser already left fullscreen. */ }
+    };
+    const clearNativeRequest = () => {
+        const request = nativeRequest;
+        nativeRequest = undefined;
+        if (!request) return;
+        request.video.removeEventListener('loadedmetadata', request.syncOrientation);
+        request.video.removeEventListener('resize', request.syncOrientation);
+        showOrientationHint(request.tile, false);
+        releaseOrientation(request);
+    };
+    const syncNativeOrientation = (request) => {
+        if (nativeRequest !== request || getFullscreenElement() !== request.tile) return;
+        if (!request.mobile || !landscapeVideo(request.video)) {
+            releaseOrientation(request);
+            request.orientationAttempted = false;
+            showOrientationHint(request.tile, false);
+            return;
+        }
+        if (request.orientationAttempted) return;
+        request.orientationAttempted = true;
+        const orientation = global.screen?.orientation;
+        if (!orientation?.lock || !orientation?.unlock) {
+            showOrientationHint(request.tile, true);
+            return;
+        }
+        const lease = { orientation, cancelled: false };
+        request.orientationLease = lease;
+        orientationOwner = lease;
+        // Orientation failure must not turn a successful fullscreen into an error.
+        void (async () => {
+            try {
+                await orientation.lock('landscape');
+                if (lease.cancelled && !orientationOwner) {
+                    try { orientation.unlock(); } catch { /* Already unlocked. */ }
+                }
+            } catch {
+                if (nativeRequest === request && request.orientationLease === lease) {
+                    releaseOrientation(request);
+                    showOrientationHint(request.tile, true);
+                }
+            }
+        })();
+    };
     const syncImmersive = (entry) => {
         const active = compact() && (webFullscreenTile === entry.tile || getFullscreenElement() === entry.tile);
         if (active === entry.immersive) return;
@@ -35,6 +108,7 @@
     const exitWebFullscreen = () => {
         const tile = webFullscreenTile;
         webFullscreenTile = undefined;
+        showOrientationHint(tile, false);
         tile?.classList.remove('is-web-fullscreen');
         const entry = tileEntries.get(tile);
         webCloseWatcher?.destroy(); webCloseWatcher = undefined;
@@ -105,8 +179,10 @@
 
     const syncFullscreenState = () => {
         const fullscreenElement = getFullscreenElement();
-        if (nativeRequest && nativeRequest.tile === fullscreenElement) nativeRequest.entered = true;
-        else if (nativeRequest?.entered) nativeRequest = undefined;
+        if (nativeRequest && nativeRequest.tile === fullscreenElement) {
+            nativeRequest.entered = true;
+            syncNativeOrientation(nativeRequest);
+        } else if (nativeRequest?.entered) clearNativeRequest();
 
         Array.from(fullscreenSnapshots.keys()).forEach((tile) => {
             if (tile !== fullscreenElement && nativeRequest?.tile !== tile) {
@@ -142,7 +218,7 @@
         }
     };
     const exitTileFullscreen = (tile) => {
-        if (nativeRequest?.tile === tile) nativeRequest = undefined;
+        if (nativeRequest?.tile === tile) clearNativeRequest();
         if (webFullscreenTile === tile) exitWebFullscreen();
         if (getFullscreenElement() === tile) void exitFullscreen().catch(() => {});
         else restoreTileState(tile);
@@ -183,35 +259,42 @@
 
         let request;
         try {
-            if (webFullscreenTile === tile) { nativeRequest = undefined; exitWebFullscreen(); return true; }
+            if (webFullscreenTile === tile) { clearNativeRequest(); exitWebFullscreen(); return true; }
             exitWebFullscreen();
             if (getFullscreenElement() === tile) {
-                nativeRequest = undefined;
+                clearNativeRequest();
                 await exitFullscreen();
             } else {
-                request = { tile, entered: false };
+                clearNativeRequest();
+                request = { tile, video, entered: false, mobile: touchScreen() };
+                request.syncOrientation = () => syncNativeOrientation(request);
                 nativeRequest = request;
+                video.addEventListener('loadedmetadata', request.syncOrientation);
+                video.addEventListener('resize', request.syncOrientation);
                 if (tile.requestFullscreen || tile.webkitRequestFullscreen) {
                     captureTileState(tile);
                 }
                 await requestTileFullscreen(tile, video);
                 if (nativeRequest !== request || tile.isConnected === false) {
-                    if (nativeRequest === request) nativeRequest = undefined;
+                    if (nativeRequest === request) clearNativeRequest();
                     // A later request for this same tile still owns fullscreen.
                     if (getFullscreenElement() === tile && nativeRequest?.tile !== tile) await exitFullscreen();
                     if (getFullscreenElement() !== tile && nativeRequest?.tile !== tile) restoreTileState(tile);
                     return false;
                 }
                 request.entered = getFullscreenElement() === tile;
+                syncNativeOrientation(request);
+                // iOS owns video-only fullscreen; no document orientation lease exists.
+                if (!request.entered) clearNativeRequest();
             }
             return true;
         } catch (error) {
             if (request && (nativeRequest !== request || tile.isConnected === false)) {
-                if (nativeRequest === request) nativeRequest = undefined;
+                if (nativeRequest === request) clearNativeRequest();
                 if (getFullscreenElement() !== tile && nativeRequest?.tile !== tile) restoreTileState(tile);
                 return false;
             }
-            if (nativeRequest === request) nativeRequest = undefined;
+            if (nativeRequest === request) clearNativeRequest();
             if (getFullscreenElement() !== tile) {
                 restoreTileState(tile);
             }
@@ -276,6 +359,12 @@
             tile.addEventListener('pointerup', entry.pointer);
             tile.addEventListener('keydown', entry.keyboard);
             tile.addEventListener('focusout', entry.focusout);
+            entry.syncWebOrientation = () => {
+                if (webFullscreenTile === tile) showOrientationHint(tile, touchScreen() && landscapeVideo(tile.querySelector('video')));
+            };
+            entry.video = tile.querySelector('video');
+            entry.video?.addEventListener('loadedmetadata', entry.syncWebOrientation);
+            entry.video?.addEventListener('resize', entry.syncWebOrientation);
             entry.webButton = global.document.createElement('button');
             entry.webButton.className = 'web-fullscreen-btn window-action-button no-drag';
             entry.webButton.type = 'button';
@@ -285,7 +374,7 @@
                 if (getFullscreenElement()) return;
                 if (nativeRequest) {
                     const pendingTile = nativeRequest.tile;
-                    nativeRequest = undefined;
+                    clearNativeRequest();
                     restoreTileState(pendingTile);
                 }
                 const wasActive = webFullscreenTile === tile;
@@ -300,6 +389,7 @@
                 }
                 syncWebButton(entry);
                 syncImmersive(entry);
+                entry.syncWebOrientation();
             };
             entry.webButton.addEventListener('click', entry.toggleWeb);
             entry.toggle = (event) => {
@@ -355,6 +445,8 @@
             tile.removeEventListener('pointerup', entry.pointer);
             tile.removeEventListener('keydown', entry.keyboard);
             tile.removeEventListener('focusout', entry.focusout);
+            entry.video?.removeEventListener('loadedmetadata', entry.syncWebOrientation);
+            entry.video?.removeEventListener('resize', entry.syncWebOrientation);
             global.clearTimeout?.(entry.controlsTimer);
             tile.classList.remove('is-immersive-player', 'player-controls-hidden');
             if (removeButton) {
@@ -421,7 +513,7 @@
     };
 
     const destroy = () => {
-        nativeRequest = undefined;
+        clearNativeRequest();
         fullscreenChangeBinding?.destroy();
         Array.from(tileEntries.keys()).forEach((tile) => detachTile(tile));
         Array.from(fullscreenSnapshots.keys()).forEach((tile) =>

@@ -25,3 +25,31 @@ test('speaking meter highlights energy with hold, clears mute/departure and neve
     sources = []; tick(); runtime.destroy(); assert.equal(closes, 1);
     assert.equal(track.readyState, 'live');
 });
+
+test('meter follows real RMS loudness, resets silence/mute/suspension and never captures or stops tracks', () => {
+    let tick, amplitude = .005, closes = 0, disconnects = 0;
+    const levels = [];
+    const track = { readyState: 'live', enabled: true, muted: false };
+    const context = { state: 'running',
+        createAnalyser: () => ({ getFloatTimeDomainData: samples => samples.fill(amplitude), disconnect: () => disconnects++ }),
+        createMediaStreamSource: () => ({ connect() {}, disconnect: () => disconnects++ }), close: async () => { closes++; } };
+    const window = { setTimeout, clearTimeout };
+    vm.runInNewContext(readFileSync(new URL('../src/views/js/voice/voice-speaking-runtime.js', import.meta.url), 'utf8'), { window });
+    const runtime = window.VoiceSpeakingRuntime.createRuntime({
+        getSources: () => [{ id: 'local-video', enabled: true, stream: { getAudioTracks: () => [track] } }],
+        onSpeaking() {}, onLevel: (id, level) => { assert.equal(id, 'local-video'); levels.push(level); },
+        createContext: () => context, createStream: () => ({}), setTimer: fn => { tick = fn; }, clearTimer() {} });
+    runtime.start(); const quiet = levels.at(-1);
+    amplitude = .04; tick(); const speech = levels.at(-1);
+    amplitude = .2; tick(); const loud = levels.at(-1);
+    assert.ok(quiet > 0 && quiet < speech && speech < loud && loud <= 1);
+    amplitude = .005; tick(); assert.ok(levels.at(-1) < loud, 'release decays instead of staying full');
+    amplitude = 0; tick(); assert.equal(levels.at(-1), 0, 'silence is empty even during speaking hold');
+    amplitude = 1; tick(); assert.equal(levels.at(-1), 1);
+    context.state = 'suspended'; tick(); assert.equal(levels.at(-1), 0);
+    context.state = 'running'; track.muted = true; tick(); assert.equal(levels.at(-1), 0);
+    assert.equal(disconnects, 2);
+    track.muted = false; tick(); assert.equal(levels.at(-1), 1);
+    track.enabled = false; tick(); assert.equal(levels.at(-1), 0);
+    runtime.destroy(); assert.equal(closes, 1); assert.equal(track.readyState, 'live');
+});

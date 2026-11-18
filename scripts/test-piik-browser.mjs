@@ -260,6 +260,9 @@ try {
             );
         }
         for (const s of [a, b]) {
+            // Joining can still be initializing the default microphone. Clicking
+            // during that operation cancels it instead of enabling audio.
+            await wait(() => evaluate(s, `document.querySelector('#toggleAudio').getAttribute('aria-busy') === 'false'`), 'default microphone initialization completes');
             if (await evaluate(s, `document.querySelector('#toggleAudio').getAttribute('aria-pressed') !== 'true'`)) await click(s, '#toggleAudio');
             await wait(
                 () =>

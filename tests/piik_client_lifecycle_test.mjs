@@ -18,7 +18,7 @@ const bundle = await build({
             export class ViewerPeer {}
             export const decodeServerMessage = JSON.parse;
             export const applyVideoCaptureProfile = async () => {};
-            export const createNativeCapture = () => ({stop(){},isActive(){return false},get(){return null}});
+            export const createNativeCapture = () => ({stop(){},isActive(){return false},get(){return null},audioDiagnostics(){return null}});
         ` }));
     } }],
 });
@@ -54,6 +54,7 @@ test('cancelled publication safely handles a late acknowledgement and denied cle
     await flush();
     assert.ok(requests.some(input => input.action === 'close' && input.sessionId === 'retired'));
     assert.equal(runtime.snapshot().sharing, false);
+    assert.equal(runtime.snapshot().原生共享音频, null);
 });
 
 test('departed viewer safely closes a late watch acknowledgement after authorization ends', async () => {

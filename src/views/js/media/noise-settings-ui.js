@@ -16,8 +16,12 @@
     const getNoiseMode = () => {
         const saved = safeStorageGet(NOISE_MODE_KEY);
         if (['off', 'browser', 'rnnoise', 'deepfilter'].includes(saved)) return saved;
-        return safeStorageGet(AI_NOISE_EXPERIMENT_KEY) === 'true' ? 'rnnoise' :
-            safeStorageGet(NOISE_SUPPRESSION_KEY) === 'false' ? 'off' : 'browser';
+        const legacyAi = safeStorageGet(AI_NOISE_EXPERIMENT_KEY);
+        const legacyBrowser = safeStorageGet(NOISE_SUPPRESSION_KEY);
+        if (legacyAi === 'true') return 'rnnoise';
+        if (legacyBrowser === 'false') return 'off';
+        if (legacyBrowser === 'true' || legacyAi === 'false') return 'browser';
+        return 'rnnoise';
     };
     const setNoiseMode = (mode) => {
         if (!['off', 'browser', 'rnnoise', 'deepfilter'].includes(mode)) return false;

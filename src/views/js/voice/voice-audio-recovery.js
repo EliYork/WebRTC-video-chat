@@ -45,6 +45,7 @@
                 state.blocked = false;
                 return;
             }
+            if (!userGesture && global.VoiceShareWatchStatus?.shouldDeferPlaybackRecovery?.(element)) return;
             if (state.pending || (state.blocked && !userGesture)) return;
             state.pending = true;
             // Invoke synchronously so an explicit recovery click retains the

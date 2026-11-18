@@ -189,7 +189,7 @@ app.whenReady().then(async () => {
     await win.loadURL('data:text/html;charset=utf-8,'+encodeURIComponent('<!doctype html><meta charset="utf-8"><title>Isolated dock lifecycle</title><body>'));
     await win.webContents.executeJavaScript('window.__dockErrors=[];addEventListener("error",e=>window.__dockErrors.push(e.message));addEventListener("unhandledrejection",e=>window.__dockErrors.push(String(e.reason)));');
     const html = await ejs.renderFile(resolve(__dirname, '../../src/views/room/index.ejs'), {
-        channelName: 'Fixture', roomId: 'fixture', channels: [], cspNonce: 'fixture', roomBootstrap: '{}', piikEnabled: false,
+        channelName: 'Fixture', roomId: 'fixture', channels: [], cspNonce: 'fixture', roomBootstrap: '{}', piikEnabled: false, roomAssetVersions: {},
     });
     await win.webContents.executeJavaScript('window.__dockTemplate='+JSON.stringify(html));
     for (const path of ['audio-processing-view.js', 'media-dock-runtime.js']) {

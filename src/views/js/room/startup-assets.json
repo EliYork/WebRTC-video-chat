@@ -1,0 +1,20 @@
+{
+  "runtime": {
+    "sourceSha256": "84fe0827a0536bd53cf6d4b2bfd747c77448804935f2f3d3f9dba9fda25af82d",
+    "sha256": "4162469b0023b691364c9c9b35becd91c2242f215b7a803d13cbee8324154678",
+    "sourceBytes": 659152,
+    "bytes": 273070
+  },
+  "stylesheet": {
+    "sourceSha256": "54ca0f95190b89c1b4250b618612ad2129ed3c7349fdb9ffca2bbd23b0ec8946",
+    "sha256": "9201befd58c49b07fedb2e02102700d1f0411313dfb698b9111e89a71cbe8490",
+    "sourceBytes": 83101,
+    "bytes": 67651
+  },
+  "mainScript": {
+    "sourceSha256": "c9d9979c84f95e32974fd16368791ede8625c8df4d452ef46e4132a63b656f43",
+    "sha256": "6d27333fee03c8528e4429f0ee5f74bd5fdc5d791a1e0f2bf37b1ee2ced42293",
+    "sourceBytes": 144830,
+    "bytes": 58613
+  }
+}

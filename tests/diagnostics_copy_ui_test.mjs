@@ -67,7 +67,7 @@ function fixture({ clipboardFails = false } = {}) {
 
 test('room renders one diagnostics action in the global header and binds it once outside the dock', () => {
     const html = ejs.render(read('room/index.ejs'), { channelName: '大厅', roomId: 'lobby', channels: [],
-        cspNonce: 'test', roomBootstrap: '{}' }, { filename: fileURLToPath(new URL('../src/views/room/index.ejs', import.meta.url)) });
+        cspNonce: 'test', roomBootstrap: '{}', roomAssetVersions: {} }, { filename: fileURLToPath(new URL('../src/views/room/index.ejs', import.meta.url)) });
     const header = html.match(/<header class="workspace-topbar"[\s\S]*?<\/header>/)?.[0];
     assert.ok(header);
     assert.match(header, /workspace-brand/);

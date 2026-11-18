@@ -480,6 +480,15 @@
                 refs.callDuration,
                 formatDuration(lastSnapshot.callDurationMs)
             );
+            const signal = root.querySelector('#callSignal');
+            if (signal) {
+                const quality = lastSnapshot.connectionQuality || {};
+                signal.dataset.quality = quality.status || 'unknown';
+                signal.dataset.bars = String(quality.bars ?? 0);
+                const detail = quality.detail || '通话质量尚未测量';
+                signal.setAttribute('aria-label', detail);
+                setText(root.querySelector('#callSignalDetail'), detail);
+            }
             setText(
                 refs.callStatus,
                 lastSnapshot.callStatusText ||
@@ -596,7 +605,7 @@
             const audioMode = screenField('[data-native-audio-mode]')?.value || 'none';
             const audio = native ? audioMode !== 'none' : screenField('[data-screen-share-audio]')?.checked === true;
             const restart = sharing && (old?.provider !== (native ? 'native' : 'web') || old?.shareAudio !== audio ||
-                (native && (old?.nativeAudioMode !== audioMode || old?.nativeAudioTargetKey !== (screenField('[data-native-audio-target]')?.value || '') || (editorMode === 'source' && !['none', 'source'].includes(audioMode)))) ||
+                (native && (old?.nativeAudioMode !== audioMode || old?.nativeAudioTargetKey !== (screenField('[data-native-audio-target]')?.value || '') || (editorMode === 'source' && audioMode !== 'none'))) ||
                 (!native && (old?.codecMode !== codecMode || !provider || (resolutionPreset === 'original' && old?.resolutionPreset !== 'original'))));
             setText(
                 refs.screenSettingsStatus,
@@ -846,6 +855,7 @@
             closePopovers();
         };
         const openPopover = (type, fromHover = false, mode = 'source') => {
+            setSignalOpen(false);
             closePopovers();
             if (type === 'screen') {
                 editorMode = mode;
@@ -951,7 +961,13 @@
                       : adapter.selectOutput;
             void runIntent(`device-${type}`, () => action(deviceId), true);
         };
+        const setSignalOpen = (open) => {
+            root.querySelector('#callSignal')?.setAttribute('aria-expanded', String(open));
+            const detail = root.querySelector('#callSignalDetail');
+            if (detail) detail.hidden = !open;
+        };
         const handleDocumentClick = (event) => {
+            if (!root.querySelector('.media-dock-timer')?.contains(event.target)) setSignalOpen(false);
             const action = event.target.closest?.('[data-share-action]')?.dataset.shareAction;
             if (action) {
                 if (action === 'stop') {
@@ -975,6 +991,11 @@
                 }
             }
             if (event.key === 'Escape') {
+                if (!openPopoverType && root.querySelector('#callSignal')?.getAttribute('aria-expanded') === 'true') {
+                    event.preventDefault();
+                    setSignalOpen(false);
+                    return;
+                }
                 if (openPopoverType) event.preventDefault();
                 if (openPopoverType === 'screen') { event.preventDefault(); cancelShareDialog(); }
                 else closePopovers();
@@ -1019,6 +1040,8 @@
             refs.frameRateSelect.value = String(frameRate);
 
             listen(refs.sessionButton, 'click', handleSessionClick);
+            const signal = root.querySelector('#callSignal');
+            listen(signal, 'click', () => setSignalOpen(signal.getAttribute('aria-expanded') !== 'true'));
             listen(refs.micButton, 'click', handleMicrophoneClick);
             listen(refs.cameraButton, 'click', handleCameraClick);
             listen(refs.screenButton, 'click', handleScreenClick);
@@ -1130,6 +1153,7 @@
             }
             destroyed = true;
             pendingActions.clear();
+            setSignalOpen(false);
             closePopovers();
             listenerCleanups.splice(0).forEach((cleanup) => cleanup());
             unsubscribe?.();

@@ -101,6 +101,33 @@ const ICONS = Object.freeze({
 });
 
 const instances = new WeakMap();
+let meterId = 0;
+
+const syncMicLevel = (button, value) => {
+    const instance = instances.get(button);
+    if (!instance) return false;
+    const level = instance.current === 'mic' && Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
+    if (!instance.meter) {
+        const defs = document.createElementNS(SVG_NS, 'defs');
+        const clip = document.createElementNS(SVG_NS, 'clipPath');
+        const shape = document.createElementNS(SVG_NS, 'rect');
+        const fill = document.createElementNS(SVG_NS, 'rect');
+        clip.id = `voice-mic-meter-${++meterId}`;
+        clip.setAttribute('clipPathUnits', 'userSpaceOnUse');
+        for (const [key, val] of Object.entries({ x: 9, y: 3, width: 6, height: 11, rx: 3 })) shape.setAttribute(key, val);
+        clip.append(shape); defs.append(clip);
+        fill.classList.add('mic-level-fill');
+        fill.setAttribute('x', '9'); fill.setAttribute('width', '6');
+        fill.setAttribute('stroke', 'none'); fill.setAttribute('fill', '#2eac76');
+        fill.setAttribute('clip-path', `url(#${clip.id})`);
+        instance.svg.prepend(defs, fill);
+        instance.meter = fill;
+    }
+    instance.meter.setAttribute('y', String(14 - level * 11));
+    instance.meter.setAttribute('height', String(level * 11));
+    button.dataset.micLevel = String(Math.round(level * 100));
+    return true;
+};
 
 const createSvg = () => {
     const svg = document.createElementNS(SVG_NS, 'svg');
@@ -158,6 +185,7 @@ const syncButtonIcon = (button, iconName, { animate = true } = {}) => {
     }
 
     button.dataset.morphIcon = iconName;
+    if (iconName !== 'mic' && instance.meter) syncMicLevel(button, 0);
     return true;
 };
 
@@ -172,6 +200,7 @@ const destroyButtonIcon = (button) => {
 window.VoiceMorphIconUI = {
     destroyButtonIcon,
     syncButtonIcon,
+    syncMicLevel,
 };
 
-export { destroyButtonIcon, syncButtonIcon };
+export { destroyButtonIcon, syncButtonIcon, syncMicLevel };

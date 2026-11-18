@@ -77,11 +77,37 @@ const resumeFixture = () => {
         { window: localWindow, Date: { now: () => now } });
     const runtime = localWindow.VoiceShareWatchStatus.createRuntime({ root, getSource: () => source });
     runtime.init();
-    return { runtime, tile, video, source, button: tile.querySelector('button'), label: tile.querySelector('span'),
+    return { runtime, tile, video, source, global: localWindow, button: tile.querySelector('button'), label: tile.querySelector('span'),
         tick: () => tick(), advance: ms => { now += ms; },
         emit: type => video.listeners.get(type).forEach(handler => handler()) };
 };
 const settleResume = () => new Promise(resolve => setImmediate(resolve));
+
+test('visible resume owns only its paused stream and releases ownership on resume, replacement and teardown', () => {
+    const f = resumeFixture(); const shouldDefer = f.global.VoiceShareWatchStatus.shouldDeferPlaybackRecovery;
+    assert.equal(shouldDefer(f.video), true);
+    f.video.paused = false; assert.equal(shouldDefer(f.video), false);
+    f.emit('playing'); f.video.paused = true; assert.equal(shouldDefer(f.video), false);
+    f.emit('pause'); assert.equal(shouldDefer(f.video), true);
+    f.video.srcObject = { getVideoTracks: () => [{ readyState: 'live' }] };
+    assert.equal(shouldDefer(f.video), false, 'a replacement stream retains automatic startup recovery');
+    f.tick(); assert.equal(shouldDefer(f.video), true);
+    f.runtime.destroy(); assert.equal(shouldDefer(f.video), false);
+});
+
+test('background audio recovery preserves the visible resume action while its click plays the original video', async () => {
+    const f = resumeFixture(); let plays = 0;
+    f.video.srcObject.getTracks = () => [{readyState:'live'}];
+    f.video.play = () => { plays++; f.video.paused = false; return Promise.resolve(); };
+    vm.runInNewContext(readFileSync(new URL('../src/views/js/voice/voice-audio-recovery.js', import.meta.url), 'utf8'), {window:f.global});
+    const recovery = f.global.VoiceAudioRecovery.createRuntime({ getMediaElements: () => [f.video] });
+    recovery.recover(); await settleResume(); assert.equal(plays, 0);
+    f.button.click(); await settleResume(); assert.equal(plays, 1);
+    assert.equal(f.tile.dataset.playbackState, 'playing');
+    f.video.paused = true; f.emit('pause');
+    recovery.recover({userGesture:true}); await settleResume(); assert.equal(plays, 2);
+    recovery.dispose(); f.runtime.destroy();
+});
 
 const bufferingFixture = () => {
     const f = resumeFixture(); f.video.paused = false;

@@ -1,5 +1,6 @@
 (function exposeShareWatchStatus(global) {
     'use strict';
+    const manualResumeStreams = new WeakMap();
 
     // Read existing transport snapshots and player events. No capture, stats
     // polling, retry policy or route changes belong in this presentation layer.
@@ -27,6 +28,7 @@
         };
         const release = () => {
             resumeRevision++;
+            if (video) manualResumeStreams.delete(video);
             cleanups.splice(0).forEach((cleanup) => cleanup());
             panel?.remove(); panel = label = resume = undefined;
             tile = video = stream = undefined; waitingSince = 0;
@@ -51,6 +53,10 @@
                 waiting: waitingSince > 0 && Date.now() - waitingSince > 800, connections });
             const text = state.state === 'paused' && failedResumeRevision === resumeRevision
                 ? '浏览器未能恢复播放，请检查媒体权限后重试。' : state.text;
+            // The visible resume action owns this pause. Background audio
+            // recovery must not race the user's click on the same stream.
+            if (state.resume && video?.srcObject) manualResumeStreams.set(video, video.srcObject);
+            else if (video) manualResumeStreams.delete(video);
             if (tile.dataset.playbackState !== state.state) tile.dataset.playbackState = state.state;
             if (label.textContent !== text) label.textContent = text;
             panel.hidden = !text;
@@ -126,5 +132,6 @@
             },
         };
     };
-    global.VoiceShareWatchStatus = { createRuntime, describe };
+    global.VoiceShareWatchStatus = { createRuntime, describe,
+        shouldDeferPlaybackRecovery: (element) => Boolean(element?.paused && element.srcObject && manualResumeStreams.get(element) === element.srcObject) };
 })(window);

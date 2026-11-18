@@ -369,6 +369,11 @@ test('page loads only active resources and stage code cannot capture or change m
     const source = read('js/room/stage-layout-runtime.js');
     assert.doesNotMatch(source, /setReceiveRoute|RTCPeerConnection|getUserMedia|getDisplayMedia|replaceTrack|\.stop\(|localStorage|\.clone\(/);
     for (const [, url] of html.matchAll(/(?:src|href)="(\/(?:js\/|styles\/|style\.css)[^"]+)"/g)) {
+        if (url.startsWith('/js/room/boot-runtime.js?')) {
+            for (const path of JSON.parse(read('js/room/boot-scripts.json')))
+                assert.doesNotThrow(() => read(path.slice(1)), `missing bundled source ${path}`);
+            continue;
+        }
         assert.doesNotThrow(() => read(url.slice(1).split('?')[0]), `missing resource ${url}`);
     }
     assert.match(read('js/voice/voice-media-quality-view.js'), /state\.control\.change\(mode\)/);

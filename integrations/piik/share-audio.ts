@@ -7,16 +7,27 @@ export function parseAudioTarget(key: unknown) {
     return {pid: Number(match[1]), creationTime: match[2]};
 }
 export function nativeAudioSelection(options: any, client: NativeClient, source: any) {
-    const mode = options.nativeAudioMode || (options.shareAudio ? 'source' : 'none');
+    let mode = options.nativeAudioMode || (options.shareAudio ? 'source' : 'none');
     if (!['none', 'system', 'application', 'source'].includes(mode)) throw Error('请选择有效的共享音频模式');
     if (mode === 'source') {
+        if (!options.shareAudio) return {audio: false, microphoneMixing: false};
         if (options.shareAudio && !(source.kind === 'window' ? client.health.nativeMedia.processAudio : client.health.nativeMedia.systemAudio))
             throw Error('当前客户端不支持此来源的声音');
-        return {audio: options.shareAudio === true, microphoneMixing: false};
+        // Legacy display capture is endpoint loopback, including received voice.
+        // Reuse the independent process-tree path instead of starting that mix.
+        if (source.kind !== 'window') {
+            if (!client.health.nativeMedia.independentAudio || !client.health.nativeMedia.processAudioExclusion)
+                throw Error('旧版整屏声音会回传通话，请升级客户端后使用“系统声音（排除本客户端）”，或选择独立应用窗口声音');
+            mode = 'system';
+        } else if (client.health.nativeMedia.independentAudio) {
+            const target = parseAudioTarget(`${source.pid}:${source.creationTime}`);
+            if (!target) throw Error('窗口应用音源已失效，请刷新并重新选择');
+            return {audioMode: 'application' as const, audioTarget: target, audio: true, microphoneMixing: false};
+        } else return {audio: true, microphoneMixing: false};
     }
     if (!client.health.nativeMedia.independentAudio) {
         if (mode === 'none') return {audio: false, microphoneMixing: false};
-        throw Error('独立音源需要新版 Windows 客户端；旧版可使用“随画面”声音');
+        throw Error('独立音源需要新版 Windows 客户端；旧版可选择应用窗口声音');
     }
     const target = mode === 'application' ? parseAudioTarget(options.nativeAudioTargetKey) : null;
     if (mode === 'application' && (!target || !client.health.nativeMedia.processAudio)) throw Error('请选择有效的应用音源；应用重启后需刷新重选');
@@ -76,7 +87,7 @@ export function createAudioSourcePicker() {
             none: '仅共享画面，麦克风语音保持独立。',
             system: '系统声音将排除本客户端进程树。其他浏览器或通话软件的声音仍可能被共享。',
             application: '列出当前会话中可访问的进程（最多 1024 项，含无窗口应用），优先显示有音频会话的进程。采集所选进程及其子进程；无声时保持静音。浏览器可能包含多个标签页，也可能由其他进程播放，无法保证单标签隔离。应用重启后需刷新重选。',
-            source: '旧版能力：窗口对应应用声音，或整屏系统声音；整屏声音可能包含通话。',
+            source: '窗口共享对应应用声音；整屏声音仅在能排除本客户端通话时启动，否则提示升级客户端。',
         };
         if (hint) hint.textContent = descriptions[mode?.value || 'none'];
     };

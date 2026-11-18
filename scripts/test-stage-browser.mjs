@@ -2,6 +2,7 @@
 // Optional local automation using an isolated headless Edge profile, fake
 // microphone/camera and synthetic canvas shares. No real screen is captured.
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -43,14 +44,18 @@ const evaluate = async (sessionId, expression) => {
     return result.result.value;
 };
 const probe = `(() => {
-    window.__stageProbe = { offers: 0, replaceTracks: 0, captures: 0, shares: [] };
+    window.__stageProbe = { offers: 0, replaceTracks: 0, captures: 0, shares: [], captureCalls: [] };
     Object.defineProperty(navigator, 'clipboard', { configurable:true, value:{writeText:async(text)=>{window.__copiedDiagnostics=JSON.parse(text);}} });
     const offer = RTCPeerConnection.prototype.createOffer;
     RTCPeerConnection.prototype.createOffer = function(...args) { window.__stageProbe.offers++; return offer.apply(this, args); };
     const replace = RTCRtpSender.prototype.replaceTrack;
     RTCRtpSender.prototype.replaceTrack = function(...args) { window.__stageProbe.replaceTracks++; return replace.apply(this, args); };
     const capture = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
-    navigator.mediaDevices.getUserMedia = (...args) => { window.__stageProbe.captures++; return capture(...args); };
+    navigator.mediaDevices.getUserMedia = (...args) => {
+        window.__stageProbe.captures++;
+        window.__stageProbe.captureCalls.push({ at:performance.now(), focused:document.activeElement?.outerHTML.slice(0,160), stack:new Error().stack });
+        return capture(...args);
+    };
     navigator.mediaDevices.getDisplayMedia = async () => {
         const canvas = document.createElement('canvas'); canvas.width = 1280; canvas.height = 720;
         const ctx = canvas.getContext('2d');
@@ -81,7 +86,11 @@ const viewportReady = async (session, width, height) => {
     await send('Page.bringToFront', {}, session);
     await wait(() => evaluate(session, `!document.hidden && document.querySelector('#main').dataset.viewportMode === '${compactViewport(width,height) ? 'compact' : 'wide'}'`), `viewport navigation reconciled ${width}x${height}`);
 };
+const lastTouch = new Map();
 const tap = async (session, selector) => {
+    // Chromium's touch emulator otherwise coalesces consecutive scripted taps
+    // into double-taps while native fullscreen/popover animations are pending.
+    await delay(Math.max(0, 600 - (Date.now() - (lastTouch.get(session) || 0))));
     let point;
     await wait(async () => {
         const next = await evaluate(session, `(() => { const n=document.querySelector(${JSON.stringify(selector)}); if (!n) return {hit:false}; const r=n.getBoundingClientRect(), x=r.x+r.width/2, y=r.y+r.height/2; return {x,y,hit:r.width>0 && r.height>0 && n.contains(document.elementFromPoint(x,y))}; })()`);
@@ -93,6 +102,7 @@ const tap = async (session, selector) => {
     }, `touch target is visible and unobstructed: ${selector}`);
     await send('Input.dispatchTouchEvent', { type:'touchStart', touchPoints:[{ x:point.x,y:point.y }] }, session);
     await send('Input.dispatchTouchEvent', { type:'touchEnd', touchPoints:[] }, session);
+    lastTouch.set(session, Date.now());
 };
 const screenshot = async (session, name) => {
     if (!artifacts) return;
@@ -111,7 +121,7 @@ const geometry = (session) => evaluate(session, `(() => {
         stage:rect('.room-stage'), members:rect('.stage-members'), chat:rect('#chat-panel'), dock:rect('.stage-dock'), sidebar:rect('.stage-sidebar-column'), nav:rect('.room-sidebar'), main:rect('#main'),
         dockCount:document.querySelectorAll('#buttons').length, sidebarBrand:document.querySelector('.server-navigation')!==null,
         cards:[...document.querySelectorAll('#member-cards > *')].map((n) => { const r=n.getBoundingClientRect(); return {x:r.x,y:r.y,w:r.width,h:r.height}; }),
-        icons:[...document.querySelectorAll('.stage-dock svg, .stage-dock button > i')].filter(n=>n.getBoundingClientRect().width>0).map(n=>{const r=n.getBoundingClientRect(),b=n.closest('button').getBoundingClientRect();return {w:r.width,h:r.height,inside:r.x>=b.x && r.y>=b.y && r.right<=b.right+.5 && r.bottom<=b.bottom+.5};}),
+        icons:[...document.querySelectorAll('.stage-dock button svg, .stage-dock button > i')].filter(n=>n.getBoundingClientRect().width>0).map(n=>{const r=n.getBoundingClientRect(),b=n.closest('button').getBoundingClientRect();return {w:r.width,h:r.height,inside:r.x>=b.x && r.y>=b.y && r.right<=b.right+.5 && r.bottom<=b.bottom+.5};}),
         controls:[...document.querySelectorAll('.media-dock-actions button, #destroyPeer, #copyRoomLink')].map(n=>{const r=n.getBoundingClientRect();return {w:r.width,h:r.height,x:r.x,right:r.right};}),
         cardActions:[...document.querySelectorAll('#member-cards .tile-header button')].filter(n=>n.getBoundingClientRect().width>0).map(n=>{const r=n.getBoundingClientRect(),c=n.closest('.member-card').getBoundingClientRect();return r.left>=c.left && r.right<=c.right+.5 && r.top>=c.top && r.bottom<=c.bottom+.5;}) };
     const focus = document.querySelector('#video-grid > .is-stage-focus video'); if (focus) result.fit = getComputedStyle(focus).objectFit;
@@ -141,6 +151,15 @@ const checkDock = (result) => {
 
 try {
     await wait(async () => { try { return (await fetch(`http://127.0.0.1:${port}/room/lobby`)).ok; } catch { return false; } }, 'isolated local server');
+    const origin = `http://127.0.0.1:${port}`;
+    const html = await (await fetch(`${origin}/room/lobby`)).text();
+    await Promise.all(['/style.css', '/js/room/boot-runtime.js', '/script.js'].map(async (path) => {
+        const version = html.split(`"${path}?v=`)[1]?.split('"')[0];
+        assert.match(version ?? '', /^[\da-f]{64}$/, `content version in HTML for ${path}`);
+        const response = await fetch(`${origin}${path}?v=${version}`);
+        assert.equal(response.status, 200);
+        assert.equal(createHash('sha256').update(Buffer.from(await response.arrayBuffer())).digest('hex'), version, `hash matches served bytes for ${path}`);
+    }));
     browser = spawn(browserPath, ['--headless=new', '--mute-audio', '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--remote-debugging-port=0', `--user-data-dir=${join(work, 'profile')}`,
         '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--autoplay-policy=no-user-gesture-required', 'about:blank'], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     let browserLog = ''; browser.stderr.on('data', (value) => { browserLog += value; });
@@ -160,7 +179,25 @@ try {
         else if (message.method === 'Network.responseReceived' && message.params.response.status >= 400 &&
             !message.params.response.url.endsWith('/favicon.ico')) requests.push(message.params.response.url);
     });
+    const noiseSession = await open();
+    assert.equal(await evaluate(noiseSession, `VoiceNoiseSettingsUI.getNoiseMode()`), 'rnnoise', 'fresh page defaults to RNNoise');
+    assert.equal(await evaluate(noiseSession, `__stageProbe.captures`), 0, 'default preference must not capture before joining');
+    assert.equal(await evaluate(noiseSession, `performance.getEntriesByType('resource').some(n=>/rnnoise.*wasm/.test(n.name))`), false, 'default model stays lazy before microphone use');
+    await click(noiseSession, '#stageJoinVoice');
+    await wait(() => evaluate(noiseSession, `document.querySelector('#toggleAudio').getAttribute('aria-busy') === 'false' && document.querySelector('[data-audio-processing-status]').textContent.includes('实际：RNNoise')`), 'first join actually uses the default RNNoise worklet', 20000);
+    assert.equal(await evaluate(noiseSession, `document.querySelector('[data-audio-noise-mode]').value`), 'rnnoise');
+    await screenshot(noiseSession, 'default-rnnoise-active');
+    await click(noiseSession, '#destroyPeer');
+    await wait(() => evaluate(noiseSession, `document.querySelector('#destroyPeer').dataset.sessionAction === 'join'`), 'default RNNoise test leaves its isolated voice session');
+    await send('Page.close', {}, noiseSession);
     const a = await open({ width:390, height:844, mobile:true });
+    assert.equal(await evaluate(a, `VoiceNoiseSettingsUI.getNoiseMode()`), 'rnnoise', 'fresh page defaults to RNNoise');
+    assert.equal(await evaluate(a, `__stageProbe.captures`), 0, 'default preference must not capture before joining');
+    assert.equal(await evaluate(a, `performance.getEntriesByType('resource').some(n=>/rnnoise.*wasm/.test(n.name))`), false, 'default model stays lazy before microphone use');
+    // RNNoise may correctly suppress the browser's fake test tone. Keep the
+    // existing synthetic media/mic-fill suite on an explicit browser preference.
+    await evaluate(a, `(() => {const select=document.querySelector('[data-audio-noise-mode]'); select.value='browser'; select.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+    await wait(() => evaluate(a, `VoiceNoiseSettingsUI.getNoiseMode()==='browser'`), 'explicit browser choice remains selectable before joining');
     assert.equal((await geometry(a)).stage.display, 'none');
     await wait(() => evaluate(a, `document.querySelector('#main').dataset.channelOccupancy === 'empty'`), 'empty channel guide');
     assert.equal(await evaluate(a, `document.querySelector('#members-empty').hidden`), false);
@@ -184,6 +221,7 @@ try {
     await screenshot(a, 'not-joined');
     await click(a, '#stageJoinVoice');
     await wait(() => evaluate(a, `document.querySelector('#destroyPeer').dataset.sessionAction === 'hangup' && Boolean(document.querySelector('#local-video'))`), 'first voice join');
+    await wait(() => evaluate(a, `document.querySelector('#toggleAudio').getAttribute('aria-busy') === 'false'`), 'default microphone initialization completes', 20000);
     if (await evaluate(a, `document.querySelector('#toggleAudio').getAttribute('aria-pressed') !== 'true'`)) await click(a, '#toggleAudio');
     await wait(() => evaluate(a, `document.querySelector('#toggleAudio').getAttribute('aria-pressed') === 'true'`), 'synthetic microphone enabled');
     await click(a, '#toggleVideo');
@@ -193,6 +231,46 @@ try {
     await click(b, '#stageJoinVoice');
     await wait(() => evaluate(a, `document.querySelectorAll('#member-cards > *').length === 2`), 'second participant');
     await wait(() => evaluate(b, `document.querySelector('#destroyPeer').dataset.sessionAction === 'hangup'`), 'second voice join');
+    await wait(() => evaluate(b, `Number(document.querySelector('#callSignal').dataset.bars)>0 && document.querySelector('#callSignal').getAttribute('aria-label').includes('往返延迟')`), 'real WebRTC stats update the call signal', 20000);
+    await wait(() => evaluate(b, `Number(document.querySelector('#toggleAudio').dataset.micLevel)>0 && Number(document.querySelector('#toggleAudio .mic-level-fill')?.getAttribute('height'))>0`), 'fake microphone audio fills the real mic icon');
+    await screenshot(b, 'live-call-signal-and-mic');
+    const signalBounds = `(() => {const n=document.querySelector('#callSignalDetail'),r=n.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return {fits:!n.hidden && r.width>0 && r.left>=0 && r.right<=innerWidth && r.top>=0 && r.bottom<=innerHeight && n.contains(hit),hidden:n.hidden,rect:r.toJSON(),hit:hit?.className,focus:document.activeElement?.id};})()`;
+    await viewportReady(b,1920,1080);
+    await evaluate(b, `document.querySelector('#callSignal').focus()`);
+    const key = async (value, code) => {
+        await send('Input.dispatchKeyEvent', { type: code === 13 ? 'keyDown' : 'rawKeyDown', key:value, code:value, windowsVirtualKeyCode:code, ...(code === 13 ? { text:'\r', unmodifiedText:'\r' } : {}) }, b);
+        await send('Input.dispatchKeyEvent', { type:'keyUp', key:value, code:value, windowsVirtualKeyCode:code }, b);
+    };
+    await key('Enter', 13);
+    const desktopSignal = await evaluate(b, signalBounds);
+    assert.ok(desktopSignal.fits, `keyboard opens signal details within desktop bounds: ${JSON.stringify(desktopSignal)}`);
+    assert.equal(await evaluate(b, `document.querySelector('#callSignal').hasAttribute('title')`), false, 'only one quality hint');
+    await screenshot(b, 'live-call-signal-details');
+    await key('Escape', 27);
+    assert.equal(await evaluate(b, `document.querySelector('#callSignalDetail').hidden`), true);
+    await key('Enter', 13);
+    await click(b, '[data-control-menu="mic"]');
+    assert.equal(await evaluate(b, `document.querySelector('#callSignalDetail').hidden && document.querySelector('[data-device-popover="mic"]').classList.contains('is-open')`), true, 'device settings dismiss the quality details');
+    await click(b, '[data-device-popover="mic"] [data-control-close]');
+    for (const [width,height] of [[320,640], [390,844], [844,390]]) {
+        await send('Emulation.setDeviceMetricsOverride', { width,height,deviceScaleFactor:1,mobile:true }, b);
+        await send('Emulation.setTouchEmulationEnabled', { enabled:true }, b);
+        await viewportReady(b,width,height);
+        await tap(b, '#callSignal');
+        const mobileSignal = await evaluate(b, signalBounds);
+        assert.ok(mobileSignal.fits, `touch opens signal details within ${width}x${height}: ${JSON.stringify(mobileSignal)}`);
+        assert.equal(await evaluate(b, `document.querySelector('#callDuration').getBoundingClientRect().width > 0`), true);
+        await screenshot(b, `live-call-signal-${width}`);
+        await tap(b, '#stageStageToggle');
+        assert.equal(await evaluate(b, `document.querySelector('#callSignalDetail').hidden`), true, 'tap outside dismisses details');
+    }
+    await send('Emulation.setDeviceMetricsOverride', { width:1920,height:1080,deviceScaleFactor:1,mobile:false }, b);
+    await send('Emulation.setTouchEmulationEnabled', { enabled:false }, b);
+    await viewportReady(b,1920,1080);
+    await click(b, '#toggleAudio');
+    await wait(() => evaluate(b, `document.querySelector('#toggleAudio').dataset.morphIcon==='mic-off' && Number(document.querySelector('#toggleAudio').dataset.micLevel)===0`), 'muted microphone icon has no volume fill');
+    await click(b, '#toggleAudio');
+    await wait(() => evaluate(b, `Number(document.querySelector('#toggleAudio').dataset.micLevel)>0`), 'unmuting resumes measured mic fill');
     await wait(() => evaluate(b, `document.querySelector('#member-cards > :not(#local-video) video')?.videoWidth > 0 && document.querySelector('#member-cards > :not(#local-video) video').srcObject.getAudioTracks().length === 1`), 'remote camera and voice reception');
     await evaluate(b, `window.__cameraTile = document.querySelector('#member-cards > :not(#local-video)'); window.__cameraPlayer = __cameraTile.querySelector('video'); window.__cameraMic = __cameraPlayer.srcObject.getAudioTracks()[0];`);
     // Exercise the compact mobile sender UI; no physical device or camera is used.
@@ -283,7 +361,7 @@ try {
         await wait(() => evaluate(b, `document.querySelector('[data-device-popover="mic"]').classList.contains('is-open')`), 'touch opens microphone settings');
         if (width === 390) await screenshot(b, 'mobile-microphone-settings');
         await tap(b, '[data-device-popover="mic"] [data-control-close]');
-        await wait(() => evaluate(b, `!document.querySelector('[data-device-popover="mic"]').classList.contains('is-open')`), 'settings have an explicit close action');
+        await wait(() => evaluate(b, `!document.querySelector('[data-device-popover="mic"]').classList.contains('is-open')`), `settings have an explicit close action at ${width}x${height}`);
         await tap(b, '#video-grid > .is-stage-focus .voice-player-more');
         assert.equal(await evaluate(b, `document.querySelector('.voice-player-menu').textContent.includes('连接方式') && document.querySelector('.voice-player-menu').textContent.includes('调整音量')`), true, 'secondary share controls remain accessible');
         await tap(b, '.voice-player-menu button:nth-child(4)');
@@ -295,7 +373,9 @@ try {
         assert.deepEqual(await evaluate(b, `__originalPlayers.filter(({node,stream})=>!node.isConnected || node.srcObject!==stream).map(({node})=>node.tagName)`), [], 'mobile navigation preserves exact players and streams');
         await screenshot(b, `mobile-sharing-${width}`);
     }
-    assert.deepEqual(await evaluate(b, `({offers:__stageProbe.offers,replaceTracks:__stageProbe.replaceTracks,captures:__stageProbe.captures})`), counters, 'mobile tabs and settings never capture or negotiate');
+    const afterMobileControls = await evaluate(b, `({offers:__stageProbe.offers,replaceTracks:__stageProbe.replaceTracks,captures:__stageProbe.captures})`);
+    if (afterMobileControls.captures !== counters.captures) console.error(await evaluate(b, `__stageProbe.captureCalls.slice(${counters.captures})`));
+    assert.deepEqual(afterMobileControls, counters, 'mobile tabs and settings never capture or negotiate');
     // Exercise actual playback and UI events without replacing any media tracks.
     await send('Emulation.setDeviceMetricsOverride', { width:390,height:844,deviceScaleFactor:1,mobile:true }, b);
     await viewportReady(b,390,844);
@@ -317,6 +397,61 @@ try {
     await wait(() => evaluate(b, `!document.querySelector('.is-web-fullscreen').classList.contains('player-controls-hidden')`), 'touch reveals fullscreen controls');
     await tap(b, '.is-web-fullscreen .fullscreen-btn');
     await wait(() => evaluate(b, `!document.querySelector('.is-web-fullscreen') && !document.fullscreenElement`), 'fullscreen exit restores original stage');
+    // Do not let a second touch at the same control become a double-tap.
+    await delay(700);
+    // Use real touch/native fullscreen, with a controlled orientation API because
+    // headless desktop Edge cannot prove a physical phone's orientation support.
+    await evaluate(b, `(() => {
+        window.__orientationProbe = {calls:[], reject:false};
+        window.__orientationMethods = {lock:Object.getOwnPropertyDescriptor(screen.orientation,'lock'), unlock:Object.getOwnPropertyDescriptor(screen.orientation,'unlock')};
+        Object.defineProperty(screen.orientation,'lock',{configurable:true,value:async mode=>{
+            __orientationProbe.calls.push({mode,fullscreen:Boolean(document.fullscreenElement)});
+            if(__orientationProbe.reject) throw new DOMException('controlled unsupported lock','NotSupportedError');
+        }});
+        Object.defineProperty(screen.orientation,'unlock',{configurable:true,value:()=>__orientationProbe.calls.push({mode:'unlock'})});
+    })()`);
+    await send('Emulation.setDeviceMetricsOverride', { width:390,height:844,deviceScaleFactor:1,mobile:true }, b);
+    await viewportReady(b,390,844);
+    await tap(b, '#video-grid > .is-stage-focus .fullscreen-btn');
+    // Allow the browser's native fullscreen transition to settle before exit.
+    await delay(500);
+    try {
+        await wait(() => evaluate(b, `Boolean(document.fullscreenElement) && __orientationProbe.calls.some(n=>n.mode==='landscape')`), 'native fullscreen requests landscape');
+    } catch (error) {
+        console.error('Initial orientation transition', await evaluate(b, `JSON.stringify({calls:__orientationProbe.calls,fullscreen:Boolean(document.fullscreenElement),web:Boolean(document.querySelector('.is-web-fullscreen'))})`));
+        console.error('Fullscreen warnings', warnings.slice(-6));
+        await screenshot(b, 'initial-orientation-transition-failed');
+        throw error;
+    }
+    assert.deepEqual(await evaluate(b, `__orientationProbe.calls`), [{mode:'landscape',fullscreen:true}]);
+    await tap(b, ':fullscreen .fullscreen-btn');
+    await wait(() => evaluate(b, `!document.fullscreenElement && __orientationProbe.calls.at(-1)?.mode==='unlock'`), 'native fullscreen releases orientation');
+    // Fullscreen exit finishes asynchronously after fullscreenElement clears.
+    // Let Chromium finish that transition before requesting it again by touch.
+    await delay(600);
+    await send('Emulation.setDeviceMetricsOverride', { width:390,height:844,deviceScaleFactor:1,mobile:true }, b);
+    await viewportReady(b,390,844);
+    await evaluate(b, `__orientationProbe.reject=true`);
+    await tap(b, '#video-grid > .is-stage-focus .fullscreen-btn');
+    try {
+        await wait(() => evaluate(b, `Boolean(document.fullscreenElement?.querySelector('.player-orientation-hint'))`), 'unsupported lock preserves fullscreen with guidance');
+    } catch (error) {
+        console.error('Orientation transition', await evaluate(b, `JSON.stringify({calls:__orientationProbe.calls,fullscreen:Boolean(document.fullscreenElement),hint:document.querySelector('.player-orientation-hint')?.outerHTML})`));
+        console.error('Fullscreen warnings', warnings.slice(-6));
+        await screenshot(b, 'orientation-transition-failed');
+        throw error;
+    }
+    assert.equal(await evaluate(b, `(() => {const h=document.querySelector(':fullscreen .player-orientation-hint'),r=h.getBoundingClientRect();return r.width>0 && r.left>=0 && r.right<=innerWidth && r.bottom<=innerHeight;})()`), true, 'rotation hint is readable inside portrait fullscreen');
+    await screenshot(b, 'mobile-native-fullscreen-rotation-hint');
+    await send('Emulation.setDeviceMetricsOverride', { width:844,height:390,deviceScaleFactor:1,mobile:true }, b);
+    await viewportReady(b,844,390);
+    await wait(() => evaluate(b, `getComputedStyle(document.querySelector(':fullscreen .player-orientation-hint')).display==='none'`), 'manual landscape hides rotation hint');
+    await screenshot(b, 'mobile-native-fullscreen-landscape');
+    await tap(b, ':fullscreen .fullscreen-btn');
+    await wait(() => evaluate(b, `!document.fullscreenElement && !document.querySelector('.player-orientation-hint')`), 'rotation hint removed on exit');
+    await evaluate(b, `for(const name of ['lock','unlock']) {const descriptor=__orientationMethods[name];if(descriptor)Object.defineProperty(screen.orientation,name,descriptor);else delete screen.orientation[name];}`);
+    await send('Emulation.setDeviceMetricsOverride', { width:390,height:844,deviceScaleFactor:1,mobile:true }, b);
+    await viewportReady(b,390,844);
     await tap(b, '[data-control-menu="mic"]');
     await send('Input.dispatchKeyEvent', { type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27 }, b);
     await send('Input.dispatchKeyEvent', { type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27 }, b);
@@ -458,8 +593,10 @@ try {
         viewportCases: layouts.length + voiceLayouts.length, memberGridCases:memberGrids.length, memberCounts:[1,2,3,4,8,12], cssViewports:layouts.map((row)=>row.viewport),
         routeChecks:useSfu ? ['automatic SFU','manual P2P','manual SFU','per-sharer preference retention'] : ['P2P','manual P2P','per-sharer preference retention'],
         tests:['empty and occupied channel guides','central join action','voice join','camera off clears remote player and preserves voice','camera restart renders fresh frames','chat after camera restart','camera off preserves active screen share','screen end with camera off clears video','two voice peers','synthetic share','responsive geometry in both modes','1/2/3/4/8/12 member grid fixtures','bounded dock icons and member actions','closing chat expands central stage','chat draft','no layout renegotiation/capture','two shares','focus retention/fallback','manual route retention','preview hide retains capture','last share end','member departure'],
-        mobilePolishChecks:['pause and resume original player','immersive auto-hide and touch reveal','fullscreen exit restores stage','close request dismisses settings','actual decode and playback statistics','unread badge and read acknowledgement','share end notice','no extra media capture or negotiation'],
+        mobilePolishChecks:['pause and resume original player','immersive auto-hide and touch reveal','fullscreen exit restores stage','native fullscreen with controlled landscape lock and unlock','rejected orientation lock preserves fullscreen and shows bounded hint','manual landscape hides hint and exit removes it','close request dismisses settings','actual decode and playback statistics','unread badge and read acknowledgement','share end notice','no extra media capture or negotiation'],
         diagnosticChecks:['compact export','checkpoint survives peer departure'], runtimeErrors:errors.length, failedResources:requests.length };
+    report.liveIndicatorChecks = ['actual WebRTC stats render call quality and metric details', 'keyboard and touch details stay in bounds on desktop and at 320/390/844 CSS pixels', 'outside click, device settings and Escape dismiss quality details', 'fake microphone RMS fills the real SVG icon', 'mute clears fill and unmute resumes live measurement'];
+    report.noiseDefaultChecks = ['fresh settings select RNNoise', 'no microphone capture or model download before joining', 'first join runs the actual RNNoise worklet', 'explicit browser mode remains selectable'];
     if (artifacts) writeFileSync(join(artifacts, 'report.json'), JSON.stringify(report, null, 2));
     console.log(JSON.stringify(report, null, 2));
 } finally {

@@ -3,6 +3,7 @@
     const STORAGE_KEY = 'voice-call-diagnostics-v1';
     const limits = { sessions: 5, events: 200, samples: 24 };
     const copyLimits = { events: 40, samples: 10 };
+    const diagnosticConnectionLimit = 16;
     const versionInfo = () => {
         const ua = global.navigator?.userAgent || '';
         const desktop = ua.match(/(?:eliyork-voice-desktop|EliYorkVoice|EliYork Voice)\/([0-9]+\.[0-9]+\.[0-9]+)(?=\s|$)/i);
@@ -92,7 +93,7 @@
             WebAudio输出切换支持: typeof global.AudioContext?.prototype.setSinkId === 'function',
         };
     };
-    const createRuntime = ({ getState, getConnections, getSources, getAudioRole, getReceiverHealth, sanitize, storage } = {}) => {
+    const createRuntime = ({ getState, getConnections, getSources, getAudioRole, getReceiverHealth, onConnectionQuality, sanitize, storage } = {}) => {
         let sessions = [];
         let current;
         let socket;
@@ -239,7 +240,8 @@
                     if (!pc || seen.has(pc)) return false;
                     seen.add(pc);
                     return true;
-                }).slice(0, 16);
+                }).filter((entry, index) => index < diagnosticConnectionLimit ||
+                    (onConnectionQuality && (entry.pc || entry).screenRoute !== 'SFU'));
                 const connections = await Promise.all(pcs.map(async (entry, index) => {
                     const pc = entry.pc || entry;
                     let timeout;
@@ -255,6 +257,9 @@
                         const reports = [...stats.values()];
                         const previous = sampleBaselines.get(pc) || new Map();
                         const next = new Map();
+                        const quality = onConnectionQuality && pc.screenRoute !== 'SFU'
+                            ? global.VoiceConnectionQuality.readConnection(reports, previous, pc) : null;
+                        reports.filter(row => row.type === 'remote-inbound-rtp').forEach(row => next.set(row.id, { ...row }));
                         const rows = reports.filter((row) => ['outbound-rtp', 'inbound-rtp'].includes(row.type) && (row.kind === 'audio' || row.mediaType === 'audio') && !row.isRemote);
                         const audio = rows.map((row) => {
                             const result = audioSummary(reports, row, previous.get(row.id));
@@ -263,12 +268,15 @@
                             return result;
                         });
                         sampleBaselines.set(pc, next);
-                        return { 序号: index + 1, 参与者序号: entry.ordinal || null, 连接用途: entry.purpose || null, 路径: pc.screenRoute === 'SFU' ? 'SFU' : 'P2P', 连接状态: pc.connectionState || null, ICE状态: pc.iceConnectionState || null, 音频流: audio };
-                    } catch { return { 序号: index + 1, 状态: '统计读取失败或超时' }; }
+                        return { quality, 序号: index + 1, 参与者序号: entry.ordinal || null, 连接用途: entry.purpose || null, 路径: pc.screenRoute === 'SFU' ? 'SFU' : 'P2P', 连接状态: pc.connectionState || null, ICE状态: pc.iceConnectionState || null, 音频流: audio };
+                    } catch { return { quality: pc.screenRoute !== 'SFU' ? { state: pc.connectionState || 'unknown' } : null, 序号: index + 1, 状态: '统计读取失败或超时' }; }
                     finally { global.clearTimeout(timeout); timeouts.delete(timeout); }
                 }));
                 if (!isCurrent()) return null;
-                const snapshot = sanitize({ 采样时间: new Date().toISOString(), 浏览器: browserInfo(), ...local, 共享: shares.filter(Boolean), 连接: connections });
+                if (onConnectionQuality) {
+                    try { onConnectionQuality(connections.map(entry => entry?.quality).filter(Boolean)); } catch { /* UI cannot interrupt diagnostics. */ }
+                }
+                const snapshot = sanitize({ 采样时间: new Date().toISOString(), 浏览器: browserInfo(), ...local, 共享: shares.filter(Boolean), 连接: connections.slice(0, diagnosticConnectionLimit) });
                 if (owned && current === owned) {
                     // Reuse the existing SFU health decision and ordinal. No second
                     // low-FPS detector, and no guessed mapping to a video tile.

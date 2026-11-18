@@ -8,6 +8,7 @@ dotenv.config();
 
 import { createWebServer } from './utils/WebServer.js';
 import { createMediaReadiness } from './utils/MediaReadiness.js';
+import { createRoomAssets, getRoomAssetVersions } from './utils/RoomAssets.js';
 
 import { Server as SocketServer } from 'socket.io';
 import { ExpressPeerServer } from 'peer';
@@ -313,6 +314,11 @@ const normalizeCursorPosition = (value) => {
 
 app.set('view engine', 'ejs');
 app.set('views', __dirname + '/views');
+const roomAssets = createRoomAssets(join(__dirname, 'views'));
+const roomAssetVersions = getRoomAssetVersions(roomAssets);
+app.get('/js/room/boot-runtime.js', (_, res) =>
+    res.type('js').send(roomAssets.runtime)
+);
 ['assets', 'audio-worklet', 'js', 'styles', 'vendor', 'wasm'].forEach((directory) =>
     app.use(
         `/${directory}`,
@@ -324,10 +330,10 @@ app.set('views', __dirname + '/views');
     )
 );
 app.get('/script.js', (_, res) =>
-    res.sendFile('script.js', { root: join(__dirname, 'views') })
+    res.type('js').send(roomAssets.mainScript)
 );
 app.get('/style.css', (_, res) =>
-    res.sendFile('style.css', { root: join(__dirname, 'views') })
+    res.type('css').send(roomAssets.stylesheet)
 );
 app.get('/favicon.ico', (_, res) =>
     res.sendFile('favicon.ico', { root: join(__dirname, 'views/assets/brand') })
@@ -348,6 +354,7 @@ app.get('/room/:channel', (req, res) => {
         channels: CHANNELS,
         roomId: channel.slug,
         channelName: channel.name,
+        roomAssetVersions,
         piikEnabled,
         roomBootstrap: JSON.stringify({
             buildInfo: { webVersion, webRevision },

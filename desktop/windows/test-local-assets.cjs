@@ -92,6 +92,8 @@ app.whenReady().then(async () => {
             if(navigator.mediaDevices?.[method]) navigator.mediaDevices[method]=()=>{state.captures++;return Promise.reject(Error('Real capture denied in local-assets test'));};
         }
         document.addEventListener('securitypolicyviolation',event=>state.violations.push({directive:event.effectiveDirective,uri:event.blockedURI}));
+        // This transport/CSP check joins silently even when the product defaults to an enabled mic.
+        document.querySelector('#toggleAudio').click();
         document.querySelector('#destroyPeer').click();
     })()`);
     await wait(`document.querySelector('#main').dataset.voiceState==='joined' && window.__localAssets.peers[0]?.open && window.__localAssets.socket?.io.engine.transport.name==='websocket'`);
