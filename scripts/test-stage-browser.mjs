@@ -57,9 +57,11 @@ const probe = `(() => {
         return capture(...args);
     };
     navigator.mediaDevices.getDisplayMedia = async () => {
-        const canvas = document.createElement('canvas'); canvas.width = 1280; canvas.height = 720;
+        const canvas = document.createElement('canvas');
+        canvas.width = __stageProbe.shareSize?.width ?? 1280;
+        canvas.height = __stageProbe.shareSize?.height ?? 720;
         const ctx = canvas.getContext('2d');
-        const draw = () => { ctx.fillStyle = '#39465c'; ctx.fillRect(0,0,1280,720); ctx.fillStyle = 'white'; ctx.font = '40px sans-serif'; ctx.fillText('Synthetic stage regression ' + Date.now(), 80, 200); };
+        const draw = () => { ctx.fillStyle = '#39465c'; ctx.fillRect(0,0,canvas.width,canvas.height); ctx.fillStyle = 'white'; ctx.font = '40px sans-serif'; ctx.fillText('Synthetic stage regression ' + Date.now(), 80, 200); };
         draw(); const timer = setInterval(draw, 100); const stream = canvas.captureStream(10);
         stream.getVideoTracks()[0].addEventListener('ended', () => clearInterval(timer));
         window.__stageProbe.shares.push(stream); return stream;
@@ -124,9 +126,25 @@ const geometry = (session) => evaluate(session, `(() => {
         icons:[...document.querySelectorAll('.stage-dock button svg, .stage-dock button > i')].filter(n=>n.getBoundingClientRect().width>0).map(n=>{const r=n.getBoundingClientRect(),b=n.closest('button').getBoundingClientRect();return {w:r.width,h:r.height,inside:r.x>=b.x && r.y>=b.y && r.right<=b.right+.5 && r.bottom<=b.bottom+.5};}),
         controls:[...document.querySelectorAll('.media-dock-actions button, #destroyPeer, #copyRoomLink')].map(n=>{const r=n.getBoundingClientRect();return {w:r.width,h:r.height,x:r.x,right:r.right};}),
         cardActions:[...document.querySelectorAll('#member-cards .tile-header button')].filter(n=>n.getBoundingClientRect().width>0).map(n=>{const r=n.getBoundingClientRect(),c=n.closest('.member-card').getBoundingClientRect();return r.left>=c.left && r.right<=c.right+.5 && r.top>=c.top && r.bottom<=c.bottom+.5;}) };
-    const focus = document.querySelector('#video-grid > .is-stage-focus video'); if (focus) result.fit = getComputedStyle(focus).objectFit;
+    const focus = document.querySelector('#video-grid > .is-stage-focus video');
+    if (focus) {
+        result.fit = getComputedStyle(focus).objectFit;
+        result.picture = { ...rect('#video-grid > .is-stage-focus video'), mediaWidth: focus.videoWidth, mediaHeight: focus.videoHeight };
+    }
     return result;
 })()`);
+const buttonContrast = async (session, selector) => {
+    const [color, background] = await evaluate(session, `(() => {
+        const css = getComputedStyle(document.querySelector(${JSON.stringify(selector)}));
+        return [css.color, css.backgroundColor];
+    })()`);
+    const luminance = (value) => value.match(/[0-9.]+/g).slice(0, 3)
+        .map((part) => Number(part) / 255)
+        .map((part) => part <= .04045 ? part / 12.92 : ((part + .055) / 1.055) ** 2.4)
+        .reduce((sum, part, index) => sum + part * [.2126, .7152, .0722][index], 0);
+    const values = [luminance(color), luminance(background)].sort((a, b) => b - a);
+    return { background, ratio: (values[0] + .05) / (values[1] + .05) };
+};
 const checkDock = (result) => {
     const [width,height] = result.viewport;
     assert.ok(result.dock.y + result.dock.h <= height + 1, `dock within viewport ${width}x${height}`);
@@ -202,6 +220,10 @@ try {
     await wait(() => evaluate(a, `document.querySelector('#main').dataset.channelOccupancy === 'empty'`), 'empty channel guide');
     assert.equal(await evaluate(a, `document.querySelector('#members-empty').hidden`), false);
     assert.equal(await evaluate(a, `document.querySelector('#main').dataset.mobilePanel`), 'stage', 'mobile never starts behind the chat panel');
+    const stageJoinContrast = await buttonContrast(a, '#stageJoinVoice');
+    const dockJoinContrast = await buttonContrast(a, '#destroyPeer');
+    assert.ok(stageJoinContrast.ratio >= 4.5 && dockJoinContrast.ratio >= 4.5, 'both join actions have readable text');
+    assert.notEqual(stageJoinContrast.background, dockJoinContrast.background, 'the Dock join uses a secondary style');
     await screenshot(a, 'mobile-idle');
     await tap(a, '#stageChannelsToggle');
     assert.equal(await evaluate(a, `getComputedStyle(document.querySelector('#stage-channels')).display !== 'none' && document.querySelector('#chat-panel').inert`), true);
@@ -221,6 +243,8 @@ try {
     await screenshot(a, 'not-joined');
     await click(a, '#stageJoinVoice');
     await wait(() => evaluate(a, `document.querySelector('#destroyPeer').dataset.sessionAction === 'hangup' && Boolean(document.querySelector('#local-video'))`), 'first voice join');
+    const dockLeaveContrast = await buttonContrast(a, '#destroyPeer');
+    assert.ok(dockLeaveContrast.ratio >= 4.5, 'the leave action has readable text');
     await wait(() => evaluate(a, `document.querySelector('#toggleAudio').getAttribute('aria-busy') === 'false'`), 'default microphone initialization completes', 20000);
     if (await evaluate(a, `document.querySelector('#toggleAudio').getAttribute('aria-pressed') !== 'true'`)) await click(a, '#toggleAudio');
     await wait(() => evaluate(a, `document.querySelector('#toggleAudio').getAttribute('aria-pressed') === 'true'`), 'synthetic microphone enabled');
@@ -334,6 +358,13 @@ try {
             assert.ok(result.chat.y + result.chat.h >= height - 1, 'chat uses released bottom space');
         } else assert.ok(result.members.y + result.members.h <= result.dock.y + 1, 'compact viewport member strip above dock');
         assert.equal(result.fit, 'contain');
+        if (width <= 640 && width < height) {
+            const { w, h, mediaWidth, mediaHeight } = result.picture;
+            const aspectHeight = w * mediaHeight / mediaWidth;
+            assert.ok(h > 0 && h <= aspectHeight + 2, `portrait video has no oversized matte at ${width}x${height}: ${JSON.stringify(result.picture)}`);
+            if (width <= 390) assert.ok(Math.abs(h - aspectHeight) <= 2, 'portrait video uses the full fitted size');
+            assert.ok(result.members.y <= result.stage.y + result.stage.h + 2, 'member strip follows the fitted player');
+        }
         assert.ok(result.cards.every((card) => card.w <= 320 && card.h <= 210), 'bounded member cards');
         layouts.push(result);
         if (width===1920 || width===390) await screenshot(b, `sharing-${width}`);
@@ -505,11 +536,23 @@ try {
         await click(routeSession, `[id="${routeTile}"] .voice-route-close`);
     }
     await send('Emulation.setDeviceMetricsOverride', { width:1920,height:1080,deviceScaleFactor:1,mobile:false }, b);
+    await evaluate(b, `window.__stageProbe.shareSize = {width:540,height:960}`);
     await share(b);
     await wait(() => evaluate(a, `document.querySelectorAll('#share-sources button').length === 2`), 'two simultaneous shares');
     await evaluate(a, `document.querySelectorAll('#share-sources button')[1].click(); window.__selectedSource = document.querySelector('#video-grid > .is-stage-focus').id;`);
     await click(a, '#stageChatToggle'); await click(a, '#stageChatToggle');
     assert.equal(await evaluate(a, `document.querySelector('#video-grid > .is-stage-focus').id === __selectedSource`), true);
+    await send('Emulation.setDeviceMetricsOverride', { width:390,height:844,deviceScaleFactor:1,mobile:true }, a);
+    await viewportReady(a,390,844);
+    await click(a, '#stageStageToggle');
+    await wait(() => evaluate(a, `(() => {const video=document.querySelector('#video-grid > .is-stage-focus video');return video?.videoHeight>video?.videoWidth;})()`), 'portrait screen share reaches the receiver');
+    assert.equal(await evaluate(a, `(() => {
+        const video=document.querySelector('#video-grid > .is-stage-focus video'), r=video.getBoundingClientRect(), body=video.closest('.tile-body').getBoundingClientRect();
+        return getComputedStyle(video).objectFit==='contain' && r.height>r.width && r.y>=body.y-1 && r.bottom<=body.bottom+1;
+    })()`), true, 'portrait media fits inside the stage without overlapping the members');
+    await screenshot(a, 'mobile-portrait-source');
+    await send('Emulation.setDeviceMetricsOverride', { width:1920,height:1080,deviceScaleFactor:1,mobile:false }, a);
+    await viewportReady(a,1920,1080);
     await click(a, '.local-screen-preview-toggle');
     assert.equal(await evaluate(a, `__stageProbe.shares[0].getVideoTracks()[0].readyState`), 'live');
     assert.equal(await evaluate(b, `document.querySelectorAll('#share-sources button').length`), 2);
@@ -595,6 +638,7 @@ try {
         tests:['empty and occupied channel guides','central join action','voice join','camera off clears remote player and preserves voice','camera restart renders fresh frames','chat after camera restart','camera off preserves active screen share','screen end with camera off clears video','two voice peers','synthetic share','responsive geometry in both modes','1/2/3/4/8/12 member grid fixtures','bounded dock icons and member actions','closing chat expands central stage','chat draft','no layout renegotiation/capture','two shares','focus retention/fallback','manual route retention','preview hide retains capture','last share end','member departure'],
         mobilePolishChecks:['pause and resume original player','immersive auto-hide and touch reveal','fullscreen exit restores stage','native fullscreen with controlled landscape lock and unlock','rejected orientation lock preserves fullscreen and shows bounded hint','manual landscape hides hint and exit removes it','close request dismisses settings','actual decode and playback statistics','unread badge and read acknowledgement','share end notice','no extra media capture or negotiation'],
         diagnosticChecks:['compact export','checkpoint survives peer departure'], runtimeErrors:errors.length, failedResources:requests.length };
+    report.sessionButtonContrast = { stageJoin: stageJoinContrast.ratio, dockJoin: dockJoinContrast.ratio, dockLeave: dockLeaveContrast.ratio };
     report.liveIndicatorChecks = ['actual WebRTC stats render call quality and metric details', 'keyboard and touch details stay in bounds on desktop and at 320/390/844 CSS pixels', 'outside click, device settings and Escape dismiss quality details', 'fake microphone RMS fills the real SVG icon', 'mute clears fill and unmute resumes live measurement'];
     report.noiseDefaultChecks = ['fresh settings select RNNoise', 'no microphone capture or model download before joining', 'first join runs the actual RNNoise worklet', 'explicit browser mode remains selectable'];
     if (artifacts) writeFileSync(join(artifacts, 'report.json'), JSON.stringify(report, null, 2));

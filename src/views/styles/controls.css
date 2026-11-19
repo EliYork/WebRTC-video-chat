@@ -559,19 +559,20 @@
 
 #buttons #destroyPeer {
     width: 42px;
-    border-color: rgba(191, 82, 96, 0.28) !important;
-    background-color: #df6d7b !important;
-    color: #fff !important;
+    border-color: var(--danger);
+    background-color: var(--danger);
+    color: white;
 }
 
 #buttons #destroyPeer[data-session-action='join'] {
-    border-color: rgba(78, 168, 118, 0.28) !important;
-    background-color: #4ea876 !important;
+    border-color: var(--line);
+    background-color: var(--panel);
+    color: var(--accent-strong);
 }
 
-#buttons #destroyPeer[data-session-action='join']:hover,
-#buttons #destroyPeer[data-session-action='join']:focus-visible {
-    background-color: #3f9164 !important;
+#buttons #destroyPeer[data-session-action='join']:is(:hover, :focus-visible) {
+    border-color: var(--accent);
+    background-color: var(--accent-soft);
 }
 
 #buttons button[aria-busy='true'] {
@@ -579,9 +580,14 @@
     opacity: 0.68;
 }
 
-#buttons #destroyPeer:hover,
+#buttons #destroyPeer:not([data-session-action='join']):is(:hover, :focus-visible) {
+    border-color: var(--danger-strong);
+    background-color: var(--danger-strong);
+}
+
 #buttons #destroyPeer:focus-visible {
-    background-color: #c95c6c !important;
+    outline: 2px solid var(--accent-strong);
+    outline-offset: 2px;
 }
 
 .hidden {

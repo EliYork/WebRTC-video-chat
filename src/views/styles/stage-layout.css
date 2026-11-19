@@ -79,7 +79,9 @@ html[data-desktop-chrome] .workspace-download { display: none; }
 .members-empty h1 { margin: 20px 0 8px; font-size: clamp(20px, 2vw, 28px); color: var(--text); }
 .members-empty p { margin: 0 0 24px; line-height: 1.8; }
 .stage-welcome-mark { display: grid; place-items: center; width: 72px; height: 72px; margin: auto; border-radius: 24px; background: var(--accent-soft); color: var(--accent-strong); font-size: 36px; letter-spacing: -6px; padding-right: 6px; }
-#stageJoinVoice { min-height: 44px; padding: 10px 28px; border: 0; border-radius: 12px; background: var(--accent); color: white; font-weight: 650; cursor: pointer; }
+/* The stage owns the primary join action. The Dock carries secondary controls. */
+#stageJoinVoice { min-height: 44px; padding: 10px 28px; border: 0; border-radius: 12px; background: var(--accent-strong); color: white; font-weight: 650; cursor: pointer; }
+#stageJoinVoice:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 2px; }
 #stageJoinVoice:disabled { opacity: .6; cursor: progress; }
 .members-empty[hidden], #member-cards[hidden], #stageJoinVoice[hidden] { display: none; }
 #member-cards { display: grid; flex: 1; width: 100%; max-width: 1600px; margin: 0 auto; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); align-content: safe center; justify-content: center; gap: clamp(12px, 1.3vw, 24px); min-width: 0; min-height: 0; overflow: auto; scrollbar-gutter: stable; padding: 4px; }
@@ -297,4 +299,39 @@ html[data-desktop-chrome] .workspace-download { display: none; }
     .stage-dock #buttons :is(#copyRoomLink, #destroyPeer) { height: 48px; min-height: 48px; }
     .stage-dock #buttons #copyRoomLink { width: 36px; }
     #main.stage-layout:is([data-mobile-panel='chat'], [data-mobile-panel='channels']) { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; grid-template-areas: 'members' 'dock'; }
+}
+
+@media (max-width: 640px) and (orientation: portrait) {
+    #main.stage-layout[data-stage-mode='sharing'][data-mobile-panel='stage'] {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: minmax(0, max-content) minmax(108px, 1fr) auto;
+        grid-template-areas: 'stage' 'members' 'dock';
+    }
+    .stage-layout[data-stage-mode='sharing'] .stage-members { align-self: stretch; height: auto; }
+    .stage-layout[data-stage-mode='sharing'] #member-cards {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-auto-rows: 96px;
+        align-content: start;
+        overflow: auto;
+    }
+    .stage-layout[data-stage-mode='sharing'] #member-cards .member-card { width: 100%; max-width: none; }
+
+    /* The active video sizes the inline player. The stage can shrink on short screens. */
+    .stage-layout .room-stage #canvas { display: flex; flex: 0 1 auto; }
+    .stage-layout .room-stage #video-grid { display: flex; position: relative; inset: auto; width: 100%; }
+    #video-grid > .video-tile.is-stage-focus:not(:fullscreen, .is-web-fullscreen) {
+        position: relative;
+        inset: auto;
+        height: auto;
+    }
+    #video-grid > .is-stage-focus:not(:fullscreen, .is-web-fullscreen) .tile-body video {
+        position: static;
+        height: auto;
+        aspect-ratio: auto 16 / 9;
+    }
+    #video-grid > .is-stage-focus:not(:fullscreen, .is-web-fullscreen) .tile-body:not(:has(video)),
+    #video-grid > .is-stage-focus.is-local-preview-hidden:not(:fullscreen, .is-web-fullscreen) .tile-body {
+        aspect-ratio: 16 / 9;
+    }
 }
