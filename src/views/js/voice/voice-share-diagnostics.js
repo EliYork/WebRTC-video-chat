@@ -231,7 +231,7 @@
             const output = global.document.createElement('pre');
             output.tabIndex = 0;
             output.textContent =
-                '展开后等待两个采样周期；复现模糊或卡顿后，可从页面右上角复制诊断。';
+                '展开后等待两个采样周期，复现问题后复制诊断。';
             panel.append(summary, note, output);
             panel.addEventListener('dblclick', (event) =>
                 event.stopPropagation()

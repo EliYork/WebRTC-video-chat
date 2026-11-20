@@ -13,13 +13,12 @@ const {outputFiles}=await build({stdin:{contents:'export * from "./integrations/
         builder.onLoad({filter:/.*/,namespace:'mock'},()=>({contents:`
             export const NativeClient=window.FakeClient;
             export const NativeMediaBridge=window.FakeBridge;
-            export const discoverNativeConnect=async()=>null;
             export const defaultNativeCapturePath=()=>({adapterIndex:0,encoderIndex:0});
             export const nativeCaptureTargetKey=target=>target.sourceId;
         `}));}
 }]});
 const markup=ejs.render(readFileSync('src/views/room/share-dialog.ejs','utf8'),{piikPrototype:true});
-const css=readFileSync('src/views/styles/share-dialog.css','utf8');
+const css=['tokens', 'share-dialog'].map(name => readFileSync(`src/views/styles/${name}.css`,'utf8')).join('\n');
 const browser=await chromium.launch({channel:'msedge',headless:true,args:['--mute-audio']});
 try {
     const page=await browser.newPage();const errors=[];page.on('pageerror',error=>errors.push(error.message));
@@ -49,7 +48,10 @@ try {
     });
     await page.waitForSelector('[data-native-audio-target] option[value="42:420"]',{state:'attached'});
     await page.locator('[data-native-source-key="screen-A"]').click();
-    assert.equal(await page.locator('[data-native-audio-mode]').inputValue(),'none');
+    assert.equal(await page.locator('[data-native-audio-mode]').inputValue(),'system');
+    assert.equal(await page.locator('[data-native-audio-mode] option:checked').textContent(),'系统声音');
+    assert.equal(await page.locator('[data-screen-share-provider]').isVisible(),false);
+    assert.equal(await page.getByText(/授权/).count(),0);
     await page.locator('[data-native-audio-mode]').selectOption('application');
     await page.locator('[data-native-audio-target]').selectOption('42:420');
     assert.equal(await page.locator('[data-piik-native-source]').inputValue(),'screen-A');
@@ -58,7 +60,7 @@ try {
     await page.evaluate(()=>window.capture.capture({nativeSourceKey:'screen-A',nativeAudioMode:'application',nativeAudioTargetKey:'42:420',shareAudio:true,resolutionPreset:'1080p',frameRate:60},new AbortController().signal));
     await page.waitForFunction(()=>document.querySelector('[data-native-encoder-method]').textContent==='GPU 硬件编码');
     const input=await page.evaluate(()=>window.startInput);assert.equal(input.source.sourceId,'screen-A');assert.equal(input.audioTarget.pid,42);assert.equal(input.microphoneMixing,false);
-    const viewports=[[1920,1080],[2560,1440],[3840,2160],[900,650],[480,640]];
+    const viewports=[[1920,1080],[2560,1440],[3840,2160],[1280,720],[900,650],[480,640],[375,812]];
     const layouts=[];
     for(const [width,height] of viewports){
         await page.setViewportSize({width,height});
@@ -66,7 +68,11 @@ try {
         assert.ok(layout.x>=0 && layout.y>=0 && layout.width<=width && layout.height<=height);assert.equal(layout.horizontalOverflow,false);assert.equal(layout.bodyOverflow,false);
         await page.screenshot({path:resolve(directory,`dialog-${width}x${height}.png`)});layouts.push({viewport:[width,height],...layout});
     }
-    await page.locator('[data-screen-share-provider]').selectOption('web');
+    await page.evaluate(() => {
+        document.dispatchEvent(new Event('voice-share-dialog-close'));
+        document.querySelector('[data-screen-share-provider]').value='web';
+        document.dispatchEvent(new CustomEvent('voice-share-dialog-open',{detail:{mode:'source'}}));
+    });
     assert.equal(await page.locator('[data-native-audio-section]').isVisible(),false);assert.equal(await page.locator('[data-web-audio-section]').isVisible(),true);
     await page.evaluate(()=>{window.capture.stop();document.dispatchEvent(new Event('voice-share-dialog-close'));});
     const cancellation=await page.evaluate(async()=>{
@@ -85,9 +91,9 @@ try {
         await picker.load({health:{nativeMedia:{independentAudio:true}},audioSources:async()=>({systemSafe:false,sources:[]})});
         finishOld({systemSafe:true,sources:[{pid:99,creationTime:'990',name:'old.exe',active:false,hasSession:false,icon:''}]});
         await slow;
-        return {cancelled,newestOwnsList:!document.querySelector('[data-native-audio-target] option[value="99:990"]')};
+        return {cancelled,newestOwnsList:!document.querySelector('[data-native-audio-target] option[value="99:990"]'), unsafeSystemDisabled:document.querySelector('[data-native-audio-mode] option[value="system"]').disabled};
     });
-    assert.deepEqual(cancellation,{cancelled:true,newestOwnsList:true});
+    assert.deepEqual(cancellation,{cancelled:true,newestOwnsList:true,unsafeSystemDisabled:true});
     assert.deepEqual(errors,[]);
     writeFileSync(resolve(directory,'ui-result.json'),JSON.stringify({passed:true,syntheticOnly:true,layouts,cancellation,errors},null,2));
     process.stdout.write(`Share dialog: ${viewports.length} viewport sizes, independent audio and web capability checks passed.\n`);

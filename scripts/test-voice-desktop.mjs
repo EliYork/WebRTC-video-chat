@@ -84,8 +84,14 @@ try {
     assert.equal(data.audioMuted, true);
     assert.equal(data.roomReady, true);
     assert.equal(data.nativeHealth, 200);
+    assert.ok(data.nativePicker.cards > 0);
+    assert.deepEqual({ ...data.nativePicker, cards: undefined }, {
+        provider: 'native', providerHidden: true, audio: 'system', label: '系统声音',
+        cards: undefined, approvalVisible: false,
+    });
     assert.equal(data.clipboardWrite, true);
     assert.equal(data.diagnosticsCopied, true);
+    assert.equal(data.callDiagnosticsInSettings, true);
     assert.equal(data.diagnosticVersions.web, JSON.parse(readFileSync('package.json', 'utf8')).version);
     assert.equal(data.diagnosticVersions.desktop, JSON.parse(readFileSync('desktop/windows/package.json', 'utf8')).version);
     assert.equal(data.diagnosticVersions.schema, 5);

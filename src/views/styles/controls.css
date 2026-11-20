@@ -87,7 +87,7 @@
 }
 
 .media-dock-info strong {
-    color: #6b4356;
+    color: var(--text);
     font-size: 14px;
     font-weight: 800;
 }
@@ -263,7 +263,7 @@
 .control-button-wrap {
     position: relative;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 12px;
+    grid-template-columns: minmax(0, 1fr);
     gap: 0;
     min-width: 0;
 }
@@ -340,53 +340,34 @@
     transform: scale(0.97);
 }
 
-.control-button-wrap > button:first-child {
-    border-top-right-radius: 5px;
-    border-bottom-right-radius: 5px;
-}
-
-.control-menu-toggle {
-    width: 12px !important;
-    border-top-left-radius: 5px !important;
-    border-bottom-left-radius: 5px !important;
-    font-size: 10px !important;
-}
-
-/* Mouse users hover the action icon itself. Keep the separate settings
-   button available to touch and keyboard users without a visible arrow. */
-@media (hover: hover) and (pointer: fine) {
-    #buttons .control-button-wrap {
-        grid-template-columns: minmax(0, 1fr);
-    }
-
-    #buttons .control-menu-toggle {
-        position: absolute;
-        width: 1px !important;
-        height: 1px;
-        min-height: 0;
-        overflow: hidden;
-        clip-path: inset(50%);
-    }
-
-    #buttons .control-menu-toggle:focus-visible {
-        right: 0;
-        width: 20px !important;
-        height: 28px;
-        clip-path: none;
-    }
-
-    #buttons .control-button-wrap > button:first-child {
-        border-radius: 8px;
-    }
-}
-
 .media-dock-activity-row .media-dock-pill {
     min-height: 24px;
     font-size: 11px;
 }
 
-.control-button-wrap.is-open .control-menu-toggle i {
-    transform: rotate(180deg);
+#buttons .dock-device-tabs {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 4px;
+    padding: 4px;
+    border-radius: 8px;
+    background: var(--panel-soft);
+}
+
+#buttons .dock-device-tabs button {
+    width: 100%;
+    min-height: 36px;
+    padding: 4px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--muted);
+}
+
+#buttons .dock-device-tabs button[aria-current='true'] {
+    background: var(--panel);
+    color: var(--accent-strong);
+    box-shadow: var(--shadow);
 }
 
 .media-device-popover {
@@ -402,10 +383,10 @@
     transform: translateX(var(--popover-shift-x));
     gap: 8px;
     padding: 10px;
-    border: 1px solid rgba(216, 111, 154, 0.24);
-    border-radius: 8px;
-    background-color: rgba(255, 252, 254, 0.98);
-    box-shadow: 0 18px 36px rgba(120, 58, 87, 0.2);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background-color: var(--panel);
+    box-shadow: 0 12px 36px rgba(36, 41, 54, 0.16);
     color: var(--text);
 }
 
@@ -426,7 +407,7 @@
     align-items: center;
     justify-content: space-between;
     gap: 10px;
-    color: #6b4356;
+    color: var(--text);
     font-size: 12px;
 }
 
@@ -438,6 +419,19 @@
     font-weight: 700;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.call-log-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+#buttons .call-log-actions button {
+    width: auto;
+    min-height: 36px;
+    padding: 4px 10px;
 }
 
 .media-device-list {
@@ -469,9 +463,9 @@
 }
 
 .media-device-option[aria-pressed='true'] {
-    border-color: rgba(216, 111, 154, 0.42);
-    background-color: #fff0f6;
-    font-weight: 800;
+    border-color: var(--line);
+    background-color: var(--accent-soft);
+    font-weight: 650;
 }
 
 .media-device-option[aria-pressed='true'] i {
@@ -494,6 +488,8 @@
     font-size: 12px;
     font-weight: 700;
 }
+
+.media-device-popover :is(input[type="range"], input[type="checkbox"]) { accent-color: var(--accent-strong); }
 
 .media-volume-row input {
     width: 100%;
@@ -527,10 +523,10 @@
     min-width: 0;
     height: 34px;
     padding: 0 8px;
-    border: 1px solid rgba(216, 111, 154, 0.24);
+    border: 1px solid var(--line);
     border-radius: 8px;
-    background: #fff;
-    color: #6b4356;
+    background: var(--panel);
+    color: var(--text);
     font: inherit;
 }
 

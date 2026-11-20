@@ -29,8 +29,6 @@
     });
     const DEVICE_TYPES = Object.freeze(['mic', 'camera', 'output']);
     const REQUIRED_REFS = Object.freeze({
-        aiNoiseToggle: '#aiNoiseToggle',
-        aiNoiseStatus: '#aiNoiseStatusText',
         callDuration: '#callDuration',
         callStatus: '#callStatusText',
         cameraButton: '#toggleVideo',
@@ -45,8 +43,6 @@
         micGainSlider: '#micGainSlider',
         micGainValue: '#micGainValue',
         micList: '[data-device-list="mic"]',
-        noiseStatus: '#noiseStatusText',
-        noiseToggle: '#noiseToggle',
         noiseModeSelect: '[data-audio-noise-mode]',
         speechGateToggle: '[data-rnnoise-speech-gate]',
         processingStatus: '[data-audio-processing-status]',
@@ -142,17 +138,11 @@
         let openPopoverType;
         let popoverRevision = 0;
         let closeWatcher;
-        let popoverOpenedByHover = false;
         let popovers = [];
         let fallbackPopup;
         let fallbackPlaceholder;
         let fallbackBackdrop;
         let previousFocus;
-        let hoverCloseTimer;
-        const cancelHoverClose = () => {
-            global.clearTimeout(hoverCloseTimer);
-            hoverCloseTimer = undefined;
-        };
         let copyRestoreTimer;
         let resolutionPreset = normalizeResolutionPreset(
             initialScreenShareOptions.resolutionPreset
@@ -339,40 +329,9 @@
                 modeSelect.value = snapshot.requestedNoiseMode || 'browser';
                 const rnnoiseOption = modeSelect.querySelector('[value="rnnoise"]');
                 if (rnnoiseOption) rnnoiseOption.disabled = !snapshot.aiNoiseSupported;
-                const enhancedOption = modeSelect.querySelector('[value="deepfilter"]');
-                if (enhancedOption) enhancedOption.disabled = !snapshot.aiNoiseSupported;
             }
             const diagnostic = refs.processingStatus;
             if (diagnostic) setText(diagnostic, global.VoiceAudioProcessingView.describe(snapshot));
-            const noiseEnabled = snapshot.noiseSuppressionEnabled !== false;
-            const aiSupported = Boolean(snapshot.aiNoiseSupported);
-            const aiEnabled = Boolean(snapshot.aiNoiseEnabled);
-
-            refs.noiseToggle.setAttribute('aria-pressed', String(noiseEnabled));
-            setText(refs.noiseStatus, noiseEnabled ? '开' : '关');
-            refs.aiNoiseToggle.classList.toggle('na', !aiSupported);
-            refs.aiNoiseToggle.setAttribute(
-                'aria-pressed',
-                String(aiSupported && aiEnabled)
-            );
-            refs.aiNoiseToggle.tabIndex = aiSupported ? 0 : -1;
-            setText(
-                refs.aiNoiseStatus,
-                !aiSupported
-                    ? refs.aiNoiseToggle.dataset.notSupportedLabel || 'N/A'
-                    : !aiEnabled
-                      ? '关'
-                      : snapshot.audioProcessing?.fallbackReason
-                        ? '回退'
-                        : snapshot.noiseMode === 'rnnoise'
-                        ? 'RNNoise'
-                        : snapshot.noiseMode === 'passthrough'
-                          ? '直通'
-                          : snapshot.noiseMode === 'fallback'
-                            ? '回退'
-                            : '开'
-            );
-
             const micGain = clamp(snapshot.microphoneGain, 0, 150, 100);
             refs.micGainSlider.value = String(micGain);
             setText(refs.micGainValue, `${Math.round(micGain)}%`);
@@ -556,11 +515,16 @@
             const browserUnsupported = !native && lastSnapshot.browserScreenShareSupported === false;
             const pickerUnavailable = browserUnsupported && (!sharing || editorMode !== 'quality');
             const nativeApplication = screenField('[data-native-audio-target]');
-            const audioReady = !native || screenField('[data-native-audio-mode]')?.value !== 'application' || (Boolean(nativeApplication?.value) && !nativeApplication?.selectedOptions?.[0]?.disabled);
+            const nativeAudioMode = screenField('[data-native-audio-mode]');
+            const audioReady = !native || (!nativeAudioMode?.selectedOptions?.[0]?.disabled &&
+                (nativeAudioMode?.value !== 'application' ||
+                    (Boolean(nativeApplication?.value) && !nativeApplication?.selectedOptions?.[0]?.disabled)));
             refs.screenStartButton.disabled = !mediaAvailable || screenPending || !sourceReady || !audioReady || pickerUnavailable;
-            setText(screenField('[data-share-browser-title]'), browserUnsupported ? '此浏览器不支持共享屏幕' : '使用浏览器选择屏幕或窗口');
-            setText(screenField('[data-share-browser-hint]'), browserUnsupported ? '你仍可用通话卡片上的“摄像头”分享视频，或观看其他成员的共享。共享电脑屏幕请使用电脑浏览器或 Windows 客户端。' : '点击“选择来源并共享”后，将打开浏览器的来源选择器；选中画面后确认共享。');
-            setText(refs.screenStartButton, screenPending ? '正在处理…' : sharing ? (editorMode === 'quality' ? '应用画质' : '切换来源') : native ? '开始共享' : '选择来源并共享');
+            setText(screenField('[data-share-browser-title]'), browserUnsupported ? '此浏览器不支持屏幕共享' : '屏幕、窗口或浏览器标签页');
+            const browserHint = screenField('[data-share-browser-hint]');
+            if (browserHint) browserHint.hidden = !browserUnsupported;
+            setText(browserHint, browserUnsupported ? '可在电脑浏览器或 Windows 客户端发起共享。' : '');
+            setText(refs.screenStartButton, screenPending ? '正在处理…' : sharing ? (editorMode === 'quality' ? '应用画质' : '切换来源') : native ? '开始共享' : '选择画面');
             refs.screenStatus.classList.toggle('hidden', !sharing && !screenPending && !observedSharing);
             refs.resolutionSelect.value = resolutionPreset;
             refs.frameRateSelect.value = String(frameRate);
@@ -575,7 +539,7 @@
                 const select = screenField(selector);
                 if (select) { select.value = value; select.disabled = screenSelectDisabled; }
             }
-            const stateText = screenPending ? '正在处理共享…' : sharing ? `正在共享 · ${lastSnapshot.screenShareAudioActive ? '含来源声音' : '不含来源声音'}` : '已停止共享';
+            const stateText = screenPending ? '正在处理共享…' : sharing ? (lastSnapshot.screenShareAudioActive ? '共享画面和声音' : '共享画面') : '已停止共享';
             setText(refs.screenStatus, stateText);
             refs.screenStatus.dataset.shareState = screenPending ? 'pending' : sharing ? 'active' : 'stopped';
             const stageControls = global.document.querySelector?.('[data-local-share-controls]');
@@ -587,7 +551,6 @@
             const stopButton = screenField('[data-share-action="stop"]');
             if (stopButton) stopButton.hidden = !sharing && !screenPending;
             const provider = screenField('[data-screen-share-provider]');
-            if (provider) provider.disabled = screenPending || (sharing && editorMode === 'quality');
             screenPanel()?.querySelectorAll('[data-screen-share-cancel]').forEach(button => { button.disabled = screenPending; });
             const sourceSection = screenField('[data-share-source-section]');
             if (sourceSection) sourceSection.hidden = sharing && editorMode === 'quality';
@@ -609,8 +572,7 @@
                 (!native && (old?.codecMode !== codecMode || !provider || (resolutionPreset === 'original' && old?.resolutionPreset !== 'original'))));
             setText(
                 refs.screenSettingsStatus,
-                screenPending ? '正在应用，请稍候；可停止共享取消' : restart ? '此项变更需要重建共享，观看画面会短暂中断；语音保持连接' :
-                sharing ? (editorMode === 'quality' ? '在当前共享上应用；实际画质以接收端为准' : native ? '选中新来源后切换，语音保持连接' : '取消浏览器选择器将保留当前共享') : '选择来源，再确认画质'
+                screenPending ? '正在应用…' : restart ? '观看画面将短暂中断' : ''
             );
 
             renderSessionButton(lastSnapshot);
@@ -736,24 +698,6 @@
             const gain = clamp(refs.micGainSlider.value, 0, 150, 100);
             adapter.setMicrophoneGain?.(gain);
         };
-        const handleNoiseClick = () => {
-            void runIntent('noise', () => adapter.toggleNoiseSuppression?.());
-        };
-        const handleAiNoiseClick = () => {
-            if (!getCurrentAdapterSnapshot().aiNoiseSupported) {
-                return;
-            }
-            void runIntent('ai-noise', () =>
-                adapter.toggleAiNoiseSuppression?.()
-            );
-        };
-        const handleKeyboardActivation = (event) => {
-            if (event.key !== 'Enter' && event.key !== ' ') {
-                return;
-            }
-            event.preventDefault();
-            event.currentTarget.click();
-        };
         const setCopyState = (state) => {
             const icon = refs.copyButton.querySelector('i');
             const label = refs.copyButton.querySelector('span');
@@ -791,7 +735,6 @@
             popoverRevision++;
             closeWatcher?.destroy(); closeWatcher = undefined;
             if (openPopoverType === 'screen') signalDialog('voice-share-dialog-close');
-            cancelHoverClose();
             root.querySelectorAll('[data-device-control]').forEach((control) =>
                 control.classList.remove('is-open')
             );
@@ -806,11 +749,10 @@
                 fallbackBackdrop?.remove();
                 fallbackPopup = fallbackPlaceholder = fallbackBackdrop = undefined;
             }
-            root.querySelectorAll('[data-control-menu]').forEach((toggle) =>
-                toggle.setAttribute('aria-expanded', 'false')
-            );
+            root.querySelectorAll('[data-control-menu]').forEach((toggle) => {
+                if (toggle.hasAttribute?.('aria-expanded')) toggle.setAttribute('aria-expanded', 'false');
+            });
             openPopoverType = undefined;
-            popoverOpenedByHover = false;
             previousFocus?.focus?.();
             previousFocus = undefined;
         };
@@ -824,7 +766,7 @@
             const control = root.querySelector(
                 `[data-device-control="${type}"]`
             );
-            const anchor = control?.getBoundingClientRect?.();
+            const anchor = (root.querySelector('.dock-device-settings') || control)?.getBoundingClientRect?.();
             if (!anchor) return;
             popover.style.maxHeight = `${Math.max(80, global.innerHeight - margin * 2)}px`;
             const rect = popover.getBoundingClientRect();
@@ -854,12 +796,17 @@
             }
             closePopovers();
         };
-        const openPopover = (type, fromHover = false, mode = 'source') => {
+        const openPopover = (type, mode = 'source') => {
             setSignalOpen(false);
+            const opener = previousFocus || global.document.activeElement;
             closePopovers();
             if (type === 'screen') {
                 editorMode = mode;
                 const options = getCurrentAdapterSnapshot().screenShareOptions;
+                if (!getCurrentAdapterSnapshot().screenShareEnabled) {
+                    const audio = screenField('[data-native-audio-mode]');
+                    if (audio) audio.value = 'system';
+                }
                 if (getCurrentAdapterSnapshot().screenShareEnabled && options) {
                     resolutionPreset = normalizeResolutionPreset(options.resolutionPreset);
                     frameRate = normalizeFrameRate(options.frameRate);
@@ -881,12 +828,12 @@
                 `[data-device-popover="${type}"]`
             );
             const toggle = root.querySelector(`[data-control-menu="${type}"]`);
-            if (!control || !popover || !toggle) {
+            if (!control || !popover) {
                 return false;
             }
             control.classList.add('is-open');
             popover.classList.add('is-open');
-            previousFocus = global.document.activeElement;
+            previousFocus = opener;
             const showNative = type === 'screen' ? popover.showModal : popover.showPopover;
             if (typeof showNative === 'function') showNative.call(popover);
             else {
@@ -907,16 +854,16 @@
                 global.document.body.append(popover);
                 if (type === 'screen') popover.querySelector('select, button')?.focus();
             }
-            toggle.setAttribute('aria-expanded', 'true');
+            if (type !== 'screen') root.querySelector('.dock-device-settings')?.setAttribute('aria-expanded', 'true');
+            if (toggle?.hasAttribute?.('aria-expanded')) toggle.setAttribute('aria-expanded', 'true');
             openPopoverType = type;
             // Modal dialogs already participate in browser close requests.
             // Manual device popovers need an explicit watcher for Android Back.
-            if (type !== 'screen' && !fromHover && global.CloseWatcher) {
+            if (type !== 'screen' && global.CloseWatcher) {
                 closeWatcher = new global.CloseWatcher();
                 closeWatcher.addEventListener('close', closePopovers);
             }
             if (type === 'screen') signalDialog('voice-share-dialog-open', { mode, nativeSourceKey: getCurrentAdapterSnapshot().screenShareOptions?.nativeSourceKey, nativeAudioTargetKey: getCurrentAdapterSnapshot().screenShareOptions?.nativeAudioTargetKey });
-            popoverOpenedByHover = fromHover;
             if (DEVICE_TYPES.includes(type)) {
                 adapter.refreshDevices?.(type);
             }
@@ -930,17 +877,17 @@
                 return;
             }
             const menuToggle = event.target.closest?.('[data-control-menu]');
-            if (menuToggle && root.contains(menuToggle)) {
+            if (menuToggle && (root.contains(menuToggle) || fallbackPopup?.contains(menuToggle))) {
                 event.preventDefault();
                 event.stopPropagation();
                 const type = menuToggle.dataset.controlMenu;
                 if (openPopoverType === type) {
-                    if (popoverOpenedByHover) {
-                        popoverOpenedByHover = false;
-                        cancelHoverClose();
-                    } else closePopovers();
+                    if (!menuToggle.closest('[data-device-popover]')) closePopovers();
                 } else {
+                    const fromPanel = Boolean(menuToggle.closest('[data-device-popover]'));
                     openPopover(type);
+                    if (fromPanel) popovers.find(panel => panel.dataset.devicePopover === type)
+                        ?.querySelector('[aria-current="true"]')?.focus();
                 }
                 return;
             }
@@ -973,7 +920,7 @@
                 if (action === 'stop') {
                     void runIntent('screen', () => adapter.stopScreenShare(), true);
                     closePopovers();
-                } else openPopover('screen', false, action);
+                } else openPopover('screen', action);
                 return;
             }
             if (openPopoverType && !root.contains(event.target) && !fallbackPopup?.contains(event.target)) {
@@ -983,7 +930,7 @@
         const handleDocumentKeydown = (event) => {
             if (event.defaultPrevented || event.isComposing) return;
             if (fallbackPopup && openPopoverType === 'screen' && event.key === 'Tab') {
-                const focusable = Array.from(fallbackPopup.querySelectorAll('select, button, input, [tabindex="0"]')).filter((element) => !element.disabled);
+                const focusable = Array.from(fallbackPopup.querySelectorAll('select, button, input:not([type="hidden"]), [tabindex="0"]')).filter((element) => !element.disabled && !element.closest('[hidden]'));
                 const index = focusable.indexOf(global.document.activeElement);
                 if (index < 0 || (!event.shiftKey && index === focusable.length - 1) || (event.shiftKey && index === 0)) {
                     event.preventDefault();
@@ -1064,10 +1011,6 @@
                 void adapter.setRnnoiseSpeechGate?.(event.target.checked);
                 render(adapter.getSnapshot());
             });
-            listen(refs.noiseToggle, 'click', handleNoiseClick);
-            listen(refs.noiseToggle, 'keydown', handleKeyboardActivation);
-            listen(refs.aiNoiseToggle, 'click', handleAiNoiseClick);
-            listen(refs.aiNoiseToggle, 'keydown', handleKeyboardActivation);
             listen(refs.copyButton, 'click', handleCopyClick);
             listen(refs.resolutionSelect, 'change', handleResolutionChange);
             listen(refs.frameRateSelect, 'change', handleFrameRateChange);
@@ -1085,23 +1028,21 @@
                 render(lastSnapshot);
             });
             listen(root, 'click', handleRootClick);
-            root.querySelectorAll('[data-device-control]').forEach(
-                (control) => {
-                    listen(control, 'pointerenter', (event) => {
-                        if (event.pointerType !== 'mouse') return;
-                        if (control.dataset.deviceControl === 'screen' || openPopoverType === 'screen') return;
-                        cancelHoverClose();
-                        const type = control.dataset.deviceControl;
-                        if (openPopoverType !== type) openPopover(type, true);
-                    });
-                    listen(control, 'pointerleave', (event) => {
-                        if (event.pointerType !== 'mouse') return;
-                        if (openPopoverType === 'screen') return;
-                        cancelHoverClose();
-                        hoverCloseTimer = global.setTimeout(closePopovers, 250);
-                    });
-                }
-            );
+            root.querySelectorAll('[data-device-control]').forEach((control) => {
+                const type = control.dataset.deviceControl;
+                if (!DEVICE_TYPES.includes(type)) return;
+                const openSettings = (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    openPopover(type);
+                    popovers.find(panel => panel.dataset.devicePopover === type)
+                        ?.querySelector('[aria-current="true"]')?.focus();
+                };
+                listen(control, 'contextmenu', openSettings);
+                listen(control, 'keydown', (event) => {
+                    if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) openSettings(event);
+                });
+            });
             root.querySelectorAll('[data-device-popover]').forEach(
                 (popover) => {
                     listen(popover, 'click', (event) => {
@@ -1118,12 +1059,6 @@
                         });
                         return;
                     }
-                    listen(popover, 'pointerenter', cancelHoverClose);
-                    listen(popover, 'pointerleave', (event) => {
-                        if (event.pointerType !== 'mouse') return;
-                        cancelHoverClose();
-                        hoverCloseTimer = global.setTimeout(closePopovers, 250);
-                    });
                 }
             );
             listen(global.document, 'click', handleDocumentClick);

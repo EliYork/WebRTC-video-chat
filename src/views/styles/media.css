@@ -118,13 +118,13 @@
     align-content: center;
     gap: 8px;
     padding: 24px;
-    background-color: #fff9fc;
-    color: #8c6376;
+    background-color: #20242d;
+    color: #bac3d1;
     text-align: center;
 }
 
 .local-screen-preview-placeholder strong {
-    color: #57354a;
+    color: #f5f6f8;
     font-size: 15px;
 }
 
@@ -223,14 +223,8 @@
     place-items: center;
     align-content: center;
     gap: 8px;
-    background:
-        radial-gradient(
-            circle at 50% 42%,
-            rgba(216, 111, 154, 0.22),
-            transparent 36%
-        ),
-        #fff9fc;
-    color: #8c6376;
+    background: var(--panel-soft);
+    color: var(--muted);
     text-align: center;
 }
 
@@ -239,9 +233,9 @@
     width: 58px;
     height: 58px;
     place-items: center;
-    border: 1px solid rgba(216, 111, 154, 0.22);
+    border: 1px solid var(--line);
     border-radius: 999px;
-    background-color: rgba(255, 255, 255, 0.78);
+    background-color: var(--panel);
     color: var(--accent-strong);
     font-size: 24px;
     font-weight: 700;
@@ -250,7 +244,7 @@
 .voice-placeholder-title {
     max-width: 80%;
     overflow: hidden;
-    color: #57354a;
+    color: #f5f6f8;
     font-size: 15px;
     font-weight: 700;
     text-overflow: ellipsis;

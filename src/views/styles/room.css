@@ -83,13 +83,7 @@
     flex-direction: column;
     padding: 14px 12px;
     border-right: 1px solid var(--line);
-    background:
-        linear-gradient(
-            180deg,
-            rgba(255, 240, 247, 0.94),
-            rgba(255, 250, 253, 0.98)
-        ),
-        var(--panel);
+    background: var(--panel-soft);
 }
 
 .sidebar-channel-tree {
@@ -182,8 +176,8 @@
     min-width: 24px;
     padding: 2px 7px;
     border-radius: 999px;
-    background-color: var(--accent-soft);
-    color: var(--accent-strong);
+    background-color: var(--panel);
+    color: var(--muted);
     font-size: 12px;
     text-align: center;
 }
@@ -204,8 +198,13 @@
     padding: 4px 8px;
     overflow: hidden;
     border-radius: 7px;
-    color: #7b596b;
+    color: var(--text);
     font-size: 13px;
+}
+
+.channel-member.has-member-volume:is(:hover, :focus-within) {
+    background: var(--panel);
+    box-shadow: var(--shadow);
 }
 
 .channel-members:empty {

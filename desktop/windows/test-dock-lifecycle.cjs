@@ -41,7 +41,7 @@ async function verifyRenderer() {
         return { root, create, copy: root.querySelector('#copyRoomLink'), screenButton: root.querySelector('#shareScreen'),
             start: root.querySelector('[data-screen-share-start]'), screen: root.querySelector('[data-device-popover="screen"]'),
             feedback: root.querySelector('[data-share-dialog-feedback]'),
-            toggle: type => root.querySelector(`[data-control-menu="${type}"]`).click() };
+            openMicrophoneSettings: () => root.querySelector('.dock-device-settings').click() };
     };
     const copies = [], screens = [], current = [], copyTimers = new Set();
     const nativeSetTimeout = window.setTimeout, nativeClearTimeout = window.clearTimeout;
@@ -63,7 +63,7 @@ async function verifyRenderer() {
                     timersAfter: copyTimers.size, sameButton: f.root.querySelector('#copyRoomLink') === f.copy });
             } finally { second.runtime.destroy(); }
         }
-        for (const change of ['other-popover', 'reopened', 'superseded', 'new-request', 'destroyed']) {
+        for (const change of ['other-popover', 'superseded', 'new-request', 'destroyed']) {
             for (const started of [true, false]) {
                 const f = fixture(), first = f.create(); let finish, finishNew, second;
                 first.adapter.startScreenShare = () => new Promise(resolve => { finish = resolve; });
@@ -78,7 +78,7 @@ async function verifyRenderer() {
                             first.adapter.startScreenShare = () => new Promise(resolve => { finishNew = resolve; });
                             f.start.click();
                         }
-                    } else { f.toggle('mic'); if (change === 'reopened') f.toggle('screen'); }
+                    } else f.openMicrophoneSettings();
                     const panel = change === 'other-popover' ? f.root.querySelector('[data-device-popover="mic"]') : f.screen;
                     f.feedback.textContent = 'Current settings feedback';
                     const before = panel.classList.contains('is-open');
@@ -132,7 +132,7 @@ async function verifyEscapeLayers() {
         fullscreen.attachTileButton({ tile }); tile.querySelector('.web-fullscreen-btn').click();
         return { root, tile, adapter, video, stream,
             panel: type => root.querySelector(`[data-device-popover="${type}"]`),
-            open: type => root.querySelector(`[data-control-menu="${type}"]`).click(),
+            open: type => root.querySelector(type === 'screen' ? '#shareScreen' : `[data-control-menu="${type}"]`).click(),
             webOpen: () => tile.classList.contains('is-web-fullscreen'),
             destroy: () => { ui.closePopover(); runtime.destroy(); fullscreen.detachTile(tile); } };
     };

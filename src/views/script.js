@@ -970,14 +970,6 @@ const syncRoomCompositionState = () => {
         refs: { chatTitle },
         channelName: viewingName,
     });
-    const viewedChannel = Array.from(sidebarRoot.querySelectorAll('[data-channel-room]'))
-        .find((channel) => channel.dataset.channelRoom === viewingRoomId);
-    const description = byId('chatDescription');
-    if (description) {
-        description.textContent = viewedChannel?.dataset.channelDescription || '';
-        description.hidden = !description.textContent;
-    }
-
     updateLocalUserCard();
     updateMobileRoomState();
 };
@@ -1196,14 +1188,10 @@ const bindVoiceSocketHandlers = (activeSocket) => {
 const getChatName = () =>
     chatPanelRuntime?.getDisplayName() || chatNameState.getStoredChatName();
 
-const getMemberTileToggle = (member) => member.peerId ? {
+const getMemberTileToggle = (member) => member.peerId && member.peerId !== localPeerId ? {
     icon: 'fas fa-volume-up',
-    label: member.peerId === localPeerId ? '查看我的成员卡片' : '成员音量',
-    onClick: (event) => {
-        const tile = document.getElementById(member.peerId === localPeerId ? 'local-video' : member.peerId);
-        if (tile && member.peerId !== localPeerId) showPeerVolumePopover(event, tile);
-        else tile?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
-    },
+    label: '调整成员音量',
+    onClick: (event) => showMemberVolumePopover(event, member.peerId),
 } : undefined;
 
 const reconcilePresenceState = ({
@@ -1900,17 +1888,19 @@ const ensureTileStructure = (tile) => {
     return structure;
 };
 
-const showPeerVolumePopover = (event, tile) => {
-    const peerId = tile.dataset.peerId;
+const showPeerVolumePopover = (event, tile) =>
+    tile && tile.id !== 'local-video' &&
+    showMemberVolumePopover(event, tile.dataset.peerId, tile.dataset.tileType === 'screen-share');
 
-    if (tile.id === 'local-video' || !peerId) {
+const showMemberVolumePopover = (event, peerId, screenTile = false) => {
+    if (!peerId || peerId === localPeerId) {
         return;
     }
 
     event.preventDefault();
     event.stopPropagation?.();
     const isScreenShare =
-        tile.dataset.tileType === 'screen-share' || screenSharers.has(peerId);
+        screenTile || screenSharers.has(peerId);
 
     const snapshot = screenShareVolumeController.getSnapshot(peerId);
     const controls = [{
@@ -3595,7 +3585,15 @@ callDiagnostics = window.VoiceCallDiagnostics.createRuntime({
         return null;
     },
 });
-document.querySelector('[data-copy-call-diagnostics]')?.addEventListener('click', (event) => callDiagnostics.copyCombined(event.currentTarget));
+const copyDiagnosticsButton = document.querySelector('[data-copy-call-diagnostics]');
+const desktopLogActions = window.EliYorkDesktop && mediaDockRoot.querySelector('[data-call-log-actions]');
+if (copyDiagnosticsButton && desktopLogActions) {
+    desktopLogActions.prepend(copyDiagnosticsButton);
+    copyDiagnosticsButton.classList.remove('workspace-copy-diagnostics');
+    byId('stageMoreToggle')?.remove();
+    byId('workspace-tools')?.remove();
+}
+copyDiagnosticsButton?.addEventListener('click', (event) => callDiagnostics.copyCombined(event.currentTarget));
 window.VoicePlayerMenu.configure({
     beforeOpen: () => remoteVolumeUI.closePopover(),
     showEvents: (tile) => callDiagnostics.showLogs({ shareOrdinal: callDiagnostics.getShareOrdinal(tile), host: tile }),

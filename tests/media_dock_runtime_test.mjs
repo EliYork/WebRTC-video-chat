@@ -565,52 +565,7 @@ test('device popover stays within viewport and follows scrolling without moving 
     assert.equal(fixture.window.listenerCount('scroll'), 0);
 });
 
-test('mouse hover opens settings, crossing to popover cancels close, touch does not hover', () => {
-    const fixture = createFixture();
-    const { runtimeApi } = loadApis(fixture);
-    const stub = createAdapterStub();
-    const timers = new Map();
-    let sequence = 0;
-    fixture.window.setTimeout = (callback) => {
-        timers.set(++sequence, callback);
-        return sequence;
-    };
-    fixture.window.clearTimeout = (id) => timers.delete(id);
-    const runtime = runtimeApi.createMediaDockRuntime({
-        root: fixture.root,
-        adapter: stub.adapter,
-    });
-    runtime.init();
-    const control = fixture.root.querySelector('[data-device-control="mic"]');
-    const popover = fixture.root.querySelector('[data-device-popover="mic"]');
-    control.dispatchEvent(
-        new FakeEvent('pointerenter', { pointerType: 'touch' })
-    );
-    assert.equal(popover.classList.contains('is-open'), false);
-    control.dispatchEvent(
-        new FakeEvent('pointerenter', { pointerType: 'mouse' })
-    );
-    assert.equal(popover.classList.contains('is-open'), true);
-    control.dispatchEvent(
-        new FakeEvent('pointerleave', { pointerType: 'mouse' })
-    );
-    assert.equal(timers.size, 1);
-    popover.dispatchEvent(
-        new FakeEvent('pointerenter', { pointerType: 'mouse' })
-    );
-    assert.equal(timers.size, 0);
-    assert.equal(popover.classList.contains('is-open'), true);
-    popover.dispatchEvent(
-        new FakeEvent('pointerleave', { pointerType: 'mouse' })
-    );
-    [...timers.values()][0]();
-    assert.equal(popover.classList.contains('is-open'), false);
-    runtime.destroy();
-    assert.equal(control.listenerCount('pointerenter'), 0);
-    assert.equal(timers.size, 0);
-});
-
-test('first click on a hover-opened settings arrow keeps it open; second closes', () => {
+test('device settings open by right-click or keyboard and stay closed on hover', () => {
     const fixture = createFixture();
     const { runtimeApi } = loadApis(fixture);
     const stub = createAdapterStub();
@@ -618,13 +573,16 @@ test('first click on a hover-opened settings arrow keeps it open; second closes'
     runtime.init();
     const control = fixture.root.querySelector('[data-device-control="mic"]');
     const popover = fixture.root.querySelector('[data-device-popover="mic"]');
-    const menu = fixture.root.querySelector('[data-control-menu="mic"]');
     control.dispatchEvent(new FakeEvent('pointerenter', { pointerType: 'mouse' }));
-    fixture.root.dispatchEvent(new FakeEvent('click', { target: menu }));
-    assert.equal(popover.classList.contains('is-open'), true);
-    fixture.root.dispatchEvent(new FakeEvent('click', { target: menu }));
     assert.equal(popover.classList.contains('is-open'), false);
+    control.dispatchEvent(new FakeEvent('contextmenu', { target: fixture.refs.micButton }));
+    assert.equal(popover.classList.contains('is-open'), true);
+    fixture.document.dispatchEvent(new FakeEvent('keydown', { key: 'Escape' }));
+    assert.equal(popover.classList.contains('is-open'), false);
+    control.dispatchEvent(new FakeEvent('keydown', { key: 'F10', shiftKey: true, target: fixture.refs.micButton }));
+    assert.equal(popover.classList.contains('is-open'), true);
     runtime.destroy();
+    assert.equal(control.listenerCount('contextmenu'), 0);
 });
 
 const defaultState = () => ({
@@ -832,7 +790,7 @@ test('browsers without screen capture explain the limitation while keeping camer
     const runtime = runtimeApi.createMediaDockRuntime({ root: fixture.root, adapter: stub.adapter });
     runtime.init();
     assert.equal(fixture.root.querySelector('[data-screen-share-start]').disabled, true);
-    assert.match(hint.textContent, /摄像头/);
+    assert.match(hint.textContent, /电脑浏览器或 Windows 客户端/);
     assert.equal(fixture.refs.cameraButton.disabled, false);
     assert.equal(fixture.refs.micButton.disabled, false);
     stub.emit({ browserScreenShareSupported: true });
@@ -1023,9 +981,9 @@ test('4K30 AV1 settings reach capture adapter and the dock shows sharing and act
     assert.equal(stub.calls.get('startScreenShare')[0][0].frameRate, 30);
     assert.equal(stub.calls.get('startScreenShare')[0][0].codecMode, 'av1');
     stub.emit({ screenShareEnabled: true, screenShareRoute: { hasUplink: true, serverViewers: 0 } });
-    assert.match(fixture.refs.screenStatus.textContent, /正在共享 · 不含来源声音/);
+    assert.match(fixture.refs.screenStatus.textContent, /^共享画面$/);
     stub.emit({ screenShareEnabled: true, screenShareAudioActive: true });
-    assert.match(fixture.refs.screenStatus.textContent, /正在共享 · 含来源声音/);
+    assert.match(fixture.refs.screenStatus.textContent, /^共享画面和声音$/);
     runtime.destroy();
 });
 

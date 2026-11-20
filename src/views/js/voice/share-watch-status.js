@@ -5,7 +5,7 @@
     // Read existing transport snapshots and player events. No capture, stats
     // polling, retry policy or route changes belong in this presentation layer.
     const describe = ({ local, previewHidden, error, ended, connections = [], paused, ready, waiting } = {}) => {
-        if (local) return previewHidden ? { state: 'preview-hidden', text: '本机预览已隐藏，共享仍在继续。' } : { state: 'playing', text: '' };
+        if (local) return previewHidden ? { state: 'preview-hidden', text: '' } : { state: 'playing', text: '' };
         if (error) return { state: 'error', text: '当前共享无法播放，请尝试重新进入频道。' };
         if (ended) return { state: 'interrupted', text: '共享画面已中断，等待共享者恢复…' };
         if (connections.some((state) => ['failed', 'closed', 'disconnected'].includes(state))) {

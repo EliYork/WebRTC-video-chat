@@ -1,4 +1,4 @@
-import { NativeClient } from './.deps/upstream/src/client/native/client';
+import type { NativeClient } from './.deps/upstream/src/client/native/client';
 import { nativeCaptureTargetKey } from './.deps/upstream/src/client/native/capture-selection';
 import type { NativeCaptureTarget } from './.deps/upstream/src/client/native/wire';
 
@@ -11,7 +11,11 @@ export const sourceLabel = (source: NativeCaptureTarget, index: number) =>
 // One short-lived, authorized control connection belongs to the selector.
 // Closing it cancels pending upstream preview work without stopping an active
 // share, which owns a separate control connection. No video capture loop here.
-export function createNativeSourcePicker(authorize: () => Promise<unknown>, audioPicker?: {load(client: NativeClient): Promise<void>; close(): void}) {
+export function createNativeSourcePicker(
+    authorize: () => Promise<unknown>,
+    connectDesktop: (signal: AbortSignal) => Promise<NativeClient | null>,
+    audioPicker?: {load(client: NativeClient): Promise<void>; close(): void},
+) {
     const gallery = document.querySelector<HTMLElement>(
         '[data-piik-native-gallery]'
     );
@@ -106,7 +110,7 @@ export function createNativeSourcePicker(authorize: () => Promise<unknown>, audi
                 image.addEventListener('error', () => {
                     image.hidden = true;
                     hint.hidden = false;
-                    hint.textContent = '预览无法显示，请刷新或选择其他来源';
+                    hint.textContent = '无预览';
                 });
                 const name = document.createElement('span');
                 name.className = 'share-source-name';
@@ -126,8 +130,6 @@ export function createNativeSourcePicker(authorize: () => Promise<unknown>, audi
                                 String(el.dataset.nativeSourceKey === key)
                             )
                         );
-                    if (status)
-                        status.textContent = `已选择：${name.textContent}`;
                     notify();
                 });
                 grid.append(card);
@@ -143,11 +145,11 @@ export function createNativeSourcePicker(authorize: () => Promise<unknown>, audi
                             return;
                         if (data) image.src = data;
                         else
-                            hint.textContent = '此来源暂不能预览，可刷新后重试';
+                            hint.textContent = '无预览';
                     } catch {
                         if (visible && generation === token && card.isConnected)
                             hint.textContent =
-                                '预览不可用：窗口已关闭、受保护或客户端不支持';
+                                '无预览';
                     }
                 });
             }
@@ -190,17 +192,12 @@ export function createNativeSourcePicker(authorize: () => Promise<unknown>, audi
         lifetime = controller;
         const token = generation;
         if (refresh) refresh.disabled = true;
-        if (status) status.textContent = '正在连接客户端并读取来源…';
+        if (status) status.textContent = '正在读取画面来源…';
         try {
             await authorize();
             if (!visible || token !== generation) return;
-            const next = await NativeClient.connect({
-                signal: controller.signal,
-            });
-            if (!next)
-                throw new Error(
-                    '未连接客户端；请打开 EliYork Voice，或展开下方连接帮助。'
-                );
+            const next = await connectDesktop(controller.signal);
+            if (!next) return;
             if (!visible || token !== generation) {
                 next.close();
                 return;
@@ -213,9 +210,9 @@ export function createNativeSourcePicker(authorize: () => Promise<unknown>, audi
                 !sources.some((s) => nativeCaptureTargetKey(s) === selected);
             if (missing) selected = '';
             if (status)
-                status.textContent = missing
+                status.textContent = !sources.length ? '未找到可共享的画面。' : missing
                     ? '之前选择的窗口或屏幕已不可用，请重新选择。'
-                    : '点击一张卡片，选择要共享的画面。';
+                    : '';
             render();
             void audioPicker?.load(next);
         } catch (error: any) {

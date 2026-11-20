@@ -17,7 +17,7 @@ export function nativeAudioSelection(options: any, client: NativeClient, source:
         // Reuse the independent process-tree path instead of starting that mix.
         if (source.kind !== 'window') {
             if (!client.health.nativeMedia.independentAudio || !client.health.nativeMedia.processAudioExclusion)
-                throw Error('旧版整屏声音会回传通话，请升级客户端后使用“系统声音（排除本客户端）”，或选择独立应用窗口声音');
+                throw Error('旧版整屏声音会回传通话，请升级客户端后使用“系统声音”，或选择独立应用窗口声音');
             mode = 'system';
         } else if (client.health.nativeMedia.independentAudio) {
             const target = parseAudioTarget(`${source.pid}:${source.creationTime}`);
@@ -75,6 +75,7 @@ export function createAudioSourcePicker() {
     let generation = 0;
     let selected = '';
     let applications: any[] = [];
+    let audioStatus = '';
     const sync = () => {
         if (group) group.hidden = mode?.value !== 'application';
         selected = select?.value || selected;
@@ -83,13 +84,12 @@ export function createAudioSourcePicker() {
             icon.hidden = !source?.icon;
             icon.src = source?.icon || '';
         }
-        const descriptions: Record<string,string> = {
-            none: '仅共享画面，麦克风语音保持独立。',
-            system: '系统声音将排除本客户端进程树。其他浏览器或通话软件的声音仍可能被共享。',
-            application: '列出当前会话中可访问的进程（最多 1024 项，含无窗口应用），优先显示有音频会话的进程。采集所选进程及其子进程；无声时保持静音。浏览器可能包含多个标签页，也可能由其他进程播放，无法保证单标签隔离。应用重启后需刷新重选。',
-            source: '窗口共享对应应用声音；整屏声音仅在能排除本客户端通话时启动，否则提示升级客户端。',
-        };
-        if (hint) hint.textContent = descriptions[mode?.value || 'none'];
+        if (hint) {
+            const unavailable = mode?.value === 'system' && mode.selectedOptions[0]?.disabled;
+            const text = audioStatus || (unavailable ? '此设备无法安全共享系统声音。请选择应用或关闭共享声音。' : '');
+            hint.textContent = text;
+            hint.hidden = !text;
+        }
     };
     mode?.addEventListener('change', sync);
     select?.addEventListener('change', sync);
@@ -98,10 +98,14 @@ export function createAudioSourcePicker() {
     return {
         close,
         sync,
-        setSelected(key: string) { selected = key || ''; },
+        setSelected(key: string) {
+            selected = key || '';
+            if (select) select.value = selected;
+        },
         async load(client: NativeClient) {
             const token = ++generation;
             if (!mode || !select) return;
+            audioStatus = '';
             const legacy = mode.querySelector<HTMLOptionElement>('[data-native-audio-legacy]');
             if (legacy) legacy.hidden = client.health.nativeMedia.independentAudio;
             try {
@@ -115,7 +119,7 @@ export function createAudioSourcePicker() {
                 for (const option of Array.from(mode.options)) {
                     option.disabled = option.value === 'application' ? !client.health.nativeMedia.processAudio || !client.health.nativeMedia.independentAudio : option.value === 'system' ? !systemSafe : false;
                 }
-                select.replaceChildren(new Option('选择应用（含无窗口进程）', ''), ...applications.map(app =>
+                select.replaceChildren(new Option('选择应用', ''), ...applications.map(app =>
                     new Option(`${app.name} · PID ${app.pid}${app.active ? ' · 音频会话活跃' : app.hasSession ? ' · 音频会话空闲' : ' · 暂无音频会话'}`, audioTargetKey(app))));
                 select.value = selected;
                 // Retain an invalid selection as invalid. Never silently choose
@@ -129,7 +133,11 @@ export function createAudioSourcePicker() {
             } catch {
                 if (token !== generation) return;
                 applications = []; select.replaceChildren(new Option('读取失败，请刷新来源', ''));
-                if (hint) hint.textContent = '无法读取应用音源；请刷新来源或升级客户端。未切换为系统声音。';
+                const system = mode.querySelector<HTMLOptionElement>('[value="system"]');
+                if (system) system.disabled = true;
+                audioStatus = '无法读取声音来源。请刷新来源，或关闭共享声音。';
+                sync();
+                select.dispatchEvent(new Event('change', {bubbles: true}));
             }
         },
     };

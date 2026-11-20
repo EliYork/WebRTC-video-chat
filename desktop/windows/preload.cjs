@@ -29,6 +29,7 @@ ipcRenderer.on('voice:notice', (_event, value) => { notice = value; showNotice()
 contextBridge.exposeInMainWorld(
     'EliYorkDesktop',
     Object.freeze({
+        waitForNativeShare: () => ipcRenderer.invoke('voice:native-share-ready'),
         refreshPage: () => ipcRenderer.invoke('voice:refresh'),
         writeClipboardText: (text) =>
             ipcRenderer.invoke('voice:clipboard-write', text),
@@ -52,14 +53,15 @@ window.addEventListener('DOMContentLoaded', () => {
         brand.className = 'workspace-brand';
         header.prepend(brand);
     }
-    brand.replaceChildren();
-    const icon = document.createElement('span');
-    icon.className = 'workspace-mark';
-    icon.setAttribute('aria-hidden', 'true');
-    icon.textContent = '◖◗';
-    const title = document.createElement('strong');
-    title.textContent = '语音据点';
-    brand.append(icon, title);
+    if (!brand.querySelector('.workspace-mark') || !brand.querySelector('strong')) {
+        const icon = document.createElement('img');
+        icon.className = 'workspace-mark';
+        icon.src = '/assets/brand/voice.svg?v=brand-20261022';
+        icon.alt = '';
+        const title = document.createElement('strong');
+        title.textContent = '语音据点';
+        brand.replaceChildren(icon, title);
+    }
     const menu = document.createElement('button');
     menu.type = 'button';
     menu.className = 'desktop-menu';

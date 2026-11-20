@@ -260,6 +260,33 @@ try {
     await screenshot(b, 'live-call-signal-and-mic');
     const signalBounds = `(() => {const n=document.querySelector('#callSignalDetail'),r=n.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return {fits:!n.hidden && r.width>0 && r.left>=0 && r.right<=innerWidth && r.top>=0 && r.bottom<=innerHeight && n.contains(hit),hidden:n.hidden,rect:r.toJSON(),hit:hit?.className,focus:document.activeElement?.id};})()`;
     await viewportReady(b,1920,1080);
+    assert.equal(await evaluate(b, `document.querySelectorAll('.control-menu-toggle').length`), 0);
+    const memberVolume = await evaluate(b, `(() => {
+        const row = document.querySelector('.channel-member.has-member-volume');
+        const card = document.querySelector('#member-cards .member-card:not(#local-video)');
+        const rightClick = () => row.dispatchEvent(new MouseEvent('contextmenu', {bubbles:true, cancelable:true, clientX:120, clientY:125}));
+        // Presence can already be visible while the remote player's DOM is unavailable.
+        const parent = card?.parentNode, next = card?.nextSibling;
+        card?.remove();
+        rightClick();
+        const range = document.querySelector('.peer-volume-popover input');
+        if (range) { range.value = '35'; range.dispatchEvent(new Event('input',{bubbles:true})); }
+        rightClick();
+        const slider = document.querySelector('.peer-volume-popover input');
+        const restored = slider?.value;
+        if (parent) parent.insertBefore(card,next);
+        const player = card?.querySelector('video, audio:not(.screen-share-audio)');
+        slider?.dispatchEvent(new Event('input',{bubbles:true}));
+        const volume = player?.volume;
+        if (slider) { slider.value = '100'; slider.dispatchEvent(new Event('input',{bubbles:true})); }
+        document.querySelector('.peer-volume-popover')?.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
+        return { opened: Boolean(range), restored, volume };
+    })()`);
+    assert.deepEqual(memberVolume, { opened: true, restored: '35', volume: 0.35 });
+    await click(b, '.dock-device-settings');
+    await click(b, '[data-device-popover="mic"] [data-control-menu="output"]');
+    assert.equal(await evaluate(b, `document.querySelector('[data-device-popover="output"]').matches(':popover-open')`), true);
+    await click(b, '[data-device-popover="output"] [data-control-close]');
     await evaluate(b, `document.querySelector('#callSignal').focus()`);
     const key = async (value, code) => {
         await send('Input.dispatchKeyEvent', { type: code === 13 ? 'keyDown' : 'rawKeyDown', key:value, code:value, windowsVirtualKeyCode:code, ...(code === 13 ? { text:'\r', unmodifiedText:'\r' } : {}) }, b);
@@ -320,7 +347,7 @@ try {
     await delay(250);
     assert.equal(await evaluate(b, `document.querySelector('#video-grid > .is-stage-focus video').srcObject.getVideoTracks()[0] === __screenTrack && __screenTrack.readyState === 'live'`), true, 'camera off must not hide or stop the active screen share');
     await delay(1800); // Let initial microphone/camera/share negotiations settle.
-    const viewports = [[3840,2160,1], [2560,1440,1], [1920,1080,1], [1600,900,1], [1366,768,1], [2560,1440,1.5], [900,700,1], [800,600,1.5], [640,700,1], [390,844,3], [320,640,2], [844,390,2]];
+    const viewports = [[3840,2160,1], [2560,1440,1], [1920,1080,1], [1600,900,1], [1366,768,1], [1280,720,1], [2560,1440,1.5], [900,700,1], [800,600,1.5], [640,700,1], [390,844,3], [375,812,2], [320,640,2], [844,390,2]];
     await evaluate(a, `window.__realDock=document.querySelector('#buttons');window.__realShareDialog=document.querySelector('[data-device-popover="screen"]');`);
     await send('Page.bringToFront', {}, a);
     for (const [width,height,dpr] of viewports) {
@@ -336,6 +363,12 @@ try {
     }
     await send('Emulation.setDeviceMetricsOverride', { width:1920,height:1080,deviceScaleFactor:1,mobile:false }, a);
     await screenshot(a, 'sharing-local-controls');
+    await click(a, '#video-grid .local-screen-preview-toggle');
+    await wait(() => evaluate(a, `document.querySelector('.is-stage-focus')?.dataset.playbackState === 'preview-hidden'`), 'hidden preview has a single status');
+    assert.equal(await evaluate(a, `!document.querySelector('.is-stage-focus .local-screen-preview-placeholder').hidden &&
+        document.querySelector('.is-stage-focus .share-watch-message').hidden`), true);
+    await screenshot(a, 'sharing-local-preview-hidden');
+    await click(a, '#video-grid .local-screen-preview-toggle');
     const layouts = [];
     const counters = await evaluate(b, `({offers:__stageProbe.offers,replaceTracks:__stageProbe.replaceTracks,captures:__stageProbe.captures})`);
     await send('Page.bringToFront', {}, b);
@@ -632,7 +665,7 @@ try {
     assert.deepEqual(errors, [], 'no unhandled browser runtime errors');
     assert.deepEqual(requests, [], 'no failed runtime resources');
     const report = { status:'passed', browser: (await send('Browser.getVersion')).product, syntheticMediaOnly:true, serverForwardingEnabled:useSfu,
-        shareUiChecks: ['centered dialog with visible footer at twelve viewport/DPR cases', 'same Dock and dialog DOM throughout resize', 'compact left Dock parent with full-height desktop chat', 'mobile starts on stage', 'touch navigation, settings close and share menu at 320/390/844 CSS pixels', 'mobile navigation preserves actual players, streams and chat draft without media negotiation'],
+        shareUiChecks: ['centered dialog with visible footer across viewport and DPR cases', 'same Dock and dialog DOM throughout resize', 'sidebar volume persists without the card and reaches the real remote player', 'consolidated device settings switch between panels', 'local preview has one status', 'compact left Dock parent with full-height desktop chat', 'mobile starts on stage', 'touch navigation, settings close and share menu at 320/390/844 CSS pixels', 'mobile navigation preserves actual players, streams and chat draft without media negotiation'],
         viewportCases: layouts.length + voiceLayouts.length, memberGridCases:memberGrids.length, memberCounts:[1,2,3,4,8,12], cssViewports:layouts.map((row)=>row.viewport),
         routeChecks:useSfu ? ['automatic SFU','manual P2P','manual SFU','per-sharer preference retention'] : ['P2P','manual P2P','per-sharer preference retention'],
         tests:['empty and occupied channel guides','central join action','voice join','camera off clears remote player and preserves voice','camera restart renders fresh frames','chat after camera restart','camera off preserves active screen share','screen end with camera off clears video','two voice peers','synthetic share','responsive geometry in both modes','1/2/3/4/8/12 member grid fixtures','bounded dock icons and member actions','closing chat expands central stage','chat draft','no layout renegotiation/capture','two shares','focus retention/fallback','manual route retention','preview hide retains capture','last share end','member departure'],

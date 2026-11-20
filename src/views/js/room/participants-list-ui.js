@@ -72,8 +72,11 @@
             statuses.append(createStatusIcon(status));
         });
 
-        if (participant.tileToggle) {
-            statuses.append(createTileToggleButton(participant.tileToggle));
+        if (participant.tileToggle && !participant.isLocal) {
+            const control = createTileToggleButton(participant.tileToggle);
+            statuses.append(control);
+            item.classList.add('has-member-volume');
+            item.addEventListener('contextmenu', (event) => participant.tileToggle.onClick?.(event));
         }
 
         item.append(name, statuses);

@@ -332,7 +332,7 @@
                         choices.set(tile.id, choice);
                         sources.append(choice);
                     }
-                    choice.textContent = `▣ ${member.senderName || 'Guest'}`;
+                    choice.textContent = tile.id === 'local-video' ? '我的屏幕' : (member.senderName || 'Guest');
                     choice.setAttribute('aria-label', `观看 ${member.senderName || 'Guest'} 的共享`);
                 } else {
                     if (tile.classList.contains('is-stage-focus')) global.VoiceFullscreenControls?.exitTileFullscreen(tile);

@@ -1,9 +1,6 @@
 // Reuse Piik's authenticated App control and native Pion senders. The local
 // capture ID is not a Piik room credential; Node alone authorizes publication.
-import {
-    NativeClient,
-    discoverNativeConnect,
-} from './.deps/upstream/src/client/native/client';
+import { NativeClient } from './.deps/upstream/src/client/native/client';
 import { NativeMediaBridge } from './.deps/upstream/src/client/native/media-bridge';
 import {
     defaultNativeCapturePath,
@@ -29,7 +26,24 @@ export function createNativeCapture(
         '[data-screen-share-provider]'
     );
     const audioPicker = createAudioSourcePicker();
-    const picker = createNativeSourcePicker(authorize, audioPicker);
+    const connectDesktop = async (signal?: AbortSignal) => {
+        const { EliYorkDesktop } = globalThis as typeof globalThis & {
+            EliYorkDesktop?: { waitForNativeShare?: () => Promise<void> };
+        };
+        if (EliYorkDesktop?.waitForNativeShare) {
+            try {
+                await EliYorkDesktop.waitForNativeShare();
+            } catch {
+                throw Error('共享组件未就绪。请在客户端中恢复共享组件后重试。');
+            }
+        }
+        if (signal?.aborted) return null;
+        const next = await NativeClient.connect({ signal });
+        if (!next && !signal?.aborted)
+            throw Error('无法连接共享组件。请刷新来源，或重启 Windows 客户端。');
+        return next;
+    };
+    const picker = createNativeSourcePicker(authorize, connectDesktop, audioPicker);
     let pickerVisible = false;
     let editingQuality = false;
     const status = document.querySelector<HTMLElement>(
@@ -117,11 +131,8 @@ export function createNativeCapture(
         const token = generation;
         connecting = (async () => {
             await cleanup;
-            const next = await NativeClient.connect();
-            if (!next)
-                throw new Error(
-                    '请先启动 Piik App 并批准此网站；浏览器也可能需要本地网络访问许可。'
-                );
+            const next = await connectDesktop();
+            if (!next) throw Error('无法连接共享组件');
             if (token !== generation) {
                 next.close();
                 throw new Error('原生共享请求已取消');
@@ -162,14 +173,6 @@ export function createNativeCapture(
     const syncPicker = () => {
         const native = provider?.value === 'native';
         updateResolutionValidity();
-        if (!native) {
-            const hint = document.querySelector<HTMLElement>(
-                '[data-share-audio-hint]'
-            );
-            if (hint)
-                hint.textContent =
-                    '声音来源由浏览器选择器决定。整屏声音可能包含本频道通话，可取消勾选以避免回传；建议选择独立窗口或标签页。';
-        }
         const nativeOptions = document.querySelector<HTMLElement>(
             '[data-piik-native-options]'
         );
@@ -186,12 +189,10 @@ export function createNativeCapture(
         if (native && pickerVisible && !editingQuality) void picker.open();
         else picker.close();
     };
-    provider?.addEventListener('change', syncPicker);
     document.addEventListener('voice-share-dialog-open', (event) => {
         pickerVisible = true;
         editingQuality = (event as CustomEvent).detail?.mode === 'quality';
-        const key = (event as CustomEvent).detail?.nativeSourceKey;
-        if (typeof key === 'string') picker.setSelected(key);
+        picker.setSelected((event as CustomEvent).detail?.nativeSourceKey || '');
         audioPicker.setSelected((event as CustomEvent).detail?.nativeAudioTargetKey || '');
         syncPicker();
     });
@@ -199,28 +200,6 @@ export function createNativeCapture(
         pickerVisible = false;
         picker.close();
     });
-    // This link is followed only by the user. Discovery grants no control;
-    // approval stays in Piik's existing capability-protected local launcher.
-    document
-        .querySelector('[data-piik-native-approve]')
-        ?.addEventListener('click', async () => {
-            try {
-                await authorize();
-                const url = await discoverNativeConnect();
-                const link = document.querySelector<HTMLAnchorElement>(
-                    '[data-piik-native-approval-link]'
-                );
-                if (!url || !link)
-                    throw new Error('未发现 Piik App，请先启动 App');
-                link.href = url;
-                link.hidden = false;
-                setStatus(
-                    '点击“打开 App 授权”后，在 App 中核对并批准此网站，再点击重新连接。'
-                );
-            } catch (error: any) {
-                setStatus(error.message);
-            }
-        });
     const profileFor = (options: any) => {
         const size = sizes[options.resolutionPreset];
         if (!size) throw new Error(resolutionMessage);

@@ -12,8 +12,8 @@ html[data-desktop-chrome] .workspace-topbar {
     gap: 8px;
     align-items: center;
     box-sizing: border-box;
-    background: #f4ebf0;
-    color: #49333f;
+    background: #f0f1f4;
+    color: #303646;
     z-index: 20000;
     pointer-events: auto;
     -webkit-app-region: drag;
@@ -33,7 +33,6 @@ html[data-desktop-chrome] .workspace-brand {
 html[data-desktop-chrome] .workspace-brand strong { display: block; white-space: nowrap; }
 html[data-desktop-chrome] .workspace-mark { width: 24px; height: 24px; }
 html[data-desktop-chrome] .workspace-actions { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; width: auto; }
-html[data-desktop-chrome] .workspace-actions > #stageMoreToggle { height: 28px; min-height: 0; }
 html[data-desktop-chrome] .workspace-topbar :is(button, a) { -webkit-app-region: no-drag; }
 html[data-desktop-chrome] .workspace-actions > button {
     height: 28px;
@@ -58,7 +57,7 @@ html[data-desktop-chrome] .workspace-topbar .desktop-refresh {
     cursor: pointer;
     font-size: 21px;
 }
-html[data-desktop-chrome] .workspace-topbar .desktop-refresh:hover { background: #e6d8e1; }
+html[data-desktop-chrome] .workspace-topbar .desktop-refresh:hover { background: #e2e4eb; }
 html[data-desktop-chrome] #main.stage-layout { padding-top: env(titlebar-area-height, 40px); }
 html[data-desktop-chrome] .server-navigation { display: none; }
 /* Old production pages may still have a repeated sidebar brand. The title
@@ -67,10 +66,10 @@ html[data-desktop-chrome] body:not(:has(#main.stage-layout)) { padding-top: env(
 html[data-desktop-chrome] .desktop-notice {
     position: fixed; top: 54px; right: 18px; z-index: 19000;
     width: min(360px, calc(100vw - 36px)); padding: 17px 18px;
-    background: #fff9fc; color: #49333f; border: 1px solid #e8d3de;
-    border-radius: 14px; box-shadow: 0 8px 30px #49333f18; font-size: 13px;
+    background: var(--panel, #fff); color: var(--text, #303646); border: 1px solid var(--line, #dde0e7);
+    border-radius: 14px; box-shadow: 0 8px 30px #30364618; font-size: 13px;
 }
-html[data-desktop-chrome] .desktop-notice p { margin: 7px 0 12px; color: #887681; line-height: 1.6; }
-html[data-desktop-chrome] .desktop-notice button { padding: 5px 10px; border-radius: 7px; background: #f8e9f0; color: #8e425f; border: 0; cursor: pointer; }
+html[data-desktop-chrome] .desktop-notice p { margin: 7px 0 12px; color: var(--muted, #5e6677); line-height: 1.6; }
+html[data-desktop-chrome] .desktop-notice button { padding: 5px 10px; border-radius: 7px; background: var(--accent-soft, #eee8f3); color: var(--accent-strong, #594265); border: 0; cursor: pointer; }
 html[data-desktop-chrome] .desktop-notice button + button { margin-left: 8px; }
 html[data-desktop-chrome] .desktop-notice button:disabled { opacity: .65; cursor: wait; }

@@ -67,7 +67,6 @@
                         class="tree-channel voice-channel <%= channel.slug === roomId ? 'is-viewing' : '' %>"
                         data-channel-room="<%= channel.slug %>"
                         data-channel-name="<%= channel.name %>"
-                        data-channel-description="<%= channel.description %>"
                     >
                         <a class="tree-channel-link" href="/room/<%= channel.slug %>">
                             <span class="tree-channel-name">
@@ -100,7 +99,6 @@
                             </div>
                         </div>
                         <div class="media-dock-info">
-                            <span class="media-dock-kicker">语音详情</span>
                             <strong id="localVoiceChannelName">大厅</strong>
                             <span class="media-dock-timer">
                                 <button type="button" id="callSignal" class="call-signal" data-quality="unknown" data-bars="0" aria-label="通话质量" aria-expanded="false" aria-controls="callSignalDetail">
@@ -129,17 +127,11 @@
                                 <i class="far fa-newspaper"></i>
                                 <span>共享</span>
                             </button>
-                            <button class="control-menu-toggle" type="button" aria-label="屏幕共享设置" aria-expanded="false" data-control-menu="screen">
-                                <i class="fas fa-chevron-up"></i>
-                            </button>
                         </div>
                         <div class="media-dock-control-group control-button-wrap" data-device-control="camera">
                             <button id="toggleVideo" class="media-dock-action-button" type="button" title="摄像头" aria-label="摄像头" aria-pressed="false">
                                 <i class="fas fa-video"></i>
                                 <span>摄像头</span>
-                            </button>
-                            <button class="control-menu-toggle" type="button" aria-label="摄像头设置" aria-expanded="false" data-control-menu="camera">
-                                <i class="fas fa-chevron-up"></i>
                             </button>
                         </div>
                         <div class="media-dock-control-group control-button-wrap" data-device-control="mic">
@@ -147,19 +139,14 @@
                                 <i class="fas fa-microphone"></i>
                                 <span>麦克风</span>
                             </button>
-                            <button class="control-menu-toggle" type="button" aria-label="麦克风设置" aria-expanded="false" data-control-menu="mic">
-                                <i class="fas fa-chevron-up"></i>
-                            </button>
                         </div>
                         <div class="media-dock-control-group control-button-wrap" data-device-control="output">
                             <button id="toggleOutput" class="media-dock-action-button" type="button" title="听筒" aria-label="听筒" aria-pressed="false">
                                 <i class="fas fa-volume-up"></i>
                                 <span>播放音量</span>
                             </button>
-                            <button class="control-menu-toggle" type="button" aria-label="播放设置" aria-expanded="false" data-control-menu="output">
-                                <i class="fas fa-chevron-up"></i>
-                            </button>
                         </div>
+                        <button type="button" class="dock-device-settings" data-control-menu="mic" aria-expanded="false" aria-haspopup="dialog" title="音视频设置" aria-label="音视频设置"><i class="fas fa-sliders-h" aria-hidden="true"></i></button>
                     </div>
                     <section class="media-device-popover mic-volume-popover" data-control-panel="mic" data-device-popover="mic" popover="manual" role="dialog" aria-label="麦克风设备">
                         <div class="media-device-popover-header">
@@ -167,36 +154,34 @@
                             <span id="micDeviceStatus">默认设备</span>
                             <button type="button" data-control-close aria-label="关闭麦克风设置">完成</button>
                         </div>
+                        <nav class="dock-device-tabs" aria-label="音视频设置">
+                            <button type="button" data-control-menu="mic" aria-current="true">麦克风</button>
+                            <button type="button" data-control-menu="camera">摄像头</button>
+                            <button type="button" data-control-menu="output">播放</button>
+                        </nav>
                         <div class="media-device-list" data-device-list="mic"></div>
                         <label class="media-volume-row">
                             <span>输入音量</span>
                             <input id="micGainSlider" type="range" min="0" max="150" step="5" value="100">
                             <strong id="micGainValue">100%</strong>
                         </label>
-                        <div class="media-audio-options">
-                            <span id="noiseToggle" class="media-dock-pill noise-toggle" role="button" tabindex="0" aria-pressed="true">浏览器降噪 <strong id="noiseStatusText">开</strong></span>
-                            <span id="aiNoiseToggle" class="media-dock-pill noise-toggle" role="button" tabindex="0" aria-pressed="false" data-not-supported-label="N/A">RNNoise <strong id="aiNoiseStatusText">关</strong></span>
-                        </div>
-                        <label class="media-device-status">降噪模式
+                        <label class="media-select-row"><span>降噪模式</span>
                             <select data-audio-noise-mode aria-label="降噪模式">
                                 <option value="off">关闭</option>
                                 <option value="browser">浏览器内置</option>
                                 <option value="rnnoise">RNNoise</option>
-                                <option value="deepfilter">增强降噪 · DeepFilterNet3（实验）</option>
                             </select>
                         </label>
                         <label class="media-device-status" title="只作用于 RNNoise；压低非语音残留。轻声或首字变弱时可关闭对比。">
                             <input type="checkbox" data-rnnoise-speech-gate checked>
                             非语音门控（RNNoise）
                         </label>
-                        <p class="media-device-status">增强降噪在本机处理，首次加载约 23 MB；会增加语音延迟，轻声或首字变弱时可切回 RNNoise 对比。</p>
                         <p class="media-device-status" data-audio-processing-status role="status" aria-live="polite"></p>
                         <details>
-                            <summary>通话诊断与日志</summary>
-                            <p class="media-device-status">非语音门控主要压低不讲话时的残留；讲话时的键盘声仍由 RNNoise 处理。本机保留最近 5 次日志，不录音。</p>
-                            <div class="media-audio-options">
-                                <button type="button" data-show-call-logs>查看最近通话日志</button>
-                                <button type="button" data-clear-call-logs>清除历史日志</button>
+                            <summary>通话日志</summary>
+                            <div class="call-log-actions" data-call-log-actions>
+                                <button type="button" data-show-call-logs>查看日志</button>
+                                <button type="button" data-clear-call-logs>清除日志</button>
                             </div>
                         </details>
                     </section>
@@ -206,6 +191,11 @@
                             <span id="cameraDeviceStatus">默认设备</span>
                             <button type="button" data-control-close aria-label="关闭摄像头设置">完成</button>
                         </div>
+                        <nav class="dock-device-tabs" aria-label="音视频设置">
+                            <button type="button" data-control-menu="mic">麦克风</button>
+                            <button type="button" data-control-menu="camera" aria-current="true">摄像头</button>
+                            <button type="button" data-control-menu="output">播放</button>
+                        </nav>
                         <div class="media-device-list" data-device-list="camera"></div>
                     </section>
                     <section class="media-device-popover" data-control-panel="output" data-device-popover="output" popover="manual" role="dialog" aria-label="输出设备">
@@ -214,6 +204,11 @@
                             <span id="outputDeviceStatus">默认设备</span>
                             <button type="button" data-control-close aria-label="关闭播放设置">完成</button>
                         </div>
+                        <nav class="dock-device-tabs" aria-label="音视频设置">
+                            <button type="button" data-control-menu="mic">麦克风</button>
+                            <button type="button" data-control-menu="camera">摄像头</button>
+                            <button type="button" data-control-menu="output" aria-current="true">播放</button>
+                        </nav>
                         <p class="media-device-warning hidden" data-output-unsupported>当前浏览器不支持选择输出设备</p>
                         <div class="media-device-list" data-device-list="output"></div>
                         <label class="media-volume-row">
@@ -236,8 +231,11 @@
         </footer>
         </div>
         <main class="room-stage" aria-label="屏幕共享舞台">
-            <header class="share-stage-header"><strong>正在观看</strong><nav id="share-sources" aria-label="选择共享源"></nav>
-                <div class="local-share-controls" data-local-share-controls hidden><span data-local-share-state>正在共享</span><button type="button" data-share-action="source">更换画面</button><button type="button" data-share-action="quality">画质</button><button type="button" data-share-action="stop">停止共享</button></div>
+            <header class="share-stage-header"><nav id="share-sources" aria-label="选择共享源"></nav>
+                <div class="local-share-controls" data-local-share-controls hidden><span data-local-share-state role="status">正在共享</span>
+                    <button type="button" data-share-action="source"><i class="fas fa-exchange-alt" aria-hidden="true"></i>换画面</button>
+                    <button type="button" data-share-action="quality"><i class="fas fa-sliders-h" aria-hidden="true"></i>画质</button>
+                    <button type="button" data-share-action="stop"><i class="fas fa-stop" aria-hidden="true"></i>停止共享</button></div>
             </header>
             <section id="canvas" class="stage-canvas" aria-label="共享画面"><div id="video-grid"></div></section>
         </main>
@@ -254,7 +252,7 @@
         </section>
 
         <aside id="chat-panel" class="chat-panel" aria-label="频道聊天">
-            <header class="stage-chat-heading"><h2 id="chatTitle">频道聊天</h2><p id="chatDescription" hidden></p><button id="chatJumpToLatest" type="button" hidden>查看新消息</button></header>
+            <header class="stage-chat-heading"><h2 id="chatTitle">频道聊天</h2><button id="chatJumpToLatest" type="button" hidden>查看新消息</button></header>
             <input id="chatName" type="hidden" maxlength="32" autocomplete="nickname">
             <ol id="chatMessages" class="chat-messages"></ol>
             <form id="chatForm" class="chat-form">

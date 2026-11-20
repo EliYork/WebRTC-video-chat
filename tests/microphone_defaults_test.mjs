@@ -40,7 +40,7 @@ test('fresh settings default to RNNoise with AEC and speech gate, without double
 });
 
 test('saved modes take priority over the new default and legacy preferences', () => {
-    for (const mode of ['browser', 'off', 'rnnoise', 'deepfilter']) {
+    for (const mode of ['browser', 'off', 'rnnoise']) {
         const api = fixture(undefined, [['webrtc-noise-mode', mode], ['webrtc-ai-noise-experiment', 'true']]);
         assert.equal(api.getNoiseMode(), mode);
     }
@@ -66,14 +66,12 @@ test('unavailable browser storage defaults to RNNoise without writing or accessi
     assert.equal(window.VoiceNoiseSettingsUI.getNoiseMode(), 'rnnoise');
 });
 
-test('enhanced mode persists explicitly without enabling browser double suppression', () => {
-    const api = fixture();
+test('a saved experimental model migrates to RNNoise with AEC and without double suppression', () => {
+    const api = fixture(undefined, [['webrtc-noise-mode', 'deepfilter'], ['webrtc-rnnoise-speech-gate', 'false']]);
     assert.equal(api.getNoiseMode(), 'rnnoise');
-    assert.equal(api.setNoiseMode('deepfilter'), true);
-    assert.equal(api.getNoiseMode(), 'deepfilter');
+    assert.equal(api.getRnnoiseSpeechGateEnabled(), false);
+    assert.equal(api.setNoiseMode('deepfilter'), false);
     assert.equal(api.getAudioConstraints().noiseSuppression, false);
     assert.equal(api.getAudioConstraints().autoGainControl, false);
     assert.equal(api.getAudioConstraints().echoCancellation, true);
-    assert.equal(api.setNoiseMode('invented'), false);
-    assert.equal(api.getNoiseMode(), 'deepfilter');
 });

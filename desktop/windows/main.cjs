@@ -226,6 +226,17 @@ else {
             panels = createPanels({ BrowserWindow, ipcMain, screen, window: () => mainWindow, hidden: smoke, log,
                 preferences: windowPreferences, trayAvailable: () => windowLifecycle?.trayAvailable() || false });
             startNative();
+            ipcMain.handle('voice:native-share-ready', async (event) => {
+                if (!owned(event.sender, event.senderFrame?.url) ||
+                    event.senderFrame !== mainWindow.webContents.mainFrame)
+                    throw Error('Native share readiness denied');
+                try {
+                    await nativeReady;
+                    if (nativeRuntime.snapshot().state !== 'ready') throw Error('native-not-ready');
+                } catch {
+                    throw Error('共享组件未就绪。请在客户端中恢复共享组件后重试。');
+                }
+            });
             ipcMain.handle('voice:clipboard-write', async (event, text) => {
                 if (
                     !owned(event.sender, event.senderFrame?.url) ||
@@ -287,7 +298,7 @@ else {
                 icon: join(__dirname, 'assets/app.png'),
                 title: '语音据点',
                 titleBarStyle: 'hidden',
-                titleBarOverlay: { color: '#f4ebf0', symbolColor: '#49333f', height: 40 },
+                titleBarOverlay: { color: '#f0f1f4', symbolColor: '#303646', height: 40 },
                 autoHideMenuBar: true,
                 width: 1440,
                 height: 940,
@@ -421,7 +432,7 @@ else {
                         },
                     ])
                 );
-                // Keep the menu available via ⋯ without another native row.
+                // The title bar's Settings button opens the application menu.
                 mainWindow.removeMenu();
             };
             if (!smoke && app.isPackaged) {
@@ -493,6 +504,33 @@ else {
                         const badge = VoiceMediaQualityView.render(tile, '4K · 60fps', '播放');
                         const fits = badge.scrollWidth <= badge.clientWidth && badge.textContent.includes('60fps');
                         tile.remove(); return fits;
+                    })()`);
+                    result.nativePicker = await mainWindow.webContents.executeJavaScript(`(async () => {
+                        await window.EliYorkDesktop.waitForNativeShare();
+                        const wait = async (condition) => {
+                            for (let i = 0; i < 160; i++) {
+                                if (condition()) return;
+                                await new Promise(resolve => setTimeout(resolve, 100));
+                            }
+                            throw Error('Native share picker did not load');
+                        };
+                        document.querySelector('#stageJoinVoice').click();
+                        await wait(() => document.querySelector('#destroyPeer').dataset.sessionAction === 'hangup');
+                        document.querySelector('#shareScreen').click();
+                        const dialog = document.querySelector('[data-device-popover="screen"]');
+                        await wait(() => dialog.querySelector('.share-source-card'));
+                        const provider = dialog.querySelector('[data-screen-share-provider]');
+                        const audio = dialog.querySelector('[data-native-audio-mode]');
+                        const picker = {
+                            provider: provider.value, providerHidden: provider.type === 'hidden',
+                            audio: audio.value, label: audio.selectedOptions[0].textContent,
+                            cards: dialog.querySelectorAll('.share-source-card').length,
+                            approvalVisible: /授权/.test(dialog.innerText),
+                        };
+                        dialog.querySelector('[data-screen-share-cancel]').click();
+                        document.querySelector('#destroyPeer').click();
+                        await wait(() => document.querySelector('#destroyPeer').dataset.sessionAction === 'join');
+                        return picker;
                     })()`);
                     result.nativeHealth =
                         await mainWindow.webContents.executeJavaScript(
@@ -601,9 +639,15 @@ else {
                         );
                         result.clipboardWrite =
                             (await clipboard.readText()) === marker;
-                        await mainWindow.webContents.executeJavaScript(
-                            `document.querySelector('[data-copy-call-diagnostics]').click()`
-                        );
+                        result.callDiagnosticsInSettings = await mainWindow.webContents.executeJavaScript(`(() => {
+                            document.querySelector('.dock-device-settings').click();
+                            const button = document.querySelector('[data-call-log-actions] [data-copy-call-diagnostics]');
+                            if (!button || document.querySelector('#stageMoreToggle, #workspace-tools')) return false;
+                            button.closest('details').open = true;
+                            if (!button.getClientRects().length) return false;
+                            button.click();
+                            return true;
+                        })()`);
                         for (let attempt = 0; attempt < 110; attempt++) {
                             // eslint-disable-next-line no-await-in-loop -- Poll this one clipboard operation in order.
                             const value = await clipboard.readText();
@@ -643,6 +687,7 @@ else {
                         !result.clipboardWrite ||
                         !result.clipboardReadDenied ||
                         !result.diagnosticsCopied ||
+                        !result.callDiagnosticsInSettings ||
                         !result.qualityLabelFits
                     )
                         throw Error(JSON.stringify({ result, media }));
