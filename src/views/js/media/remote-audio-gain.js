@@ -40,7 +40,8 @@
         };
         const setVolume = (element, { volume = 1, muted = false } = {}) => {
             if (!element) return false;
-            volume = Number.isFinite(Number(volume)) ? Math.max(0, Math.min(2, Number(volume))) : 1;
+            // The master and the individual stream controls can each reach 200%.
+            volume = Number.isFinite(Number(volume)) ? Math.max(0, Math.min(4, Number(volume))) : 1;
             const tracks = (element.srcObject?.getAudioTracks?.() || []).filter((track) => track.readyState === 'live');
             if (volume <= 1 || !tracks.length || muted) {
                 release(element);

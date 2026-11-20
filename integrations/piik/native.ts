@@ -8,7 +8,7 @@ import {
 } from './.deps/upstream/src/client/native/capture-selection';
 import { createNativeSourcePicker } from './source-picker';
 import type { NativeCaptureTarget } from './.deps/upstream/src/client/native/wire';
-import {createAudioSourcePicker, nativeAudioSelection, nativeFailureText, showEncoderStatus} from './share-audio';
+import {createAudioSourcePicker, nativeAudioSelection, nativeFailureText} from './share-audio';
 
 export function createNativeCapture(
     authorize: () => Promise<unknown>,
@@ -62,7 +62,7 @@ export function createNativeCapture(
         status.after(hint);
     }
     const resolutionMessage =
-        'Piik 原生共享暂不支持“原始分辨率”或“自动”。请选择 720p、1080p、1440p 或 2160p（4K）；不会自动降低分辨率。';
+        '请选择固定分辨率（720p、1080p、1440p 或 2160p）。';
     const sizes: Record<string, number[]> = {
         '720p': [1280, 720],
         '1080p': [1920, 1080],
@@ -80,11 +80,6 @@ export function createNativeCapture(
             hint.hidden = !invalid;
             hint.textContent = invalid ? resolutionMessage : '';
         }
-        const routeHint = document.querySelector<HTMLElement>(
-            '[data-piik-provider-hint]'
-        );
-        if (routeHint)
-            routeHint.textContent = `Piik P2P · ${native ? 'App 原生采集 · H.264 硬件编码' : '浏览器采集与编码'} · 每路最多 3 人观看 · 目标码率 15 Mbps。实际画质和帧率取决于设备与网络。`;
     };
     resolutionSelect?.addEventListener('change', updateResolutionValidity);
     updateResolutionValidity();
@@ -105,7 +100,6 @@ export function createNativeCapture(
         clearTimeout(previous?.statusTimer);
         sources = [];
         path = null;
-        showEncoderStatus(null);
         if (previousClient) {
             cleanup = previous
                 ? previousClient
@@ -182,10 +176,8 @@ export function createNativeCapture(
         audioPicker.sync();
         const nativeAudio = document.querySelector<HTMLElement>('[data-native-audio-section]');
         const webAudio = document.querySelector<HTMLElement>('[data-web-audio-section]');
-        const encoder = document.querySelector<HTMLElement>('[data-native-encoder-section]');
         if (nativeAudio) nativeAudio.hidden = !native;
         if (webAudio) webAudio.hidden = native;
-        if (encoder) encoder.hidden = !native;
         if (native && pickerVisible && !editingQuality) void picker.open();
         else picker.close();
     };
@@ -269,12 +261,13 @@ export function createNativeCapture(
                     const state = await next.shareStatus(shareId);
                     if (active !== owner) return;
                     owner.encoderStatus = state;
-                    showEncoderStatus(state);
                     if (state?.audio === 'failed' && owner.audio) {
                         const message = '共享音源已退出或采集失败，共享已停止；请刷新重选音源，未切换为系统声音。';
                         stop(); setStatus(message); onFailure(message); return;
                     }
-                } catch { if (active === owner) { owner.encoderStatus = null; showEncoderStatus(null); } }
+                } catch {
+                    if (active === owner) owner.encoderStatus = null;
+                }
                 if (active === owner) owner.statusTimer = setTimeout(updateStatus, 1500);
             };
             const abort = () => {
@@ -301,7 +294,6 @@ export function createNativeCapture(
                 owner.actualAudio = result.audio;
                 if (owner.audio && (!result.audio || result.sourceAudio === false)) throw Error('共享音频未能启动；未切换为系统声音');
                 if (token !== generation) throw new Error('原生共享请求已取消');
-                setStatus('App 原生 H.264 共享中');
                 void updateStatus();
                 return owner.stream;
             } catch (error) {

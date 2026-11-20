@@ -25,10 +25,13 @@
         <section class="share-quality-section" aria-label="画质设置">
             <h3>画质</h3>
             <div class="share-quality-controls">
-                <label><span>分辨率</span><select id="screenShareResolution" data-screen-share-resolution>
-                    <option value="auto">自动</option><option value="720p">720p</option><option value="1080p" selected>1080p</option><option value="1440p">1440p（2K）</option><option value="2160p">2160p（4K）</option><option value="original">原始分辨率</option>
+                <label class="share-field"><span>分辨率</span><select id="screenShareResolution" data-screen-share-resolution>
+                    <option value="auto">自动</option><option value="720p">720p</option><option value="1080p" selected>1080p</option><option value="1440p">1440p（2K）</option><option value="2160p">2160p（4K）</option>
                 </select></label>
-                <label><span>流畅度</span><select id="screenShareFrameRate" data-screen-share-frame-rate><option value="15">15 帧/秒</option><option value="30">30 帧/秒</option><option value="60" selected>60 帧/秒</option></select></label>
+                <label class="share-field"><span>流畅度</span><select id="screenShareFrameRate" data-screen-share-frame-rate><option value="15">15 帧/秒</option><option value="30">30 帧/秒</option><option value="60" selected>60 帧/秒</option></select></label>
+                <% if (piikPrototype) { %>
+                <label class="share-field share-bitrate-field"><span>目标码率上限</span><select data-screen-share-bitrate><option value="3000000">3 Mbps</option><option value="6000000">6 Mbps</option><option value="10000000">10 Mbps</option><option value="15000000" selected>15 Mbps</option></select></label>
+                <% } %>
             </div>
         </section>
         <section class="share-audio-section" aria-label="共享音频">
@@ -36,36 +39,22 @@
             <label class="share-audio-choice" data-web-audio-section><input type="checkbox" checked data-screen-share-audio><span>共享声音<small>整屏声音可能包含通话。可在浏览器中选择单独的标签页或窗口声音。</small></span></label>
             <% if (piikPrototype) { %>
             <div data-native-audio-section hidden>
-                <label class="media-select-row"><span>声音来源</span><select data-native-audio-mode aria-label="共享音频模式">
+                <label class="share-field"><span>声音来源</span><select data-native-audio-mode aria-label="共享音频模式">
                     <option value="system" selected>系统声音</option><option value="none">不共享声音</option><option value="application">指定应用声音</option><option value="source" data-native-audio-legacy hidden>随画面声音（旧客户端）</option>
                 </select></label>
                 <div class="share-audio-app" data-native-audio-application hidden>
                     <img data-native-audio-icon alt="" width="24" height="24" hidden>
-                    <label><span>选择应用</span><select data-native-audio-target aria-label="应用音源"><option value="">选择应用</option></select></label>
+                    <label class="share-field"><span>选择应用</span><select data-native-audio-target aria-label="应用音源"><option value="">选择应用</option></select></label>
                 </div>
                 <p class="media-device-hint" data-native-audio-hint role="status" hidden></p>
             </div>
             <% } %>
         </section>
-        <details class="share-advanced"><summary>高级设置</summary>
-            <label class="media-select-row" data-share-mode-row><span>画面偏好</span><select data-screen-share-mode><option value="game" selected>流畅优先</option><option value="detail">文字清晰优先</option></select></label>
-            <% if (piikPrototype) { %>
-            <label class="media-select-row"><span>目标码率上限</span><select data-screen-share-bitrate><option value="3000000">3 Mbps</option><option value="6000000">6 Mbps</option><option value="10000000">10 Mbps</option><option value="15000000" selected>15 Mbps</option></select></label>
-            <% } %>
-            <label class="media-select-row" data-share-web-only><span>视频编码</span><select data-screen-share-codec><option value="auto" selected>自动</option><% if (!piikPrototype) { %><option value="av1">AV1（实验）</option><% } %><option value="h264">H.264 优先</option><option value="vp8">VP8</option></select></label>
-            <label class="media-select-row" <%= piikPrototype ? 'hidden' : '' %>><span>服务器启动码率</span><select data-screen-share-start-bitrate><option value="browser" selected>默认</option><option value="1500">1.5 Mbps</option><option value="5500">5.5 Mbps</option></select></label>
-            <% if (piikPrototype) { %>
-            <div data-native-encoder-section hidden>
-                <dl class="share-encoder-status" aria-live="polite">
-                    <dt>视频编码</dt><dd data-native-encoder-codec>未确认</dd>
-                    <dt>编码方式</dt><dd data-native-encoder-method>未确认</dd>
-                    <dt>实际编码器</dt><dd data-native-encoder-encoder>未确认</dd>
-                    <dt>GPU 适配器</dt><dd data-native-encoder-adapter>未确认</dd>
-                    <dt>状态</dt><dd data-native-encoder-state>等待开始共享</dd>
-                </dl>
-            </div>
-            <% } %>
-        </details>
+        <div class="share-extra-settings">
+            <label class="share-field" data-share-mode-row><span>画面偏好</span><select data-screen-share-mode><option value="game" selected>流畅优先</option><option value="detail">文字清晰优先</option></select></label>
+            <label class="share-field" data-share-web-only><span>视频编码</span><select data-screen-share-codec><option value="auto" selected>自动</option><% if (!piikPrototype) { %><option value="av1">AV1（实验）</option><% } %><option value="h264">H.264 优先</option><option value="vp8">VP8</option></select></label>
+            <label class="share-field" <%= piikPrototype ? 'hidden' : '' %>><span>服务器启动码率</span><select data-screen-share-start-bitrate><option value="browser" selected>默认</option><option value="1500">1.5 Mbps</option><option value="5500">5.5 Mbps</option></select></label>
+        </div>
         <p class="share-dialog-feedback" data-share-dialog-feedback role="status" aria-live="polite"></p>
     </div>
     <footer class="screen-share-dialog-actions"><button type="button" data-share-action="stop" class="share-stop-action" hidden>停止共享</button><span></span><button type="button" data-screen-share-cancel>取消</button><button type="button" data-screen-share-start class="share-primary-action">选择画面</button></footer>

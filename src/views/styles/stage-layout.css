@@ -4,7 +4,7 @@
 .workspace-topbar { top: 0; left: 0; right: 0; height: calc(var(--workspace-bar-height) + env(safe-area-inset-top)); min-height: 0; padding: env(safe-area-inset-top) max(14px, env(safe-area-inset-right)) 0 max(14px, env(safe-area-inset-left)); background: var(--panel); border-bottom: 1px solid var(--line-soft); pointer-events: auto; }
 .workspace-brand { gap: 8px; font-size: 13px; }
 .workspace-mark { width: 24px; height: 24px; }
-.workspace-navigation, .workspace-tools { display: flex; align-items: center; gap: 6px; }
+.workspace-navigation { display: flex; align-items: center; gap: 6px; }
 #stageChatToggle:not([data-unread-count='0'])[data-unread-count]::after { content: attr(data-unread-label); display: inline-grid; place-items: center; min-width: 18px; height: 18px; margin-left: 4px; padding: 0 4px; border-radius: 10px; background: var(--accent-strong); color: white; font-size: 11px; line-height: 1; vertical-align: middle; }
 .stage-connection-status { position: fixed; z-index: 1100; top: calc(var(--workspace-bar-height) + env(safe-area-inset-top) + 8px); left: 50%; transform: translateX(-50%); width: max-content; max-width: calc(100vw - 24px); margin: 0; padding: 8px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); box-shadow: var(--shadow); font-size: 13px; overflow-wrap: anywhere; }
 .stage-connection-status[hidden], .stage-share-notice[hidden], #chatJumpToLatest[hidden], .share-watch-message[hidden], .share-watch-message button[hidden] { display: none; }
@@ -22,12 +22,6 @@
 @media (prefers-reduced-motion: reduce) { .stage-layout .video-tile.is-immersive-player .tile-header { transition: none; } }
 .workspace-actions button { min-width: 32px; min-height: 32px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); font-size: 12px; cursor: pointer; }
 #stageStageToggle { display: none; }
-#stageMoreToggle { display: block; width: 36px; padding: 0; font-size: 17px; }
-#stageMoreToggle[aria-expanded='true'] { background: var(--accent-soft); border-color: var(--accent); }
-.workspace-tools { display: none; position: absolute; top: calc(100% + 6px); right: max(10px, env(safe-area-inset-right)); width: min(232px, calc(100vw - 20px)); padding: 6px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); box-shadow: var(--shadow); -webkit-app-region: no-drag; }
-.workspace-tools.is-open { display: grid; gap: 4px; }
-.workspace-tools .workspace-copy-diagnostics, .workspace-tools .workspace-download { width: 100%; min-height: 40px; justify-content: flex-start; text-align: left; padding: 8px 12px; font-size: 13px; }
-.workspace-tools .workspace-download span { display: inline; }
 html[data-desktop-chrome] .workspace-actions .workspace-navigation > button { height: 28px; min-height: 0; padding: 3px 8px; font-size: 12px; box-shadow: none; }
 @media (pointer: coarse) {
     :root { --workspace-bar-height: 56px; }
@@ -99,22 +93,19 @@ html[data-desktop-chrome] .workspace-download { display: none; }
 .stage-dock #buttons.media-dock { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-areas: 'user' 'controls' 'session' 'status'; align-items: center; gap: 10px; min-height: 0; padding: 0; border: 0; box-shadow: none; border-radius: 0; background: none; }
 .stage-dock #buttons .media-dock-header { grid-area: user; grid-template-columns: minmax(0, 1fr); gap: 6px; padding: 0; }
 .stage-dock .media-dock-activity-row { grid-area: session; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; }
-.stage-dock #buttons .media-dock-actions { grid-area: controls; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) 40px; gap: 4px; }
+.stage-dock #buttons .media-dock-actions { grid-area: controls; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
 .stage-dock #buttons .control-button-wrap { grid-template-columns: minmax(0, 1fr); min-width: 0; }
 .stage-dock #buttons :is(.media-dock-action-button, .media-dock-hangup) { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; height: 44px; min-height: 44px; padding: 4px; gap: 2px; line-height: 1; }
-.stage-dock #buttons .media-dock-control-group > button,
-.stage-dock #buttons .dock-device-settings {
+.stage-dock #buttons .media-dock-control-group > button {
     border: 1px solid transparent;
     border-radius: 8px;
     background: var(--panel-soft);
     color: var(--text);
     box-shadow: none;
 }
-.stage-dock #buttons .media-dock-control-group > button[aria-pressed='true'],
-.stage-dock #buttons .dock-device-settings[aria-expanded='true'] { background: var(--accent-soft); color: var(--accent-strong); }
+.stage-dock #buttons .media-dock-control-group > button:is([aria-pressed='true'], [aria-expanded='true']) { background: var(--accent-soft); color: var(--accent-strong); }
 .stage-dock #buttons .media-dock-control-group > button.is-off { background: var(--panel-warm); color: var(--muted); }
-.stage-dock #buttons :is(.media-dock-control-group > button, .dock-device-settings):hover { border-color: var(--line); background: var(--accent-soft); }
-.stage-dock #buttons .dock-device-settings { width: 100%; height: 100%; min-height: 44px; padding: 0; order: 4; }
+.stage-dock #buttons .media-dock-control-group > button:hover { border-color: var(--line); background: var(--accent-soft); }
 .stage-dock #buttons .media-dock-action-button span { display: block; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
 .stage-dock #buttons :is(svg, i) { width: 20px; height: 20px; flex: 0 0 20px; font-size: 18px; line-height: 20px; }
 .stage-dock #buttons #copyRoomLink { width: 44px; flex: 0 0 44px; }
@@ -205,12 +196,8 @@ html[data-desktop-chrome] .workspace-download { display: none; }
     .workspace-actions { width: 100%; gap: 8px; }
     .workspace-navigation { flex: 1; padding: 2px; gap: 2px; border: 1px solid var(--line-soft); border-radius: 12px; background: var(--panel); }
     .workspace-navigation > button { flex: 1; min-width: 0; min-height: 44px; padding: 6px; border: 0; border-radius: 9px; background: transparent; font-size: 14px; }
-    #stageChannelsToggle, #stageStageToggle, #stageMoreToggle { display: block; }
+    #stageChannelsToggle, #stageStageToggle { display: block; }
     .workspace-navigation > button[aria-pressed='true'] { background: var(--accent-soft); color: var(--accent-strong); font-weight: 650; }
-    #stageMoreToggle { width: 44px; min-height: 44px; padding: 0; border-radius: 10px; font-size: 17px; }
-    .workspace-tools .workspace-copy-diagnostics, .workspace-tools .workspace-download { width: 100%; min-height: 48px; justify-content: flex-start; text-align: left; padding: 10px 14px; font-size: 14px; }
-    .workspace-tools .workspace-download span { display: inline; }
-    .workspace-tools .workspace-download span::after { content: 'Windows 64 位'; display: block; font-size: 11px; font-weight: 400; color: var(--muted); }
     #main.stage-layout,
     #main.stage-layout.stage-chat-closed,
     #main.stage-layout.stage-channels-open {
@@ -230,7 +217,7 @@ html[data-desktop-chrome] .workspace-download { display: none; }
     .stage-dock .media-dock-header :is(.media-dock-user, #localVoiceChannelName) { display: none; }
     .stage-dock .media-dock-timer { grid-area: quality; }
     .stage-dock #buttons .call-signal { width: 44px; min-height: 40px; }
-    .stage-dock #buttons .media-dock-actions { grid-template-columns: repeat(4, minmax(0, 1fr)) 40px; gap: 4px; }
+    .stage-dock #buttons .media-dock-actions { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
     .stage-dock [data-device-control='mic'] { order: 0; }
     .stage-dock [data-device-control='camera'] { order: 1; }
     .stage-dock [data-device-control='output'] { order: 2; }
@@ -305,7 +292,6 @@ html[data-desktop-chrome] .workspace-download { display: none; }
     .media-device-popover:not([data-device-popover='screen']) { width: min(360px, calc(100vw - 16px)); padding: 16px; border-radius: 16px; font-size: 14px; overscroll-behavior: contain; }
     .media-device-popover-header { flex-wrap: wrap; font-size: 15px; }
     .media-device-popover-header span { flex: 1; font-size: 12px; }
-    #buttons .media-device-popover [data-control-close] { width: auto; min-width: 44px; height: 44px; padding: 6px; }
     #buttons .media-device-popover .media-device-option { height: auto; min-height: 44px; padding: 8px; }
     .media-device-popover :is(select, input[type='range']) { min-height: 44px; }
 }

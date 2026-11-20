@@ -11,7 +11,7 @@
     const MIC_GAIN_KEY = 'webrtc-mic-gain';
     const DEFAULT_MIC_GAIN = 100;
     const MIN_MIC_GAIN = 0;
-    const MAX_MIC_GAIN = 150;
+    const MAX_MIC_GAIN = 200;
 
     const getNoiseMode = () => {
         const saved = safeStorageGet(NOISE_MODE_KEY);

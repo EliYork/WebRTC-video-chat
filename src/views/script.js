@@ -3585,15 +3585,7 @@ callDiagnostics = window.VoiceCallDiagnostics.createRuntime({
         return null;
     },
 });
-const copyDiagnosticsButton = document.querySelector('[data-copy-call-diagnostics]');
-const desktopLogActions = window.EliYorkDesktop && mediaDockRoot.querySelector('[data-call-log-actions]');
-if (copyDiagnosticsButton && desktopLogActions) {
-    desktopLogActions.prepend(copyDiagnosticsButton);
-    copyDiagnosticsButton.classList.remove('workspace-copy-diagnostics');
-    byId('stageMoreToggle')?.remove();
-    byId('workspace-tools')?.remove();
-}
-copyDiagnosticsButton?.addEventListener('click', (event) => callDiagnostics.copyCombined(event.currentTarget));
+mediaDockRoot.querySelector('[data-copy-call-diagnostics]')?.addEventListener('click', (event) => callDiagnostics.copyCombined(event.currentTarget));
 window.VoicePlayerMenu.configure({
     beforeOpen: () => remoteVolumeUI.closePopover(),
     showEvents: (tile) => callDiagnostics.showLogs({ shareOrdinal: callDiagnostics.getShareOrdinal(tile), host: tile }),
@@ -3770,7 +3762,7 @@ mediaDockAdapter = mediaDockAdapterApi.createMediaDockAdapter({
             return applyOutputSettingsToRemoteMedia();
         },
         setOutputVolume: (volume) => {
-            outputVolume = Math.max(0, Math.min(1, Number(volume) || 0));
+            outputVolume = outputVolumeState.clampVolume(volume, 0);
             notifyMediaDock();
             return applyOutputSettingsToRemoteMedia();
         },

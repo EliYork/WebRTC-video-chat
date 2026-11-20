@@ -16,7 +16,7 @@ const artifacts = resolve(__dirname, '../../integrations/piik/artifacts/update-p
 mkdirSync(artifacts, { recursive: true });
 app.setPath('userData', join(work, 'profile')); app.disableHardwareAcceleration();
 app.commandLine.appendSwitch('mute-audio'); app.on('window-all-closed', () => {});
-let parent, panels, active, timer, offered, version = '0.1.7', downloads = 0, installs = 0, confirmations = 0;
+let parent, panels, active, timer, offered, version = '0.1.7', downloads = 0, installs = 0, releases = 0;
 const fixture = Buffer.from('Synthetic updater bytes. This is not an executable.');
 const results = {};
 const server = createServer((req, res) => {
@@ -52,8 +52,7 @@ app.whenReady().then(async () => {
         active = createUpdates({ updater, app: { getVersion: () => '0.1.6' }, window: () => null,
             preferences: createUpdatePreferences(join(work, 'ignore.json')), log: () => {},
             onStartupUpdate: async () => { offered = await panels.updatePrompt(info, active); },
-            prepareInstall: async () => { throw Error('Media must not be stopped'); },
-            confirmInstall: async () => { confirmations++; return false; } });
+            prepareInstall: async () => { releases++; } });
     };
     launch(); await wait(() => offered);
     const first = offered;
@@ -81,12 +80,14 @@ app.whenReady().then(async () => {
     const newer = offered;
     await newer.webContents.executeJavaScript(`document.querySelector('#primary').click()`);
     await wait(() => active.snapshot().status==='downloaded' && !active.snapshot().busy);
-    assert.equal(downloads,1); assert.equal(installs,0);
+    assert.equal(downloads,1); assert.equal(installs,0); assert.equal(releases,0);
+    assert.equal(await newer.webContents.executeJavaScript(`document.querySelector('#primary').textContent`),'退出并安装');
     await newer.webContents.executeJavaScript(`document.querySelector('#primary').click()`);
-    await wait(() => confirmations===1);
-    assert.equal(installs,0); assert.equal(active.snapshot().status,'downloaded');
+    await wait(() => installs===1);
+    assert.equal(releases,1); assert.equal(active.snapshot().status,'installing');
+    assert.equal(BrowserWindow.getAllWindows().filter(win => win !== parent && win !== newer).length, 0);
     results.closeRemindsNextLaunch = true; results.ignorePersists = true; results.manualStillAvailable = true;
     results.newVersionReminds = true; results.downloads = downloads; results.installs = installs;
     writeFileSync(join(artifacts,'result.json'),JSON.stringify({passed:true,hidden:true,muted:true,syntheticDownloadOnly:true,results,work},null,2));
-    finish(); process.stdout.write('PASS startup update prompts, close, persisted ignore, newer version, explicit download and declined install.\n'); app.quit();
+    finish(); process.stdout.write('PASS startup update prompts, close, persisted ignore, newer version, explicit download and one-click install handoff.\n'); app.quit();
 }).catch(fail);

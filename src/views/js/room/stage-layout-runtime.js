@@ -18,14 +18,12 @@
         let activeShares = [];
         let chatOpen = !compact;
         let channelsOpen = false;
-        let toolsOpen = false;
         let initialized = false;
         let disposed = false;
         let savedChatPosition;
         let unread = 0;
         let chatConnection = 'connected';
         let panelCloseWatcher;
-        let toolsCloseWatcher;
         const doc = root.ownerDocument || global.document;
         const byId = (id) => doc.getElementById(id);
         const atLatest = () => {
@@ -87,17 +85,6 @@
                 panelCloseWatcher = new global.CloseWatcher();
                 panelCloseWatcher.addEventListener('close', () => { panelCloseWatcher = undefined; showStage(); });
             }
-            if (!toolsOpen) { toolsCloseWatcher?.destroy(); toolsCloseWatcher = undefined; }
-            else if (!toolsCloseWatcher) {
-                const watcher = toolsCloseWatcher = new global.CloseWatcher();
-                watcher.addEventListener('close', () => {
-                    if (toolsCloseWatcher !== watcher) return;
-                    const toggle = byId('stageMoreToggle');
-                    const restoreFocus = byId('workspace-tools')?.contains(doc.activeElement) || doc.activeElement === toggle;
-                    toolsCloseWatcher = undefined; toolsOpen = false; renderControls();
-                    if (restoreFocus) toggle?.focus();
-                });
-            }
         };
         const button = (label, className) => {
             const node = doc.createElement('button');
@@ -143,10 +130,6 @@
             chat.setAttribute('aria-hidden', String(!chatOpen));
             const channels = byId('stage-channels');
             if (channels) channels.inert = compact && !channelsOpen;
-            const tools = byId('workspace-tools');
-            if (tools) tools.inert = !toolsOpen;
-            byId('stageMoreToggle')?.setAttribute('aria-expanded', String(toolsOpen));
-            tools?.classList.toggle('is-open', toolsOpen);
             renderUnread();
             renderConnection();
             syncCloseWatchers();
@@ -162,7 +145,7 @@
                     chatOpen = false;
                 }
                 else { restoreChat = !chatOpen && desktopChatOpen; chatOpen = desktopChatOpen; }
-                channelsOpen = false; toolsOpen = false;
+                channelsOpen = false;
                 compact = nextCompact;
             }
             const viewport = global.visualViewport;
@@ -206,7 +189,6 @@
                 if (chat.contains(doc.activeElement)) byId('stageChatToggle')?.focus();
             }
             chatOpen = next;
-            toolsOpen = false;
             syncViewport();
             if (next) restoreChatPosition();
             if (next && !doc.hidden && atLatest()) resetUnread();
@@ -214,7 +196,6 @@
         const setChannelsOpen = (open) => {
             if (open && compact) setChatOpen(false);
             channelsOpen = Boolean(open);
-            toolsOpen = false;
             renderControls();
         };
         const showStage = () => {
@@ -353,17 +334,9 @@
             bind(byId('stageChatToggle'), 'click', () => { syncViewport(); setChatOpen(!chatOpen); });
             bind(byId('stageChannelsToggle'), 'click', () => { syncViewport(); setChannelsOpen(!channelsOpen); });
             bind(byId('stageStageToggle'), 'click', showStage);
-            bind(byId('stageMoreToggle'), 'click', () => { toolsOpen = !toolsOpen; renderControls(); });
-            bind(doc, 'click', (event) => {
-                if (toolsOpen && !byId('workspace-tools')?.contains(event.target) &&
-                    !byId('stageMoreToggle')?.contains(event.target)) {
-                    toolsOpen = false; renderControls();
-                }
-            });
             bind(doc, 'keydown', (event) => {
                 if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;
-                if (toolsOpen) { event.preventDefault(); toolsOpen = false; renderControls(); byId('stageMoreToggle')?.focus(); }
-                else if (compact && (channelsOpen || chatOpen) && !event.defaultPrevented) {
+                if (compact && (channelsOpen || chatOpen)) {
                     event.preventDefault();
                     showStage(); byId('stageStageToggle')?.focus();
                 }
@@ -395,7 +368,7 @@
             destroy: () => {
                 disposed = true;
                 savedChatPosition = undefined;
-                panelCloseWatcher?.destroy(); toolsCloseWatcher?.destroy();
+                panelCloseWatcher?.destroy();
                 bindings.splice(0).forEach((unbind) => unbind());
                 Array.from(cameraPreviews.keys()).forEach(releaseCameraPreview);
                 proxies.forEach((proxy) => proxy.remove());

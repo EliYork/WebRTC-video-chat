@@ -122,9 +122,8 @@ app.whenReady()
         const updater = new NsisUpdater(null, adapter);
         updater.httpExecutor = new ElectronHttpExecutor(() => {});
         updater.disableDifferentialDownload = true;
-        updater.quitAndInstall = () => {
-            throw Error('Test must never install');
-        };
+        let installs = 0;
+        updater.quitAndInstall = () => { installs++; };
         const parent = new BrowserWindow({
             show: false,
             width: 1000,
@@ -144,8 +143,7 @@ app.whenReady()
             log: () => {},
             openExternal: async url => { openedLinks.push(url); creditOpened(); },
         });
-        let confirmations = 0,
-            releaseMedia = 0;
+        let releaseMedia = 0;
         const controller = createUpdates({
             updater,
             app: { getVersion: () => '0.1.3' },
@@ -153,19 +151,6 @@ app.whenReady()
             log: () => {},
             prepareInstall: async () => {
                 releaseMedia++;
-            },
-            confirmInstall: async () => {
-                confirmations++;
-                return (
-                    (
-                        await panels.confirm({
-                            title: '退出并安装 0.1.4？',
-                            detail: '安装会结束当前语音和屏幕共享，然后重新打开客户端。',
-                            accept: '退出并安装',
-                            cancel: '稍后安装',
-                        })
-                    ).response === 0
-                );
             },
         });
         const info = {
@@ -178,6 +163,9 @@ app.whenReady()
         try {
             win = await panels.about(info, controller);
             await until(win, stateIs('idle'));
+            assert.equal(await win.webContents.executeJavaScript(
+                `document.querySelector('#about').innerText.split('0.1.3').length - 1`
+            ), 1);
             assert.equal(await panels.about(info, controller), win);
             results.singleton = true;
             assert.equal(win.isVisible(), false);
@@ -267,41 +255,6 @@ app.whenReady()
                 );
             }
             win.webContents.setZoomFactor(1);
-            win.webContents.executeJavaScript(
-                `document.querySelector('#primary').click()`
-            );
-            let confirmation;
-            for (let i = 0; i < 100; i++) {
-                confirmation = BrowserWindow.getAllWindows().find(
-                    (w) =>
-                        w !== parent &&
-                        w !== win &&
-                        w.getTitle().startsWith('退出并安装')
-                );
-                if (confirmation) break;
-                await new Promise((done) => setTimeout(done, 20));
-            }
-            assert.ok(confirmation);
-            await until(
-                confirmation,
-                `document.querySelector('#cancel').textContent==='稍后安装'`
-            );
-            assert.equal(
-                await confirmation.webContents.executeJavaScript(
-                    `document.activeElement.id`
-                ),
-                'cancel'
-            );
-            await shot(confirmation, 'confirm-install');
-            await confirmation.webContents.executeJavaScript(
-                `document.querySelector('#cancel').click()`
-            );
-            await until(
-                win,
-                `${stateIs('downloaded')}&&!document.querySelector('#primary').disabled`
-            );
-            assert.equal(confirmations, 1);
-            assert.equal(releaseMedia, 0);
             const rogue = new BrowserWindow({
                 show: false,
                 webPreferences: {
@@ -317,6 +270,13 @@ app.whenReady()
                 );
             assert.equal(results.unownedWindowDenied, true);
             rogue.destroy();
+            assert.equal(installs, 0);
+            await win.webContents.executeJavaScript(`document.querySelector('#primary').click()`);
+            await until(win, stateIs('installing'));
+            assert.equal(releaseMedia, 1);
+            assert.equal(installs, 1);
+            assert.equal(BrowserWindow.getAllWindows().filter(window => window !== parent && window !== win).length, 0);
+            results.singleInstallAction = true;
             win.close();
             controller.stop();
             // A fresh controller exercises offline feedback in the same real UI.
@@ -327,7 +287,6 @@ app.whenReady()
                 window: () => parent,
                 log: () => {},
                 prepareInstall: async () => {},
-                confirmInstall: async () => false,
             });
             win = await panels.about(info, offline);
             await until(win, stateIs('idle'));

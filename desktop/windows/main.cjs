@@ -39,7 +39,6 @@ if (preview) app.setPath('userData', process.env.ELIYORK_PREVIEW_USER_DATA || jo
 if (smoke) {
     app.commandLine.appendSwitch('mute-audio');
     app.commandLine.appendSwitch('use-fake-device-for-media-stream');
-    app.commandLine.appendSwitch('use-fake-ui-for-media-stream');
     app.disableHardwareAcceleration();
     if (process.env.ELIYORK_TEST_USER_DATA)
         app.setPath('userData', process.env.ELIYORK_TEST_USER_DATA);
@@ -68,7 +67,6 @@ function nativeChanged({ state, port }) {
     if (state === 'ready') nativeNeedsRecovery = false;
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('voice:notice', notice);
 }
-const mediaAllowed = new Set();
 const trusted = (value) => {
     try {
         return new URL(value).origin === origin;
@@ -256,34 +254,20 @@ else {
                 'display-capture',
                 'clipboard-sanitized-write',
             ]);
+            // Only the client's own room frame may use the microphone or camera.
+            // The web controls still decide when to request and release a device.
             session.defaultSession.setPermissionCheckHandler(
-                (contents, permission, requestingOrigin) =>
+                (contents, permission, requestingOrigin, details) =>
                     owned(contents, requestingOrigin) &&
                     (permissions.has(permission) ||
-                        (permission === 'media' &&
-                            mediaAllowed.has(permission)))
+                        (permission === 'media' && details?.isMainFrame === true))
             );
             session.defaultSession.setPermissionRequestHandler(
-                async (contents, permission, callback, details) => {
-                    if (
-                        !owned(
-                            contents,
-                            details.requestingUrl || contents.getURL()
-                        ) ||
-                        details.isMainFrame === false
-                    )
-                        return callback(false);
-                    if (permissions.has(permission)) return callback(true);
-                    if (permission !== 'media') return callback(false);
-                    if (smoke || mediaAllowed.has(permission))
-                        return callback(true);
-                    const result = await panels.confirm({
-                        title: '允许使用麦克风或摄像头？',
-                        detail: '仅授权 voice.eliyork.com；设备仍由频道中的媒体按钮控制。',
-                        accept: '允许使用', cancel: '暂不允许',
-                    }).catch(() => ({ response: 1 }));
-                    if (result.response === 0) mediaAllowed.add(permission);
-                    callback(result.response === 0);
+                (contents, permission, callback, details) => {
+                    const trustedRequest = owned(contents, details.requestingUrl || contents?.getURL()) &&
+                        details.isMainFrame !== false;
+                    callback(trustedRequest && (permissions.has(permission) ||
+                        (permission === 'media' && details.isMainFrame === true)));
                 }
             );
             session.defaultSession.setDisplayMediaRequestHandler(
@@ -298,7 +282,7 @@ else {
                 icon: join(__dirname, 'assets/app.png'),
                 title: '语音据点',
                 titleBarStyle: 'hidden',
-                titleBarOverlay: { color: '#f0f1f4', symbolColor: '#303646', height: 40 },
+                titleBarOverlay: { color: '#f4ebf0', symbolColor: '#49333f', height: 40 },
                 autoHideMenuBar: true,
                 width: 1440,
                 height: 940,
@@ -402,25 +386,6 @@ else {
                                     click: () => void showAbout().catch(error => log(`about-error ${error.message}`)),
                                 },
                                 {
-                                    label:
-                                        updates?.label() || '检查更新（开发预览不可用）',
-                                    enabled: Boolean(updates),
-                                    click: () => void showAbout().then(() => {
-                                        if (!['available', 'downloaded'].includes(updates?.snapshot().status)) void updates?.check();
-                                    }).catch(error => log(`settings-error ${error.message}`)),
-                                },
-                                { type: 'separator' },
-                                {
-                                    label: '刷新频道页面',
-                                    accelerator: 'CmdOrCtrl+R',
-                                    click: () =>
-                                        void refreshPage().catch((error) => log(`refresh-error ${error.message}`)),
-                                },
-                                {
-                                    label: '恢复原生共享组件',
-                                    click: () => void recoverNative(),
-                                },
-                                {
                                     label: '诊断工具',
                                     accelerator: 'F12',
                                     click: () =>
@@ -441,7 +406,6 @@ else {
                     app,
                     window: () => mainWindow,
                     log,
-                    changed: () => buildMenu(),
                     preferences: require('./update-preferences.cjs').createUpdatePreferences(
                         join(app.getPath('userData'), 'update-preferences.json'), log),
                     onStartupUpdate: ({ version }) => {
@@ -454,11 +418,6 @@ else {
                         else mainWindow.once('show', offer);
                     },
                     prepareInstall: installUpdate,
-                    confirmInstall: async (version) => (await panels.confirm({
-                        title: `退出并安装 ${version}？`,
-                        detail: '安装会结束当前语音和屏幕共享，然后重新打开客户端。\n选择稍后，下载好的更新会保留，不会自动安装。',
-                        accept: '退出并安装', cancel: '稍后安装',
-                    })).response === 0,
                 });
             }
             buildMenu();
@@ -484,7 +443,26 @@ else {
                     );
                     const media =
                         await mainWindow.webContents.executeJavaScript(
-                            `(async()=>{const mic=await navigator.mediaDevices.getUserMedia({audio:true});const microphone=mic.getAudioTracks().length;mic.getTracks().forEach(t=>t.stop());const screen=await navigator.mediaDevices.getDisplayMedia({video:true,audio:false});const display=screen.getVideoTracks().length;screen.getTracks().forEach(t=>t.stop());return {microphone,display}})()`,
+                            `(async () => {
+                                const devices = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+                                const microphone = devices.getAudioTracks().length;
+                                const camera = devices.getVideoTracks().length;
+                                devices.getTracks().forEach(track => track.stop());
+                                const frame = document.createElement('iframe');
+                                frame.allow = 'microphone; camera';
+                                frame.hidden = true;
+                                document.body.append(frame);
+                                const embedded = await frame.contentWindow.navigator.mediaDevices
+                                    .getUserMedia({ audio: true, video: true }).then(stream => {
+                                        stream.getTracks().forEach(track => track.stop());
+                                        return false;
+                                    }, error => error.name === 'NotAllowedError');
+                                frame.remove();
+                                const screen = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+                                const display = screen.getVideoTracks().length;
+                                screen.getTracks().forEach(track => track.stop());
+                                return { microphone, camera, embedded, display };
+                            })()`,
                             true
                         );
                     const result =
@@ -521,8 +499,12 @@ else {
                         await wait(() => dialog.querySelector('.share-source-card'));
                         const provider = dialog.querySelector('[data-screen-share-provider]');
                         const audio = dialog.querySelector('[data-native-audio-mode]');
+                        const headerBottom = document.querySelector('.workspace-topbar').getBoundingClientRect().bottom;
                         const picker = {
                             provider: provider.value, providerHidden: provider.type === 'hidden',
+                            backdropBelowTitlebar: headerBottom > 0 &&
+                                Math.abs(parseFloat(getComputedStyle(dialog, '::backdrop').top) - headerBottom) < 1 &&
+                                dialog.getBoundingClientRect().top >= headerBottom,
                             audio: audio.value, label: audio.selectedOptions[0].textContent,
                             cards: dialog.querySelectorAll('.share-source-card').length,
                             approvalVisible: /授权/.test(dialog.innerText),
@@ -565,6 +547,8 @@ else {
                     mainWindow.webContents.setZoomFactor(1);
                     result.windowTitle = mainWindow.getTitle();
                     result.menuHidden = !mainWindow.isMenuBarVisible();
+                    result.settingsItems = Menu.getApplicationMenu().items[0].submenu.items
+                        .filter(item => item.type !== 'separator').map(item => item.label);
                     result.settingsEntry = await mainWindow.webContents.executeJavaScript(`document.querySelector('.desktop-menu')?.textContent.includes('设置')`);
                     const settingsWindow = await showAbout();
                     result.aboutDialog = await settingsWindow.webContents.executeJavaScript(`new Promise(resolve=>{const poll=()=>{const c=document.querySelector('#client-version');if(c?.textContent)resolve(document.querySelector('#window-title').textContent==='关于与更新'&&document.querySelector('#web-version').textContent.length>0);else setTimeout(poll,20)};poll()})`);
@@ -640,7 +624,7 @@ else {
                         result.clipboardWrite =
                             (await clipboard.readText()) === marker;
                         result.callDiagnosticsInSettings = await mainWindow.webContents.executeJavaScript(`(() => {
-                            document.querySelector('.dock-device-settings').click();
+                            document.querySelector('#toggleAudio').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
                             const button = document.querySelector('[data-call-log-actions] [data-copy-call-diagnostics]');
                             if (!button || document.querySelector('#stageMoreToggle, #workspace-tools')) return false;
                             button.closest('details').open = true;
@@ -682,6 +666,8 @@ else {
                         result.nodeExposed ||
                         !result.media ||
                         media.microphone !== 1 ||
+                        media.camera !== 1 ||
+                        !media.embedded ||
                         media.display !== 1 ||
                         result.nativeHealth !== 200 ||
                         !result.clipboardWrite ||

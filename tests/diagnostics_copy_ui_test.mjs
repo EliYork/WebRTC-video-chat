@@ -65,13 +65,15 @@ function fixture({ clipboardFails = false } = {}) {
     return { runtime, button, window, timers, copied, downloads, elements, state, shares, health };
 }
 
-test('room renders one diagnostics action for the web header and provides a desktop destination', () => {
+test('room places diagnostics under microphone logs and downloads directly in the web header', () => {
     const html = ejs.render(read('room/index.ejs'), { channelName: '大厅', roomId: 'lobby', channels: [],
         cspNonce: 'test', roomBootstrap: '{}', roomAssetVersions: {} }, { filename: fileURLToPath(new URL('../src/views/room/index.ejs', import.meta.url)) });
     const header = html.match(/<header class="workspace-topbar"[\s\S]*?<\/header>/)?.[0];
     assert.ok(header);
     assert.match(header, /workspace-brand/);
-    assert.match(header, /data-copy-call-diagnostics[^>]*>复制诊断<\/button>/);
+    assert.match(header, /<a class="workspace-download" href="\/download\/windows"/);
+    assert.doesNotMatch(header, /stageMoreToggle|workspace-tools|data-copy-call-diagnostics/);
+    assert.match(html, /data-call-log-actions>[\s\S]*?data-copy-call-diagnostics[^>]*>复制诊断<\/button>/);
     assert.equal((html.match(/data-copy-call-diagnostics/g) || []).length, 1);
     assert.ok(html.indexOf('</header>') < html.indexOf('id="main"'));
     assert.doesNotMatch(html, /复制双方诊断|复制脱敏诊断/);
@@ -82,9 +84,7 @@ test('room renders one diagnostics action for the web header and provides a desk
     const script = read('script.js');
     const binding = script.split('\n').filter((line) => line.includes('[data-copy-call-diagnostics]'));
     assert.equal(binding.length, 1);
-    assert.match(binding[0], /const copyDiagnosticsButton = document\.querySelector/);
-    assert.match(script, /desktopLogActions\.prepend\(copyDiagnosticsButton\)/);
-    assert.match(script, /copyDiagnosticsButton\?\.addEventListener\('click'.*callDiagnostics\.copyCombined\(event.currentTarget\)/);
+    assert.match(binding[0], /mediaDockRoot\.querySelector.*addEventListener\('click'.*callDiagnostics\.copyCombined\(event.currentTarget\)/);
     assert.doesNotMatch(script, /window\.VoiceCallDiagnostics\.copyCombined\s*=/);
     assert.doesNotMatch(read('js/voice/voice-share-diagnostics.js'), /createElement\('button'\)|clipboard|copyCombined/);
 });

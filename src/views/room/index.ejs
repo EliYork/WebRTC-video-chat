@@ -49,11 +49,7 @@
             <button type="button" id="stageStageToggle" aria-controls="member-cards canvas" aria-pressed="true">语音</button>
             <button type="button" id="stageChatToggle" aria-controls="chat-panel" aria-expanded="true">聊天</button>
             </nav>
-            <button type="button" id="stageMoreToggle" aria-controls="workspace-tools" aria-expanded="false" aria-label="更多操作">•••</button>
-            <div class="workspace-tools" id="workspace-tools" role="group" aria-label="更多操作" inert>
-            <button type="button" class="workspace-copy-diagnostics" data-copy-call-diagnostics aria-live="polite" aria-atomic="true">复制诊断</button>
             <a class="workspace-download" href="/download/windows" target="_blank" rel="noopener" title="下载 Windows 客户端（Windows 10/11，64 位）" aria-label="下载 Windows 客户端（64 位）"><i class="fa-solid fa-download" aria-hidden="true"></i><span>下载客户端</span></a>
-            </div>
         </div>
         <p id="stageConnectionStatus" class="stage-connection-status" role="status" hidden></p>
     </header>
@@ -129,40 +125,33 @@
                             </button>
                         </div>
                         <div class="media-dock-control-group control-button-wrap" data-device-control="camera">
-                            <button id="toggleVideo" class="media-dock-action-button" type="button" title="摄像头" aria-label="摄像头" aria-pressed="false">
+                            <button id="toggleVideo" aria-haspopup="dialog" aria-expanded="false" aria-controls="camera-device-panel" aria-keyshortcuts="Shift+F10" class="media-dock-action-button" type="button" title="摄像头" aria-label="摄像头" aria-pressed="false">
                                 <i class="fas fa-video"></i>
                                 <span>摄像头</span>
                             </button>
                         </div>
                         <div class="media-dock-control-group control-button-wrap" data-device-control="mic">
-                            <button id="toggleAudio" class="media-dock-action-button" type="button" title="麦克风" aria-label="麦克风" aria-pressed="false">
+                            <button id="toggleAudio" aria-haspopup="dialog" aria-expanded="false" aria-controls="mic-device-panel" aria-keyshortcuts="Shift+F10" class="media-dock-action-button" type="button" title="麦克风" aria-label="麦克风" aria-pressed="false">
                                 <i class="fas fa-microphone"></i>
                                 <span>麦克风</span>
                             </button>
                         </div>
                         <div class="media-dock-control-group control-button-wrap" data-device-control="output">
-                            <button id="toggleOutput" class="media-dock-action-button" type="button" title="听筒" aria-label="听筒" aria-pressed="false">
+                            <button id="toggleOutput" aria-haspopup="dialog" aria-expanded="false" aria-controls="output-device-panel" aria-keyshortcuts="Shift+F10" class="media-dock-action-button" type="button" title="听筒" aria-label="听筒" aria-pressed="false">
                                 <i class="fas fa-volume-up"></i>
                                 <span>播放音量</span>
                             </button>
                         </div>
-                        <button type="button" class="dock-device-settings" data-control-menu="mic" aria-expanded="false" aria-haspopup="dialog" title="音视频设置" aria-label="音视频设置"><i class="fas fa-sliders-h" aria-hidden="true"></i></button>
                     </div>
-                    <section class="media-device-popover mic-volume-popover" data-control-panel="mic" data-device-popover="mic" popover="manual" role="dialog" aria-label="麦克风设备">
+                    <section class="media-device-popover mic-volume-popover" id="mic-device-panel" data-control-panel="mic" data-device-popover="mic" popover="manual" role="dialog" aria-label="麦克风设备">
                         <div class="media-device-popover-header">
                             <strong>麦克风</strong>
                             <span id="micDeviceStatus">默认设备</span>
-                            <button type="button" data-control-close aria-label="关闭麦克风设置">完成</button>
                         </div>
-                        <nav class="dock-device-tabs" aria-label="音视频设置">
-                            <button type="button" data-control-menu="mic" aria-current="true">麦克风</button>
-                            <button type="button" data-control-menu="camera">摄像头</button>
-                            <button type="button" data-control-menu="output">播放</button>
-                        </nav>
                         <div class="media-device-list" data-device-list="mic"></div>
                         <label class="media-volume-row">
                             <span>输入音量</span>
-                            <input id="micGainSlider" type="range" min="0" max="150" step="5" value="100">
+                            <input id="micGainSlider" type="range" min="0" max="200" step="5" value="100">
                             <strong id="micGainValue">100%</strong>
                         </label>
                         <label class="media-select-row"><span>降噪模式</span>
@@ -180,47 +169,36 @@
                         <details>
                             <summary>通话日志</summary>
                             <div class="call-log-actions" data-call-log-actions>
+                                <button type="button" data-copy-call-diagnostics aria-live="polite" aria-atomic="true">复制诊断</button>
                                 <button type="button" data-show-call-logs>查看日志</button>
                                 <button type="button" data-clear-call-logs>清除日志</button>
                             </div>
                         </details>
                     </section>
-                    <section class="media-device-popover" data-control-panel="camera" data-device-popover="camera" popover="manual" role="dialog" aria-label="摄像头设备">
+                    <section class="media-device-popover" id="camera-device-panel" data-control-panel="camera" data-device-popover="camera" popover="manual" role="dialog" aria-label="摄像头设备">
                         <div class="media-device-popover-header">
                             <strong>摄像头</strong>
                             <span id="cameraDeviceStatus">默认设备</span>
-                            <button type="button" data-control-close aria-label="关闭摄像头设置">完成</button>
                         </div>
-                        <nav class="dock-device-tabs" aria-label="音视频设置">
-                            <button type="button" data-control-menu="mic">麦克风</button>
-                            <button type="button" data-control-menu="camera" aria-current="true">摄像头</button>
-                            <button type="button" data-control-menu="output">播放</button>
-                        </nav>
                         <div class="media-device-list" data-device-list="camera"></div>
                     </section>
-                    <section class="media-device-popover" data-control-panel="output" data-device-popover="output" popover="manual" role="dialog" aria-label="输出设备">
+                    <section class="media-device-popover" id="output-device-panel" data-control-panel="output" data-device-popover="output" popover="manual" role="dialog" aria-label="输出设备">
                         <div class="media-device-popover-header">
-                            <strong>耳机</strong>
+                            <strong>声音</strong>
                             <span id="outputDeviceStatus">默认设备</span>
-                            <button type="button" data-control-close aria-label="关闭播放设置">完成</button>
                         </div>
-                        <nav class="dock-device-tabs" aria-label="音视频设置">
-                            <button type="button" data-control-menu="mic">麦克风</button>
-                            <button type="button" data-control-menu="camera">摄像头</button>
-                            <button type="button" data-control-menu="output" aria-current="true">播放</button>
-                        </nav>
                         <p class="media-device-warning hidden" data-output-unsupported>当前浏览器不支持选择输出设备</p>
                         <div class="media-device-list" data-device-list="output"></div>
                         <label class="media-volume-row">
                             <span>输出音量</span>
-                            <input id="outputVolume" type="range" min="0" max="1" step="0.05" value="1">
+                            <input id="outputVolume" type="range" min="0" max="2" step="0.05" value="1">
                             <strong id="outputVolumeValue">100%</strong>
                         </label>
                         <label class="voice-event-sound-toggle"><input id="voiceEventSounds" type="checkbox" checked><span>成员加入 / 离开提示音</span></label>
                         <label class="media-volume-row">
                             <span>提示音量</span>
-                            <input id="voiceEventVolume" type="range" min="0" max="1" step="0.05" value="0.35">
-                            <strong id="voiceEventVolumeValue">35%</strong>
+                            <input id="voiceEventVolume" type="range" min="0" max="1" step="0.05" value="0.5">
+                            <strong id="voiceEventVolumeValue">50%</strong>
                         </label>
                         <p class="voice-event-sound-hint">加入 do–re，离开 re–do。跟随总静音和当前输出设备。</p>
                         <p id="voiceEventSoundStatus" class="voice-event-sound-hint" role="status"></p>

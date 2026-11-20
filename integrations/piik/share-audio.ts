@@ -46,26 +46,6 @@ export function nativeFailureText(error: any) {
         'capture-unconfirmed': '原生采集或编码失败，原因未确认；请查看客户端诊断',
     } as Record<string,string>)[reason] || error?.message || '原生共享失败，原因未确认';
 }
-export function encoderSummary(status: any) {
-    const confirmed = status?.state === 'active' && status?.codec === 'h264' && status?.hardware === true;
-    return {
-        codec: status?.codec === 'h264' ? 'H.264' : '未确认',
-        method: confirmed ? 'GPU 硬件编码' : '未确认',
-        encoder: confirmed && status.encoder ? status.encoder : '未确认',
-        adapter: confirmed && status.adapter ? status.adapter : '未确认',
-        state: status?.state === 'active' ? '正在编码' : status?.state === 'starting' ? '正在初始化，尚未确认输出' : '等待开始共享',
-    };
-}
-export function showEncoderStatus(status: any) {
-    const summary = encoderSummary(status);
-    for (const [key,value] of Object.entries(summary)) {
-        const element = document.querySelector<HTMLElement>(`[data-native-encoder-${key}]`);
-        if (element) element.textContent = value;
-    }
-}
-
-// Shares the selector's short-lived authorized connection. Metadata only;
-// closing/refreshing the dialog invalidates every outstanding result.
 export function createAudioSourcePicker() {
     const mode = document.querySelector<HTMLSelectElement>('[data-native-audio-mode]');
     const select = document.querySelector<HTMLSelectElement>('[data-native-audio-target]');

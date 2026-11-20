@@ -7,7 +7,6 @@
         '1080p',
         '1440p',
         '2160p',
-        'original',
     ]);
     const FRAME_RATES = Object.freeze([15, 30, 60]);
     const DEFAULT_SCREEN_SHARE_OPTIONS = Object.freeze({
@@ -28,6 +27,8 @@
         restoring: '正在恢复语音',
     });
     const DEVICE_TYPES = Object.freeze(['mic', 'camera', 'output']);
+    const DEVICE_HOVER_CLOSE_MS = 500;
+    const DEVICE_LONG_PRESS_MS = 500;
     const REQUIRED_REFS = Object.freeze({
         callDuration: '#callDuration',
         callStatus: '#callStatusText',
@@ -143,6 +144,7 @@
         let fallbackPlaceholder;
         let fallbackBackdrop;
         let previousFocus;
+        let hoverCloseTimer;
         let copyRestoreTimer;
         let resolutionPreset = normalizeResolutionPreset(
             initialScreenShareOptions.resolutionPreset
@@ -283,7 +285,7 @@
             );
         };
         const renderOutput = (snapshot) => {
-            const volume = clamp(snapshot.outputVolume, 0, 1, 1);
+            const volume = clamp(snapshot.outputVolume, 0, 2, 1);
             const percent = Math.round(volume * 100);
             const muted = Boolean(snapshot.outputMuted);
             const label = refs.outputButton.querySelector('span');
@@ -332,7 +334,7 @@
             }
             const diagnostic = refs.processingStatus;
             if (diagnostic) setText(diagnostic, global.VoiceAudioProcessingView.describe(snapshot));
-            const micGain = clamp(snapshot.microphoneGain, 0, 150, 100);
+            const micGain = clamp(snapshot.microphoneGain, 0, 200, 100);
             refs.micGainSlider.value = String(micGain);
             setText(refs.micGainValue, `${Math.round(micGain)}%`);
         };
@@ -569,7 +571,7 @@
             const audio = native ? audioMode !== 'none' : screenField('[data-screen-share-audio]')?.checked === true;
             const restart = sharing && (old?.provider !== (native ? 'native' : 'web') || old?.shareAudio !== audio ||
                 (native && (old?.nativeAudioMode !== audioMode || old?.nativeAudioTargetKey !== (screenField('[data-native-audio-target]')?.value || '') || (editorMode === 'source' && audioMode !== 'none'))) ||
-                (!native && (old?.codecMode !== codecMode || !provider || (resolutionPreset === 'original' && old?.resolutionPreset !== 'original'))));
+                (!native && (old?.codecMode !== codecMode || !provider)));
             setText(
                 refs.screenSettingsStatus,
                 screenPending ? '正在应用…' : restart ? '观看画面将短暂中断' : ''
@@ -691,11 +693,11 @@
             );
         };
         const handleOutputInput = () => {
-            const volume = clamp(refs.outputSlider.value, 0, 1, 1);
+            const volume = clamp(refs.outputSlider.value, 0, 2, 1);
             adapter.setOutputVolume(volume);
         };
         const handleMicGainInput = () => {
-            const gain = clamp(refs.micGainSlider.value, 0, 150, 100);
+            const gain = clamp(refs.micGainSlider.value, 0, 200, 100);
             adapter.setMicrophoneGain?.(gain);
         };
         const setCopyState = (state) => {
@@ -731,13 +733,27 @@
                 return copied;
             });
         };
+        const cancelHoverClose = () => {
+            global.clearTimeout(hoverCloseTimer);
+            hoverCloseTimer = undefined;
+        };
+        const scheduleHoverClose = (type, event) => {
+            if (event.pointerType !== 'mouse' || openPopoverType !== type) return;
+            cancelHoverClose();
+            hoverCloseTimer = global.setTimeout(() => {
+                if (openPopoverType === type) closePopovers();
+            }, DEVICE_HOVER_CLOSE_MS);
+        };
         const closePopovers = () => {
+            cancelHoverClose();
             popoverRevision++;
             closeWatcher?.destroy(); closeWatcher = undefined;
             if (openPopoverType === 'screen') signalDialog('voice-share-dialog-close');
-            root.querySelectorAll('[data-device-control]').forEach((control) =>
-                control.classList.remove('is-open')
-            );
+            root.querySelectorAll('[data-device-control]').forEach((control) => {
+                control.classList.remove('is-open');
+                if (DEVICE_TYPES.includes(control.dataset.deviceControl))
+                    control.querySelector('button')?.setAttribute('aria-expanded', 'false');
+            });
             popovers.forEach((popover) => {
                 if (popover.open && typeof popover.close === 'function') popover.close();
                 if (typeof popover.hidePopover === 'function' && popover.matches?.(':popover-open')) popover.hidePopover();
@@ -749,9 +765,6 @@
                 fallbackBackdrop?.remove();
                 fallbackPopup = fallbackPlaceholder = fallbackBackdrop = undefined;
             }
-            root.querySelectorAll('[data-control-menu]').forEach((toggle) => {
-                if (toggle.hasAttribute?.('aria-expanded')) toggle.setAttribute('aria-expanded', 'false');
-            });
             openPopoverType = undefined;
             previousFocus?.focus?.();
             previousFocus = undefined;
@@ -766,9 +779,13 @@
             const control = root.querySelector(
                 `[data-device-control="${type}"]`
             );
-            const anchor = (root.querySelector('.dock-device-settings') || control)?.getBoundingClientRect?.();
+            const anchor = control?.getBoundingClientRect?.();
             if (!anchor) return;
-            popover.style.maxHeight = `${Math.max(80, global.innerHeight - margin * 2)}px`;
+            const headerBottom = global.document.querySelector?.('.workspace-topbar')?.getBoundingClientRect?.().bottom || 0;
+            const topLimit = headerBottom + margin;
+            const spaceAbove = anchor.top - topLimit - margin;
+            const spaceBelow = global.innerHeight - anchor.bottom - margin * 2;
+            popover.style.maxHeight = `${Math.max(0, spaceAbove, spaceBelow)}px`;
             const rect = popover.getBoundingClientRect();
             const left = Math.max(
                 margin,
@@ -776,10 +793,10 @@
             );
             const above = anchor.top - rect.height - margin;
             const top =
-                above >= margin
+                above >= topLimit
                     ? above
                     : Math.max(
-                          margin,
+                          topLimit,
                           Math.min(
                               anchor.bottom + margin,
                               global.innerHeight - rect.height - margin
@@ -796,9 +813,9 @@
             }
             closePopovers();
         };
-        const openPopover = (type, mode = 'source') => {
+        const openPopover = (type, { mode = 'source', fromHover = false } = {}) => {
             setSignalOpen(false);
-            const opener = previousFocus || global.document.activeElement;
+            const opener = fromHover ? undefined : previousFocus || global.document.activeElement;
             closePopovers();
             if (type === 'screen') {
                 editorMode = mode;
@@ -827,7 +844,6 @@
             const popover = root.querySelector(
                 `[data-device-popover="${type}"]`
             );
-            const toggle = root.querySelector(`[data-control-menu="${type}"]`);
             if (!control || !popover) {
                 return false;
             }
@@ -854,8 +870,8 @@
                 global.document.body.append(popover);
                 if (type === 'screen') popover.querySelector('select, button')?.focus();
             }
-            if (type !== 'screen') root.querySelector('.dock-device-settings')?.setAttribute('aria-expanded', 'true');
-            if (toggle?.hasAttribute?.('aria-expanded')) toggle.setAttribute('aria-expanded', 'true');
+            if (DEVICE_TYPES.includes(type))
+                control.querySelector('button')?.setAttribute('aria-expanded', 'true');
             openPopoverType = type;
             // Modal dialogs already participate in browser close requests.
             // Manual device popovers need an explicit watcher for Android Back.
@@ -871,27 +887,6 @@
             return true;
         };
         const handleRootClick = (event) => {
-            if (event.target.closest?.('[data-control-close]')) {
-                event.preventDefault();
-                closePopovers();
-                return;
-            }
-            const menuToggle = event.target.closest?.('[data-control-menu]');
-            if (menuToggle && (root.contains(menuToggle) || fallbackPopup?.contains(menuToggle))) {
-                event.preventDefault();
-                event.stopPropagation();
-                const type = menuToggle.dataset.controlMenu;
-                if (openPopoverType === type) {
-                    if (!menuToggle.closest('[data-device-popover]')) closePopovers();
-                } else {
-                    const fromPanel = Boolean(menuToggle.closest('[data-device-popover]'));
-                    openPopover(type);
-                    if (fromPanel) popovers.find(panel => panel.dataset.devicePopover === type)
-                        ?.querySelector('[aria-current="true"]')?.focus();
-                }
-                return;
-            }
-
             const deviceOption = event.target.closest?.(
                 '[data-device-type][data-device-id]'
             );
@@ -920,12 +915,17 @@
                 if (action === 'stop') {
                     void runIntent('screen', () => adapter.stopScreenShare(), true);
                     closePopovers();
-                } else openPopover('screen', action);
+                } else openPopover('screen', { mode: action });
                 return;
             }
-            if (openPopoverType && !root.contains(event.target) && !fallbackPopup?.contains(event.target)) {
-                closePopovers();
-            }
+            if (!openPopoverType) return;
+            // A source pager can replace its own node before the click reaches
+            // the document. The event path still includes the original dialog.
+            const path = event.composedPath?.();
+            const inside = path
+                ? path.includes(root) || path.includes(fallbackPopup)
+                : root.contains(event.target) || fallbackPopup?.contains(event.target);
+            if (!inside) closePopovers();
         };
         const handleDocumentKeydown = (event) => {
             if (event.defaultPrevented || event.isComposing) return;
@@ -1031,17 +1031,59 @@
             root.querySelectorAll('[data-device-control]').forEach((control) => {
                 const type = control.dataset.deviceControl;
                 if (!DEVICE_TYPES.includes(type)) return;
+                const popover = popovers.find(panel => panel.dataset.devicePopover === type);
                 const openSettings = (event) => {
                     event.preventDefault();
                     event.stopPropagation();
-                    openPopover(type);
-                    popovers.find(panel => panel.dataset.devicePopover === type)
-                        ?.querySelector('[aria-current="true"]')?.focus();
+                    if (openPopoverType === 'screen') return;
+                    cancelHoverClose();
+                    if (openPopoverType !== type) openPopover(type);
+                    if (event.type === 'keydown') {
+                        previousFocus = control.querySelector('button');
+                        popover?.querySelector('button:enabled, input:enabled, select:enabled, summary')?.focus();
+                    }
                 };
+                listen(control, 'pointerenter', (event) => {
+                    if (event.pointerType !== 'mouse' || openPopoverType === 'screen') return;
+                    cancelHoverClose();
+                    if (openPopoverType !== type) openPopover(type, { fromHover: true });
+                });
+                listen(control, 'pointerleave', (event) => scheduleHoverClose(type, event));
                 listen(control, 'contextmenu', openSettings);
                 listen(control, 'keydown', (event) => {
                     if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) openSettings(event);
                 });
+                let press;
+                let consumeClick = false;
+                const clearPress = () => {
+                    global.clearTimeout(press?.timer);
+                    press = undefined;
+                };
+                listen(control, 'pointerdown', (event) => {
+                    consumeClick = false;
+                    if (event.pointerType !== 'touch' || !event.isPrimary) return;
+                    clearPress();
+                    const { pointerId, clientX, clientY } = event;
+                    press = { pointerId, clientX, clientY, timer: global.setTimeout(() => {
+                        if (openPopoverType === 'screen') return;
+                        consumeClick = true;
+                        if (openPopoverType !== type) openPopover(type);
+                    }, DEVICE_LONG_PRESS_MS) };
+                });
+                listen(control, 'pointermove', (event) => {
+                    if (press?.pointerId === event.pointerId &&
+                        Math.hypot(event.clientX - press.clientX, event.clientY - press.clientY) > 10) clearPress();
+                });
+                for (const eventType of ['pointercancel', 'pointerup', 'lostpointercapture']) {
+                    listen(control, eventType, (event) => { if (press?.pointerId === event.pointerId) clearPress(); });
+                }
+                listen(control, 'click', (event) => {
+                    if (!consumeClick || event.detail === 0) return;
+                    consumeClick = false;
+                    event.preventDefault();
+                    event.stopPropagation();
+                }, true);
+                listenerCleanups.push(clearPress);
             });
             root.querySelectorAll('[data-device-popover]').forEach(
                 (popover) => {
@@ -1059,6 +1101,11 @@
                         });
                         return;
                     }
+                    const type = popover.dataset.devicePopover;
+                    listen(popover, 'pointerenter', (event) => {
+                        if (event.pointerType === 'mouse' && openPopoverType === type) cancelHoverClose();
+                    });
+                    listen(popover, 'pointerleave', (event) => scheduleHoverClose(type, event));
                 }
             );
             listen(global.document, 'click', handleDocumentClick);

@@ -96,28 +96,25 @@ app.whenReady()
             return value;
         };
         const order = [], states = [];
-        let accepted = false;
         const updater = realUpdater();
         const controller = createUpdates({
             updater, app: { getVersion: () => '0.1.1' }, window: () => null,
             log: () => {}, prepareInstall: async () => order.push('native-stopped'),
-            confirmInstall: async () => accepted,
         });
         controller.subscribe(state => states.push(state));
         updater.quitAndInstall = () => order.push('install-requested');
         try {
             await controller.check(false);
             assert.equal(downloads, 0);
-            assert.match(controller.label(), /发现新版 0.1.2/);
+            assert.equal(controller.snapshot().version, '0.1.2');
+            assert.equal(controller.snapshot().status, 'available');
             await controller.download();
             assert.equal(downloads, 1);
             assert.equal(order.length, 0);
             assert.equal(updater.autoInstallOnAppQuit, false);
             assert.equal(updater.autoDownload, false);
-            assert.match(controller.label(), /安装更新 0.1.2/);
+            assert.equal(controller.snapshot().status, 'downloaded');
             await controller.install();
-            assert.deepEqual(order, []);
-            accepted = true;
             await controller.install();
             assert.deepEqual(order, ['native-stopped', 'install-requested']);
             assert.ok(states.some(state => state.status === 'checking'));
@@ -127,7 +124,7 @@ app.whenReady()
                 mode = selected;
                 const check = createUpdates({
                     updater: realUpdater(), app: { getVersion: () => '0.1.1' },
-                    window: () => null, log: () => {}, confirmInstall: async () => true,
+                    window: () => null, log: () => {},
                     prepareInstall: async () => { throw Error('invalid update must not install'); },
                 });
                 try {
@@ -138,7 +135,7 @@ app.whenReady()
                     if (selected === 'bad') assert.match(check.snapshot().error, /校验/);
                 } finally { check.stop(); }
             }
-            process.stdout.write('PASS real updater: quiet checks, explicit download/install, SHA512, defer, ordered cleanup, no update, checksum rejection and HTTP failure. No installer executed.\n');
+            process.stdout.write('PASS real updater: quiet checks, explicit download/install, SHA512, ordered cleanup, no update, checksum rejection and HTTP failure. No installer executed.\n');
         } finally {
             controller.stop();
             server.close();

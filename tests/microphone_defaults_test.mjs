@@ -15,13 +15,13 @@ const fixture = (saved, preferences = []) => {
 };
 
 test('fresh or unavailable microphone settings keep audible 100 percent gain before UI initialization', () => {
-    for (const saved of [undefined, null, '', ' ', 'bad', 'Infinity', '-1', '151']) {
+    for (const saved of [undefined, null, '', ' ', 'bad', 'Infinity', '-1', '201']) {
         assert.equal(fixture(saved).getMicGain(), 100);
     }
 });
 
 test('explicit zero and valid user microphone levels are preserved', () => {
-    for (const saved of ['0', '25', '100', '150']) {
+    for (const saved of ['0', '25', '100', '150', '200']) {
         const api = fixture(saved);
         assert.equal(api.getMicGain(), Number(saved));
         api.setMicGain(80, { syncUI: false });

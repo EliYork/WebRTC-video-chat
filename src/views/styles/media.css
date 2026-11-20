@@ -118,13 +118,13 @@
     align-content: center;
     gap: 8px;
     padding: 24px;
-    background-color: #20242d;
-    color: #bac3d1;
+    background-color: var(--panel-soft);
+    color: var(--muted);
     text-align: center;
 }
 
 .local-screen-preview-placeholder strong {
-    color: #f5f6f8;
+    color: var(--text);
     font-size: 15px;
 }
 
@@ -244,7 +244,7 @@
 .voice-placeholder-title {
     max-width: 80%;
     overflow: hidden;
-    color: #f5f6f8;
+    color: var(--text);
     font-size: 15px;
     font-weight: 700;
     text-overflow: ellipsis;

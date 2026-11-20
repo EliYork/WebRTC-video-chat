@@ -4,9 +4,7 @@ function createUpdates({
     app,
     window,
     log,
-    changed,
     prepareInstall,
-    confirmInstall,
     onStartupUpdate,
     preferences,
     timers = { setTimeout, clearTimeout, setInterval, clearInterval },
@@ -34,17 +32,6 @@ function createUpdates({
         error: (message) => log(`update ${message}`),
         debug: () => {},
     };
-    const label = () =>
-        ({
-            downloaded: `安装更新 ${version}…`,
-            available: `发现新版 ${version}…`,
-            downloading: `正在下载 ${version}…`,
-            verifying: '正在校验更新…',
-            installing: '正在退出并安装…',
-            checking: '正在检查更新…',
-            error: '更新未完成，点击重试…',
-            cancelled: '更新下载已取消…',
-        })[status] || '检查客户端更新…';
     const snapshot = () => ({
         status,
         version,
@@ -58,7 +45,6 @@ function createUpdates({
     });
     const publish = () => {
         if (stopped) return;
-        changed?.(label());
         for (const listener of listeners) listener(snapshot());
     };
     const update = (next) => {
@@ -187,9 +173,7 @@ function createUpdates({
         if (busy || stopped || status !== 'downloaded') return;
         busy = true;
         phase = 'install';
-        publish();
         try {
-            if (!(await confirmInstall(version)) || stopped) return;
             update('installing');
             taskbar(2);
             await prepareInstall();
@@ -220,7 +204,6 @@ function createUpdates({
         cancel,
         install,
         ignoreVersion,
-        label,
         snapshot,
         subscribe(listener) {
             listeners.add(listener);

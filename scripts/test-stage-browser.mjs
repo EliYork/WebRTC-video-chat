@@ -89,7 +89,7 @@ const viewportReady = async (session, width, height) => {
     await wait(() => evaluate(session, `!document.hidden && document.querySelector('#main').dataset.viewportMode === '${compactViewport(width,height) ? 'compact' : 'wide'}'`), `viewport navigation reconciled ${width}x${height}`);
 };
 const lastTouch = new Map();
-const tap = async (session, selector) => {
+const tap = async (session, selector, holdMs = 0) => {
     // Chromium's touch emulator otherwise coalesces consecutive scripted taps
     // into double-taps while native fullscreen/popover animations are pending.
     await delay(Math.max(0, 600 - (Date.now() - (lastTouch.get(session) || 0))));
@@ -103,6 +103,7 @@ const tap = async (session, selector) => {
         return stable;
     }, `touch target is visible and unobstructed: ${selector}`);
     await send('Input.dispatchTouchEvent', { type:'touchStart', touchPoints:[{ x:point.x,y:point.y }] }, session);
+    if (holdMs) await delay(holdMs);
     await send('Input.dispatchTouchEvent', { type:'touchEnd', touchPoints:[] }, session);
     lastTouch.set(session, Date.now());
 };
@@ -232,10 +233,8 @@ try {
     assert.equal(await evaluate(a, `getComputedStyle(document.querySelector('.stage-members')).display === 'none' && !document.querySelector('#chat-panel').inert`), true, 'chat is an explicit view, not an overlay on the stage');
     await evaluate(a, `document.querySelector('#chatInput').value='mobile unsent draft';`);
     await tap(a, '#stageStageToggle');
-    await tap(a, '#stageMoreToggle');
-    assert.equal(await evaluate(a, `document.querySelector('#workspace-tools').inert`), false);
-    await tap(a, '#stageStageToggle');
-    assert.equal(await evaluate(a, `document.querySelector('#workspace-tools').inert`), true, 'tap outside dismisses secondary operations');
+    assert.equal(await evaluate(a, `document.querySelector('.workspace-actions > .workspace-download').pathname`), '/download/windows');
+    assert.equal(await evaluate(a, `document.querySelector('#stageMoreToggle, #workspace-tools') === null`), true);
     assert.equal(await evaluate(a, `document.querySelector('#chatInput').value`), 'mobile unsent draft');
     await send('Emulation.setDeviceMetricsOverride', { width:1920,height:1080,deviceScaleFactor:1,mobile:false }, a);
     await send('Emulation.setTouchEmulationEnabled', { enabled:false }, a);
@@ -283,10 +282,22 @@ try {
         return { opened: Boolean(range), restored, volume };
     })()`);
     assert.deepEqual(memberVolume, { opened: true, restored: '35', volume: 0.35 });
-    await click(b, '.dock-device-settings');
-    await click(b, '[data-device-popover="mic"] [data-control-menu="output"]');
-    assert.equal(await evaluate(b, `document.querySelector('[data-device-popover="output"]').matches(':popover-open')`), true);
-    await click(b, '[data-device-popover="output"] [data-control-close]');
+    const hover = async selector => {
+        const point = await evaluate(b, `(() => {const rect = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return {x: rect.x + rect.width/2, y: rect.y + rect.height/2};})()`);
+        await send('Input.dispatchMouseEvent', { type:'mouseMoved', ...point }, b);
+    };
+    const deviceOpen = type => evaluate(b, `document.querySelector('[data-device-popover="${type}"]').matches(':popover-open')`);
+    await hover('#toggleAudio');
+    await wait(() => deviceOpen('mic'), 'hover opens the microphone settings');
+    await hover('[data-device-popover="mic"]');
+    await delay(550);
+    assert.ok(await deviceOpen('mic'), 'pointer inside the settings keeps them open');
+    await hover('#toggleOutput');
+    await wait(() => deviceOpen('output'), 'moving to output switches the open panel');
+    await hover('.workspace-brand');
+    await delay(300);
+    assert.ok(await deviceOpen('output'), 'leaving keeps the panel open for the grace period');
+    await wait(async () => !(await deviceOpen('output')), 'pointer away closes the popover');
     await evaluate(b, `document.querySelector('#callSignal').focus()`);
     const key = async (value, code) => {
         await send('Input.dispatchKeyEvent', { type: code === 13 ? 'keyDown' : 'rawKeyDown', key:value, code:value, windowsVirtualKeyCode:code, ...(code === 13 ? { text:'\r', unmodifiedText:'\r' } : {}) }, b);
@@ -300,9 +311,10 @@ try {
     await key('Escape', 27);
     assert.equal(await evaluate(b, `document.querySelector('#callSignalDetail').hidden`), true);
     await key('Enter', 13);
-    await click(b, '[data-control-menu="mic"]');
+    await hover('#toggleAudio');
     assert.equal(await evaluate(b, `document.querySelector('#callSignalDetail').hidden && document.querySelector('[data-device-popover="mic"]').classList.contains('is-open')`), true, 'device settings dismiss the quality details');
-    await click(b, '[data-device-popover="mic"] [data-control-close]');
+    await hover('.workspace-brand');
+    await key('Escape', 27);
     for (const [width,height] of [[320,640], [390,844], [844,390]]) {
         await send('Emulation.setDeviceMetricsOverride', { width,height,deviceScaleFactor:1,mobile:true }, b);
         await send('Emulation.setTouchEmulationEnabled', { enabled:true }, b);
@@ -421,11 +433,13 @@ try {
         await tap(b, '#stageChannelsToggle');
         assert.equal(await evaluate(b, `document.querySelector('#chat-panel').inert && getComputedStyle(document.querySelector('#stage-channels')).display !== 'none'`), true);
         await tap(b, '#stageStageToggle');
-        await tap(b, '[data-control-menu="mic"]');
+        const micWasEnabled = await evaluate(b, `document.querySelector('#toggleAudio').getAttribute('aria-pressed')`);
+        await tap(b, '#toggleAudio', 550);
+        assert.equal(await evaluate(b, `document.querySelector('#toggleAudio').getAttribute('aria-pressed')`), micWasEnabled);
         await wait(() => evaluate(b, `document.querySelector('[data-device-popover="mic"]').classList.contains('is-open')`), 'touch opens microphone settings');
         if (width === 390) await screenshot(b, 'mobile-microphone-settings');
-        await tap(b, '[data-device-popover="mic"] [data-control-close]');
-        await wait(() => evaluate(b, `!document.querySelector('[data-device-popover="mic"]').classList.contains('is-open')`), `settings have an explicit close action at ${width}x${height}`);
+        await tap(b, '#stageStageToggle');
+        await wait(() => evaluate(b, `!document.querySelector('[data-device-popover="mic"]').classList.contains('is-open')`), `tapping outside dismisses settings at ${width}x${height}`);
         await tap(b, '#video-grid > .is-stage-focus .voice-player-more');
         assert.equal(await evaluate(b, `document.querySelector('.voice-player-menu').textContent.includes('连接方式') && document.querySelector('.voice-player-menu').textContent.includes('调整音量')`), true, 'secondary share controls remain accessible');
         await tap(b, '.voice-player-menu button:nth-child(4)');
@@ -516,13 +530,13 @@ try {
     await evaluate(b, `for(const name of ['lock','unlock']) {const descriptor=__orientationMethods[name];if(descriptor)Object.defineProperty(screen.orientation,name,descriptor);else delete screen.orientation[name];}`);
     await send('Emulation.setDeviceMetricsOverride', { width:390,height:844,deviceScaleFactor:1,mobile:true }, b);
     await viewportReady(b,390,844);
-    await tap(b, '[data-control-menu="mic"]');
+    await tap(b, '#toggleAudio', 550);
     await send('Input.dispatchKeyEvent', { type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27 }, b);
     await send('Input.dispatchKeyEvent', { type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27 }, b);
     await wait(() => evaluate(b, `!document.querySelector('[data-device-popover="mic"]').classList.contains('is-open') && document.querySelector('#main').dataset.mobilePanel === 'stage'`), 'close request dismisses only device settings');
     await tap(b, '#video-grid > .is-stage-focus .voice-player-more');
     await tap(b, '.voice-player-menu button:first-child');
-    await wait(() => evaluate(b, `!document.querySelector('#video-grid > .is-stage-focus .voice-share-stats').hidden`), 'real video statistics open');
+    await wait(() => evaluate(b, `document.querySelector('#video-grid > .is-stage-focus .voice-share-stats')?.hidden === false`), 'real video statistics open');
     await wait(() => evaluate(b, `document.querySelector('#video-grid > .is-stage-focus .voice-share-stats').textContent.includes('解码 FPS')`), 'statistics distinguish decode and playback');
     await screenshot(b, 'mobile-video-statistics');
     await tap(b, '#video-grid > .is-stage-focus .voice-share-stats button');
@@ -665,7 +679,7 @@ try {
     assert.deepEqual(errors, [], 'no unhandled browser runtime errors');
     assert.deepEqual(requests, [], 'no failed runtime resources');
     const report = { status:'passed', browser: (await send('Browser.getVersion')).product, syntheticMediaOnly:true, serverForwardingEnabled:useSfu,
-        shareUiChecks: ['centered dialog with visible footer across viewport and DPR cases', 'same Dock and dialog DOM throughout resize', 'sidebar volume persists without the card and reaches the real remote player', 'consolidated device settings switch between panels', 'local preview has one status', 'compact left Dock parent with full-height desktop chat', 'mobile starts on stage', 'touch navigation, settings close and share menu at 320/390/844 CSS pixels', 'mobile navigation preserves actual players, streams and chat draft without media negotiation'],
+        shareUiChecks: ['centered dialog with visible footer across viewport and DPR cases', 'same Dock and dialog DOM throughout resize', 'sidebar volume persists without the card and reaches the real remote player', 'hover switches device settings and crossing to the panel retains it', 'local preview has one status', 'compact left Dock parent with full-height desktop chat', 'mobile starts on stage', 'touch navigation, settings close and share menu at 320/390/844 CSS pixels', 'mobile navigation preserves actual players, streams and chat draft without media negotiation'],
         viewportCases: layouts.length + voiceLayouts.length, memberGridCases:memberGrids.length, memberCounts:[1,2,3,4,8,12], cssViewports:layouts.map((row)=>row.viewport),
         routeChecks:useSfu ? ['automatic SFU','manual P2P','manual SFU','per-sharer preference retention'] : ['P2P','manual P2P','per-sharer preference retention'],
         tests:['empty and occupied channel guides','central join action','voice join','camera off clears remote player and preserves voice','camera restart renders fresh frames','chat after camera restart','camera off preserves active screen share','screen end with camera off clears video','two voice peers','synthetic share','responsive geometry in both modes','1/2/3/4/8/12 member grid fixtures','bounded dock icons and member actions','closing chat expands central stage','chat draft','no layout renegotiation/capture','two shares','focus retention/fallback','manual route retention','preview hide retains capture','last share end','member departure'],

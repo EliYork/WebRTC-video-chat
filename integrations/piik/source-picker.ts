@@ -49,7 +49,7 @@ export function createNativeSourcePicker(
             void pump();
         }
     };
-    const render = () => {
+    const render = (focusPager?: 'display' | 'window') => {
         if (!gallery || !select || !client || !visible) return;
         const token = generation,
             owner = client;
@@ -80,7 +80,7 @@ export function createNativeSourcePicker(
                 pager.textContent = `${pages[kind] + 1} / ${pageCount} · 下一页`;
                 pager.addEventListener('click', () => {
                     pages[kind] = (pages[kind] + 1) % pageCount;
-                    render();
+                    render(document.activeElement === pager ? kind : undefined);
                 });
                 heading.append(pager);
             }
@@ -164,6 +164,7 @@ export function createNativeSourcePicker(
             }
             section.append(grid);
             gallery.append(section);
+            if (focusPager === kind) heading.querySelector('button')?.focus({ preventScroll: true });
         }
         notify();
         void pump();

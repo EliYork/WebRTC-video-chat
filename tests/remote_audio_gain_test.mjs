@@ -33,6 +33,8 @@ test('200% uses independent gains and native playout never duplicates amplified 
     assert.equal(contexts.length, 1);
     assert.equal(contexts[0].gains[0].gain.value, 2);
     assert.equal(contexts[0].gains[1].gain.value, 1.5);
+    runtime.setVolume(voice, { volume: 4 });
+    assert.equal(contexts[0].gains[0].gain.value, 4);
     assert.equal(voice.muted, true);
     assert.equal(screen.muted, true);
     assert.equal(runtime.describePlayer(voice).重复播放风险, false);

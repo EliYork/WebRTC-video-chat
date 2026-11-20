@@ -5,10 +5,12 @@
 .local-share-controls button { border-color: transparent; background: var(--panel-soft); }
 .local-share-controls button:hover { background: var(--accent-soft); }
 .local-share-controls [data-share-action='stop'], :is(#buttons, body) .screen-share-settings-popover .share-stop-action { color: var(--danger-strong); background: var(--panel); border-color: var(--line); }
-dialog.screen-share-settings-popover[data-device-popover='screen'] { position: fixed; inset: 0; margin: auto; transform: none; width: min(880px, calc(100vw - 32px)); height: fit-content; max-height: calc(100dvh - 32px); padding: 0; overflow: hidden; border-radius: 18px; background: var(--panel); color: var(--text); font-size: 14px; box-shadow: 0 24px 90px #69324833; }
+dialog.screen-share-settings-popover[data-device-popover='screen'] { position: fixed; inset: var(--share-top-inset, 0px) 0 0; margin: auto; transform: none; width: min(880px, calc(100vw - 32px)); height: fit-content; max-height: calc(100dvh - var(--share-top-inset, 0px) - 32px); padding: 0; overflow: hidden; border-radius: 18px; background: var(--panel); color: var(--text); font-size: 14px; box-shadow: 0 24px 90px #69324833; }
 dialog.screen-share-settings-popover.is-open { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }
 .screen-share-settings-popover::backdrop, .media-modal-fallback-backdrop { background: #32222c66; backdrop-filter: blur(4px); }
-.media-modal-fallback-backdrop { position: fixed; inset: 0; z-index: 14999; }
+.media-modal-fallback-backdrop { position: fixed; inset: var(--share-top-inset, 0px) 0 0; z-index: 14999; }
+html[data-desktop-chrome] { --share-top-inset: env(titlebar-area-height, 40px); }
+html[data-desktop-chrome] .screen-share-settings-popover::backdrop { top: env(titlebar-area-height, 40px); }
 .share-dialog-header { display: flex; justify-content: space-between; align-items: start; gap: 16px; padding: 22px 24px 16px; border-bottom: 1px solid var(--line-soft); }
 .share-dialog-header h2 { margin: 0; font-size: 21px; color: var(--text); }
 .share-dialog-header p { margin: 6px 0 0; color: var(--muted); line-height: 1.5; }
@@ -20,22 +22,20 @@ dialog.screen-share-settings-popover.is-open { display: grid; grid-template-rows
 .share-browser-source p { margin: 0; }
 .share-browser-source p + p { flex: 0 0 100%; color: var(--muted); }
 .share-dialog-header p:empty, [data-piik-native-status]:empty { display: none; }
-.share-quality-section h3 { margin: 0 0 10px; font-size: 14px; }
-.share-audio-section h3 { margin: 0 0 10px; font-size: 14px; }
-.share-audio-app { display: flex; align-items: center; gap: 10px; margin-top: 10px; min-width: 0; }
-.share-audio-app label { display: grid; gap: 7px; flex: 1; min-width: 0; }
-.share-audio-app img { flex: 0 0 24px; }
-.share-encoder-status { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 7px 16px; font-size: 12px; }
-.share-encoder-status dt { color: var(--muted); }
-.share-encoder-status dd { margin: 0; overflow-wrap: anywhere; }
-.share-quality-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-.share-quality-controls label { display: grid; gap: 7px; }
+/* Shared field rhythm keeps the quality and audio inputs aligned (3.6). */
+:is(.share-quality-section, .share-audio-section) h3 { margin: 0 0 10px; font-size: 14px; }
+.share-field { display: grid; gap: 7px; min-width: 0; color: var(--muted); }
+.share-quality-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 16px; }
+.share-bitrate-field { grid-column: 1 / -1; }
+.share-audio-app { display: flex; align-items: end; gap: 10px; margin-top: 10px; min-width: 0; }
+.share-audio-app label { flex: 1; }
+.share-audio-app img { flex: 0 0 24px; margin-bottom: 9px; }
+[data-native-audio-hint] { margin-top: 7px; }
 .share-audio-choice { display: flex; gap: 10px; align-items: start; }
 .share-audio-choice input { accent-color: var(--accent); margin-top: 3px; }
 .share-audio-choice small { display: block; color: var(--muted); font-size: 12px; line-height: 1.6; margin-top: 4px; }
-.share-advanced { border-top: 1px solid var(--line-soft); padding-top: 12px; }
-.share-advanced summary { cursor: pointer; color: var(--muted); }
-.share-advanced .media-select-row { margin-top: 12px; }
+.share-extra-settings { display: grid; gap: 12px 18px; border-top: 1px solid var(--line-soft); padding-top: 16px; }
+.share-extra-settings:not(:has(> :not([hidden]))) { display: none; }
 .screen-share-dialog-actions { display: flex; align-items: center; gap: 10px; padding: 16px 24px; border-top: 1px solid var(--line-soft); background: var(--page); }
 .screen-share-dialog-actions > span { flex: 1; }
 :is(#buttons, body) .screen-share-dialog-actions .share-primary-action { background: var(--accent); border-color: var(--accent); color: white; font-weight: 650; }
@@ -45,8 +45,7 @@ dialog.screen-share-settings-popover.is-open { display: grid; grid-template-rows
 .share-source-toolbar { display: flex; align-items: center; gap: 8px; }
 .share-source-toolbar p { margin: 0; }
 .share-source-toolbar button { margin-left: auto; flex: 0 0 auto; }
-.share-source-group-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.share-source-group-heading { margin: 16px 0 9px; }
+.share-source-group-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 30px; margin: 16px 0 9px; }
 .share-source-group-heading h3 { font-size: 14px; margin: 0; }
 :is(#buttons, body) .share-source-group-heading button { min-height: 30px; padding: 3px 10px; }
 .share-source-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
@@ -54,6 +53,7 @@ dialog.screen-share-settings-popover.is-open { display: grid; grid-template-rows
 @media (min-width: 640px) {
     .share-dialog-body { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .share-dialog-body > :not(.share-quality-section, .share-audio-section) { grid-column: 1 / -1; }
+    .share-extra-settings { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     [data-piik-native-gallery]:not(:empty) { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
     .share-source-grid:has(.share-source-card:only-child) { grid-template-columns: minmax(0, 200px); }
 }

@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { build } from 'esbuild';
-import { nativeAudioSelection, parseAudioTarget, encoderSummary, nativeFailureText } from '../integrations/piik/share-audio.ts';
+import { nativeAudioSelection, parseAudioTarget, nativeFailureText } from '../integrations/piik/share-audio.ts';
 
 const client = {health:{nativeMedia:{video:true, independentAudio:true, processAudio:true, processAudioExclusion:true, systemAudio:true}}};
 test('independent audio modes keep picture A separate from process B and disable native microphone mixing', () => {
@@ -37,10 +37,7 @@ test('legacy full-screen audio reuses client-tree exclusion, and never falls bac
         {audioMode:'application',audioTarget:{pid:234,creationTime:'123456'},audio:true,microphoneMixing:false});
     assert.throws(()=>nativeAudioSelection({nativeAudioMode:'source',shareAudio:true},client,{...window,creationTime:'0'}),/失效/);
 });
-test('hardware UI requires active H264 evidence and keeps unknown and failures explicit', () => {
-    for (const value of [null,{}, {state:'starting',codec:'h264',hardware:true,encoder:'GPU'}, {state:'active',codec:'vp8',hardware:true}]) assert.equal(encoderSummary(value).method,'未确认');
-    const active=encoderSummary({state:'active',codec:'h264',hardware:true,encoder:'Actual MFT',adapter:'Actual GPU'});
-    assert.equal(active.encoder,'Actual MFT'); assert.equal(active.adapter,'Actual GPU'); assert.equal(active.method,'GPU 硬件编码');
+test('known native share failures have specific messages', () => {
     for (const reason of ['hardware-unavailable','encoder-failed','media-capture-failed','audio-target-invalid','audio-capture-failed','system-exclusion-unavailable','capture-unconfirmed']) assert.notEqual(nativeFailureText({cause:{reason}}),'原生共享失败，原因未确认');
 });
 

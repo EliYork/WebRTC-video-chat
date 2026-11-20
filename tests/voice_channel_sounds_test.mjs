@@ -292,7 +292,9 @@ test('selected headset is respected; failures and unsupported custom sinks stay 
     const f = audioFixture();
     await f.player.unlock();
     f.output.deviceId = 'headset';
+    f.output.volume = 2;
     assert.equal(await f.player.play('join'), true);
+    assert.equal(f.gains[0].gain.value, 0.7);
     assert.deepEqual(f.routes, ['headset']);
     f.failSink();
     f.output.deviceId = 'removed';
@@ -343,12 +345,13 @@ test('notification controls restore and save per-browser preferences and remove 
         },
     };
     vm.runInNewContext(source, { window });
-    const runtime = window.VoiceChannelSounds.createRuntime({
+    const create = () => window.VoiceChannelSounds.createRuntime({
         document,
         getOutput: () => ({ muted: true, volume: 0, deviceId: 'default' }),
         getIdentity: () => own,
         isConnected: () => true,
     });
+    const runtime = create();
     assert.equal(elements.voiceEventSounds.checked, false);
     assert.equal(elements.voiceEventVolume.disabled, true);
     assert.equal(elements.voiceEventVolumeValue.textContent, '60%');
@@ -363,4 +366,8 @@ test('notification controls restore and save per-browser preferences and remove 
     assert.equal(document.listeners.size, 0);
     assert.equal(elements.voiceEventVolume.listeners.size, 0);
     assert.equal(elements.voiceEventSounds.listeners.size, 0);
+    storage.delete('voice-channel-sounds-volume');
+    const fresh = create();
+    assert.equal(elements.voiceEventVolumeValue.textContent, '50%');
+    fresh.destroy();
 });

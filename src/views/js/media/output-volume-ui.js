@@ -3,13 +3,13 @@
 
     const { byId, setText, toggleClass } = global.VoiceViewUtils;
     const MIN_VOLUME = 0;
-    const MAX_VOLUME = 1;
+    const MAX_VOLUME = 2;
 
     const clampVolume = (volume) => {
         const numericVolume = Number(volume);
 
         if (!Number.isFinite(numericVolume)) {
-            return MAX_VOLUME;
+            return 1;
         }
 
         return Math.max(MIN_VOLUME, Math.min(MAX_VOLUME, numericVolume));

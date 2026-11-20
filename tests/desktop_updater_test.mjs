@@ -23,8 +23,7 @@ function fixture(options = {}) {
         states = [],
         bars = [];
     let checks = 0,
-        downloads = 0,
-        accepted = false;
+        downloads = 0;
     const token = { cancel: () => { if (downloads) download.reject(Error('cancelled')); } };
     updater.checkForUpdates = () => {
         checks++;
@@ -45,7 +44,6 @@ function fixture(options = {}) {
         }),
         log: () => {},
         prepareInstall: async () => order.push('media-stopped'),
-        confirmInstall: async () => accepted,
         ...options,
     });
     controller.subscribe((state) => states.push(state));
@@ -57,9 +55,6 @@ function fixture(options = {}) {
         order,
         states,
         bars,
-        accept: () => {
-            accepted = true;
-        },
         available: () => {
             updater.emit('update-available', { version: '0.1.4' });
             check.resolve({
@@ -76,7 +71,7 @@ function fixture(options = {}) {
     };
 }
 
-test('checking and real progress are observable, operations coalesce, install requires explicit confirmation', async () => {
+test('checking and real progress are observable, operations coalesce, install requires the explicit action after verification', async () => {
     const f = fixture();
     try {
         const checking = f.controller.check();
@@ -116,11 +111,10 @@ test('checking and real progress are observable, operations coalesce, install re
         assert.equal(f.bars.at(-1), -1);
         await f.controller.check();
         assert.equal(f.checks, 1);
-        await f.controller.install();
         assert.deepEqual(f.order, []);
-        assert.equal(f.controller.snapshot().status, 'downloaded');
-        f.accept();
+        const installing = f.controller.install();
         await f.controller.install();
+        await installing;
         assert.deepEqual(f.order, ['media-stopped', 'install']);
         assert.equal(f.controller.snapshot().status, 'installing');
         assert.equal(f.updater.autoDownload, false);
@@ -147,7 +141,6 @@ test('cancel cannot install, retry requires a fresh check, closing subscribers d
         assert.equal(f.controller.snapshot().status, 'cancelled');
         await f.controller.download();
         assert.equal(f.downloads, 1);
-        f.accept();
         await f.controller.install();
         assert.deepEqual(f.order, []);
     } finally {
@@ -179,7 +172,6 @@ test('network and digest failures surface in state without popups; stop clears p
         await downloading;
         assert.equal(g.controller.snapshot().status, 'error');
         assert.match(g.controller.snapshot().error, /校验/);
-        g.accept();
         await g.controller.install();
         assert.deepEqual(g.order, []);
     } finally {

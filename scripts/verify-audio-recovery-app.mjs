@@ -409,7 +409,7 @@ try {
         [],
         'default sink must not be repeatedly reopened'
     );
-    await b.locator('[data-control-menu="output"]').click();
+    await b.locator('#toggleOutput').dispatchEvent('contextmenu');
     await b
         .locator('[data-device-type="output"][data-device-id="denied-output"]')
         .click();

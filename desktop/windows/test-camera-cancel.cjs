@@ -94,7 +94,7 @@ app.whenReady().then(async () => {
     await wait(`document.querySelector('#main').dataset.voiceState==='joined'`);
     await run(`document.querySelector('#toggleVideo').click()`);
     await wait(`document.querySelector('#toggleVideo').getAttribute('aria-pressed')==='true' && window.__cameraTest.tracks.length===1`);
-    await run(`document.querySelector('[data-control-menu="camera"]').click()`);
+    await run(`document.querySelector('#toggleVideo').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true}))`);
     await wait(`document.querySelector('[data-device-type="camera"][data-device-id="camera-b"]')`);
     await run(`document.querySelector('[data-device-type="camera"][data-device-id="camera-b"]').click()`);
     await wait(`window.__cameraTest.pending.length===1 && document.querySelector('#toggleVideo').getAttribute('aria-busy')==='true'`);
@@ -133,7 +133,7 @@ app.whenReady().then(async () => {
     await wait(`document.querySelector('#main').dataset.voiceState==='joined'`);
     // Opening the real device menu requests a fresh enumeration. A disappeared
     // adopted device becomes the default preference without a new selection.
-    await run(`(()=>{const menu=document.querySelector('[data-control-menu="camera"]');if(menu.getAttribute('aria-expanded')==='true')menu.click();menu.click();})()`);
+    await run(`(()=>{document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',cancelable:true}));document.querySelector('#toggleVideo').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true}));})()`);
     await wait(`document.querySelector('[data-device-type="camera"][data-device-id="camera-c"]') && document.querySelector('[data-device-type="camera"][data-device-id="default"]').getAttribute('aria-pressed')==='true'`);
     await run(`document.querySelector('#toggleVideo').click()`);
     await wait(`window.__cameraTest.requests.length===6 && window.__cameraTest.pending.length===2`);
@@ -146,7 +146,7 @@ app.whenReady().then(async () => {
     assert.deepEqual(rejoined, { selected: 'default', track: 'live', voice: 'joined', pending: 0 });
     await run(`(()=>{
         navigator.mediaDevices.enumerateDevices=async()=>['camera-c','camera-d'].map(deviceId=>({deviceId,kind:'videoinput',groupId:'synthetic',label:'Synthetic '+deviceId}));
-        const menu=document.querySelector('[data-control-menu="camera"]');if(menu.getAttribute('aria-expanded')==='true')menu.click();menu.click();
+        document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',cancelable:true}));document.querySelector('#toggleVideo').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true}));
     })()`);
     await wait(`document.querySelector('[data-device-type="camera"][data-device-id="camera-d"]')`);
     await run(`document.querySelector('[data-device-type="camera"][data-device-id="camera-c"]').click()`);

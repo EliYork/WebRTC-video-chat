@@ -318,10 +318,8 @@ const createControl = (document, type, button) => {
     const control = createElement(document, 'div', {
         data: { 'device-control': type },
     });
-    const toggle = createButton(document, '');
-    toggle.setAttribute('data-control-menu', type);
-    control.append(button, toggle);
-    return { control, toggle };
+    control.append(button);
+    return control;
 };
 
 const createFixture = () => {
@@ -451,7 +449,7 @@ const createFixture = () => {
                     ? refs.micButton
                     : refs.outputButton;
         const control = createControl(document, type, button);
-        actions.append(control.control);
+        actions.append(control);
     });
 
     const createPopover = (type, children) => {
@@ -516,9 +514,9 @@ for (const type of ['mic', 'screen']) {
             const stub = createAdapterStub();
             const runtime = runtimeApi.createMediaDockRuntime({ root: fixture.root, adapter: stub.adapter });
             runtime.init();
-            const toggle = fixture.root.querySelector(`[data-control-menu="${type}"]`);
             const panel = fixture.root.querySelector(`[data-device-popover="${type}"]`);
-            fixture.root.dispatchEvent(new FakeEvent('click', { target: toggle }));
+            if (type === 'screen') fixture.refs.screenButton.click();
+            else fixture.root.querySelector('[data-device-control="mic"]').dispatchEvent(new FakeEvent('contextmenu'));
             assert.equal(panel.classList.contains('is-open'), true);
             fixture.document.dispatchEvent(new FakeEvent('keydown', { key: 'Escape', [flag]: true }));
             const retained = panel.classList.contains('is-open');
@@ -534,7 +532,7 @@ test('device popover stays within viewport and follows scrolling without moving 
     const stub = createAdapterStub();
     fixture.window.innerWidth = 390;
     fixture.window.innerHeight = 844;
-    const toggle = fixture.root.querySelector('[data-control-menu="mic"]');
+    const control = fixture.root.querySelector('[data-device-control="mic"]');
     const popover = fixture.root.querySelector(
         '[data-device-popover="mic"]'
     );
@@ -553,7 +551,7 @@ test('device popover stays within viewport and follows scrolling without moving 
         adapter: stub.adapter,
     });
     runtime.init();
-    fixture.root.dispatchEvent(new FakeEvent('click', { target: toggle }));
+    control.dispatchEvent(new FakeEvent('pointerenter', { pointerType: 'mouse' }));
     assert.equal(popover.style.left, '82px');
     assert.equal(popover.style.top, '60px');
     anchorTop = 800;
@@ -565,24 +563,46 @@ test('device popover stays within viewport and follows scrolling without moving 
     assert.equal(fixture.window.listenerCount('scroll'), 0);
 });
 
-test('device settings open by right-click or keyboard and stay closed on hover', () => {
+test('device popovers follow the mouse and close 500 ms after it leaves', () => {
     const fixture = createFixture();
     const { runtimeApi } = loadApis(fixture);
     const stub = createAdapterStub();
+    let timer;
+    fixture.window.setTimeout = (callback, delay) => { timer = {callback, delay}; return 1; };
+    fixture.window.clearTimeout = () => { timer = undefined; };
     const runtime = runtimeApi.createMediaDockRuntime({ root: fixture.root, adapter: stub.adapter });
     runtime.init();
     const control = fixture.root.querySelector('[data-device-control="mic"]');
     const popover = fixture.root.querySelector('[data-device-popover="mic"]');
-    control.dispatchEvent(new FakeEvent('pointerenter', { pointerType: 'mouse' }));
-    assert.equal(popover.classList.contains('is-open'), false);
-    control.dispatchEvent(new FakeEvent('contextmenu', { target: fixture.refs.micButton }));
-    assert.equal(popover.classList.contains('is-open'), true);
+    const move = (target, type, pointerType = 'mouse') => target.dispatchEvent(new FakeEvent(type, { pointerType }));
+    const opened = () => popover.classList.contains('is-open');
+    move(control, 'pointerenter', 'touch');
+    assert.equal(opened(), false);
+    move(control, 'pointerenter');
+    assert.equal(opened(), true);
+    assert.equal(fixture.refs.micButton.getAttribute('aria-expanded'), 'true');
+    move(control, 'pointerleave');
+    assert.equal(timer.delay, 500);
+    assert.equal(opened(), true);
+    move(popover, 'pointerenter');
+    assert.equal(timer, undefined);
+    move(popover, 'pointerleave');
+    assert.equal(timer.delay, 500);
+    timer.callback();
+    assert.equal(opened(), false);
+    assert.equal(fixture.refs.micButton.getAttribute('aria-expanded'), 'false');
+    move(control, 'pointerenter');
+    move(control, 'pointerleave');
+    const camera = fixture.root.querySelector('[data-device-control="camera"]');
+    move(camera, 'pointerenter');
+    assert.equal(opened(), false);
+    assert.equal(timer, undefined);
+    assert.equal(fixture.refs.cameraButton.getAttribute('aria-expanded'), 'true');
     fixture.document.dispatchEvent(new FakeEvent('keydown', { key: 'Escape' }));
-    assert.equal(popover.classList.contains('is-open'), false);
-    control.dispatchEvent(new FakeEvent('keydown', { key: 'F10', shiftKey: true, target: fixture.refs.micButton }));
-    assert.equal(popover.classList.contains('is-open'), true);
+    control.dispatchEvent(new FakeEvent('keydown', { key: 'F10', shiftKey: true }));
+    assert.equal(opened(), true);
     runtime.destroy();
-    assert.equal(control.listenerCount('contextmenu'), 0);
+    assert.equal(control.listenerCount('pointerenter'), 0);
 });
 
 const defaultState = () => ({
@@ -815,8 +835,10 @@ test('buttons, device selection, output volume and mute emit one adapter intent'
     fixture.refs.micButton.click();
     fixture.refs.cameraButton.click();
     fixture.refs.outputButton.click();
-    fixture.refs.outputSlider.value = '0.4';
+    fixture.refs.outputSlider.value = '2';
     fixture.refs.outputSlider.dispatchEvent(new FakeEvent('input'));
+    fixture.refs.micGainSlider.value = '200';
+    fixture.refs.micGainSlider.dispatchEvent(new FakeEvent('input'));
     fixture.refs.sessionButton.click();
     const micOption = fixture.refs.micList.querySelector(
         '[data-device-id="mic-a"]'
@@ -827,7 +849,8 @@ test('buttons, device selection, output volume and mute emit one adapter intent'
     assert.equal(stub.calls.get('toggleMicrophone').length, 1);
     assert.equal(stub.calls.get('toggleCamera').length, 1);
     assert.deepEqual(stub.calls.get('setOutputMuted'), [[true]]);
-    assert.deepEqual(stub.calls.get('setOutputVolume'), [[0.4]]);
+    assert.deepEqual(stub.calls.get('setOutputVolume'), [[2]]);
+    assert.deepEqual(stub.calls.get('setMicrophoneGain'), [[200]]);
     assert.equal(stub.calls.get('hangUp').length, 1);
     assert.deepEqual(stub.calls.get('selectMicrophone'), [['mic-a']]);
 
@@ -1135,7 +1158,7 @@ for (const copied of [true, false]) {
     });
 }
 
-for (const change of ['other-popover', 'reopened', 'superseded', 'new-request', 'destroyed']) {
+for (const change of ['superseded', 'new-request', 'destroyed']) {
     for (const started of [true, false]) {
         test(`late screen ${started} cannot alter ${change} settings`, async () => {
             const fixture = createFixture(), { runtimeApi } = loadApis(fixture), stub = createAdapterStub();
@@ -1145,9 +1168,6 @@ for (const change of ['other-popover', 'reopened', 'superseded', 'new-request', 
             let finish, finishNew, second;
             stub.results.set('startScreenShare', new Promise(resolve => { finish = resolve; }));
             fixture.refs.screenButton.click(); fixture.refs.screenStartButton.click();
-            const toggle = type => fixture.root.dispatchEvent(new FakeEvent('click', {
-                target: fixture.root.querySelector(`[data-control-menu="${type}"]`),
-            }));
             try {
                 if (change === 'destroyed') {
                     first.destroy();
@@ -1163,11 +1183,8 @@ for (const change of ['other-popover', 'reopened', 'superseded', 'new-request', 
                         stub.results.set('startScreenShare', new Promise(resolve => { finishNew = resolve; }));
                         fixture.refs.screenStartButton.click();
                     }
-                } else {
-                    toggle('mic');
-                    if (change === 'reopened') toggle('screen');
                 }
-                const panel = change === 'other-popover' ? fixture.root.querySelector('[data-device-popover="mic"]') : screen;
+                const panel = screen;
                 feedback.textContent = '当前设置提示';
                 assert.equal(panel.classList.contains('is-open'), true);
                 finish(started); await flush();

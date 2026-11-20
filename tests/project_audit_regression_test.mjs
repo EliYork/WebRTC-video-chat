@@ -113,6 +113,10 @@ test('wrong-shaped stored peer volumes are recoverable and explicit mute survive
         assert.equal(api.getPeerVolume('peer'), saved?.peer === 0 ? 0 : 1);
         assert.doesNotThrow(() => api.setPeerVolume('peer', 0.5));
         assert.equal(api.getPeerVolume('peer'), 0.5);
+        api.setPeerVolume('peer', 2);
+        assert.equal(api.getPeerVolume('peer'), 2);
+        assert.equal(api.getEffectiveOutputVolume(2, api.getPeerVolume('peer')), 4);
+        assert.equal(api.getEffectiveOutputVolume(0, 2), 0);
     }
 });
 

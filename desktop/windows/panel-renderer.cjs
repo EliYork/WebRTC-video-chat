@@ -56,12 +56,11 @@ function render(state) {
     $('#client-version').textContent = info.clientVersion;
     $('#web-version').textContent = info.webVersion;
     $('#server-origin').textContent = info.origin;
-    $('#version-chip').textContent = `v${info.clientVersion}`;
     const status = u?.status || 'preview',
         progress = u?.progress;
     const views = {
         idle: [
-            '保持最新，轻松连接',
+            '客户端更新',
             '检查客户端和原生共享组件的可用更新。',
             '检查更新',
             'check',
@@ -74,7 +73,7 @@ function render(state) {
         ],
         current: [
             '已经是最新版本',
-            `当前客户端 ${info.clientVersion}，无需更新。`,
+            '',
             '重新检查',
             'check',
         ],
@@ -98,7 +97,7 @@ function render(state) {
         ],
         downloaded: [
             '更新已准备就绪',
-            `版本 ${u?.version} 已通过完整性校验，方便时再安装。`,
+            `版本 ${u?.version} 已通过校验。安装会结束当前通话和共享。`,
             '退出并安装',
             'install',
         ],

@@ -6,7 +6,7 @@
         join: [523.251, 587.33],
         leave: [587.33, 523.251],
     });
-    const clamp = (value) => Math.max(0, Math.min(1, Number(value) || 0));
+    const clamp = (value, limit = 1) => Math.max(0, Math.min(limit, Number(value) || 0));
 
     // Observe the authoritative roster, never video tiles or media reconnects.
     function createTracker({ notify, now = () => Date.now() }) {
@@ -90,7 +90,7 @@
             const settings = getSettings(),
                 output = getOutput();
             return settings.enabled && !output.muted
-                ? clamp(settings.volume) * clamp(output.volume)
+                ? clamp(settings.volume) * clamp(output.volume, 2)
                 : 0;
         };
         const clearNodes = () => {
@@ -235,7 +235,7 @@
                 stored !== '' &&
                 Number.isFinite(Number(stored))
                     ? clamp(stored)
-                    : 0.35,
+                    : 0.5,
         };
         const player = createTonePlayer({
             getSettings: () => settings,
