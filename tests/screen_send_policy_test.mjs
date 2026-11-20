@@ -67,6 +67,24 @@ test('screen policy applies 4K60 limits and restores prior settings for camera',
     assert.equal(f.params().degradationPreference, 'balanced');
 });
 
+test('shared audio applies the 256 kbps ceiling without modifying an ordinary microphone track', async () => {
+    const f = fixture();
+    const screenAudio = { kind: 'audio' };
+    const microphone = { kind: 'audio' };
+    f.sender.track = screenAudio;
+    f.api.registerAudio(screenAudio, 256_000);
+    await f.api.apply(f.pc);
+    assert.equal(f.params().encodings[0].maxBitrate, 256_000);
+    assert.equal(f.params().encodings[0].maxFramerate, undefined);
+    assert.equal(f.params().degradationPreference, 'balanced');
+
+    f.sender.track = microphone;
+    await f.api.apply(f.pc);
+    assert.equal(f.params().encodings[0].maxBitrate, 1234);
+    await f.api.apply(f.pc);
+    assert.equal(f.count(), 2);
+});
+
 test('duplicate connection callbacks skip writes but changed parameters are repaired', async () => {
     const f = fixture();
     f.api.register(f.track, { frameRate: 60 });

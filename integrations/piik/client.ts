@@ -5,6 +5,7 @@ import { ViewerPeer } from './.deps/upstream/src/client/webrtc/viewer-peer';
 import { decodeServerMessage } from './.deps/upstream/src/shared/protocol';
 import { NativeSenderPeer } from './.deps/upstream/src/client/native/native-sender-peer';
 import { createNativeCapture } from './native';
+import { SCREEN_AUDIO_BITRATE } from './share-audio';
 import { diagnosticConnection } from './diagnostics';
 import { applyVideoCaptureProfile } from './.deps/upstream/src/client/media/quality';
 import type { HostMediaPeer } from './.deps/upstream/src/client/webrtc/host-peer';
@@ -584,7 +585,7 @@ function createRuntime({
                 },
                 maxFramerate: options.frameRate || 60,
                 maxBitrate: options.maxBitrate || 15000000,
-                maxAudioBitrate: 128000,
+                maxAudioBitrate: SCREEN_AUDIO_BITRATE,
                 degradationPreference: 'maintain-resolution',
             };
             const result = await request({ action: 'publish', quality });

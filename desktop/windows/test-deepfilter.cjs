@@ -76,6 +76,8 @@ app.whenReady().then(async()=>{
         t.choose=mode=>{const select=document.querySelector('[data-audio-noise-mode]');select.value=mode;select.dispatchEvent(new Event('change',{bubbles:true}));};
         t.snapshot=()=>({mode:document.querySelector('[data-audio-noise-mode]').value,
             status:document.querySelector('[data-audio-processing-status]').textContent,
+            activeMode:document.querySelector('[data-audio-noise-mode]').dataset.activeNoiseMode,
+            pending:document.querySelector('[data-audio-noise-mode]').getAttribute('aria-busy')==='true',
             mic:document.querySelector('#toggleAudio').getAttribute('aria-pressed'),
             voice:document.querySelector('#main').dataset.voiceState,
             contexts:t.contexts.map(context=>context.state),requests:t.requests,
@@ -88,18 +90,18 @@ app.whenReady().then(async()=>{
     assert.equal(assetRequests.length,0);
     assert.equal(await run('__dfCheck.requests'),0);
     await run(`document.querySelector('#destroyPeer').click()`);
-    await wait(`__dfCheck.snapshot().voice==='joined' && __dfCheck.snapshot().status.includes('实际：RNNoise')`);
+    await wait(`__dfCheck.snapshot().voice==='joined' && __dfCheck.snapshot().activeMode==='rnnoise'`);
     await run(`document.querySelector('#toggleAudio').click()`);await wait(`__dfCheck.snapshot().mic==='false'`);
     const baseline=await run('__dfCheck.snapshot()');
     blockModel=true;
     await run(`__dfCheck.choose('deepfilter')`);
-    await wait(`__dfCheck.snapshot().status.includes('已保留原音频') && __dfCheck.snapshot().mode==='rnnoise'`);
+    await wait(`__dfCheck.snapshot().status.includes('降噪切换失败') && __dfCheck.snapshot().mode==='rnnoise'`);
     const failedLoad=await run('__dfCheck.snapshot()');
     assert.equal(failedLoad.outputTrackId,baseline.outputTrackId);assert.equal(failedLoad.outputEnabled,false);
     assert.equal(failedLoad.contexts.at(-1),'closed');
     blockModel=false;
     await run(`__dfCheck.choose('deepfilter')`);
-    await wait(`__dfCheck.snapshot().status.includes('实际：增强降噪') && !__dfCheck.snapshot().status.includes('切换中')`);
+    await wait(`__dfCheck.snapshot().activeMode==='deepfilter' && !__dfCheck.snapshot().pending`);
     const enhanced=await run('__dfCheck.snapshot()');
     assert.equal(enhanced.gateDisabled,true);assert.equal(enhanced.outputTrackId,baseline.outputTrackId);assert.equal(enhanced.outputEnabled,false);
     await run(`document.querySelector('[data-control-menu="mic"]').click()`);
@@ -109,9 +111,9 @@ app.whenReady().then(async()=>{
     await run(`document.querySelector('[data-control-panel="mic"] [data-control-close]').click()`);
     for(let i=0;i<2;i++){
         await run(`__dfCheck.choose('rnnoise')`);
-        await wait(`__dfCheck.snapshot().status.includes('实际：RNNoise') && !__dfCheck.snapshot().status.includes('切换中')`);
+        await wait(`__dfCheck.snapshot().activeMode==='rnnoise' && !__dfCheck.snapshot().pending`);
         await run(`__dfCheck.choose('deepfilter')`);
-        await wait(`__dfCheck.snapshot().status.includes('实际：增强降噪') && !__dfCheck.snapshot().status.includes('切换中')`);
+        await wait(`__dfCheck.snapshot().activeMode==='deepfilter' && !__dfCheck.snapshot().pending`);
     }
     await wait(`__dfCheck.messages.some(e=>e.data.type==='load-report')`);
     const repeated=await run('__dfCheck.snapshot()');
@@ -130,9 +132,9 @@ app.whenReady().then(async()=>{
     assert.equal(fallback.modelContexts.filter(state=>state==='running').length,0);
     assert.equal(await run('__dfCheck.outputContext.state'),'running');
     await run(`__dfCheck.releaseCapture()`);
-    await wait(`__dfCheck.snapshot().status.includes('实际：RNNoise') && !__dfCheck.snapshot().status.includes('切换中')`);
+    await wait(`__dfCheck.snapshot().activeMode==='rnnoise' && !__dfCheck.snapshot().pending`);
     await run(`__dfCheck.choose('deepfilter')`);
-    await wait(`__dfCheck.snapshot().status.includes('实际：增强降噪') && !__dfCheck.snapshot().status.includes('切换中')`);
+    await wait(`__dfCheck.snapshot().activeMode==='deepfilter' && !__dfCheck.snapshot().pending`);
     await run(`document.querySelector('#toggleAudio').click()`);await wait(`__dfCheck.snapshot().mic==='true'`);
     const signal=await run(`(async()=>{
         const ctx=__dfCheck.outputContext,stream=ctx.destinations[0].stream;

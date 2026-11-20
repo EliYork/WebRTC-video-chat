@@ -44,6 +44,31 @@ html[data-desktop-chrome] .workspace-actions > button {
     box-shadow: none;
 }
 html[data-desktop-chrome] .desktop-menu { -webkit-app-region: no-drag; }
+/* Match the neighboring title-bar controls; use text as well as color (2.3, 8.4). */
+html[data-desktop-chrome] .workspace-topbar button.desktop-update {
+    height: 28px;
+    padding: 3px 8px;
+    min-height: 0;
+    border: 1px solid #376b53;
+    border-radius: 8px;
+    background: #376b53;
+    color: #fff;
+    font: 600 12px 'Segoe UI', 'Microsoft YaHei', sans-serif;
+    white-space: nowrap;
+    cursor: pointer;
+}
+html[data-desktop-chrome] .workspace-topbar .desktop-update[hidden] { display: none; }
+html[data-desktop-chrome] .workspace-topbar .desktop-update:hover:not(:disabled) { background: #2d5844; }
+html[data-desktop-chrome] .workspace-topbar .desktop-update:disabled {
+    background: #edf5f0;
+    border-color: #c1d5ca;
+    color: #376b53;
+    cursor: default;
+}
+html[data-desktop-chrome] .workspace-topbar .desktop-update:focus-visible {
+    outline: 2px solid #376b53;
+    outline-offset: 2px;
+}
 html[data-desktop-chrome] .workspace-topbar .desktop-refresh {
     align-self: stretch;
     flex: 0 0 46px;

@@ -125,8 +125,8 @@
         });
         const getDisplayName = () =>
             nameState.getChatName(refs?.nameInput?.value);
-        const commitDisplayName = () => {
-            const name = nameState.saveChatName(refs?.nameInput?.value);
+        const commitDisplayName = (value = refs?.nameInput?.value) => {
+            const name = nameState.saveChatName(value);
             if (refs?.nameInput) {
                 refs.nameInput.value = name;
             }
@@ -689,6 +689,7 @@
             rejoinCurrentRoom,
             renderHistory,
             setConnectionState,
+            setDisplayName: (name) => assertActive() ? commitDisplayName(name) : false,
             setRoom,
             setSendingState,
         };

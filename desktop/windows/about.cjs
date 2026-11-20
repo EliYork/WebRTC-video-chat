@@ -1,6 +1,6 @@
 // Local settings remain available independently of the channel page loading.
 function createAbout({ app, panels, window, updates, origin, cancelled = () => false }) {
-    return async ({ startupPrompt = false } = {}) => {
+    return async () => {
         const win = window();
         if (!win || win.isDestroyed()) return;
         let webVersion = '暂时无法读取';
@@ -23,9 +23,7 @@ function createAbout({ app, panels, window, updates, origin, cancelled = () => f
         }
         if (cancelled() || win.isDestroyed() || window() !== win) return;
         const service = app.isPackaged ? updates() : null;
-        const state = startupPrompt ? service?.snapshot() : null;
-        if (startupPrompt && (!state || state.status !== 'available' || state.ignoredVersion === state.version)) return;
-        return (startupPrompt ? panels.updatePrompt : panels.about)(
+        return panels.about(
             {
                 clientVersion: app.getVersion(),
                 webVersion,

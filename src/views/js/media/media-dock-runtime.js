@@ -14,28 +14,14 @@
         frameRate: 60,
         mode: 'game',
     });
-    const CONNECTION_LABELS = Object.freeze({
-        degraded: '连接中断，正在重试',
-        failed: '语音恢复失败，请重新加入',
-        idle: '未加入语音',
-        joined: '连接已恢复',
-        joining: '正在加入语音',
-        leaving: '正在离开语音',
-        offline: '网络离线',
-        'reconnecting-peer': '语音信令中断，正在重试',
-        'reconnecting-socket': '连接中断，正在重试',
-        restoring: '正在恢复语音',
-    });
     const DEVICE_TYPES = Object.freeze(['mic', 'camera', 'output']);
     const DEVICE_HOVER_CLOSE_MS = 500;
     const DEVICE_LONG_PRESS_MS = 500;
     const REQUIRED_REFS = Object.freeze({
         callDuration: '#callDuration',
-        callStatus: '#callStatusText',
         cameraButton: '#toggleVideo',
         cameraDeviceStatus: '#cameraDeviceStatus',
         cameraList: '[data-device-list="camera"]',
-        channelName: '#localVoiceChannelName',
         copyButton: '#copyRoomLink',
         frameRateSelect: '[data-screen-share-frame-rate]',
         localUserName: '#localUserName',
@@ -329,29 +315,22 @@
             }
             if (modeSelect) {
                 modeSelect.value = snapshot.requestedNoiseMode || 'browser';
+                modeSelect.dataset.activeNoiseMode = snapshot.audioProcessing?.mode || '';
+                modeSelect.setAttribute('aria-busy', String(Boolean(snapshot.audioSettingsPending)));
                 const rnnoiseOption = modeSelect.querySelector('[value="rnnoise"]');
                 if (rnnoiseOption) rnnoiseOption.disabled = !snapshot.aiNoiseSupported;
             }
             const diagnostic = refs.processingStatus;
-            if (diagnostic) setText(diagnostic, global.VoiceAudioProcessingView.describe(snapshot));
+            if (diagnostic) {
+                diagnostic.hidden = !snapshot.audioSettingsError;
+                setText(diagnostic, snapshot.audioSettingsError ? '降噪切换失败，请重试。' : '');
+            }
             const micGain = clamp(snapshot.microphoneGain, 0, 200, 100);
             refs.micGainSlider.value = String(micGain);
             setText(refs.micGainValue, `${Math.round(micGain)}%`);
         };
         const renderStatusMessages = (snapshot) => {
             const messages = [];
-            const connectionState = snapshot.connectionState || 'idle';
-
-            if (
-                snapshot.desiredVoiceJoined &&
-                !['joined', 'idle'].includes(connectionState)
-            ) {
-                messages.push({
-                    kind: 'connection',
-                    message:
-                        CONNECTION_LABELS[connectionState] || connectionState,
-                });
-            }
             Object.entries(snapshot.mediaErrors || {}).forEach(
                 ([kind, message]) => {
                     if (message) {
@@ -435,8 +414,8 @@
                 'aria-busy',
                 String(microphonePending || cameraPending || screenPending)
             );
-            setText(refs.localUserName, lastSnapshot.displayName || 'Guest');
-            setText(refs.channelName, lastSnapshot.channelName || '');
+            if (global.document.activeElement !== refs.localUserName)
+                refs.localUserName.value = lastSnapshot.displayName || 'Guest';
             setText(
                 refs.callDuration,
                 formatDuration(lastSnapshot.callDurationMs)
@@ -447,16 +426,17 @@
                 signal.dataset.quality = quality.status || 'unknown';
                 signal.dataset.bars = String(quality.bars ?? 0);
                 const detail = quality.detail || '通话质量尚未测量';
-                signal.setAttribute('aria-label', detail);
-                setText(root.querySelector('#callSignalDetail'), detail);
+                const format = (value, unit) =>
+                    Number.isFinite(value) ? `${Math.round(value * 10) / 10}${unit}` : '—';
+                const hasMicRate = Number.isFinite(quality.micKbps);
+                const micRate = format(quality.micKbps, ' kbps');
+                const micRow = root.querySelector('[data-call-mic-row]');
+                if (micRow) micRow.hidden = !hasMicRate;
+                setText(root.querySelector('[data-call-rtt]'), format(quality.rttMs, ' ms'));
+                setText(root.querySelector('[data-call-loss]'), format(quality.lossPercent, '%'));
+                setText(root.querySelector('[data-call-mic-rate]'), micRate);
+                signal.setAttribute('aria-label', hasMicRate ? `${detail} · 麦克风发送 ${micRate}` : detail);
             }
-            setText(
-                refs.callStatus,
-                lastSnapshot.callStatusText ||
-                    CONNECTION_LABELS[lastSnapshot.connectionState] ||
-                    '未加入语音'
-            );
-
             renderToggleButton({
                 button: refs.micButton,
                 disabled: !(lastSnapshot.microphoneControlsAvailable ?? mediaAvailable),
@@ -814,7 +794,6 @@
             closePopovers();
         };
         const openPopover = (type, { mode = 'source', fromHover = false } = {}) => {
-            setSignalOpen(false);
             const opener = fromHover ? undefined : previousFocus || global.document.activeElement;
             closePopovers();
             if (type === 'screen') {
@@ -903,13 +882,7 @@
                       : adapter.selectOutput;
             void runIntent(`device-${type}`, () => action(deviceId), true);
         };
-        const setSignalOpen = (open) => {
-            root.querySelector('#callSignal')?.setAttribute('aria-expanded', String(open));
-            const detail = root.querySelector('#callSignalDetail');
-            if (detail) detail.hidden = !open;
-        };
         const handleDocumentClick = (event) => {
-            if (!root.querySelector('.media-dock-timer')?.contains(event.target)) setSignalOpen(false);
             const action = event.target.closest?.('[data-share-action]')?.dataset.shareAction;
             if (action) {
                 if (action === 'stop') {
@@ -938,11 +911,6 @@
                 }
             }
             if (event.key === 'Escape') {
-                if (!openPopoverType && root.querySelector('#callSignal')?.getAttribute('aria-expanded') === 'true') {
-                    event.preventDefault();
-                    setSignalOpen(false);
-                    return;
-                }
                 if (openPopoverType) event.preventDefault();
                 if (openPopoverType === 'screen') { event.preventDefault(); cancelShareDialog(); }
                 else closePopovers();
@@ -986,9 +954,22 @@
             refs.resolutionSelect.value = resolutionPreset;
             refs.frameRateSelect.value = String(frameRate);
 
+            listen(refs.localUserName, 'change', (event) => {
+                const input = event.currentTarget;
+                const previous = lastSnapshot.displayName || 'Guest';
+                const name = input.value.trim();
+                input.value = (name && name !== previous && adapter.setDisplayName?.(name)) || previous;
+            });
+            listen(refs.localUserName, 'keydown', (event) => {
+                if (event.isComposing || event.keyCode === 229 || !['Enter', 'Escape'].includes(event.key)) return;
+                event.preventDefault();
+                if (event.key === 'Escape') {
+                    event.stopPropagation();
+                    refs.localUserName.value = lastSnapshot.displayName || 'Guest';
+                }
+                refs.localUserName.blur();
+            });
             listen(refs.sessionButton, 'click', handleSessionClick);
-            const signal = root.querySelector('#callSignal');
-            listen(signal, 'click', () => setSignalOpen(signal.getAttribute('aria-expanded') !== 'true'));
             listen(refs.micButton, 'click', handleMicrophoneClick);
             listen(refs.cameraButton, 'click', handleCameraClick);
             listen(refs.screenButton, 'click', handleScreenClick);
@@ -1135,7 +1116,6 @@
             }
             destroyed = true;
             pendingActions.clear();
-            setSignalOpen(false);
             closePopovers();
             listenerCleanups.splice(0).forEach((cleanup) => cleanup());
             unsubscribe?.();

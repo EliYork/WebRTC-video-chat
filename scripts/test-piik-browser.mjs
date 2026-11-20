@@ -104,10 +104,41 @@ const probe = `(() => {
     window.__pcs=[]; const Original=RTCPeerConnection;
     window.RTCPeerConnection=new Proxy(Original,{construct(T,args){const pc=new T(...args);__pcs.push(pc);return pc;}});
     let factory; Object.defineProperty(window,'io',{configurable:true,get(){return factory;},set(value){factory=new Proxy(value,{apply(T,self,args){const socket=Reflect.apply(T,self,args);window.__socket=socket;socket.on('piik:message',({message})=>{(window.__piikMessages??=[]).push({type:message.type,phase:message.phase,revision:message.revision});});return socket;}});}});
-    navigator.mediaDevices.getDisplayMedia=async(options)=>{window.__lastCaptureOptions=options;if(window.__cancelNextCapture){window.__cancelNextCapture=false;throw new DOMException('Synthetic picker cancelled','NotAllowedError');}const c=document.createElement('canvas');c.width=1280;c.height=720;const x=c.getContext('2d');let f=0;const t=setInterval(()=>{x.fillStyle='hsl('+(f++%360)+',75%,45%)';x.fillRect(0,0,c.width,c.height);x.fillStyle='white';x.fillRect((f*17)%1200,120,80,440);},16);const s=c.captureStream(30);const track=s.getVideoTracks()[0],stop=track.stop.bind(track),apply=track.applyConstraints.bind(track);track.stop=()=>{clearInterval(t);stop();};track.applyConstraints=async(value)=>{window.__lastCaptureConstraints=value;return apply(value);};window.__capture=s;if(window.__holdNextCapture){window.__holdNextCapture=false;return new Promise(resolve=>{window.__releaseCapture=()=>resolve(s);});}return s;};
+    navigator.mediaDevices.getDisplayMedia=async(options)=>{
+        window.__lastCaptureOptions=options;
+        if(window.__cancelNextCapture){
+            window.__cancelNextCapture=false;
+            throw new DOMException('Synthetic picker cancelled','NotAllowedError');
+        }
+        const canvas=document.createElement('canvas');
+        canvas.width=1280;canvas.height=720;
+        const context=canvas.getContext('2d');let frame=0;
+        const timer=setInterval(()=>{
+            context.fillStyle='hsl('+(frame++%360)+',75%,45%)';
+            context.fillRect(0,0,canvas.width,canvas.height);
+            context.fillStyle='white';context.fillRect((frame*17)%1200,120,80,440);
+        },16);
+        const stream=canvas.captureStream(30);
+        let audioContext;
+        if(options.audio){
+            audioContext=new AudioContext();
+            const oscillator=audioContext.createOscillator(), output=audioContext.createMediaStreamDestination();
+            oscillator.connect(output);oscillator.start();
+            stream.addTrack(output.stream.getAudioTracks()[0]);
+        }
+        const track=stream.getVideoTracks()[0], stop=track.stop.bind(track), apply=track.applyConstraints.bind(track);
+        track.stop=()=>{clearInterval(timer);void audioContext?.close();stop();};
+        track.applyConstraints=async value=>{window.__lastCaptureConstraints=value;return apply(value);};
+        window.__capture=stream;
+        if(window.__holdNextCapture){
+            window.__holdNextCapture=false;
+            return new Promise(resolve=>{window.__releaseCapture=()=>resolve(stream);});
+        }
+        return stream;
+    };
     window.__mediaStats=async()=>{const result=[];for(const pc of __pcs){if(pc.connectionState!=='connected')continue;const stats=await pc.getStats();for(const r of stats.values()){if(r.type==='inbound-rtp'||r.type==='outbound-rtp')result.push({type:r.type,kind:r.kind,framesDecoded:r.framesDecoded,framesEncoded:r.framesEncoded,bytesReceived:r.bytesReceived,bytesSent:r.bytesSent,codec:stats.get(r.codecId)?.mimeType});}}return result;};
 })()`;
-async function open(room = 'lobby') {
+async function open(room = 'lobby', { desktop = false } = {}) {
     const { targetId } = await send('Target.createTarget', {
         url: 'about:blank',
     });
@@ -118,7 +149,9 @@ async function open(room = 'lobby') {
     await send('Page.enable', {}, s);
     await send('Runtime.enable', {}, s);
     await send('Emulation.setDeviceMetricsOverride', { width: 1920, height: 1080, deviceScaleFactor: 1, mobile: false }, s);
-    await send('Page.addScriptToEvaluateOnNewDocument', { source: probe }, s);
+    await send('Page.addScriptToEvaluateOnNewDocument', {
+        source: desktop ? 'window.EliYorkDesktop = {};\n' + probe : probe,
+    }, s);
     await send(
         'Page.navigate',
         { url: `http://127.0.0.1:${port}/room/${room}` },
@@ -277,6 +310,8 @@ try {
         await wait(() => receiving(b), 'Piik video in original stage');
         await wait(() => evaluate(a, `!document.querySelector('dialog').open`), 'sharing dialog closes on success');
         assert.notEqual(await evaluate(a, '__lastCaptureOptions.audio'), false, 'capture follows the existing checked source-audio preference; test output remains muted');
+        const shareAudioSender = `__pcs.flatMap(pc=>pc.getSenders()).find(sender=>sender.track === __capture.getAudioTracks()[0])`;
+        await wait(() => evaluate(a, `${shareAudioSender}?.getParameters().encodings.some(encoding => encoding.maxBitrate === 256000)`), 'Piik browser sender accepts the 256 kbps screen audio ceiling');
         const publicationId = (await mediaRequest(b, { action: 'list' })).shares[0].id;
         const originalTrackId = await evaluate(a, '__capture.getVideoTracks()[0].id');
         await click(a, '[data-local-share-controls] [data-share-action="quality"]');
@@ -327,6 +362,7 @@ try {
             'existing chat during Piik sharing'
         );
         await delay(2500);
+        await click(b, '.workspace-call-tools-toggle');
         await click(b, '[data-copy-call-diagnostics]');
         await wait(() => evaluate(b, '!!window.__diagnosticsCopy'), 'paired diagnostic export');
         const diagnostics = (await evaluate(b, 'JSON.parse(window.__diagnosticsCopy)')).本机;
@@ -459,6 +495,7 @@ try {
             senderVideoTracks,
             checks: [
                 'browser live quality updates actual sender FPS and bitrate',
+                'separate screen audio sender accepts the 256 kbps ceiling',
                 'cancel source picker retains old share; confirmed switch retires old capture',
                 'pending capture stop discards late stream without leaving voice',
                 'original channel and stage',

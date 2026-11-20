@@ -47,6 +47,7 @@ const stream = {getVideoTracks: () => [{getSettings: () => ({width: 1280, height
 test('cancelled publication safely handles a late acknowledgement and denied cleanup', async () => {
     const {runtime, requests, delayed} = fixture();
     const publishing = runtime.publish(stream, {frameRate: 30});
+    assert.equal(requests.find(input => input.action === 'publish').quality.maxAudioBitrate, 256_000);
     const cancelled = assert.rejects(publishing, /取消/);
     runtime.leave();
     delayed.get('publish')(null, {ok: true, sessionId: 'retired', shareId: 'old-share'});

@@ -22,6 +22,24 @@
 @media (prefers-reduced-motion: reduce) { .stage-layout .video-tile.is-immersive-player .tile-header { transition: none; } }
 .workspace-actions button { min-width: 32px; min-height: 32px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); font-size: 12px; cursor: pointer; }
 #stageStageToggle { display: none; }
+html[data-desktop-call-tools] .workspace-call-tools-toggle { display: none; }
+.workspace-actions .workspace-call-tools-toggle { white-space: nowrap; }
+.call-log-actions {
+    position: fixed;
+    inset: calc(var(--workspace-bar-height) + env(safe-area-inset-top) + 8px) max(12px, env(safe-area-inset-right)) auto auto;
+    margin: 0;
+    width: min(200px, calc(100vw - 24px));
+    padding: 8px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--panel);
+    color: var(--text);
+    box-shadow: var(--shadow);
+}
+.call-log-actions:popover-open { display: grid; gap: 4px; }
+.call-log-actions button { text-align: left; min-height: 36px; }
+.call-log-actions button:is(:hover, :focus-visible) { background: var(--accent-soft); }
+html[data-desktop-call-tools] .call-log-actions { right: calc(100% - env(titlebar-area-width, 100%) + 46px); }
 html[data-desktop-chrome] .workspace-actions .workspace-navigation > button { height: 28px; min-height: 0; padding: 3px 8px; font-size: 12px; box-shadow: none; }
 @media (pointer: coarse) {
     :root { --workspace-bar-height: 56px; }
@@ -90,8 +108,8 @@ html[data-desktop-chrome] .workspace-download { display: none; }
 .stage-dock { position: relative; }
 .stage-sidebar-column > .stage-dock { flex: 0 0 auto; width: 100%; min-width: 0; padding: 12px; background: var(--panel); border-top: 1px solid var(--line-soft); }
 .stage-dock .local-user-card { padding: 0; border: 0; background: none; box-shadow: none; }
-.stage-dock #buttons.media-dock { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-areas: 'user' 'controls' 'session' 'status'; align-items: center; gap: 10px; min-height: 0; padding: 0; border: 0; box-shadow: none; border-radius: 0; background: none; }
-.stage-dock #buttons .media-dock-header { grid-area: user; grid-template-columns: minmax(0, 1fr); gap: 6px; padding: 0; }
+.stage-dock #buttons.media-dock { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-areas: 'user' 'controls' 'session'; align-items: center; gap: 10px; min-height: 0; padding: 0; border: 0; box-shadow: none; border-radius: 0; background: none; }
+.stage-dock #buttons .media-dock-header { grid-area: user; gap: 8px; padding: 0; }
 .stage-dock .media-dock-activity-row { grid-area: session; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; }
 .stage-dock #buttons .media-dock-actions { grid-area: controls; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
 .stage-dock #buttons .control-button-wrap { grid-template-columns: minmax(0, 1fr); min-width: 0; }
@@ -112,8 +130,19 @@ html[data-desktop-chrome] .workspace-download { display: none; }
 .stage-dock #buttons #copyRoomLink span { display: none; }
 .stage-dock #buttons #destroyPeer { width: auto; flex: 1 1 100px; flex-direction: row; gap: 8px; padding: 8px 12px; }
 .stage-dock #destroyPeer [data-session-label] { font-size: 12px; white-space: nowrap; }
-.stage-dock .voice-status-messages:not(.hidden) { grid-area: status; margin: 6px 0 0; max-height: 64px; overflow: auto; }
-.stage-dock .media-dock-info { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 11px; }
+.stage-dock .voice-status-messages:not(.hidden) {
+    position: absolute;
+    inset: auto 0 calc(100% + 8px);
+    z-index: 101;
+    margin: 0;
+    max-height: 96px;
+    overflow: auto;
+    padding: 8px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+    box-shadow: var(--shadow);
+}
 .stage-dock .screen-status-chip:not(.hidden) { position: static; display: block; flex: 1 0 100%; min-height: 24px; padding: 6px 9px; color: var(--accent-strong); background: var(--accent-soft); white-space: normal; font-size: 11px; line-height: 1.3; }
 #main[data-stage-mode='sharing'] .stage-dock .screen-status-chip[data-share-state='active'] { display: none; }
 .member-card .voice-placeholder[hidden] { display: none; }
@@ -181,8 +210,7 @@ html[data-desktop-chrome] .workspace-download { display: none; }
     .stage-layout[data-stage-mode='sharing'] .members-heading, #stageChannelStatus { display: none; }
     .stage-layout[data-stage-mode='sharing'] #member-cards .tile-header { min-height: 32px; }
     .stage-layout[data-stage-mode='sharing'] #member-cards .voice-placeholder-avatar { width: 28px; height: 28px; font-size: 14px; }
-    .stage-dock #buttons .media-dock-header { display: none; }
-    .stage-dock #buttons.media-dock { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'controls' 'session' 'status'; gap: 6px; min-height: 44px; }
+    .stage-dock #buttons.media-dock { gap: 6px; min-height: 44px; }
     .stage-dock .media-dock-actions { justify-content: start; }
 }
 /* Phones use one primary view, including landscape. Hidden views keep their
@@ -209,26 +237,23 @@ html[data-desktop-chrome] .workspace-download { display: none; }
     }
     .stage-layout .stage-sidebar-column { grid-area: dock; width: min(420px, calc(100% - 16px)); justify-self: center; margin: 6px 0 max(6px, env(safe-area-inset-bottom)); overflow: visible; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); box-shadow: 0 4px 16px #44364108; }
     .stage-sidebar-column > .room-sidebar { display: none; }
-    .stage-sidebar-column > .stage-dock { width: 100%; padding: 8px; border: 0; border-radius: inherit; }
-    .stage-dock #buttons.media-dock { grid-template-areas: 'controls' 'session' 'status'; gap: 6px; }
-    .stage-dock #buttons .media-dock-header { display: none; }
-    #main[data-voice-state='joined'] .stage-dock #buttons.media-dock { grid-template-columns: auto minmax(0, 1fr); grid-template-areas: 'controls controls' 'quality session' 'status status'; }
-    #main[data-voice-state='joined'] .stage-dock #buttons :is(.media-dock-header, .media-dock-info) { display: contents; }
-    .stage-dock .media-dock-header :is(.media-dock-user, #localVoiceChannelName) { display: none; }
-    .stage-dock .media-dock-timer { grid-area: quality; }
-    .stage-dock #buttons .call-signal { width: 44px; min-height: 40px; }
+    .stage-sidebar-column > .stage-dock { width: 100%; padding: 6px; border: 0; border-radius: inherit; }
+    .stage-dock #buttons.media-dock { gap: 5px; }
+    .stage-dock #buttons .media-dock-user { grid-template-columns: 24px minmax(0, 1fr); gap: 4px; }
+    .stage-dock #buttons :is(.local-avatar, .local-user-name, .call-signal) { height: 24px; min-height: 24px; }
+    .stage-dock #buttons .local-avatar { width: 24px; font-size: 13px; }
+    #main:not([data-voice-state='joined']) .stage-dock .media-dock-timer { visibility: hidden; }
     .stage-dock #buttons .media-dock-actions { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
     .stage-dock [data-device-control='mic'] { order: 0; }
     .stage-dock [data-device-control='camera'] { order: 1; }
     .stage-dock [data-device-control='output'] { order: 2; }
     .stage-dock [data-device-control='screen'] { order: 3; }
-    .stage-dock #buttons .media-dock-action-button { height: 48px; min-height: 48px; }
+    .stage-dock #buttons .media-dock-action-button { height: 44px; min-height: 44px; }
     .stage-dock #buttons .media-dock-activity-row { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 6px; }
     .stage-dock #buttons :is(#copyRoomLink, #destroyPeer) { height: 40px; min-height: 40px; }
     .stage-dock #destroyPeer [data-session-label] { font-size: 13px; }
     .stage-dock .screen-status-chip:not(.hidden) { grid-column: 1 / -1; }
     .stage-dock .screen-status-chip[data-share-state='stopped'] { display: none; }
-    .stage-dock .voice-status-messages:not(.hidden) { max-height: 52px; }
     .stage-layout .stage-members { padding: 10px 12px 4px; }
     .members-heading { padding-bottom: 8px; }
     .members-heading strong { font-size: 17px; }

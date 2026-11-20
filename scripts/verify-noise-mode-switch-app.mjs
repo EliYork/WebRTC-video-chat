@@ -130,15 +130,15 @@ try {
     if (await page.locator('#toggleAudio').getAttribute('aria-pressed') === 'true')
         await page.locator('#toggleAudio').click();
     const uiReports = [];
-    for (const [mode, label] of [['browser', '浏览器内置'], ['rnnoise', 'RNNoise'], ['off', '关闭'], ['rnnoise', 'RNNoise'], ['browser', '浏览器内置'], ['rnnoise', 'RNNoise']]) {
+    for (const mode of ['browser', 'rnnoise', 'off', 'rnnoise', 'browser', 'rnnoise']) {
         await page.locator('[data-audio-noise-mode]').selectOption(mode, { force: true });
-        await page.waitForFunction(({ mode, label }) => {
-            const status = document.querySelector('[data-audio-processing-status]').textContent;
-            return document.querySelector('[data-audio-noise-mode]').value === mode &&
-                status.includes(`实际：${label}`) && !status.includes('切换中') && !status.includes('失败');
-        }, { mode, label });
+        await page.waitForFunction(mode => {
+            const control = document.querySelector('[data-audio-noise-mode]');
+            return control.value === mode && control.dataset.activeNoiseMode === mode &&
+                control.getAttribute('aria-busy') === 'false' && document.querySelector('[data-audio-processing-status]').hidden;
+        }, mode);
         const row = await page.evaluate(() => ({
-            status: document.querySelector('[data-audio-processing-status]').textContent,
+            activeMode: document.querySelector('[data-audio-noise-mode]').dataset.activeNoiseMode,
             stable: window.noiseTestUiTrack.readyState === 'live',
             muted: !window.noiseTestUiTrack.enabled,
             liveOutputs: window.noiseTestOutputTracks.filter((track) => track.readyState === 'live').length,

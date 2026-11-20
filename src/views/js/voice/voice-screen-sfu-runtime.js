@@ -60,7 +60,7 @@
             return bitrateQueue;
         };
         let publicationId;
-        let uplinkBitrate = (config.initialViewerBitrate || 5500000) + 128000;
+        let uplinkBitrate = (config.initialViewerBitrate || 5500000) + (config.audioBitrate || 256_000);
         let publicationVersion = 0;
         let retryTimer;
         let discoveryTimer;
@@ -674,6 +674,7 @@
                                   ...(startBitrateKbps ? { codecOptions: { videoGoogleStartBitrate: startBitrateKbps } } : {}),
                               }
                             : {
+                                  encodings: [{ maxBitrate: config.audioBitrate }],
                                   codecOptions: {
                                       opusStereo: true,
                                       opusMaxAverageBitrate:

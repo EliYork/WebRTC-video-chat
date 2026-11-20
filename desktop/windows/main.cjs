@@ -343,9 +343,21 @@ else {
                 if (!allowedFrame(event)) throw Error('Native recovery denied');
                 return recoverNative();
             });
+            ipcMain.handle('voice:update-toolbar-action', (event, action) => {
+                if (!allowedFrame(event) || !['check', 'download', 'install'].includes(action))
+                    throw Error('Update action denied');
+                return updates?.[action]();
+            });
+            const sendUpdateState = ({ status, version, busy, progress, error }) => {
+                if (!mainWindow.isDestroyed() && trusted(mainWindow.webContents.getURL()))
+                    mainWindow.webContents.send('voice:update-state', {
+                        status, version, busy, percent: progress?.percent, error,
+                    });
+            };
             mainWindow.webContents.on('did-finish-load', () => {
-                if (pendingNotice && trusted(mainWindow.webContents.getURL()))
-                    mainWindow.webContents.send('voice:notice', pendingNotice);
+                if (!trusted(mainWindow.webContents.getURL())) return;
+                if (pendingNotice) mainWindow.webContents.send('voice:notice', pendingNotice);
+                if (updates) sendUpdateState(updates.snapshot());
             });
             mainWindow.webContents.on('before-input-event', (event, input) => {
                 if (isRefreshKey(input)) {
@@ -386,6 +398,13 @@ else {
                                     click: () => void showAbout().catch(error => log(`about-error ${error.message}`)),
                                 },
                                 {
+                                    label: '通话日志…',
+                                    click: () => {
+                                        if (!mainWindow.isDestroyed() && trusted(mainWindow.webContents.getURL()))
+                                            mainWindow.webContents.send('voice:show-call-tools');
+                                    },
+                                },
+                                {
                                     label: '诊断工具',
                                     accelerator: 'F12',
                                     click: () =>
@@ -406,19 +425,9 @@ else {
                     app,
                     window: () => mainWindow,
                     log,
-                    preferences: require('./update-preferences.cjs').createUpdatePreferences(
-                        join(app.getPath('userData'), 'update-preferences.json'), log),
-                    onStartupUpdate: ({ version }) => {
-                        const offer = () => {
-                            if (quitting || mainWindow.isDestroyed() || updates.snapshot().status !== 'available' ||
-                                updates.snapshot().version !== version || updates.snapshot().ignoredVersion === version) return;
-                            void showAbout({ startupPrompt: true }).catch(error => log(`update-prompt-error ${error.message}`));
-                        };
-                        if (mainWindow.isVisible()) offer();
-                        else mainWindow.once('show', offer);
-                    },
                     prepareInstall: installUpdate,
                 });
+                updates.subscribe(sendUpdateState);
             }
             buildMenu();
             const opened = await openRoom({
@@ -623,12 +632,12 @@ else {
                         );
                         result.clipboardWrite =
                             (await clipboard.readText()) === marker;
+                        Menu.getApplicationMenu().items[0].submenu.items
+                            .find(item => item.label === '通话日志…').click();
                         result.callDiagnosticsInSettings = await mainWindow.webContents.executeJavaScript(`(() => {
-                            document.querySelector('#toggleAudio').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-                            const button = document.querySelector('[data-call-log-actions] [data-copy-call-diagnostics]');
-                            if (!button || document.querySelector('#stageMoreToggle, #workspace-tools')) return false;
-                            button.closest('details').open = true;
-                            if (!button.getClientRects().length) return false;
+                            const panel = document.querySelector('.workspace-topbar [data-call-log-actions]');
+                            const button = panel?.querySelector('[data-copy-call-diagnostics]');
+                            if (!panel?.matches(':popover-open') || !button.getClientRects().length) return false;
                             button.click();
                             return true;
                         })()`);

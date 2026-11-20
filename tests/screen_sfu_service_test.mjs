@@ -175,18 +175,18 @@ const fixture = (overrides = {}) => {
     };
 };
 
-test('global budget admits four 5.5Mbps viewers, rejects fifth, and returns released capacity', () => {
+test('global budget counts 256 kbps of audio per viewer and returns released capacity', () => {
     const config = readScreenSfuConfig({ SFU_EGRESS_MBPS: 30, SFU_VIDEO_MBPS: 22, SFU_PAYLOAD_MBPS: 23, SFU_INITIAL_VIEWER_MBPS: 5.5 });
     assert.equal(config.enabled, false);
     assert.throws(() => readScreenSfuConfig({ SFU_VIDEO_MBPS: '27' }));
     assert.throws(() => readScreenSfuConfig({ SFU_PORT: '44444.5' }));
     const budget = createScreenSfuBudget(config);
-    for (let i = 0; i < 4; i++) assert.equal(budget.reserve(`room-${i}`), true);
+    for (let i = 0; i < 3; i++) assert.equal(budget.reserve(`room-${i}`), true);
     assert.equal(budget.reserve('room-0'), true);
-    assert.equal(budget.snapshot().reservedBps, 22512000);
-    assert.equal(budget.reserve('fifth'), false);
+    assert.equal(budget.snapshot().reservedBps, 17_268_000);
+    assert.equal(budget.reserve('fourth'), false);
     budget.release('room-0');
-    assert.equal(budget.reserve('fifth'), true);
+    assert.equal(budget.reserve('fourth'), true);
 });
 test('visible SFU handoff requests one keyframe; duplicate ready does not request again', async (t) => {
     const f = fixture();
@@ -292,7 +292,7 @@ test('SFU ownership rejects unjoined, stale, cross-room and foreign transport re
 });
 
 test('concurrent viewers share the global budget; only resumed/ready receivers suppress P2P', async (t) => {
-    const f = fixture();
+    const f = fixture({ SFU_PAYLOAD_MBPS: 23.1 });
     t.after(f.service.close);
     const publisher = f.socket('publisher');
     const id = await f.publish(publisher);
@@ -319,7 +319,7 @@ test('concurrent viewers share the global budget; only resumed/ready receivers s
     assert.equal((await f.subscribe(viewers[4], id)).ok, true);
 });
 test('rising source estimates block new admission without evicting existing viewers on a transient change', async (t) => {
-    const f = fixture();
+    const f = fixture({ SFU_PAYLOAD_MBPS: 23.1 });
     t.after(f.service.close);
     const publisher = f.socket('publisher');
     const id = await f.publish(publisher);
@@ -422,6 +422,7 @@ test('20Mbps defaults reserve transport/system headroom and reject inconsistent 
     assert.equal(config.reservedEgress, 4000000);
     assert.equal(config.payloadBudget, 16000000);
     assert.equal(config.videoBitrate, 15000000);
+    assert.equal(config.audioBitrate, 256_000);
     assert.throws(() => readScreenSfuConfig({ SFU_VIDEO_MBPS: 22, SFU_PAYLOAD_MBPS: 23 }), /exceeds/);
     assert.throws(() => readScreenSfuConfig({ SFU_INITIAL_VIEWER_MBPS: 9, SFU_PAYLOAD_MBPS: 5, SFU_VIDEO_MBPS: 4 }), /INITIAL_VIEWER/);
     const budget = createScreenSfuBudget(config);
@@ -470,7 +471,7 @@ test('3.5Mbps admits four initial subscriptions and one 15Mbps source plus audio
         await f.request(viewer, 'resume', { publicationId: id });
         await f.request(viewer, 'ready', { publicationId: id });
     }
-    assert.equal(f.service.snapshot().reservedBps, 14512000);
+    assert.equal(f.service.snapshot().reservedBps, 15024000);
     assert.equal((await f.subscribe(viewers[4], id)).reason, 'server-bandwidth-limit');
     for (const bitrate of [3300000, 4400000, 6600000, 13200000, 15000000]) {
         f.setBitrate(bitrate);
@@ -481,9 +482,9 @@ test('3.5Mbps admits four initial subscriptions and one 15Mbps source plus audio
         assert.equal(route.videoMaxBitrate, 15000000);
     }
     for (const viewer of viewers.slice(1, 4)) f.service.cleanupSocket(viewer);
-    f.setBitrate(15128000);
+    f.setBitrate(15256000);
     await f.service.sampleTraffic();
-    assert.equal(f.service.snapshot().reservedBps, 15884400);
+    assert.equal(f.service.snapshot().reservedBps, 16018800);
     assert.equal(f.service.snapshot().viewers, 1);
     assert.equal((await f.subscribe(f.socket('over-budget'), id)).reason, 'server-bandwidth-limit');
 });
@@ -501,7 +502,7 @@ test('unknown-source initial allowance is shared across publishers and channels,
         }
     }
     assert.equal(f.service.snapshot().viewers, 4);
-    assert.equal(f.service.snapshot().reservedBps, 14512000);
+    assert.equal(f.service.snapshot().reservedBps, 15024000);
 });
 
 test('real total SFU egress tolerates bursts, releases one viewer after sustained pressure and waits 15s before another', async (t) => {
@@ -582,7 +583,7 @@ test('missing source measurements restore initial reservation and concurrent sam
     assert.equal(f.service.snapshot().reservedBps, 1050000);
     f.setBitrate(NaN);
     await f.service.sampleTraffic();
-    assert.equal(f.service.snapshot().reservedBps, 3628000, 'missing producer bitrate uses the initial reservation');
+    assert.equal(f.service.snapshot().reservedBps, 3756000, 'missing producer bitrate uses the initial reservation');
     f.setBitrate(1000000);
     let calls = 0;
     let finish;

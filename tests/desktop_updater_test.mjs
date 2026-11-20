@@ -2,10 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { createUpdates } from '../desktop/windows/updater.cjs';
-import { createUpdatePreferences } from '../desktop/windows/update-preferences.cjs';
-import { mkdtempSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 
 const deferred = () => {
     let resolve, reject;
@@ -179,71 +175,36 @@ test('network and digest failures surface in state without popups; stop clears p
     }
 });
 
-test('startup offers a new version once, after checking ends, without downloading; scheduled checks stay quiet', async () => {
-    const callbacks = {}, cleared = [], offers = [];
+test('startup and periodic checks both publish a ready update without downloading', async () => {
+    const callbacks = {}, cleared = [];
     const f = fixture({
-        timers: { setTimeout: (fn, ms) => { callbacks.startup = fn; assert.equal(ms, 3000); return 1; },
-            setInterval: fn => { callbacks.periodic = fn; return 2; },
-            clearTimeout: id => cleared.push(id), clearInterval: id => cleared.push(id) },
-        onStartupUpdate: state => offers.push(state),
+        timers: {
+            setTimeout: (fn, ms) => { callbacks.startup = fn; assert.equal(ms, 3000); return 1; },
+            setInterval: (fn, ms) => { callbacks.periodic = fn; assert.equal(ms, 6 * 60 * 60 * 1000); return 2; },
+            clearTimeout: id => cleared.push(id), clearInterval: id => cleared.push(id),
+        },
     });
-    callbacks.startup(); f.available();
-    await new Promise(resolve => setImmediate(resolve));
-    assert.equal(offers.length, 1);
-    assert.equal(offers[0].busy, false);
-    assert.equal(f.downloads, 0);
-    await f.controller.check({ startup: true });
-    callbacks.periodic();
-    await new Promise(resolve => setImmediate(resolve));
-    assert.equal(offers.length, 1);
-    f.controller.stop();
-    assert.deepEqual(cleared, [1, 2]);
-});
-
-test('ignoring a version persists across launches, keeps manual updates available, and allows a later release', async () => {
-    const file = join(mkdtempSync(join(tmpdir(), 'voice-update-ignore-')), 'updates.json');
-    const preferences = createUpdatePreferences(file), offers = [];
-    const f = fixture({ preferences, onStartupUpdate: state => offers.push(state.version) });
-    const checked = f.controller.check({ startup: true }); f.available(); await checked;
-    assert.equal(f.controller.ignoreVersion('stale-version'), false);
-    assert.equal(f.controller.ignoreVersion('0.1.4'), true);
-    f.controller.stop();
-    assert.equal(JSON.parse(readFileSync(file)).ignoredVersion, '0.1.4');
-    const g = fixture({ preferences: createUpdatePreferences(file), onStartupUpdate: state => offers.push(state.version) });
     try {
-        const check = g.controller.check({ startup: true }); g.available(); await check;
-        assert.deepEqual(offers, ['0.1.4']);
-        assert.equal(g.controller.snapshot().status, 'available');
-        g.updater.emit('update-available', { version: '0.1.5' });
-        await g.controller.check({ startup: true });
-        assert.deepEqual(offers, ['0.1.4', '0.1.5']);
-        const download = g.controller.download(); g.download.resolve(); await download;
-        assert.equal(g.downloads, 1);
-    } finally { g.controller.stop(); }
-});
-
-test('current/offline/stopped startup checks do not open update UI', async () => {
-    await Promise.all(['current', 'offline', 'stopped'].map(async scenario => {
-        let offered = false;
-        const f = fixture({ onStartupUpdate: () => { offered = true; } });
-        const check = f.controller.check({ startup: true });
-        if (scenario === 'current') {
-            f.updater.emit('update-not-available'); f.check.resolve({ isUpdateAvailable: false });
-        } else if (scenario === 'offline') f.check.reject(Error('offline'));
-        else { f.controller.stop(); f.available(); }
-        await check;
-        assert.equal(offered, false);
-        f.controller.stop();
-    }));
-});
-
-test('corrupt preferences fall back safely; failed persistence must not claim that a version was ignored', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'voice-update-prefs-')), file = join(dir, 'prefs.json');
-    writeFileSync(file, '{broken');
-    assert.equal(createUpdatePreferences(file).getIgnoredVersion(), '');
-    const blocked = join(dir, 'not-a-file'); mkdirSync(blocked);
-    const preferences = createUpdatePreferences(blocked);
-    assert.throws(() => preferences.setIgnoredVersion('0.1.4'));
-    assert.equal(preferences.getIgnoredVersion(), '');
-    assert.throws(() => preferences.setIgnoredVersion('../oops'));
+        callbacks.startup();
+        f.available();
+        await new Promise(resolve => setImmediate(resolve));
+        assert.equal(f.states.at(-1).status, 'available');
+        assert.equal(f.states.at(-1).version, '0.1.4');
+        assert.equal(f.states.at(-1).busy, false);
+        assert.equal(f.downloads, 0);
+        f.updater.checkForUpdates = async () => ({
+            isUpdateAvailable: true, updateInfo: { version: '0.1.5' },
+        });
+        callbacks.periodic();
+        await new Promise(resolve => setImmediate(resolve));
+        assert.equal(f.states.at(-1).status, 'available');
+        assert.equal(f.states.at(-1).version, '0.1.5');
+        assert.equal(f.downloads, 0);
+        f.updater.checkForUpdates = async () => ({ isUpdateAvailable: false });
+        callbacks.periodic();
+        await new Promise(resolve => setImmediate(resolve));
+        assert.equal(f.states.at(-1).status, 'current');
+        assert.equal(f.states.at(-1).version, '');
+    } finally { f.controller.stop(); }
+    assert.deepEqual(cleared, [1, 2]);
 });

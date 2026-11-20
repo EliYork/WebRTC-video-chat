@@ -66,9 +66,10 @@ test('actual zero RTT, zero jitter and zero interval loss are valid measurements
 
 test('multiple links use their worst real metric and disclose unavailable values', () => {
     const runtime = createRuntime();
-    runtime.accept([{ state: 'connected', rttMs: 20, jitterMs: 1, lossPercent: 0 }, { state: 'connected', rttMs: 450, lossPercent: 3 }]);
+    runtime.accept([{ state: 'connected', rttMs: 20, jitterMs: 1, lossPercent: 0, micKbps: 12.25 }, { state: 'connected', rttMs: 450, lossPercent: 3, micKbps: 30.5 }]);
     const result = runtime.snapshot({ state: 'joined' });
     assert.equal(result.bars, 2); assert.equal(result.status, 'fair');
+    assert.equal(result.rttMs, 450); assert.equal(result.lossPercent, 3); assert.equal(result.micKbps, 30.5);
     assert.match(result.detail, /450ms/); assert.match(result.detail, /2 条通话链路/);
     runtime.accept([{ state: 'connected', rttMs: 90 }]);
     assert.match(runtime.snapshot({ state: 'joined' }).detail, /区间丢包 未提供/);

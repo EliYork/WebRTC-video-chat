@@ -25,7 +25,6 @@ module.exports = {
         'assets/app.ico',
         'titlebar.css',
         'updater.cjs',
-        'update-preferences.cjs',
         'picker-preload.cjs',
         'picker.html',
         'picker.cjs',

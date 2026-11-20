@@ -24,6 +24,44 @@ function showNotice() {
     element.prepend(title, detail); element.append(close); document.body.append(element);
 }
 ipcRenderer.on('voice:notice', (_event, value) => { notice = value; showNotice(); });
+ipcRenderer.on('voice:show-call-tools', () => {
+    const tools = document.querySelector('[data-call-log-actions]');
+    if (!tools?.showPopover || tools.matches(':popover-open')) return;
+    tools.showPopover();
+    tools.querySelector('button')?.focus();
+});
+
+let updateButton, updateState, updateAction;
+function renderUpdateButton() {
+    if (!updateButton) return;
+    const state = updateState;
+    const downloading = Number.isFinite(state?.percent) ? `下载 ${Math.floor(state.percent)}%` : '正在下载';
+    const views = {
+        available: ['更新', 'download'],
+        checking: ['正在检查'],
+        downloading: [downloading],
+        verifying: ['正在校验'],
+        downloaded: ['退出并安装', 'install'],
+        installing: ['正在准备安装'],
+        cancelled: ['重试更新', 'check'],
+        error: ['重试更新', 'check'],
+    };
+    const [label, action] = views[state?.status] || [];
+    updateButton.hidden = !state?.version || !label;
+    updateAction = updateButton.hidden || state.busy ? null : action;
+    updateButton.disabled = !updateAction;
+    if (updateButton.hidden) return;
+    updateButton.textContent = label;
+    const description = state.status === 'downloaded'
+        ? `${label} ${state.version}，安装会结束通话和共享`
+        : `${label} ${state.version}`;
+    updateButton.title = state.error || description;
+    updateButton.setAttribute('aria-label', description);
+}
+ipcRenderer.on('voice:update-state', (_event, value) => {
+    updateState = value;
+    renderUpdateButton();
+});
 // Write-only bridge: diagnostic collection can outlive Chromium's user gesture.
 // Main validates the sender/frame/origin and length for every invocation.
 contextBridge.exposeInMainWorld(
@@ -41,6 +79,8 @@ contextBridge.exposeInMainWorld(
 window.addEventListener('DOMContentLoaded', () => {
     showNotice();
     document.documentElement.dataset.desktopChrome = 'windows';
+    if (document.querySelector('[data-call-log-actions]')?.showPopover)
+        document.documentElement.dataset.desktopCallTools = '';
     let header = document.querySelector('.workspace-topbar');
     if (!header) {
         header = document.createElement('header');
@@ -65,13 +105,24 @@ window.addEventListener('DOMContentLoaded', () => {
     const menu = document.createElement('button');
     menu.type = 'button';
     menu.className = 'desktop-menu';
-    menu.title = '设置：关于与更新、诊断、退出';
+    menu.title = '客户端设置';
     menu.setAttribute('aria-label', '客户端设置');
     menu.textContent = '⚙ 设置';
     menu.addEventListener('click', () => ipcRenderer.invoke('voice:menu').catch(() => {}));
     const actions = header.querySelector('.workspace-actions');
     if (actions) actions.append(menu);
     else header.append(menu);
+    updateButton = document.createElement('button');
+    updateButton.type = 'button';
+    updateButton.className = 'desktop-update';
+    updateButton.addEventListener('click', (event) => {
+        if (event.isTrusted && updateAction)
+            ipcRenderer.invoke('voice:update-toolbar-action', updateAction).catch(() => {});
+    });
+    const chat = actions?.querySelector('#stageChatToggle');
+    if (chat) chat.before(updateButton);
+    else menu.before(updateButton);
+    renderUpdateButton();
     const refresh = document.createElement('button');
     refresh.type = 'button';
     refresh.className = 'desktop-refresh';

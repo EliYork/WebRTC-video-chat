@@ -14,7 +14,7 @@ export async function runNativeScenario({
     work,
     screenshot,
 }) {
-    const a = await open(),
+    const a = await open('lobby', { desktop: true }),
         b = await open(),
         c = await open('game'),
         d = await open();
@@ -161,22 +161,22 @@ export async function runNativeScenario({
         let checkedResolutionGuard = false;
         const start = async () => {
             await click(a, '#shareScreen');
-            // Product defaults to source audio; this isolated fixture has no
-            // audio capability and automatic media checks remain silent.
-            if (!checkedResolutionGuard) assert.equal(await evaluate(a, `document.querySelector('[data-screen-share-audio]').checked`), true, 'source sound is selected by default');
-            await evaluate(a, `document.querySelector('[data-screen-share-audio]').checked=false`);
+            // The isolated native video fixture has no real audio device.
+            if (!checkedResolutionGuard) assert.equal(await evaluate(a, `document.querySelector('[data-native-audio-mode]').value`), 'system', 'system sound is selected by default');
+            await evaluate(a, `(() => { const audio = document.querySelector('[data-native-audio-mode]'); audio.value = 'none'; audio.dispatchEvent(new Event('change', { bubbles: true })); })()`);
             await evaluate(
                 a,
-                `(()=>{for(const [selector,value] of [['[data-screen-share-resolution]','720p'],['[data-screen-share-frame-rate]','30'],['[data-screen-share-provider]','native']]){const el=document.querySelector(selector);el.value=value;el.dispatchEvent(new Event('change',{bubbles:true}));}})()`
+                `(()=>{for(const [selector,value] of [['[data-screen-share-resolution]','720p'],['[data-screen-share-frame-rate]','30']]){const el=document.querySelector(selector);el.value=value;el.dispatchEvent(new Event('change',{bubbles:true}));}})()`
             );
             if (!checkedResolutionGuard) {
-                for (const preset of ['original', 'auto']) {
+                assert.equal(await evaluate(a, `Boolean(document.querySelector('[data-screen-share-resolution] option[value="original"]'))`), false);
+                {
                     const state = await evaluate(
                         a,
-                        `(()=>{const el=document.querySelector('[data-screen-share-resolution]');el.value='${preset}';el.dispatchEvent(new Event('change',{bubbles:true}));return {valid:el.validity.valid,message:el.validationMessage,hint:document.querySelector('[data-piik-native-config-status]').textContent}})()`
+                        `(()=>{const el=document.querySelector('[data-screen-share-resolution]');el.value='auto';el.dispatchEvent(new Event('change',{bubbles:true}));return {valid:el.validity.valid,message:el.validationMessage,hint:document.querySelector('[data-piik-native-config-status]').textContent}})()`
                     );
                     assert.equal(state.valid, false);
-                    assert.match(state.message, /请选择.*4K/);
+                    assert.match(state.message, /请选择固定分辨率.*2160p/);
                     assert.equal(state.hint, state.message);
                     await click(a, '[data-screen-share-start]');
                     assert.equal(
@@ -194,14 +194,9 @@ export async function runNativeScenario({
                 }
                 const state = await evaluate(
                     a,
-                    `(()=>{const provider=document.querySelector('[data-screen-share-provider]');provider.value='web';provider.dispatchEvent(new Event('change',{bubbles:true}));const el=document.querySelector('[data-screen-share-resolution]');const browserValid=el.validity.valid;el.value='720p';el.dispatchEvent(new Event('change',{bubbles:true}));provider.value='native';provider.dispatchEvent(new Event('change',{bubbles:true}));return {browserValid,nativeValid:el.validity.valid}})()`
+                    `(()=>{const el=document.querySelector('[data-screen-share-resolution]');el.value='720p';el.dispatchEvent(new Event('change',{bubbles:true}));return el.validity.valid;})()`
                 );
-                assert.equal(
-                    state.browserValid,
-                    true,
-                    'browser auto/original remains allowed'
-                );
-                assert.equal(state.nativeValid, true);
+                assert.equal(state, true);
                 checkedResolutionGuard = true;
             }
             try {
@@ -418,7 +413,7 @@ export async function runNativeScenario({
                 'receiver decodes after both updates',
                 'refresh clears vanished source selection and close releases thumbnails',
                 'stage stop cleans native resources while voice stays joined',
-                'native original/auto blocked with actionable hint before capture; browser presets retained',
+                'native Auto is rejected with a hint and Original is absent from the picker',
                 'approved site and capability required',
                 'original channel and stage',
                 'native H264 Pion fanout to three viewers',

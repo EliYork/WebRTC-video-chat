@@ -1,5 +1,7 @@
 import type { NativeClient } from './.deps/upstream/src/client/native/client';
 
+export const SCREEN_AUDIO_BITRATE = 256_000;
+
 export const audioTargetKey = (target: {pid: number; creationTime: string}) => `${target.pid}:${target.creationTime}`;
 export function parseAudioTarget(key: unknown) {
     const match = typeof key === 'string' && /^([1-9]\d{0,9}):([1-9]\d{0,19})$/.exec(key);

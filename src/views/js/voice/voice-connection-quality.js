@@ -57,12 +57,17 @@
                     lossPercent: worst(entries.map(entry => entry.lossPercent)),
                     jitterMs: worst(entries.map(entry => entry.jitterMs)),
                 };
+                const sample = { ...metrics, micKbps: worst(entries.map(entry => entry.micKbps)) };
                 const bars = grade(metrics);
-                if (bars === null || entries.some(entry => grade(entry) === null)) return result('unknown', '通话统计不完整，尚未确认质量');
+                if (bars === null || entries.some(entry => grade(entry) === null))
+                    return { ...result('unknown', '通话统计不完整，尚未确认质量'), ...sample };
                 const label = ['连接较差', '连接一般', '连接尚可', '连接良好', '连接优秀'][bars - 1];
                 const number = (value, unit) => valid(value) ? `${Math.round(value * 10) / 10}${unit}` : '未提供';
-                return result(bars >= 4 ? 'good' : bars >= 2 ? 'fair' : 'poor', label, bars,
-                    `通话质量：${label} · 往返延迟 ${number(metrics.rttMs, 'ms')} · 区间丢包 ${number(metrics.lossPercent, '%')} · 抖动 ${number(metrics.jitterMs, 'ms')}（已测 ${entries.length} 条通话链路最差值；按已提供指标估算，非 Wi-Fi/蜂窝信号）`);
+                return {
+                    ...result(bars >= 4 ? 'good' : bars >= 2 ? 'fair' : 'poor', label, bars,
+                        `通话质量：${label} · 往返延迟 ${number(metrics.rttMs, 'ms')} · 区间丢包 ${number(metrics.lossPercent, '%')} · 抖动 ${number(metrics.jitterMs, 'ms')}（已测 ${entries.length} 条通话链路最差值；按已提供指标估算，非 Wi-Fi/蜂窝信号）`),
+                    ...sample,
+                };
             },
         };
     };

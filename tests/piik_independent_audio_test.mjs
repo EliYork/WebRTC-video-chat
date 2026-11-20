@@ -91,6 +91,7 @@ test('stop, restart, channel departure and disconnection retire exactly one nati
         await f.capture.capture(f.options,new AbortController().signal); await flush();
         const owner=f.clients.at(-1);
         assert.equal(owner.inputs.length,1); assert.equal(owner.inputs[0].source.sourceId,'A');assert.equal(owner.inputs[0].audioTarget.pid,234);
+        assert.equal(owner.inputs[0].profile.maxAudioBitrate, 256_000);
         if(ending==='disconnect') owner.onclose(); else f.capture.stop();
         await flush(); assert.equal(owner.closed,1);assert.equal(owner.stopped,1);assert.equal(f.bridges.at(-1).disposed,1);assert.equal(f.timers.size,0);
     }

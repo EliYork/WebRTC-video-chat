@@ -8,7 +8,7 @@ import {
 } from './.deps/upstream/src/client/native/capture-selection';
 import { createNativeSourcePicker } from './source-picker';
 import type { NativeCaptureTarget } from './.deps/upstream/src/client/native/wire';
-import {createAudioSourcePicker, nativeAudioSelection, nativeFailureText} from './share-audio';
+import {createAudioSourcePicker, nativeAudioSelection, nativeFailureText, SCREEN_AUDIO_BITRATE} from './share-audio';
 
 export function createNativeCapture(
     authorize: () => Promise<unknown>,
@@ -199,7 +199,7 @@ export function createNativeCapture(
             resolution: { width: size[0], height: size[1] },
             maxFramerate: options.frameRate || 60,
             maxBitrate: options.maxBitrate || 15000000,
-            maxAudioBitrate: 128000,
+            maxAudioBitrate: SCREEN_AUDIO_BITRATE,
             degradationPreference: 'maintain-resolution' as const,
         };
     };

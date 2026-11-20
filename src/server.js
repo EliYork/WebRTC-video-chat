@@ -361,7 +361,7 @@ app.get('/room/:channel', (req, res) => {
             screenMediaProvider: piikEnabled ? 'piik' : 'legacy',
             iceServers: iceServersList,
             turnEnabled: turnCredentials.enabled,
-            screenSfu: { enabled: screenSfuConfig.enabled, videoBitrate: screenSfuConfig.videoBitrate, initialViewerBitrate: screenSfuConfig.initialViewerBitrate, defaultReceiveMode: 'p2p-first', p2pBudget: 24000000 },
+            screenSfu: { enabled: screenSfuConfig.enabled, videoBitrate: screenSfuConfig.videoBitrate, initialViewerBitrate: screenSfuConfig.initialViewerBitrate, audioBitrate: screenSfuConfig.audioBitrate, defaultReceiveMode: 'p2p-first', p2pBudget: 24000000 },
             roomId: channel.slug,
         }).replace(
             /[<>&\u2028\u2029]/g,

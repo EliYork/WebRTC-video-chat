@@ -7,7 +7,7 @@ import { createVoiceDiagnosticsRelay } from '../src/utils/VoiceDiagnosticsRelay.
 /* eslint-disable no-await-in-loop -- Exercise sequential samples and call lifecycles. */
 
 const source = readFileSync(new URL('../src/views/js/voice/voice-call-diagnostics.js', import.meta.url), 'utf8');
-function fixture({ storage, connections = [], shares = [], getReceiverHealth, onConnectionQuality } = {}) {
+function fixture({ storage, connections = [], shares = [], getReceiverHealth, onConnectionQuality, getAudioRole } = {}) {
     const timers = new Map();
     let id = 0;
     const state = { 会话: { state: 'joined', generation: 1 }, 本机音频: { 请求模式: 'rnnoise', 静音: true, deviceId: 'secret-device' } };
@@ -22,7 +22,7 @@ function fixture({ storage, connections = [], shares = [], getReceiverHealth, on
     };
     vm.runInNewContext(source, { window });
     vm.runInNewContext(readFileSync(new URL('../src/views/js/voice/voice-connection-quality.js', import.meta.url), 'utf8'), { window });
-    const runtime = window.VoiceCallDiagnostics.createRuntime({ sanitize: sanitizeVoiceDiagnostic, getState: () => state, getConnections: () => connections, getSources: () => shares, getReceiverHealth, onConnectionQuality });
+    const runtime = window.VoiceCallDiagnostics.createRuntime({ sanitize: sanitizeVoiceDiagnostic, getState: () => state, getConnections: () => connections, getSources: () => shares, getReceiverHealth, onConnectionQuality, getAudioRole });
     return { runtime, state, saved, window, timers };
 }
 const flush = () => new Promise((resolve) => setImmediate(resolve));
@@ -51,6 +51,35 @@ test('connection signal reuses deduplicated diagnostic stats, omits SFU and igno
     f.runtime.end('leave'); finish(new Map()); await pending;
     assert.equal(updates.length, count, 'late sample cannot update a new call signal');
     f.runtime.destroy();
+});
+
+test('live microphone bitrate uses the exact send interval and excludes shared sound', async () => {
+    let timestamp = 1000, micBytes = 2000, shareBytes = 5000;
+    let quality;
+    const pc = { connectionState: 'connected', getStats: async () => new Map([
+        ['mic', { id: 'mic', type: 'outbound-rtp', kind: 'audio', timestamp, bytesSent: micBytes }],
+        ['share', { id: 'share', type: 'outbound-rtp', kind: 'audio', timestamp, bytesSent: shareBytes }],
+    ]) };
+    const f = fixture({
+        connections: [pc],
+        getAudioRole: (_, row) => row.id === 'mic' ? '麦克风' : '共享音频',
+        onConnectionQuality: rows => { [quality] = rows; },
+    });
+    try {
+        await f.runtime.sample();
+        assert.equal(quality.micKbps, undefined);
+        timestamp += 2000;
+        micBytes += 8625;
+        shareBytes += 32000;
+        await f.runtime.sample();
+        assert.equal(quality.micKbps, 34.5);
+        timestamp += 2000;
+        micBytes = 0;
+        await f.runtime.sample();
+        assert.equal(quality.micKbps, undefined);
+    } finally {
+        f.runtime.destroy();
+    }
 });
 
 test('connection quality includes later P2P links while diagnostics remain capped', async () => {

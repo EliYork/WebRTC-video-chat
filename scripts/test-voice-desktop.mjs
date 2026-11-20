@@ -105,7 +105,7 @@ try {
     assert.equal(data.windowTitle, '语音据点');
     assert.equal(data.menuHidden, true);
     assert.equal(data.settingsEntry, true);
-    assert.deepEqual(data.settingsItems, ['关于与更新…', '诊断工具', '退出']);
+    assert.deepEqual(data.settingsItems, ['关于与更新…', '通话日志…', '诊断工具', '退出']);
     assert.equal(data.aboutDialog, true);
     assert.equal(data.aboutMuted, true);
     assert.equal(data.refreshCancelled, true);

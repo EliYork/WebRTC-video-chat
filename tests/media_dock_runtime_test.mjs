@@ -333,12 +333,8 @@ const createFixture = () => {
         className: 'media-dock-activity-row',
     });
     const refs = {
-        localUserName: createElement(document, 'strong', {
+        localUserName: createElement(document, 'input', {
             id: 'localUserName',
-        }),
-        callStatus: createElement(document, 'p', { id: 'callStatusText' }),
-        channelName: createElement(document, 'strong', {
-            id: 'localVoiceChannelName',
         }),
         callDuration: createElement(document, 'span', { id: 'callDuration' }),
         screenStatus: createElement(document, 'span', {
@@ -423,12 +419,7 @@ const createFixture = () => {
     refs.aiNoiseToggle.dataset.notSupportedLabel = 'N/A';
 
     const header = createElement(document, 'div');
-    header.append(
-        refs.localUserName,
-        refs.callStatus,
-        refs.channelName,
-        refs.callDuration
-    );
+    header.append(refs.localUserName, refs.callDuration);
     activity.append(
         refs.screenStatus,
         refs.noiseToggle,
@@ -613,7 +604,6 @@ const defaultState = () => ({
     availableMicrophones: [],
     availableOutputs: [],
     callDurationMs: 65_000,
-    callStatusText: '正在语音中',
     cameraEnabled: false,
     cameraPending: false,
     cameraPermissionState: 'prompt',
@@ -661,6 +651,7 @@ const createAdapterStub = (initialState = {}) => {
         selectMicrophone: (...args) => record('selectMicrophone', ...args),
         selectOutput: (...args) => record('selectOutput', ...args),
         setMicrophoneGain: (...args) => record('setMicrophoneGain', ...args),
+        setDisplayName(name) { record('setDisplayName', name); state.displayName = name; return name; },
         selectNoiseMode: (...args) => record('selectNoiseMode', ...args),
         setRnnoiseSpeechGate: (...args) => record('setRnnoiseSpeechGate', ...args),
         setOutputMuted: (...args) => record('setOutputMuted', ...args),
@@ -782,13 +773,13 @@ test('runtime owns one real root, renders state, devices, permission and failure
     assert.equal(runtime.init(), false);
     assert.equal(runtime.getRootElement(), fixture.root);
     assert.equal(fixture.root.classList.contains('hidden'), false);
-    assert.equal(fixture.refs.localUserName.textContent, 'A');
+    assert.equal(fixture.refs.localUserName.value, 'A');
     assert.equal(fixture.refs.callDuration.textContent, '01:05');
     assert.equal(fixture.refs.cameraButton.disabled, false);
     assert.equal(fixture.refs.cameraButton.classList.contains('is-off'), true);
     assert.equal(fixture.refs.outputButton.classList.contains('is-off'), true);
     assert.equal(fixture.refs.outputValue.textContent, '25%');
-    assert.match(fixture.refs.statusMessages.textContent, /连接中断/);
+    assert.doesNotMatch(fixture.refs.statusMessages.textContent, /连接中断/);
     assert.match(fixture.refs.statusMessages.textContent, /摄像头权限被拒绝/);
     assert.match(fixture.refs.statusMessages.textContent, /屏幕共享不可用/);
     assert.equal(
@@ -859,7 +850,13 @@ test('buttons, device selection, output volume and mute emit one adapter intent'
     await flush();
     assert.equal(stub.calls.get('joinVoice').length, 1);
 
-    stub.emit({ actualVoiceJoined: false, desiredVoiceJoined: true });
+    stub.emit({ actualVoiceJoined: false, desiredVoiceJoined: true, connectionState: 'joining' });
+    assert.equal(fixture.refs.statusMessages.classList.contains('hidden'), true);
+    assert.equal(fixture.refs.sessionButton.dataset.sessionAction, 'leave');
+    fixture.refs.localUserName.value = '  新昵称  ';
+    fixture.refs.localUserName.dispatchEvent(new FakeEvent('change'));
+    assert.deepEqual(stub.calls.get('setDisplayName'), [['新昵称']]);
+    assert.equal(fixture.refs.localUserName.value, '新昵称');
     fixture.refs.sessionButton.click();
     await flush();
     assert.equal(stub.calls.get('leaveVoice').length, 1);
@@ -1241,7 +1238,7 @@ test('component source cannot own media capture, layout reconstruction, Peer or 
 });
 
 
-test('noise modes render requested and actual AEC/NS separately and rapid selections reach the adapter', async () => {
+test('noise controls keep the applied mode, busy state and a concise failure message', async () => {
     const fixture = createFixture();
     const { runtimeApi } = loadApis(fixture);
     const stub = createAdapterStub({
@@ -1254,10 +1251,10 @@ test('noise modes render requested and actual AEC/NS separately and rapid select
     const runtime = runtimeApi.createMediaDockRuntime({ root: fixture.root, adapter: stub.adapter });
     runtime.init();
     assert.equal(fixture.refs.noiseModeSelect.value, 'rnnoise');
-    assert.match(fixture.refs.processingStatus.textContent, /请求：RNNoise/);
-    assert.match(fixture.refs.processingStatus.textContent, /实际：浏览器内置/);
-    assert.match(fixture.refs.processingStatus.textContent, /系统 AEC 未确认/);
-    assert.match(fixture.refs.processingStatus.textContent, /切换中/);
+    assert.equal(fixture.refs.noiseModeSelect.dataset.activeNoiseMode, 'browser');
+    assert.equal(fixture.refs.noiseModeSelect.getAttribute('aria-busy'), 'true');
+    assert.equal(fixture.refs.processingStatus.hidden, true);
+    assert.equal(fixture.refs.processingStatus.textContent, '');
     for (const value of ['off', 'browser', 'rnnoise']) {
         fixture.refs.noiseModeSelect.value = value;
         fixture.refs.noiseModeSelect.dispatchEvent(new FakeEvent('change'));
@@ -1271,13 +1268,13 @@ test('noise modes render requested and actual AEC/NS separately and rapid select
         mode: 'browser', actual: { noiseSuppression: true },
         lastSwitchFailure: { mode: 'rnnoise', code: 'rnnoise-csp-blocked' },
     } });
-    assert.match(fixture.refs.processingStatus.textContent, /切换RNNoise失败：浏览器安全策略/);
-    assert.match(fixture.refs.processingStatus.textContent, /已保留原音频/);
+    assert.equal(fixture.refs.processingStatus.hidden, false);
+    assert.equal(fixture.refs.processingStatus.textContent, '降噪切换失败，请重试。');
     assert.doesNotMatch(fixture.root.textContent, /重进房间/);
     runtime.destroy();
 });
 
-test('keyboard suppression shows actual processor acknowledgement and preserves a failed toggle preference', () => {
+test('keyboard suppression reflects its setting and preserves the preference after a failed toggle', () => {
     const fixture = createFixture();
     const { runtimeApi } = loadApis(fixture);
     const stub = createAdapterStub({
@@ -1288,14 +1285,14 @@ test('keyboard suppression shows actual processor acknowledgement and preserves 
     runtime.init();
     assert.equal(fixture.refs.speechGateToggle.checked, true);
     assert.equal(fixture.refs.speechGateToggle.disabled, false);
-    assert.match(fixture.refs.processingStatus.textContent, /非语音门控开/);
+    assert.equal(fixture.refs.processingStatus.hidden, true);
     stub.results.set('setRnnoiseSpeechGate', false);
     fixture.refs.speechGateToggle.checked = false;
     fixture.refs.speechGateToggle.dispatchEvent(new FakeEvent('change'));
     assert.equal(stub.calls.get('setRnnoiseSpeechGate')[0][0], false);
     assert.equal(fixture.refs.speechGateToggle.checked, true);
     stub.emit({ rnnoiseSpeechGateEnabled: false, audioProcessing: { mode: 'rnnoise', actual: {}, speechGateSupported: true, speechGateEnabled: false, speechGateRequested: false } });
-    assert.match(fixture.refs.processingStatus.textContent, /非语音门控关/);
+    assert.equal(fixture.refs.speechGateToggle.checked, false);
     stub.emit({ requestedNoiseMode: 'browser' });
     assert.equal(fixture.refs.speechGateToggle.disabled, true);
     runtime.destroy();

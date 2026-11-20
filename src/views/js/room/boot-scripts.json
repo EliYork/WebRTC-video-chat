@@ -2,7 +2,6 @@
   "/js/shared/view-utils.js",
   "/js/chat/chat-name-state.js",
   "/js/media/noise-settings-ui.js",
-  "/js/media/audio-processing-view.js",
   "/js/shared/control-popovers-ui.js",
   "/js/media/peer-volume-ui.js",
   "/js/shared/copy-link-ui.js",

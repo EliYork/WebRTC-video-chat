@@ -54,7 +54,7 @@ const voiceDeviceRuntimeApi = window.VoiceDeviceRuntime;
 const voiceStatusViewApi = window.VoiceStatusView;
 const voiceMediaQualityView = window.VoiceMediaQualityView;
 const voiceMediaQualityRuntimeApi = window.VoiceMediaQualityRuntime;
-const { getMemberMicStatus, getMemberStatusIcons, getMemberTileText } =
+const { getMemberStatusIcons, getMemberTileText } =
     presenceViewModel;
 const getCameraConstraints = () =>
     selectedCameraDeviceId && selectedCameraDeviceId !== 'default'
@@ -548,36 +548,6 @@ const emitLocalPresenceUpdate = () => {
     updateAllVideoTileStatus();
 };
 
-const getCallStatusLabel = (
-    micStatus = getMemberMicStatus(getLocalPresenceMember())
-) => {
-    const session = voiceSessionRuntime.getSnapshot();
-    if (session.desiredVoiceState === 'joined' && session.state !== 'joined') {
-        if (session.state === 'failed' && session.failureReason === 'ice-configuration-unavailable')
-            return '网络连接暂未准备好，请重试加入语音';
-        return voiceStatusViewApi.CONNECTION_LABELS[
-            navigator.onLine === false ? 'offline' : session.state
-        ];
-    }
-    if (!joinedVoiceRoomId) {
-        return '未进入频道';
-    }
-
-    if (micStatus.key === 'speaking') {
-        return '正在语音中';
-    }
-
-    if (micStatus.key === 'muted') {
-        return '静音中';
-    }
-
-    if (micStatus.key === 'denied') {
-        return '麦克风未授权';
-    }
-
-    return '未开麦';
-};
-
 const getMediaDockSnapshot = () => {
     const session = voiceSessionRuntime.getSnapshot();
     const microphoneOperation =
@@ -604,7 +574,6 @@ const getMediaDockSnapshot = () => {
         availableOutputs: mediaDevicesCache.output,
         browserScreenShareSupported: typeof navigator.mediaDevices?.getDisplayMedia === 'function',
         callDurationMs: callStartedAt ? Date.now() - callStartedAt : 0,
-        callStatusText: getCallStatusLabel(),
         cameraEnabled: hasLiveCameraTrack(),
         cameraError: mediaErrors.camera,
         cameraPending: Boolean(cameraOperation.promise),
@@ -614,7 +583,6 @@ const getMediaDockSnapshot = () => {
                 : hasLiveCameraTrack()
                   ? 'granted'
                   : 'prompt',
-        channelName: getChannelName(joinedVoiceRoomId || viewingRoomId),
         connectionState,
         connectionQuality: connectionQuality.snapshot({ state: connectionState, online: navigator.onLine !== false }),
         desiredVoiceJoined: session.desiredVoiceState === 'joined',
@@ -2663,6 +2631,10 @@ const startScreenShare = async (peer, options = {}, preparedStream) => {
         voiceSessionGeneration: localVoiceSessionGeneration,
     };
     currentScreenShareSession = screenShareSession;
+    if (!usingPiik) {
+        for (const audioTrack of screenAudioTracks)
+            window.VoiceScreenSendPolicy.registerAudio(audioTrack, window.voiceScreenSfuConfig.audioBitrate);
+    }
     activeVideoTrack = track;
     sharingNow = true;
     mediaOperationController.setActive('screen', shareScreen);
@@ -3585,7 +3557,8 @@ callDiagnostics = window.VoiceCallDiagnostics.createRuntime({
         return null;
     },
 });
-mediaDockRoot.querySelector('[data-copy-call-diagnostics]')?.addEventListener('click', (event) => callDiagnostics.copyCombined(event.currentTarget));
+const callTools = byId('call-tools');
+callTools?.querySelector('[data-copy-call-diagnostics]')?.addEventListener('click', (event) => callDiagnostics.copyCombined(event.currentTarget));
 window.VoicePlayerMenu.configure({
     beforeOpen: () => remoteVolumeUI.closePopover(),
     showEvents: (tile) => callDiagnostics.showLogs({ shareOrdinal: callDiagnostics.getShareOrdinal(tile), host: tile }),
@@ -3594,10 +3567,16 @@ window.VoicePlayerMenu.configure({
 document.addEventListener('voice:share-started', ({ detail }) => callDiagnostics.beginShare(detail.tile, detail.isLocal));
 document.addEventListener('voice:share-ended', ({ detail }) => callDiagnostics.endShare(detail.tile));
 document.addEventListener('voice:share-sample', ({ detail }) => callDiagnostics.observeShare(detail.tile, detail.snapshot));
-mediaDockRoot.querySelector('[data-show-call-logs]')?.addEventListener('click', () => callDiagnostics.showLogs());
-mediaDockRoot.querySelector('[data-clear-call-logs]')?.addEventListener('click', (event) => {
+callTools?.querySelector('[data-show-call-logs]')?.addEventListener('click', () => {
+    callTools.hidePopover?.();
+    callDiagnostics.showLogs();
+});
+callTools?.querySelector('[data-clear-call-logs]')?.addEventListener('click', (event) => {
     callDiagnostics.clearLogs();
-    event.currentTarget.textContent = '已清除历史，当前通话继续记录';
+    event.currentTarget.textContent = '历史日志已清除';
+});
+callTools?.addEventListener('toggle', (event) => {
+    if (event.newState === 'open') callTools.querySelector('[data-clear-call-logs]').textContent = '清除日志';
 });
 remoteVolumeUI.init();
 
@@ -3742,6 +3721,7 @@ mediaDockAdapter = mediaDockAdapterApi.createMediaDockAdapter({
         leaveVoice: () => leaveVoiceSession('media-dock-leave'),
         refreshDevices: () => refreshMediaDeviceLists(),
         recoverAudio,
+        setDisplayName: (name) => chatPanelRuntime.setDisplayName(name),
         selectCamera: selectCameraDevice,
         selectMicrophone: selectInputDevice,
         selectOutput: selectOutputDevice,

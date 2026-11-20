@@ -52,6 +52,10 @@
             /* optional browser hint */
         }
     };
+    const registerAudio = (track, maxBitrate) => {
+        if (track?.kind === 'audio' && Number.isFinite(maxBitrate) && maxBitrate > 0)
+            tracks.set(track, { maxBitrate });
+    };
     const apply = (pc, onWarning) =>
         Promise.all(
             (pc?.getSenders?.() || []).map((sender) => {
@@ -106,13 +110,15 @@
                             });
                         }
                         if (policy) {
-                            parameters.degradationPreference =
-                                policy.degradationPreference;
+                            if (track.kind === 'video')
+                                parameters.degradationPreference = policy.degradationPreference;
                             parameters.encodings.forEach((encoding) => {
                                 // Lower FPS must not also reduce the detail budget.
                                 encoding.maxBitrate = policy.maxBitrate;
-                                encoding.maxFramerate = policy.frameRate;
-                                encoding.scaleResolutionDownBy = 1;
+                                if (track.kind === 'video') {
+                                    encoding.maxFramerate = policy.frameRate;
+                                    encoding.scaleResolutionDownBy = 1;
+                                }
                             });
                         } else {
                             const original = originals.get(sender);
@@ -162,5 +168,5 @@
                 return task;
             })
         );
-    global.VoiceScreenSendPolicy = { register, apply, observe, getReadback };
+    global.VoiceScreenSendPolicy = { register, registerAudio, apply, observe, getReadback };
 })(window);

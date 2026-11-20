@@ -49,6 +49,13 @@
         }, 日志覆盖说明: '精简诊断：当前完整状态、最多40事件、2次起始及最近8次采样；SFU异常窗口完整保留。完整本机日志可在最近通话日志中下载。' };
     };
     const finite = (value) => Number.isFinite(value) ? Math.round(value * 100) / 100 : null;
+    const audioBitrateKbps = (report, previous) => {
+        const key = report.type === 'outbound-rtp' ? 'bytesSent' : 'bytesReceived';
+        if (!Number.isFinite(report[key]) || !Number.isFinite(previous?.[key])) return null;
+        const interval = report.timestamp - previous.timestamp;
+        const bytes = report[key] - previous[key];
+        return Number.isFinite(interval) && interval > 0 && bytes >= 0 ? bytes * 8 / interval : null;
+    };
     const audioSummary = (reports, report, previous) => {
         const sending = report.type === 'outbound-rtp';
         const seconds = previous && report.timestamp > previous.timestamp ? (report.timestamp - previous.timestamp) / 1000 : 0;
@@ -61,11 +68,12 @@
         const duration = source && previous?.source && source.totalSamplesDuration - previous.source.totalSamplesDuration;
         const energy = source && previous?.source && source.totalAudioEnergy - previous.source.totalAudioEnergy;
         const count = delta('totalSamplesReceived');
+        const bitrate = audioBitrateKbps(report, previous);
         return {
             方向: sending ? '发送' : '接收',
             编码: /^audio\/(opus|PCMU|PCMA|G722)$/i.test(codec?.mimeType || '') ? codec.mimeType : null,
             采样间隔_ms: seconds ? finite(seconds * 1000) : null,
-            码率_Mbps: seconds && delta(sending ? 'bytesSent' : 'bytesReceived') !== null ? finite(delta(sending ? 'bytesSent' : 'bytesReceived') * 8 / seconds / 1000000) : null,
+            码率_Mbps: bitrate === null ? null : finite(bitrate / 1000),
             累计丢包: finite(sending ? remote?.packetsLost : report.packetsLost),
             '区间丢包率_%': delta('packetsReceived') !== null && delta('packetsLost') !== null && delta('packetsReceived') + delta('packetsLost') > 0 ? finite(delta('packetsLost') * 100 / (delta('packetsReceived') + delta('packetsLost'))) : null,
             抖动_ms: finite((sending ? remote?.jitter : report.jitter) * 1000),
@@ -264,6 +272,10 @@
                         const audio = rows.map((row) => {
                             const result = audioSummary(reports, row, previous.get(row.id));
                             result.角色 = getAudioRole?.(pc, row, reports) || '语音或共享音频（浏览器未区分）';
+                            if (quality && row.type === 'outbound-rtp' && result.角色 === '麦克风') {
+                                const bitrate = audioBitrateKbps(row, previous.get(row.id));
+                                if (bitrate !== null) quality.micKbps = Math.max(quality.micKbps ?? 0, bitrate);
+                            }
                             next.set(row.id, { ...row, source: row.type === 'outbound-rtp' ? reports.find((item) => item.id === row.mediaSourceId) : row });
                             return result;
                         });

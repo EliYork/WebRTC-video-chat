@@ -49,6 +49,12 @@
             <button type="button" id="stageStageToggle" aria-controls="member-cards canvas" aria-pressed="true">语音</button>
             <button type="button" id="stageChatToggle" aria-controls="chat-panel" aria-expanded="true">聊天</button>
             </nav>
+            <button type="button" class="workspace-call-tools-toggle" popovertarget="call-tools">通话日志</button>
+            <div id="call-tools" class="call-log-actions" data-call-log-actions popover="auto" role="group" aria-label="通话日志">
+                <button type="button" data-copy-call-diagnostics aria-live="polite" aria-atomic="true">复制诊断</button>
+                <button type="button" data-show-call-logs>查看日志</button>
+                <button type="button" data-clear-call-logs aria-live="polite">清除日志</button>
+            </div>
             <a class="workspace-download" href="/download/windows" target="_blank" rel="noopener" title="下载 Windows 客户端（Windows 10/11，64 位）" aria-label="下载 Windows 客户端（64 位）"><i class="fa-solid fa-download" aria-hidden="true"></i><span>下载客户端</span></a>
         </div>
         <p id="stageConnectionStatus" class="stage-connection-status" role="status" hidden></p>
@@ -89,21 +95,21 @@
                     <div class="media-dock-header">
                         <div class="local-user-header media-dock-user">
                             <div class="local-avatar" aria-hidden="true">♡</div>
-                            <div class="local-user-identity">
-                                <strong id="localUserName">Guest</strong>
-                                <p id="callStatusText">未加入语音</p>
-                            </div>
+                            <input id="localUserName" class="local-user-name" type="text" value="Guest" maxlength="32" autocomplete="nickname" aria-label="昵称" title="点击修改昵称" />
                         </div>
-                        <div class="media-dock-info">
-                            <strong id="localVoiceChannelName">大厅</strong>
-                            <span class="media-dock-timer">
-                                <button type="button" id="callSignal" class="call-signal" data-quality="unknown" data-bars="0" aria-label="通话质量" aria-expanded="false" aria-controls="callSignalDetail">
+                        <span class="media-dock-timer">
+                            <span class="call-signal-slot">
+                                <span id="callSignal" class="call-signal" role="img" data-quality="unknown" data-bars="0" aria-label="通话质量尚未测量">
                                     <svg viewBox="0 0 27 24" width="24" height="20" aria-hidden="true"><rect x="1" y="18" width="3" height="5" rx="1"/><rect x="6" y="14" width="3" height="9" rx="1"/><rect x="11" y="10" width="3" height="13" rx="1"/><rect x="16" y="6" width="3" height="17" rx="1"/><rect x="21" y="2" width="3" height="21" rx="1"/><path class="signal-disconnected" d="M3 3 24 23"/></svg>
-                                </button>
-                                <span id="callSignalDetail" class="call-signal-detail" hidden>通话质量尚未测量</span>
-                                <span id="callDuration">00:00</span>
+                                </span>
+                                <span id="callSignalDetail" class="call-signal-detail" aria-hidden="true">
+                                    <span>延迟 <b data-call-rtt>—</b></span>
+                                    <span>丢包 <b data-call-loss>—</b></span>
+                                    <span data-call-mic-row hidden>麦克风发送 <b data-call-mic-rate></b></span>
+                                </span>
                             </span>
-                        </div>
+                            <span id="callDuration">00:00</span>
+                        </span>
                     </div>
                     <div class="media-dock-activity-row">
                         <span id="screenStatusText" class="media-dock-pill screen-status-chip hidden">
@@ -161,19 +167,11 @@
                                 <option value="rnnoise">RNNoise</option>
                             </select>
                         </label>
-                        <label class="media-device-status" title="只作用于 RNNoise；压低非语音残留。轻声或首字变弱时可关闭对比。">
+                        <label class="media-device-status">
                             <input type="checkbox" data-rnnoise-speech-gate checked>
                             非语音门控（RNNoise）
                         </label>
-                        <p class="media-device-status" data-audio-processing-status role="status" aria-live="polite"></p>
-                        <details>
-                            <summary>通话日志</summary>
-                            <div class="call-log-actions" data-call-log-actions>
-                                <button type="button" data-copy-call-diagnostics aria-live="polite" aria-atomic="true">复制诊断</button>
-                                <button type="button" data-show-call-logs>查看日志</button>
-                                <button type="button" data-clear-call-logs>清除日志</button>
-                            </div>
-                        </details>
+                        <p class="media-device-status" data-audio-processing-status role="status" hidden></p>
                     </section>
                     <section class="media-device-popover" id="camera-device-panel" data-control-panel="camera" data-device-popover="camera" popover="manual" role="dialog" aria-label="摄像头设备">
                         <div class="media-device-popover-header">

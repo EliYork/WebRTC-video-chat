@@ -21,6 +21,7 @@
         'copyRoomLink',
         'refreshDevices',
         'recoverAudio',
+        'setDisplayName',
         'setMicrophoneGain',
         'selectNoiseMode',
         'setRnnoiseSpeechGate',

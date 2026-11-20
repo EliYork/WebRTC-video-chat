@@ -12,6 +12,9 @@ function fixture() {
     const window = {};
     for (const file of ['voice-media-operation-runtime.js', 'voice-media-lifecycle.js'])
         vm.runInNewContext(readFileSync(new URL('../src/views/js/voice/' + file, import.meta.url), 'utf8'), { window });
+    const audioRegistrations = [];
+    window.voiceScreenSfuConfig = { audioBitrate: 256_000 };
+    window.VoiceScreenSendPolicy = { register() {}, registerAudio: (...args) => audioRegistrations.push(args) };
     const video = new StrictTrack('video', 'screen');
     const audio = new StrictTrack('audio', 'screen-audio');
     const captured = new StrictStream([video, audio]);
@@ -51,7 +54,7 @@ function fixture() {
         ${section('const stopCurrentScreenStream =', 'const restoreCameraAfterScreenShare =')}
         ${section('const startScreenShare =', 'const stopScreenShare =')}
     `, context);
-    return { video, audio, controller, window, pubs: () => pubs, signal: () => signal,
+    return { video, audio, audioRegistrations, controller, window, pubs: () => pubs, signal: () => signal,
         complete: () => complete(), run: () => vm.runInContext('startScreenShare({}, { codecMode: "auto", frameRate: 60 })', context),
         read: (code) => vm.runInContext(code, context),
         hangup() { controller.setDesired('screen', false); controller.invalidate('screen'); vm.runInContext('stopCurrentScreenStream()', context); },
@@ -69,6 +72,7 @@ test('app keeps sharing pending until codec choice and publishes the captured st
     assert.equal(f.read('currentScreenShareSession.codecDecision.primary'), 'h264');
     assert.equal(f.pubs(), 1);
     assert.equal(f.video.readyState, 'live');
+    assert.deepEqual(f.audioRegistrations, [[f.audio, 256_000]]);
 });
 
 test('hangup or browser ending capture during preflight never publishes late media and releases screen audio too', async () => {

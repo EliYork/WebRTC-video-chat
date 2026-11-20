@@ -341,7 +341,7 @@ try {
             'Page state',
             index,
             await page.evaluate(() => ({
-                mic: document.getElementById('callStatusText')?.textContent,
+                micPressed: document.getElementById('toggleAudio')?.getAttribute('aria-pressed'),
                 rtc: testConnections.map((pc) => ({
                     state: pc.connectionState,
                     send: pc.getSenders().map((s) => s.track?.kind),

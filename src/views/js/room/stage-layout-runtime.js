@@ -67,7 +67,7 @@
             if (!status) return;
             const state = getChannelState().connectionState;
             const voiceMessage = {
-                joining: '正在加入语音…', 'reconnecting-socket': '频道正在重新连接，语音可能仍在继续…',
+                'reconnecting-socket': '频道正在重新连接，语音可能仍在继续…',
                 'reconnecting-peer': '语音正在重新连接…', restoring: '正在恢复语音…',
                 degraded: '部分语音连接异常，正在恢复…', failed: '语音连接失败，可使用下方通话按钮重试。',
             }[state];

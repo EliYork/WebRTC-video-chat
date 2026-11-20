@@ -16,7 +16,7 @@ export const readScreenSfuConfig = (env = process.env) => {
     const initialViewerBitrate = Math.round(
         number('SFU_INITIAL_VIEWER_MBPS', 3.5, 1, 10) * 1e6
     );
-    const audioBitrate = 128000;
+    const audioBitrate = 256_000;
     const payloadBudget = Math.round(
         number('SFU_PAYLOAD_MBPS', 16, 2, 9999) * 1e6
     );

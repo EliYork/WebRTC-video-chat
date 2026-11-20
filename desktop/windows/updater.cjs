@@ -1,12 +1,10 @@
-// Only main and its trusted local settings window own update privileges.
+// Main owns the update service for the title bar and local settings.
 function createUpdates({
     updater,
     app,
     window,
     log,
     prepareInstall,
-    onStartupUpdate,
-    preferences,
     timers = { setTimeout, clearTimeout, setInterval, clearInterval },
 }) {
     let status = 'idle',
@@ -20,7 +18,6 @@ function createUpdates({
     let cancelled = false,
         phase = 'check';
     const listeners = new Set();
-    const prompted = new Set();
     updater.autoDownload = false;
     updater.autoInstallOnAppQuit = false;
     updater.allowDowngrade = false;
@@ -41,7 +38,6 @@ function createUpdates({
         error,
         lastChecked,
         canCancel: status === 'downloading' && Boolean(token),
-        ignoredVersion: preferences?.getIgnoredVersion() || '',
     });
     const publish = () => {
         if (stopped) return;
@@ -112,7 +108,7 @@ function createUpdates({
         taskbar(-1);
         update('downloaded');
     });
-    async function check(options) {
+    async function check() {
         if (busy || stopped || ['downloaded', 'installing'].includes(status))
             return;
         busy = true;
@@ -128,19 +124,15 @@ function createUpdates({
             if (!result) throw Error('Update service unavailable');
             token = result.cancellationToken || null;
             lastChecked = new Date().toISOString();
-            if (status === 'checking')
+            if (status === 'checking') {
+                version = result.isUpdateAvailable ? result.updateInfo?.version || '' : '';
                 update(result.isUpdateAvailable ? 'available' : 'current');
+            }
         } catch (failure) {
             failed(failure);
         } finally {
             busy = false;
             publish();
-        }
-        if (options?.startup && !stopped && status === 'available' && version &&
-            version !== preferences?.getIgnoredVersion() && !prompted.has(version)) {
-            prompted.add(version);
-            try { await onStartupUpdate?.(snapshot()); }
-            catch (failure) { log(`update-prompt-failed ${failure.message}`); }
         }
     }
     async function download() {
@@ -185,16 +177,8 @@ function createUpdates({
             publish();
         }
     }
-    function ignoreVersion(expectedVersion) {
-        if (busy || stopped || status !== 'available' || expectedVersion !== version) return false;
-        if (!preferences) throw Error('Update preferences unavailable');
-        preferences.setIgnoredVersion(version);
-        publish();
-        return true;
-    }
-    // Startup may offer a new version. Scheduled checks stay quiet; neither
-    // path downloads or installs until an owned local window requests it.
-    const startup = timers.setTimeout(() => void check({ startup: true }), 3000);
+    // Background checks publish state without downloading or opening windows.
+    const startup = timers.setTimeout(() => void check(), 3000);
     const periodic = timers.setInterval(() => void check(), 6 * 60 * 60 * 1000);
     startup.unref?.();
     periodic.unref?.();
@@ -203,7 +187,6 @@ function createUpdates({
         download,
         cancel,
         install,
-        ignoreVersion,
         snapshot,
         subscribe(listener) {
             listeners.add(listener);
