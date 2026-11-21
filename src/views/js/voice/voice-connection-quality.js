@@ -31,11 +31,15 @@
         };
     };
     const grade = ({ rttMs, lossPercent, jitterMs }) => {
+        const hasLatency = valid(rttMs);
+        const hasLoss = valid(lossPercent);
+        if (!hasLatency && !hasLoss) return null;
         const values = [rttMs, lossPercent, jitterMs];
-        if (!values.some(valid)) return null;
         const limits = [[100, .5, 15], [200, 2, 30], [350, 4, 50], [600, 8, 80]];
         const index = limits.findIndex(limit => values.every((value, i) => !valid(value) || value <= limit[i]));
-        return index < 0 ? 1 : 5 - index;
+        const bars = index < 0 ? 1 : 5 - index;
+        // Partial stats can show a problem, but cannot establish a good link.
+        return hasLatency && hasLoss ? bars : Math.min(3, bars);
     };
     const createRuntime = ({ now = () => Date.now() } = {}) => {
         let entries = [], measuredAt = 0;

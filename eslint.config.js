@@ -6,7 +6,13 @@ export default [
     js.configs.recommended,
     eslintConfigPrettier,
     {
-        ignores: ['src/views/vendor/', 'src/views/wasm/', 'src/views/audio-worklet/rnnoise-processor.js'],
+        ignores: [
+            'src/views/vendor/',
+            'src/views/wasm/',
+            'src/views/audio-worklet/rnnoise-processor.js',
+            'src/views/js/room/startup.*.min.js',
+            'src/views/styles/startup.min.css',
+        ],
     },
     {
         files: ['**/*.{js,mjs,cjs}'],

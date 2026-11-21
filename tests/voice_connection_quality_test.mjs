@@ -55,6 +55,10 @@ test('missing, negative and non-finite values remain unknown instead of perfect 
     assert.equal(result.rttMs, null, 'nominated alone does not prove selected');
     assert.equal(result.jitterMs, null);
     assert.equal(grade(result), null);
+    assert.equal(grade({ jitterMs: 1 }), null);
+    assert.equal(grade({ rttMs: 20 }), 3);
+    assert.equal(grade({ lossPercent: 0 }), 3);
+    assert.equal(grade({ rttMs: 650 }), 1);
 });
 
 test('actual zero RTT, zero jitter and zero interval loss are valid measurements', () => {
@@ -91,7 +95,7 @@ test('idle, single person, failed stats, disconnect, reconnect and offline never
 
 test('stale samples, a failed member sample and new sessions cannot inherit a green signal', () => {
     let time = 1000; const runtime = createRuntime({ now: () => time });
-    runtime.accept([{ state: 'connected', rttMs: 20 }]);
+    runtime.accept([{ state: 'connected', rttMs: 20, lossPercent: 0 }]);
     assert.equal(runtime.snapshot({ state: 'joined' }).bars, 5);
     time += 12001;
     assert.equal(runtime.snapshot({ state: 'joined' }).bars, null);

@@ -8,6 +8,7 @@ import { join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer } from 'node:net';
+import { createHash } from 'node:crypto';
 import WebSocket from 'ws';
 import Logger from '../src/utils/Log.js';
 import { createVoiceCallSignaling } from '../src/utils/VoiceCallSignaling.js';
@@ -136,7 +137,7 @@ test('real server supports both WebSocket protocols and survives malformed PeerJ
     await new Promise((done) => reservation.close(done));
     const app = spawn(process.execPath, [resolve('src/server.js')], {
         cwd: dir, windowsHide: true,
-        env: { ...process.env, HOST: '127.0.0.1', PORT: String(port), USE_HTTPS: 'false', ENV: 'production', SFU_ENABLED: 'false', CHAT_HISTORY_FILE: join(dir, 'history.json') },
+        env: { ...process.env, HOST: '127.0.0.1', PORT: String(port), USE_HTTPS: 'false', ENV: 'production', PIIK_ENABLED: 'false', SFU_ENABLED: 'false', CHAT_HISTORY_FILE: join(dir, 'history.json') },
     });
     let output = '';
     app.stdout.on('data', (chunk) => { output += chunk; });
@@ -159,6 +160,25 @@ test('real server supports both WebSocket protocols and survives malformed PeerJ
             if (!ready) await new Promise((done) => setTimeout(done, 50));
         }
         assert.ok(ready, 'isolated app must start');
+        const base = `http://127.0.0.1:${port}`;
+        const landing = await fetch(base, { redirect: 'manual' });
+        assert.equal(landing.status, 302);
+        assert.equal(landing.headers.get('location'), '/room/lobby');
+        const html = await (await fetch(base + '/room/lobby')).text();
+        const assets = [...html.matchAll(/(?:href|src)="(\/style\.css|\/script\.js|\/js\/room\/boot-runtime\.js)\?v=([a-f0-9]{64})"/g)];
+        assert.deepEqual(assets.map(match => match[1]), ['/style.css', '/js/room/boot-runtime.js', '/script.js']);
+        await Promise.all(assets.map(async ([, path, hash]) => {
+            const response = await fetch(`${base}${path}?v=${hash}`);
+            assert.equal(response.status, 200);
+            assert.equal(response.headers.get('cache-control'), 'public, max-age=31536000, immutable');
+            assert.equal(createHash('sha256').update(Buffer.from(await response.arrayBuffer())).digest('hex'), hash);
+            const oldHash = (hash[0] === '0' ? '1' : '0') + hash.slice(1);
+            for (const query of ['', `?v=${oldHash}`, `?v=${hash}&v=${oldHash}`]) {
+                const stale = await fetch(base + path + query, { method: 'HEAD' });
+                assert.equal(stale.status, 200);
+                assert.equal(stale.headers.get('cache-control'), 'no-cache');
+            }
+        }));
         await Promise.all(['/room/lobby', '/audio-worklet/rnnoise-processor.js'].map(async (path) => {
             const response = await fetch(`http://127.0.0.1:${port}${path}`);
             assert.equal(response.status, 200);
@@ -182,7 +202,9 @@ test('real server supports both WebSocket protocols and survives malformed PeerJ
         assert.match((await ack)[0].toString(), /^430\[/);
         assert.equal((await fetch(`http://127.0.0.1:${port}/room/game`)).status, 200);
         assert.equal(app.exitCode, null);
-        assert.match(readFileSync(join(dir, 'logs/node.log'), 'utf8'), /\[peerjs\]/);
+        const logs = readFileSync(join(dir, 'logs/node.log'), 'utf8');
+        assert.match(logs, /\[peerjs\]/);
+        assert.match(logs, /\[screen-media\] provider=legacy/);
     } finally {
         clients.forEach((client) => client.terminate());
         const exit = app.exitCode === null ? once(app, 'exit') : undefined;

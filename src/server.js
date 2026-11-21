@@ -152,11 +152,12 @@ const voiceCallSignaling = createVoiceCallSignaling({
     resolveRoomId: (roomId) => getChannel(roomId)?.slug,
 });
 const piikEnabled = process.env.PIIK_ENABLED === 'true';
+const piikBaseURL = process.env.PIIK_INTERNAL_URL || 'http://127.0.0.1:17887';
 const piikMedia = piikEnabled ? createPiikMediaGateway({
     io,
     getVoiceOwner: socket => voiceCallSignaling.getVoiceOwner(socket),
     protocol: await import('../integrations/piik/.build/protocol.mjs'),
-    baseURL: process.env.PIIK_INTERNAL_URL || 'http://127.0.0.1:17887',
+    baseURL: piikBaseURL,
     onSharing: (socket, sharing, owner) => voiceCallSignaling.updateScreenShare({ sharing, voiceSessionGeneration: owner.voiceSessionGeneration }, socket),
 }) : undefined;
 let screenSfuConfig;
@@ -177,10 +178,13 @@ const screenSfu = createScreenSfuService({
     getVoiceOwner: (socket) => voiceCallSignaling.getVoiceOwner(socket),
     logger: Log,
 });
-if (screenSfuConfig.enabled) void screenSfu.start().catch(() => {});
-else Log.info('[sfu] not configured; screen sharing uses P2P');
+if (piikEnabled) Log.info('[screen-media] provider=piik');
+else {
+    Log.info(`[screen-media] provider=legacy (PIIK_ENABLED is not true), SFU ${screenSfuConfig.enabled ? 'enabled' : 'disabled'}`);
+    if (screenSfuConfig.enabled) void screenSfu.start().catch(() => {});
+}
 const getMediaReadiness = createMediaReadiness({
-    piikEnabled, piikBaseURL: process.env.PIIK_INTERNAL_URL || 'http://127.0.0.1:17887',
+    piikEnabled, piikBaseURL,
     screenSfu, sfuConfigValid,
 });
 const health = async (_req, res) => {
@@ -316,9 +320,15 @@ app.set('view engine', 'ejs');
 app.set('views', __dirname + '/views');
 const roomAssets = createRoomAssets(join(__dirname, 'views'));
 const roomAssetVersions = getRoomAssetVersions(roomAssets);
-app.get('/js/room/boot-runtime.js', (_, res) =>
-    res.type('js').send(roomAssets.runtime)
-);
+const serveRoomAsset = (key, type) => (req, res) => {
+    // Unversioned URLs and URLs from older pages still serve current bytes,
+    // but must be revalidated so they cannot cache those bytes under an old hash.
+    const cache = req.query.v === roomAssetVersions[key]
+        ? 'public, max-age=31536000, immutable'
+        : 'no-cache';
+    res.set('Cache-Control', cache).type(type).send(roomAssets[key]);
+};
+app.get('/js/room/boot-runtime.js', serveRoomAsset('runtime', 'js'));
 ['assets', 'audio-worklet', 'js', 'styles', 'vendor', 'wasm'].forEach((directory) =>
     app.use(
         `/${directory}`,
@@ -329,12 +339,8 @@ app.get('/js/room/boot-runtime.js', (_, res) =>
         })
     )
 );
-app.get('/script.js', (_, res) =>
-    res.type('js').send(roomAssets.mainScript)
-);
-app.get('/style.css', (_, res) =>
-    res.type('css').send(roomAssets.stylesheet)
-);
+app.get('/script.js', serveRoomAsset('mainScript', 'js'));
+app.get('/style.css', serveRoomAsset('stylesheet', 'css'));
 app.get('/favicon.ico', (_, res) =>
     res.sendFile('favicon.ico', { root: join(__dirname, 'views/assets/brand') })
 );
