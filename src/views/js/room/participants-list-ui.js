@@ -60,13 +60,18 @@
 
     const renderParticipantItem = (participant = {}) => {
         const item = global.document.createElement('li');
+        const avatar = global.document.createElement('span');
         const name = global.document.createElement('span');
         const statuses = global.document.createElement('span');
 
         item.className = 'channel-member';
+        if (participant.peerId) item.dataset.peerId = participant.peerId;
+        avatar.className = 'channel-member-avatar';
+        avatar.setAttribute('aria-hidden', 'true');
         name.className = 'channel-member-name';
         statuses.className = 'channel-member-statuses';
 
+        setText(avatar, Array.from((participant.name || 'Guest').trim())[0]?.toUpperCase() || 'G');
         setText(name, participant.name || 'Guest');
         (participant.statuses || []).forEach((status) => {
             statuses.append(createStatusIcon(status));
@@ -79,7 +84,7 @@
             item.addEventListener('contextmenu', (event) => participant.tileToggle.onClick?.(event));
         }
 
-        item.append(name, statuses);
+        item.append(avatar, name, statuses);
         updateParticipantItemClasses(item, participant);
 
         return item;

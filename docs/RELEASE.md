@@ -303,18 +303,29 @@ AV1 及 P2P 优先（实验）的能力边界、自动化结果和实机验收�
 
 **本地验证与上线验收：**
 
+发布前在装有 Node.js 22 或更新版本、可用的 mediasoup worker 和 Edge 的开发机运行以下检查。Edge 使用非默认安装位置时，通过 `STAGE_TEST_BROWSER` 指定可执行文件。
+
 ```powershell
 npm test
-# 修改客户端依赖后才需要重新生成本地 SDK 和许可证；发布服务器无需构建。
-npm run build:sfu
-# 如已安装 Playwright，可以直接运行；否则通过 PLAYWRIGHT_MODULE 指定其模块路径。
-node scripts/verify-screen-sfu.mjs
-node scripts/verify-screen-sfu.mjs --stall
-node scripts/verify-screen-routing-app.mjs
-node scripts/verify-screen-routing-app.mjs --priority
+npm run eslint -- --max-warnings 0
+$env:STAGE_TEST_SFU = 'true'
+npm run test:stage-browser
 ```
 
-浏览器联测使用本地网络、合成移动画面和虚拟音频，覆盖四人 SFU、容量不足的 P2P 分流、停止/重开共享、服务进程退出后的已有 P2P 恢复。它不证明真实 FPS 游戏画质、声音听感、公网带宽或 1 GB 服务器承载能力。2026-10-09 的完整房间联测使用 Socket.IO HTTP polling；2026-10-12 修复路径冲突后重新联测，五个页面均确认实际 WebSocket transport，同时保留了虚拟音频设备与预期停服错误的诊断。
+`test:stage-browser` 使用本地网络和合成媒体，验证房间界面、自动 SFU、手动 P2P 和手动 SFU。仅在更新传统 SFU 浏览器 SDK 依赖时运行 `npm run build:sfu`。Piik 发布按 [Piik 验收记录](../integrations/piik/VALIDATION.md) 使用 `integrations/piik/source.json` 固定的上游版本及其专用联测。
+
+以下脚本用于补充验证，需安装 Playwright 或通过 `PLAYWRIGHT_MODULE` 指定其模块路径。默认使用 Edge。2026-11-21 在 Windows、Node.js 24.15.0、mediasoup 3.29.0、Edge 158.0.4370.33 的复测结果如下。
+
+| 补充检查 | 实测状态 |
+| --- | --- |
+| `node scripts/verify-screen-sfu.mjs` | 通过。四个接收端解码视频和音频，第五个回退，停止后可重开，关闭 worker 后恢复路由。 |
+| `node scripts/verify-screen-sfu.mjs --stall` | 通过。暂停单个接收者的 SFU 视频后释放其路由，其余接收者继续解码 1920×1080。 |
+| `node scripts/verify-screen-routing-app.mjs` | 通过。四人 SFU、手动 P2P 与 SFU、单接收端卡顿回退、共享重开和停服后直连恢复。 |
+| `node scripts/verify-screen-routing-app.mjs --priority` | 通过。先到者使用 SFU，后三个接收端通过 P2P 解码。手动切换和共享重开均通过。 |
+
+完整房间测试先等待自动开麦完成，只在麦克风仍关闭时补一次点击。手动路径测试在开关聊天面板后检查正在播放的视频轨道、实际选中的 ICE 路径和解码帧率。共享重开后，先验证各观看端正在播放的轨道持续解码超过 5 FPS，再验证停服回退。两个模式都使用本地 WebRTC 与 mediasoup，输入采用合成声画。
+
+补充检查的通过、失败或未运行均记入发布记录，失败或未运行时同时记下原因。公网带宽、实机画质、听感与服务器承载能力仍需上线验收。
 
 2026-10-09 本地验证：208 个自动测试通过；真实 worker + 浏览器四人视频/声音转发通过；完整房间的四人 SFU、单条活动视频上传、停止/重开、整个服务进程退出后的已有 P2P 恢复通过；缩小测试预算后，先来的一个观看者保留 SFU，后来的三个仍通过真实 P2P 观看。以上都不是公网或 1 GB 服务器的验收。
 
@@ -327,6 +338,7 @@ node scripts/verify-screen-routing-app.mjs --priority
 1. 记录当前 Node 项目的运行目录、启动命令、Node 版本、环境变量、端口和反向代理配置。备份当前程序与 `.env`、`data/`、`cert/`，备份不要放到可公开访问的静态目录。
 2. 在现有项目目录之外创建新的版本目录，上传 ZIP 并解压。确认该目录下直接有 `package.json` 和 `src/server.js`，不是多嵌套了一层。
 3. 将现有服务器 `.env` 安全配置到新目录，不能用 `.env.example` 覆盖。若 `USE_HTTPS=true`，还要保留 `cert/selfsigned.key`、`cert/selfsigned.crt`，或成对配置 `TLS_KEY_FILE`、`TLS_CERT_FILE` 指向现有证书；相对路径以项目根目录为基准。证书异常会阻止启动，不会降级 HTTP。不要擅自改变现有 TLS/反向代理方式。
+   同机反向代理可以使用 `HOST=127.0.0.1`。局域网设备直连时，将 `HOST` 设为服务器的局域网 IP，或用 `HOST=0.0.0.0` 监听所有 IPv4 网卡，并从其他设备通过服务器的局域网 IP 访问。浏览器的麦克风、摄像头和屏幕共享需要安全上下文，局域网客户端应使用受信任的 HTTPS 地址。
 4. 聊天历史默认在运行目录的 `data/chat-history.json`。建议通过服务器 `.env` 的 `CHAT_HISTORY_FILE` 指向固定的绝对路径，使新旧版本使用同一份历史。如果暂时仍用各版本内的 `data/`，必须停旧服务后再复制最终数据，回滚时也需保留新产生的记录。日志为运行目录的 `logs/node.log`，旧日志保留在旧目录。
 5. 在新目录执行 `npm ci --omit=dev`，使用与现有服务一致的 Node 版本。失败则停止发布，不切换。不要上传本机 Windows 的 `node_modules`。
 6. 在维护窗口停止旧进程，把宝塔 Node 项目的运行目录改为新版本目录，保持原端口与环境配置，启动命令使用 `npm start`（入口 `src/server.js`）。同一端口不要同时启动新旧进程。

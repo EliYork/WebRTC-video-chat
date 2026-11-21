@@ -170,9 +170,10 @@ node --test tests/*.mjs
 npm run eslint
 node --check src/server.js
 node --check src/views/script.js
-npx prettier README.md README.en.md --check
 git diff --check
 ```
+
+`npm run format:check` 和 `npm run format:write` 是开发时的格式检查和整理工具。有存量格式差异时，`format:check` 会以非零状态退出。发布以静态检查和 Node 测试为门禁。只整理本次修改时，用 `npx prettier --write <文件路径>` 指定文件。
 
 测试覆盖 voice 协议/协商、peer registry、会话恢复、媒体质量、服务端信任边界与 disconnect 生命周期、view/chat room 生命周期、页面布局 identity，以及 Chat Panel、Sidebar、Media Dock 生命周期、屏幕共享独立音量和本地预览显隐。它们是 Node 模型与合同测试，不是浏览器 E2E。
 

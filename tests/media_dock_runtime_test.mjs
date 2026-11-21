@@ -130,6 +130,10 @@ class FakeElement extends FakeEventTarget {
         this._textContent = '';
     }
 
+    get parentElement() {
+        return this.parentNode instanceof FakeElement ? this.parentNode : null;
+    }
+
     get textContent() {
         return (
             this._textContent +
@@ -554,7 +558,7 @@ test('device popover stays within viewport and follows scrolling without moving 
     assert.equal(fixture.window.listenerCount('scroll'), 0);
 });
 
-test('device popovers follow the mouse and close 500 ms after it leaves', () => {
+test('device popovers follow the mouse and close 300 ms after it leaves', () => {
     const fixture = createFixture();
     const { runtimeApi } = loadApis(fixture);
     const stub = createAdapterStub();
@@ -573,12 +577,12 @@ test('device popovers follow the mouse and close 500 ms after it leaves', () => 
     assert.equal(opened(), true);
     assert.equal(fixture.refs.micButton.getAttribute('aria-expanded'), 'true');
     move(control, 'pointerleave');
-    assert.equal(timer.delay, 500);
+    assert.equal(timer.delay, 300);
     assert.equal(opened(), true);
     move(popover, 'pointerenter');
     assert.equal(timer, undefined);
     move(popover, 'pointerleave');
-    assert.equal(timer.delay, 500);
+    assert.equal(timer.delay, 300);
     timer.callback();
     assert.equal(opened(), false);
     assert.equal(fixture.refs.micButton.getAttribute('aria-expanded'), 'false');
@@ -789,6 +793,30 @@ test('runtime owns one real root, renders state, devices, permission and failure
         'true'
     );
     assert.equal(stub.subscriberCount(), 1);
+});
+
+test('missing call metric rows do not stop rendering the rest of the dock', () => {
+    const fixture = createFixture();
+    const { document, root, refs } = fixture;
+    const signal = createElement(document, 'span', { id: 'callSignal' });
+    const readout = createElement(document, 'span', { id: 'callSignalDetail' });
+    const latencyRow = createElement(document, 'span');
+    const latency = createElement(document, 'b', { data: { 'call-rtt': '' } });
+    latencyRow.append(latency);
+    readout.append(latencyRow);
+    root.append(signal, readout);
+
+    const { runtimeApi } = loadApis(fixture);
+    const stub = createAdapterStub({ connectionQuality: { lossPercent: 0 } });
+    const runtime = runtimeApi.createMediaDockRuntime({ root, adapter: stub.adapter });
+    runtime.init();
+    assert.equal(readout.hidden, true, 'stats for absent rows do not show an empty readout');
+
+    stub.emit({ microphoneEnabled: true, connectionQuality: { rttMs: 0, lossPercent: 0 } });
+    assert.equal(refs.micButton.getAttribute('aria-pressed'), 'true');
+    assert.equal(readout.hidden, false);
+    assert.equal(latencyRow.hidden, false);
+    assert.equal(latency.textContent, '0 ms');
 });
 
 test('browsers without screen capture explain the limitation while keeping camera and voice available', () => {

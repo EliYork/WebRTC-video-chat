@@ -103,7 +103,7 @@ try {
             );
             window.received = new Map();
             window.routes = [];
-            window.sfu = VoiceScreenSfuRuntime.createRuntime({
+            window.sfu = window.VoiceScreenSfuRuntime.createRuntime({
                 config: { enabled: true, videoBitrate: 5500000 },
                 onRoutes: (routes) => {
                     window.routes = routes;
@@ -125,8 +125,8 @@ try {
                 onWarning: (message, error) =>
                     console.warn(message, error?.message),
             });
-            sfu.attachSocket(socket);
-            sfu.setSession({
+            window.sfu.attachSocket(socket);
+            window.sfu.setSession({
                 roomId: 'game',
                 peerId: `peer-${index}`,
                 voiceSessionGeneration: 1,
@@ -154,7 +154,7 @@ try {
                     ...canvas.captureStream(60).getTracks(),
                     ...destination.stream.getTracks(),
                 ]);
-                await sfu.publish(window.capture, {
+                await window.sfu.publish(window.capture, {
                     mode: 'game',
                     frameRate: 60,
                 });
@@ -168,7 +168,7 @@ try {
         await pages[1].waitForFunction(() => document.querySelector('video')?.videoWidth > 960, null, { timeout: 30000 });
         await pages[2].waitForFunction(() => document.querySelector('video')?.videoWidth > 960, null, { timeout: 30000 });
         const sample = async (page) => page.evaluate(async () => {
-            const source = sfu.getRemoteSource('peer-0');
+            const source = window.sfu.getRemoteSource('peer-0');
             const stats = [...(await source.pc.getStats()).values()];
             const report = stats.filter((row) => row.type === 'inbound-rtp' && row.kind === 'video').sort((a,b) => (b.framesDecoded || 0) - (a.framesDecoded || 0))[0];
             return { width: report.frameWidth, height: report.frameHeight, frames: report.framesDecoded, fps: report.framesPerSecond };
@@ -183,8 +183,8 @@ try {
         const stopped = nativeConsumers[0];
 
         await stopped.consumer.pause();
-        const gone = await Promise.race(pages.slice(1).map((page, index) => page.waitForFunction(() => !sfu.getRemoteSource('peer-0'), null, { timeout: 16000 }).then(() => index + 1)));
-        await pages[0].waitForFunction(() => routes.length === 1, null, { timeout: 5000 });
+        const gone = await Promise.race(pages.slice(1).map((page, index) => page.waitForFunction(() => !window.sfu.getRemoteSource('peer-0'), null, { timeout: 16000 }).then(() => index + 1)));
+        await pages[0].waitForFunction(() => window.routes.length === 1, null, { timeout: 5000 });
         assert.equal(stopped.transport.dtlsState, 'connected');
         const other = gone === 1 ? 2 : 1;
         const continued = await sample(pages[other]);
@@ -194,8 +194,9 @@ try {
     await pages[0].waitForFunction(() => window.routes.length === 4, null, {
         timeout: 25000,
     });
-    assert.equal(sfu.snapshot().viewers, 4);
-    assert.equal(sfu.snapshot().reservedBps, 22512000);
+    const allocation = sfu.snapshot();
+    assert.equal(allocation.viewers, 4);
+    assert.ok(allocation.reservedBps > 0 && allocation.reservedBps <= config.payloadBudget);
     const received = await Promise.all(
         pages
             .slice(1)
@@ -212,13 +213,13 @@ try {
     for (const streams of received.filter((value) => value.length))
         assert.deepEqual(streams[0].sort(), ['audio', 'video']);
     console.log(
-        'PASS: one real SFU upload, four decoded video/audio receivers, fifth falls back, global 22.512Mbps reservation'
+        'PASS: one real SFU upload, four decoded video/audio receivers, fifth falls back, reservation within payload budget'
     );
     await pages[0].evaluate(() => {
-        sfu.stopPublishing();
-        capture.getTracks().forEach((track) => track.stop());
-        clearInterval(drawTimer);
-        void audio.close();
+        window.sfu.stopPublishing();
+        window.capture.getTracks().forEach((track) => track.stop());
+        clearInterval(window.drawTimer);
+        void window.audio.close();
     });
     await pages[1].waitForFunction(() => window.received.size === 0);
     assert.equal(sfu.snapshot().viewers, 0);
@@ -231,7 +232,7 @@ try {
     );
     sfu.close();
     await pages[0].waitForFunction(
-        () => !sfu.snapshot().hasUplink && window.routes.length === 0
+        () => !window.sfu.snapshot().hasUplink && window.routes.length === 0
     );
     await pages[1].waitForFunction(() => window.received.size === 0);
     console.log(

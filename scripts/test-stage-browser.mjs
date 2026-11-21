@@ -88,6 +88,12 @@ const viewportReady = async (session, width, height) => {
     await send('Page.bringToFront', {}, session);
     await wait(() => evaluate(session, `!document.hidden && document.querySelector('#main').dataset.viewportMode === '${compactViewport(width,height) ? 'compact' : 'wide'}'`), `viewport navigation reconciled ${width}x${height}`);
 };
+const touchViewports = [[320, 640], [375, 812], [390, 844], [844, 390]];
+const setTouchViewport = async (session, width, height) => {
+    await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: true }, session);
+    await send('Emulation.setTouchEmulationEnabled', { enabled: true }, session);
+    await viewportReady(session, width, height);
+};
 const lastTouch = new Map();
 const tap = async (session, selector, holdMs = 0) => {
     // Chromium's touch emulator otherwise coalesces consecutive scripted taps
@@ -255,20 +261,70 @@ try {
     await send('Emulation.setTouchEmulationEnabled', { enabled:false }, a);
     await delay(100);
     await screenshot(a, 'not-joined');
-    await click(a, '#stageJoinVoice');
-    await wait(() => evaluate(a, `document.querySelector('#destroyPeer').dataset.sessionAction === 'hangup' && Boolean(document.querySelector('#local-video'))`), 'first voice join');
+    await send('Emulation.setDeviceMetricsOverride', { width:390,height:844,deviceScaleFactor:1,mobile:true }, a);
+    await send('Emulation.setTouchEmulationEnabled', { enabled:true }, a);
+    await viewportReady(a,390,844);
+    if (await evaluate(a, `document.querySelector('#toggleAudio').getAttribute('aria-pressed') === 'true'`)) await click(a, '#toggleAudio');
+    await tap(a, '#stageChatToggle');
+    await wait(() => evaluate(a, `document.querySelector('#main').dataset.mobilePanel === 'chat'`), 'mobile chat is open before joining');
+    await tap(a, '#destroyPeer');
+    await wait(() => evaluate(a, `document.querySelector('#main').dataset.voiceState === 'joined'`), 'first voice join from the mobile chat dock');
     const dockLeaveContrast = await buttonContrast(a, '#destroyPeer');
     assert.ok(dockLeaveContrast.ratio >= 4.5, 'the leave action has readable text');
-    await wait(() => evaluate(a, `document.querySelector('#toggleAudio').getAttribute('aria-busy') === 'false'`), 'default microphone initialization completes', 20000);
-    if (await evaluate(a, `document.querySelector('#toggleAudio').getAttribute('aria-pressed') !== 'true'`)) await click(a, '#toggleAudio');
+    assert.deepEqual(await evaluate(a, `(() => {
+        const card = document.querySelector('#member-cards #local-video .voice-placeholder-avatar');
+        const signal = document.querySelector('#callSignal');
+        const detail = document.querySelector('#callSignalDetail');
+        return { stage: document.querySelector('#main').dataset.mobilePanel,
+            cardVisible: card?.getBoundingClientRect().height > 0, captures: window.__stageProbe.captures,
+            signalVisible: getComputedStyle(signal).visibility === 'visible' && getComputedStyle(signal.querySelector('rect')).stroke !== 'none',
+            bars: signal.dataset.bars, hidden: detail.hidden, rendered: detail.getBoundingClientRect().height > 0,
+            timer: document.querySelector('#callDuration').getBoundingClientRect().width > 0 };
+    })()`), { stage:'stage', cardVisible:true, captures:0, signalVisible:true, bars:'0', hidden:true, rendered:false, timer:true }, 'solo join without mic or camera shows the local card and unmeasured signal');
+    await screenshot(a, 'live-call-signal-touch-solo');
+    await click(a, '#toggleAudio');
     await wait(() => evaluate(a, `document.querySelector('#toggleAudio').getAttribute('aria-pressed') === 'true'`), 'synthetic microphone enabled');
     await click(a, '#toggleVideo');
     await wait(() => evaluate(a, `document.querySelector('#member-cards #local-video video')?.videoWidth > 0`), 'fake camera in member card');
+    const measuredLayout = session => evaluate(session, `(() => {
+        const dock = document.querySelector('.stage-dock').getBoundingClientRect();
+        const members = document.querySelector('.stage-members').getBoundingClientRect();
+        return { dockTop: dock.top, dockHeight: dock.height, membersHeight: members.height };
+    })()`);
+    const beforeFirstStats = [];
+    for (const [width, height] of touchViewports) {
+        await setTouchViewport(a, width, height);
+        beforeFirstStats.push(await measuredLayout(a));
+    }
     const b = await open();
     await wait(() => evaluate(b, `document.querySelector('#main').dataset.channelOccupancy === 'occupied' && document.querySelector('#stageWelcomeTitle').textContent.includes('1 位')`), 'occupied channel guide');
     await click(b, '#stageJoinVoice');
     await wait(() => evaluate(a, `document.querySelectorAll('#member-cards > *').length === 2`), 'second participant');
     await wait(() => evaluate(b, `document.querySelector('#destroyPeer').dataset.sessionAction === 'hangup'`), 'second voice join');
+    await viewportReady(a, ...touchViewports.at(-1));
+    await wait(() => evaluate(a, `['rtt', 'loss', 'mic-rate'].every(metric => {
+        const value = document.querySelector('[data-call-' + metric + ']');
+        return !value.parentElement.hidden && Boolean(value.textContent);
+    })`), 'latency, packet loss and microphone rate on the mobile dock', 20000);
+    for (const [index, [width, height]] of touchViewports.entries()) {
+        await setTouchViewport(a, width, height);
+        assert.deepEqual(await measuredLayout(a), beforeFirstStats[index], `first stats preserve dock and stage height at ${width}×${height}`);
+        const nickname = await evaluate(a, `(() => {
+            const input = document.querySelector('#localUserName');
+            const timer = document.querySelector('.media-dock-timer');
+            const style = getComputedStyle(input);
+            const context = document.createElement('canvas').getContext('2d');
+            context.font = style.font;
+            return { fits: input.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) >= context.measureText(input.value).width,
+                separate: input.getBoundingClientRect().right <= timer.getBoundingClientRect().left };
+        })()`);
+        assert.deepEqual(nickname, { fits: true, separate: true }, `guest nickname fits next to real stats at ${width}×${height}`);
+        await screenshot(a, `live-call-signal-touch-first-measurement-${width}`);
+    }
+    await send('Emulation.setDeviceMetricsOverride', { width:1920,height:1080,deviceScaleFactor:1,mobile:false }, a);
+    await send('Emulation.setTouchEmulationEnabled', { enabled:false }, a);
+    await viewportReady(a,1920,1080);
+    await viewportReady(b,1920,1080);
     const editName = `(() => {
         const name = document.querySelector('#localUserName');
         name.focus();
@@ -282,20 +338,33 @@ try {
     await wait(() => evaluate(a, `(document.querySelector('.room-sidebar').textContent.includes('Stage-Nickname'))`), 'renamed voice member syncs to the other client');
     await wait(() => evaluate(b, `Number(document.querySelector('#callSignal').dataset.bars)>0 && document.querySelector('#callSignal').getAttribute('aria-label').includes('往返延迟')`), 'real WebRTC stats update the call signal', 20000);
     await wait(() => evaluate(b, `Number(document.querySelector('#toggleAudio').dataset.micLevel)>0 && Number(document.querySelector('#toggleAudio .mic-level-fill')?.getAttribute('height'))>0`), 'fake microphone audio fills the real mic icon');
+    await wait(() => evaluate(b, `['.local-user-card.is-speaking .local-avatar', '.channel-member.is-local.is-speaking .channel-member-avatar', '#local-video.is-speaking .voice-placeholder-avatar'].every(selector => {
+        const avatar = document.querySelector(selector);
+        return avatar && getComputedStyle(avatar).outlineStyle === 'solid';
+    })`), 'speaking shows green outlines on the local avatars');
+    const fillHeights = await evaluate(b, `(() => {
+        const button = document.querySelector('#toggleAudio');
+        return [0, 0.25, 0.75, 1].map(level => {
+            window.VoiceMorphIconUI.syncMicLevel(button, level);
+            return Number(button.querySelector('.mic-level-fill').getAttribute('height'));
+        });
+    })()`);
+    assert.deepEqual(fillHeights, [0, 3, 9, 12], 'mic color fills from quiet to the full capsule');
     await screenshot(b, 'live-call-signal-and-mic');
     const signalBounds = `(() => {
         const icon = document.querySelector('#callSignal'), tip = document.querySelector('#callSignalDetail');
         const rect = tip.getBoundingClientRect();
         return {
+            canHover: matchMedia('(hover: hover)').matches,
             visible: rect.width > 0,
             fits: rect.width > 0 && rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0 && rect.bottom <= innerHeight,
             role: icon.getAttribute('role'), tabIndex: icon.tabIndex, cursor: getComputedStyle(icon).cursor,
             userSelect: getComputedStyle(icon).userSelect,
             rtt: tip.querySelector('[data-call-rtt]').textContent, loss: tip.querySelector('[data-call-loss]').textContent,
+            lossHidden: tip.querySelector('[data-call-loss]').parentElement.hidden,
             micRate: tip.querySelector('[data-call-mic-rate]').textContent,
         };
     })()`;
-    await viewportReady(b,1920,1080);
     assert.equal(await evaluate(b, `document.querySelectorAll('.control-menu-toggle').length`), 0);
     const memberVolume = await evaluate(b, `(() => {
         const row = document.querySelector('.channel-member.has-member-volume');
@@ -332,13 +401,14 @@ try {
     await hover('#toggleOutput');
     await wait(() => deviceOpen('output'), 'moving to output switches the open panel');
     await hover('.workspace-brand');
-    await delay(300);
+    await delay(120);
     assert.ok(await deviceOpen('output'), 'leaving keeps the panel open for the grace period');
     await wait(async () => !(await deviceOpen('output')), 'pointer away closes the popover');
     assert.equal((await evaluate(b, signalBounds)).visible, false);
     await hover('#callSignal');
     await wait(async () => /^\d/.test((await evaluate(b, signalBounds)).micRate), 'live microphone send bitrate');
     const desktopSignal = await evaluate(b, signalBounds);
+    assert.equal(desktopSignal.canHover, true);
     assert.ok(desktopSignal.fits, `hover shows signal details within the viewport: ${JSON.stringify(desktopSignal)}`);
     assert.equal(desktopSignal.role, 'img');
     assert.equal(desktopSignal.tabIndex, -1);
@@ -346,17 +416,33 @@ try {
     assert.equal(desktopSignal.userSelect, 'none');
     assert.match(desktopSignal.rtt, /^\d.* ms$/);
     assert.match(desktopSignal.micRate, /^\d.* kbps$/);
-    assert.match(desktopSignal.loss, /^(?:\d.*%|—)$/);
+    if (desktopSignal.lossHidden) assert.equal(desktopSignal.loss, '');
+    else assert.match(desktopSignal.loss, /^\d.*%$/);
     await screenshot(b, 'live-call-signal-details');
     await click(b, '#callSignal');
     await hover('.workspace-brand');
     assert.equal((await evaluate(b, signalBounds)).visible, false, 'click does not pin the hint');
-    for (const [width,height] of [[320,640], [390,844], [844,390]]) {
-        await send('Emulation.setDeviceMetricsOverride', { width,height,deviceScaleFactor:1,mobile:true }, b);
-        await send('Emulation.setTouchEmulationEnabled', { enabled:true }, b);
+    for (const [width,height] of [[900,700], [800,600]]) {
+        await send('Emulation.setDeviceMetricsOverride', { width,height,deviceScaleFactor:1,mobile:false }, b);
         await viewportReady(b,width,height);
+        await hover('#callSignal');
+        const signal = await evaluate(b, signalBounds);
+        assert.ok(signal.canHover && signal.fits, `readout fits on hover at ${width}×${height}: ${JSON.stringify(signal)}`);
+        await screenshot(b, `live-call-signal-desktop-${width}`);
+        await hover('.workspace-brand');
+    }
+    for (const [width, height] of touchViewports) {
+        await setTouchViewport(b, width, height);
+        const touchSignal = await evaluate(b, signalBounds);
+        assert.equal(touchSignal.canHover, false);
+        assert.ok(touchSignal.fits, `touch stats fit without a tap at ${width}×${height}: ${JSON.stringify(touchSignal)}`);
+        assert.match(touchSignal.rtt, /^\d.* ms$/);
+        if (touchSignal.lossHidden) assert.equal(touchSignal.loss, '');
+        else assert.match(touchSignal.loss, /^\d.*%$/);
+        assert.match(touchSignal.micRate, /^\d.* kbps$/);
+        if (width === 390 || width === 844) await screenshot(b, `live-call-signal-touch-${width}`);
         await tap(b, '#callSignal');
-        assert.equal((await evaluate(b, signalBounds)).visible, false, 'touch does not open a click target');
+        assert.equal((await evaluate(b, signalBounds)).visible, true, 'the passive readout remains visible after tapping');
         assert.equal(await evaluate(b, `document.querySelector('#callDuration').getBoundingClientRect().width > 0`), true);
     }
     await send('Emulation.setDeviceMetricsOverride', { width:1920,height:1080,deviceScaleFactor:1,mobile:false }, b);
@@ -364,6 +450,7 @@ try {
     await viewportReady(b,1920,1080);
     await click(b, '#toggleAudio');
     await wait(() => evaluate(b, `document.querySelector('#toggleAudio').dataset.morphIcon==='mic-off' && Number(document.querySelector('#toggleAudio').dataset.micLevel)===0`), 'muted microphone icon has no volume fill');
+    await wait(() => evaluate(b, `!document.querySelector('.local-user-card.is-speaking, .channel-member.is-local.is-speaking, #local-video.is-speaking')`), 'muting clears the local speaking outlines');
     await click(b, '#toggleAudio');
     await wait(() => evaluate(b, `Number(document.querySelector('#toggleAudio').dataset.micLevel)>0`), 'unmuting resumes measured mic fill');
     await wait(() => evaluate(b, `document.querySelector('#member-cards > :not(#local-video) video')?.videoWidth > 0 && document.querySelector('#member-cards > :not(#local-video) video').srcObject.getAudioTracks().length === 1`), 'remote camera and voice reception');
@@ -720,7 +807,7 @@ try {
         mobilePolishChecks:['pause and resume original player','immersive auto-hide and touch reveal','fullscreen exit restores stage','native fullscreen with controlled landscape lock and unlock','rejected orientation lock preserves fullscreen and shows bounded hint','manual landscape hides hint and exit removes it','close request dismisses settings','actual decode and playback statistics','unread badge and read acknowledgement','share end notice','no extra media capture or negotiation'],
         diagnosticChecks:['compact export','checkpoint survives peer departure'], runtimeErrors:errors.length, failedResources:requests.length };
     report.sessionButtonContrast = { stageJoin: stageJoinContrast.ratio, dockJoin: dockJoinContrast.ratio, dockLeave: dockLeaveContrast.ratio };
-    report.liveIndicatorChecks = ['actual WebRTC stats render latency, loss and mic send rate', 'read-only details appear on hover without accepting click or focus', 'mobile signal stays passive with the timer in bounds', 'fake microphone RMS fills the real SVG icon', 'mute clears fill and unmute resumes live measurement'];
+    report.liveIndicatorChecks = ['actual WebRTC stats render latency, loss and mic send rate', 'read-only details fit on hover at 1920, 900 and 800 CSS pixels', 'mobile measured stats preserve the dock and member stage height', 'solo calls show no empty rows', 'fake microphone RMS fills the real SVG icon', 'mute clears fill and unmute resumes live measurement'];
     report.dockJoinLayout = pendingDock;
     report.syntheticMicrophoneSendRate = desktopSignal.micRate;
     report.noiseDefaultChecks = ['fresh settings select RNNoise', 'no microphone capture or model download before joining', 'first join runs the actual RNNoise worklet', 'explicit browser mode remains selectable'];

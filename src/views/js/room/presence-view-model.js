@@ -83,7 +83,7 @@
 
     const buildParticipantViewModel = (
         member = {},
-        { isLocal = false, roomName = '', tileToggle } = {}
+        { isLocal = false, isSpeaking = false, roomName = '', tileToggle } = {}
     ) => {
         const micStatus = getMemberMicStatus(member);
 
@@ -93,8 +93,9 @@
             isLocal,
             isMuted: micStatus.key === 'muted',
             isScreenSharing: Boolean(member.screenSharing),
-            isSpeaking: micStatus.key === 'speaking',
+            isSpeaking: isSpeaking && micStatus.key === 'speaking',
             name: `${member.senderName || 'Guest'}${isLocal ? '（我）' : ''}`,
+            peerId: member.peerId,
             roomId: member.roomId,
             roomName,
             statusText: getMemberTileText(member),

@@ -1,3 +1,7 @@
+:root {
+    --voice-speaking: #21865b;
+}
+
 body {
     margin: 0;
     padding: 0;

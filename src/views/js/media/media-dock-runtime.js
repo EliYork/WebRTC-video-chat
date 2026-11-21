@@ -15,7 +15,7 @@
         mode: 'game',
     });
     const DEVICE_TYPES = Object.freeze(['mic', 'camera', 'output']);
-    const DEVICE_HOVER_CLOSE_MS = 500;
+    const DEVICE_HOVER_CLOSE_MS = 300;
     const DEVICE_LONG_PRESS_MS = 500;
     const REQUIRED_REFS = Object.freeze({
         callDuration: '#callDuration',
@@ -426,16 +426,26 @@
                 signal.dataset.quality = quality.status || 'unknown';
                 signal.dataset.bars = String(quality.bars ?? 0);
                 const detail = quality.detail || '通话质量尚未测量';
-                const format = (value, unit) =>
-                    Number.isFinite(value) ? `${Math.round(value * 10) / 10}${unit}` : '—';
-                const hasMicRate = Number.isFinite(quality.micKbps);
+                const format = (value, unit) => Number.isFinite(value) ? `${Math.round(value * 10) / 10}${unit}` : '';
                 const micRate = format(quality.micKbps, ' kbps');
-                const micRow = root.querySelector('[data-call-mic-row]');
-                if (micRow) micRow.hidden = !hasMicRate;
-                setText(root.querySelector('[data-call-rtt]'), format(quality.rttMs, ' ms'));
-                setText(root.querySelector('[data-call-loss]'), format(quality.lossPercent, '%'));
-                setText(root.querySelector('[data-call-mic-rate]'), micRate);
-                signal.setAttribute('aria-label', hasMicRate ? `${detail} · 麦克风发送 ${micRate}` : detail);
+                const readout = root.querySelector('#callSignalDetail');
+                if (readout) {
+                    const metrics = [
+                        ['rtt', format(quality.rttMs, ' ms')],
+                        ['loss', format(quality.lossPercent, '%')],
+                        ['mic-rate', micRate],
+                    ];
+                    let hasVisibleMetric = false;
+                    for (const [name, value] of metrics) {
+                        const field = readout.querySelector(`[data-call-${name}]`);
+                        if (!field?.parentElement) continue;
+                        field.parentElement.hidden = !value;
+                        setText(field, value);
+                        hasVisibleMetric ||= Boolean(value);
+                    }
+                    readout.hidden = !hasVisibleMetric;
+                }
+                signal.setAttribute('aria-label', micRate ? `${detail} · 麦克风发送 ${micRate}` : detail);
             }
             renderToggleButton({
                 button: refs.micButton,

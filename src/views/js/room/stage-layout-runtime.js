@@ -361,7 +361,7 @@
             syncViewport();
         };
         return {
-            init, sync, focusShare, setChatOpen, setChannelsOpen, setSpeaking,
+            init, sync, focusShare, setChatOpen, setChannelsOpen, setSpeaking, showStage,
             syncViewport,
             notifyChatMessage, resetUnread, resetChatRoom, setChatConnection,
             snapshot: () => ({ mode: activeShares.length ? 'sharing' : 'voice', selectedId, chatOpen, channelsOpen, unread, shareIds: activeShares.map((tile) => tile.id) }),

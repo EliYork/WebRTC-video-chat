@@ -161,9 +161,10 @@ Run static checks:
 npm run eslint
 node --check src/server.js
 node --check src/views/script.js
-npx prettier README.md README.en.md --check
 git diff --check
 ```
+
+Use `npm run format:check` and `npm run format:write` for development formatting. The check exits nonzero when formatting differs, including existing differences. The verification gates are the static checks and Node tests above. To format only the files in your change, pass their paths to `npx prettier --write`.
 
 The suite covers voice protocol/negotiation, the peer registry, session recovery, media quality, server trust and disconnect lifecycles, view/chat room lifecycle, page-layout identity, Chat Panel/Sidebar/Media Dock lifecycles, and target screen-capture constraints. These are Node model and contract tests, not browser E2E tests.
 

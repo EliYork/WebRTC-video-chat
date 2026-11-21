@@ -92,6 +92,7 @@
 .call-signal-slot { position: relative; flex: 0 0 auto; }
 .call-signal svg { display: block; width: 24px; height: 20px; }
 .call-signal rect { fill: #cfd0d5; }
+#main[data-voice-state='joined'] .call-signal[data-quality='unknown'] rect { fill: none; stroke: var(--muted); stroke-width: 1; }
 #buttons .call-signal[data-quality='good'] { color: #2eac76; }
 #buttons .call-signal[data-quality='fair'] { color: #bf8b24; }
 #buttons .call-signal:is([data-quality='poor'], [data-quality='disconnected']) { color: #c45b68; }
@@ -139,9 +140,49 @@
 .call-signal-detail > span:not([hidden]) { display: flex; justify-content: space-between; gap: 12px; }
 .call-signal-detail b { font-weight: 650; font-variant-numeric: tabular-nums; }
 @media (hover: hover) {
-    .call-signal:hover + .call-signal-detail { display: grid; }
+    .call-signal:hover + .call-signal-detail:not([hidden]) { display: grid; }
+}
+@media (hover: none) {
+    .media-dock-header { --call-signal-line-height: 1.2rem; }
+    .call-signal-slot {
+        display: flex;
+        align-items: center;
+    }
+    #main[data-voice-state='joined'] .call-signal-slot {
+        min-block-size: calc(2 * var(--call-signal-line-height));
+    }
+    #main[data-voice-state='joined'] .call-signal-detail:not([hidden]) {
+        display: grid;
+        position: static;
+        grid-template-columns: auto auto;
+        grid-template-rows: repeat(2, var(--call-signal-line-height));
+        line-height: var(--call-signal-line-height);
+        gap: 0 8px;
+        padding: 0;
+        border: 0;
+        background: none;
+        box-shadow: none;
+        color: var(--text);
+    }
+    .call-signal-detail::after { content: none; }
+    .call-signal-detail > span:not([hidden]) { justify-content: start; gap: 4px; }
+    .call-signal-detail > [data-call-mic-row] { grid-row: 2; grid-column: 1 / -1; }
+}
+@media (hover: none) and (max-width: 360px) {
+    #main[data-voice-state='joined'] .stage-dock .media-dock-header {
+        position: relative;
+        padding-bottom: var(--call-signal-line-height);
+    }
+    #main[data-voice-state='joined'] .stage-dock .call-signal-slot { position: static; min-block-size: 0; }
+    #main[data-voice-state='joined'] .stage-dock .call-signal-detail:not([hidden]) {
+        display: flex;
+        position: absolute;
+        right: 0;
+        bottom: 0;
+    }
 }
 @media (prefers-reduced-motion: no-preference) { .mic-level-fill { transition: y 50ms linear, height 50ms linear; } }
+#buttons #toggleAudio[data-morph-icon='mic'][data-mic-level]:not([data-mic-level='0']) .morph-icon { color: var(--voice-speaking); }
 
 .media-dock-activity-row {
     position: relative;

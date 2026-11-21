@@ -586,7 +586,7 @@ test('double click emits one high-level voice request without changing the viewe
 test('presence creates safe member rows, correct counts, and mic/camera/screen states', () => {
     const fixture = createRuntimeFixture();
     fixture.runtime.init();
-    fixture.transport.emitPresence({
+    const presence = {
         channels: [
             {
                 slug: 'lobby',
@@ -610,13 +610,15 @@ test('presence creates safe member rows, correct counts, and mic/camera/screen s
                 ],
             },
         ],
-    });
+    };
+    fixture.transport.emitPresence(presence);
 
     const rows = getMemberRows(fixture, 'lobby');
     assert.equal(rows.length, 2);
     assert.equal(fixture.refs.get('lobby').count.textContent, '2');
     assert.equal(rows[0].classList.contains('is-local'), true);
-    assert.equal(rows[0].classList.contains('is-speaking'), true);
+    assert.equal(rows[0].classList.contains('is-speaking'), false, 'an open mic alone does not show a speaking ring');
+    assert.ok(rows[0].querySelector('.channel-member-avatar'));
     assert.equal(rows[0].classList.contains('is-screen-sharing'), true);
     const name = rows[0].querySelector('.channel-member-name');
     assert.equal(name.textContent, '<img src=x onerror=alert(1)>（我）');
@@ -627,6 +629,17 @@ test('presence creates safe member rows, correct counts, and mic/camera/screen s
         fixture.refs.get('lobby').channel.classList.contains('has-members'),
         true
     );
+    fixture.runtime.setVoiceRoom('lobby');
+    fixture.runtime.setSpeaking('local-peer', true);
+    assert.equal(rows[0].classList.contains('is-speaking'), true);
+    assert.equal(rows[1].classList.contains('is-speaking'), false);
+    presence.channels[0].members[1].senderName = 'Guest Updated';
+    fixture.transport.emitPresence(presence);
+    const updatedRows = getMemberRows(fixture, 'lobby');
+    assert.notEqual(updatedRows[0], rows[0]);
+    assert.equal(updatedRows[0].classList.contains('is-speaking'), true);
+    fixture.runtime.setVoiceRoom('');
+    assert.equal(updatedRows[0].classList.contains('is-speaking'), false);
 });
 
 test('duplicate and reconnect presence snapshots are idempotent without duplicate rows', () => {

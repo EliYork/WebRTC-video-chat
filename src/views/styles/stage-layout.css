@@ -326,8 +326,7 @@ html[data-desktop-chrome] .workspace-download { display: none; }
     .stage-layout[data-stage-mode='sharing'] #member-cards { flex-direction: column; overflow-y: auto; overflow-x: hidden; }
     .stage-layout[data-stage-mode='sharing'] #member-cards .member-card { flex: 0 0 90px; width: 100%; max-width: none; }
     .stage-layout[data-stage-mode='sharing'] #member-cards .member-volume-button { min-height: 32px; }
-    .stage-dock #buttons.media-dock { grid-template-columns: minmax(0, 1fr) 150px; grid-template-areas: 'controls session' 'status status'; gap: 8px; }
-    #main[data-voice-state='joined'] .stage-dock #buttons.media-dock { grid-template-columns: minmax(0, 1fr) auto 150px; grid-template-areas: 'controls quality session' 'status status status'; }
+    .stage-dock #buttons.media-dock { grid-template-columns: minmax(0, 1fr) 150px; grid-template-areas: 'user user' 'controls session' 'status status'; gap: 8px; }
     .stage-layout .stage-sidebar-column, #main.stage-layout[data-mobile-panel='channels'] .stage-dock { width: min(620px, calc(100% - 16px)); }
     .stage-dock #buttons .media-dock-activity-row { grid-template-columns: 36px minmax(0, 1fr); }
     .stage-dock #buttons :is(#copyRoomLink, #destroyPeer) { height: 48px; min-height: 48px; }

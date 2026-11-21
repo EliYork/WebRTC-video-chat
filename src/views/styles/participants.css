@@ -43,6 +43,10 @@
 .voice-placeholder-avatar { display: grid; place-items: center; width: clamp(42px, 4vw, 64px); height: clamp(42px, 4vw, 64px); border-radius: 50%; background: var(--accent-soft); color: var(--accent-strong); font-size: 22px; font-weight: 650; }
 .voice-placeholder-title { display: none; }
 .voice-placeholder-status { font-size: 11px; }
-.member-card.is-speaking, .video-tile.is-speaking { border-color: #39a578; box-shadow: inset 0 0 0 2px #39a578; }
+.member-card.is-speaking, .video-tile.is-speaking { border-color: var(--voice-speaking); }
 .member-card.is-speaking .tile-avatar { background: #d3f3e3; color: #246b4c; }
+.is-speaking :is(.channel-member-avatar, .local-avatar, .tile-avatar, .voice-placeholder-avatar) {
+    outline: 2px solid var(--voice-speaking);
+    outline-offset: 1px;
+}
 .member-volume-button, .member-watch-button { min-height: 32px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-warm); color: var(--text); cursor: pointer; font-size: 11px; }

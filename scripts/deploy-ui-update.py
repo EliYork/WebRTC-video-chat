@@ -30,6 +30,11 @@ for name in plan['files']:
         'integrations/piik/.build/client.js',
         'integrations/piik/.build/third-party-web.txt',
     }, name
+    if plan['files'][name]['new'] is None:
+        assert plan['files'][name]['old'] is not None, name
+
+written_files = {name for name, hashes in plan['files'].items() if hashes['new'] is not None}
+removed_files = set(plan['files']) - written_files
 
 
 def sha(path):
@@ -59,6 +64,16 @@ def replace(source, destination):
     shutil.copy2(source, temporary)
     temporary.chmod(0o644)
     os.replace(temporary, destination)
+
+
+def apply_release(destination):
+    for name in written_files:
+        staged = backup / 'after' / name
+        assert sha(staged) == plan['files'][name]['new'], 'Invalid staged hash: ' + name
+        replace(staged, destination / name)
+    for name in removed_files:
+        (destination / name).unlink()
+    replace(backup / 'after' / 'voice-build-manifest.json', destination / 'voice-build-manifest.json')
 
 
 def health(base, revision):
@@ -111,8 +126,8 @@ if mode == 'prepare':
     after = backup / 'after'
     after.mkdir()
     with tarfile.open(backup / 'patch.tar.gz') as archive:
-        assert len(archive.getmembers()) == len(plan['files'])
-        assert set(archive.getnames()) == set(plan['files'])
+        assert len(archive.getmembers()) == len(written_files)
+        assert set(archive.getnames()) == written_files
         for member in archive.getmembers():
             assert member.isfile()
             content = archive.extractfile(member).read()
@@ -152,8 +167,10 @@ if mode == 'prepare':
     (backup / 'snapshot.json').write_text(json.dumps(snapshot, indent=2))
     (backup / 'rollback.sh').write_text(f'#!/bin/sh\nset -eu\nexec python3 "{backup}/deploy.py" rollback "{backup}"\n')
     (backup / 'rollback.sh').chmod(0o700)
+    files = {name: digest for name, digest in old_manifest['files'].items() if name not in removed_files}
+    files.update({name: plan['files'][name]['new'] for name in written_files})
     manifest = {**old_manifest, 'revision': plan['revision'], 'frontendRevision': plan['revision'],
-                'deployedAt': time.time(), 'files': {**old_manifest['files'], **{p:v['new'] for p,v in plan['files'].items()}}}
+                'deployedAt': time.time(), 'files': files}
     (after / 'voice-build-manifest.json').write_text(json.dumps(manifest, indent=2))
     candidate = backup / 'candidate'
     candidate.mkdir()
@@ -162,8 +179,7 @@ if mode == 'prepare':
     for name in ['package.json', 'package-lock.json', '.env']:
         shutil.copy2(ROOT / name, candidate / name)
     (candidate / 'node_modules').symlink_to(ROOT / 'node_modules', target_is_directory=True)
-    for name in [*plan['files'], 'voice-build-manifest.json']:
-        replace(after / name, candidate / name)
+    apply_release(candidate)
     child_env = {**os.environ, **{k:v for k,v in current['pm2_env'].items() if isinstance(v, str)},
                  'PORT': '17888', 'HOST': '127.0.0.1', 'USE_HTTPS': 'false',
                  'VOICE_BUILD_ID': plan['revision'], 'CHAT_HISTORY_FILE': str(backup / 'candidate-chat.json')}
@@ -194,9 +210,7 @@ elif mode == 'activate':
     started = time.time()
     try:
         run('pm2', 'stop', 'voice-room')
-        for name in [*plan['files'], 'voice-build-manifest.json']:
-            if name in plan['files']: assert sha(backup / 'after' / name) == plan['files'][name]['new']
-            replace(backup / 'after' / name, ROOT / name)
+        apply_release(ROOT)
         result = restart(plan['revision'])
         local_seconds = round(time.time() - started, 2)
         public = health('https://voice.eliyork.com', plan['revision'])

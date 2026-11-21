@@ -80,6 +80,7 @@
         let roomRevision = 0;
         let presenceSignature = '';
         let presenceSnapshot = { channels: [] };
+        const speakingPeers = new Set();
         let roomRefs = new Map();
         let channelElements = [];
         const memberCounts = new Map();
@@ -158,6 +159,16 @@
             return true;
         };
 
+        const setSpeaking = (peerId, active) => {
+            const members = roomRefs.get(voiceRoomId)?.members;
+            if (!isActive() || !members || !peerId) return;
+            if (active) speakingPeers.add(peerId);
+            else speakingPeers.delete(peerId);
+            for (const row of members.querySelectorAll('.channel-member')) {
+                if (row.dataset.peerId === peerId) row.classList.toggle('is-speaking', Boolean(active));
+            }
+        };
+
         const setVoiceRoom = (roomId = '', { targetRoomId = '' } = {}) => {
             if (
                 !isActive() ||
@@ -168,6 +179,9 @@
             }
             if (voiceRoomId === roomId && voiceTargetRoomId === targetRoomId) {
                 return false;
+            }
+            if (voiceRoomId !== roomId) {
+                for (const peerId of speakingPeers) setSpeaking(peerId, false);
             }
             voiceRoomId = roomId;
             voiceTargetRoomId = targetRoomId;
@@ -278,6 +292,7 @@
                 const participants = channel.members.map((member) =>
                     presenceViewModel.buildParticipantViewModel(member, {
                         isLocal: Boolean(isLocalMember(member)),
+                        isSpeaking: channel.slug === voiceRoomId && speakingPeers.has(member.peerId),
                         roomName: refs.name,
                         tileToggle: getMemberTileToggle(member),
                     })
@@ -474,6 +489,7 @@
             root.removeEventListener('click', handleClick);
             root.removeEventListener('dblclick', handleDoubleClick);
             subscriptions.splice(0).forEach((unsubscribe) => unsubscribe?.());
+            speakingPeers.clear();
             clearMemberDom();
             return true;
         };
@@ -490,6 +506,7 @@
             init,
             renderPresence,
             setConnectionState,
+            setSpeaking,
             setViewingRoom,
             setVoiceRoom,
         };

@@ -93,6 +93,24 @@ test('idle, single person, failed stats, disconnect, reconnect and offline never
     assert.equal(runtime.snapshot({ state: 'joined', online: false }).status, 'disconnected');
 });
 
+test('complementary partial links cannot combine into a good signal', () => {
+    const runtime = createRuntime();
+    const latencyOnly = { state: 'connected', rttMs: 20 };
+    const lossOnly = { state: 'connected', lossPercent: 0 };
+
+    runtime.accept([latencyOnly, lossOnly]);
+    const partial = runtime.snapshot({ state: 'joined' });
+    assert.equal(partial.rttMs, 20);
+    assert.equal(partial.lossPercent, 0);
+    assert.equal(partial.bars, 3);
+    assert.equal(partial.status, 'fair');
+
+    runtime.accept([latencyOnly, { ...lossOnly, rttMs: 20 }]);
+    assert.equal(runtime.snapshot({ state: 'joined' }).bars, 3);
+    runtime.accept([latencyOnly, { ...lossOnly, rttMs: 650 }]);
+    assert.equal(runtime.snapshot({ state: 'joined' }).bars, 1);
+});
+
 test('stale samples, a failed member sample and new sessions cannot inherit a green signal', () => {
     let time = 1000; const runtime = createRuntime({ now: () => time });
     runtime.accept([{ state: 'connected', rttMs: 20, lossPercent: 0 }]);

@@ -12,7 +12,7 @@ const port = '39125';
 const origin = `http://127.0.0.1:${port}`;
 const app = spawn(process.execPath, [resolve('src/server.js')], {
     cwd: evidence, windowsHide: true,
-    env: { ...process.env, PORT: port, USE_HTTPS: 'false', ENV: 'production', SFU_ENABLED: 'false', CHAT_HISTORY_FILE: join(evidence, 'history.json') },
+    env: { ...process.env, HOST: '127.0.0.1', PORT: port, USE_HTTPS: 'false', ENV: 'production', SFU_ENABLED: 'false', CHAT_HISTORY_FILE: join(evidence, 'history.json') },
 });
 let output = '';
 app.stdout.on('data', (data) => { output += data; });
@@ -25,7 +25,9 @@ const tile = '[data-page-layout-type="mediaControlsPanel"]';
 const dialog = '[data-device-popover="screen"]';
 try {
     for (let i = 0; i < 100; i++) {
-        try { if ((await fetch(origin)).ok) break; } catch {}
+        try { if ((await fetch(origin)).ok) break; } catch {
+            // The local server may still be starting.
+        }
         if (app.exitCode !== null) throw new Error(output);
         await new Promise((done) => setTimeout(done, 100));
     }
@@ -78,7 +80,7 @@ try {
     await page.waitForTimeout(300);
     const resized = await page.locator(tile).boundingBox();
     assert.ok(resized.width > moved.width + 50, 'real border resizing changes width');
-    assert.equal(await page.evaluate(() => originalDock === document.getElementById('buttons')), true);
+    assert.equal(await page.evaluate(() => window.originalDock === document.getElementById('buttons')), true);
     await page.waitForTimeout(800);
     await page.reload();
     await ready(page);
@@ -89,7 +91,7 @@ try {
     await page.addInitScript(() => {
         window.captureRequests = [];
         navigator.mediaDevices.getDisplayMedia = async (options) => {
-            captureRequests.push({ options, active: navigator.userActivation.isActive });
+            window.captureRequests.push({ options, active: navigator.userActivation.isActive });
             throw new DOMException('Test selection cancelled', 'NotAllowedError');
         };
     });
@@ -100,7 +102,7 @@ try {
     await page.waitForFunction(() => !document.getElementById('shareScreen').disabled);
     await page.locator('#shareScreen').click();
     assert.equal(await page.locator(dialog).evaluate((element) => element.matches(':modal')), true);
-    assert.equal(await page.evaluate(() => captureRequests.length), 0);
+    assert.equal(await page.evaluate(() => window.captureRequests.length), 0);
     await page.locator('[data-screen-share-resolution]').selectOption('1440p');
     await page.locator('[data-screen-share-frame-rate]').selectOption('60');
     await page.mouse.move(1, 1);
@@ -111,7 +113,7 @@ try {
         const button = document.createElement('button');
         button.id = 'test-under-modal';
         button.style.cssText = 'position:fixed;inset:0;width:100vw;height:100vh;z-index:2147483647';
-        button.onclick = () => { underClicks++; };
+        button.onclick = () => { window.underClicks++; };
         document.body.append(button);
     });
     const modalBox = await page.locator(dialog).boundingBox();
@@ -119,21 +121,21 @@ try {
     await page.keyboard.press('Tab');
     assert.equal(await page.locator(dialog).evaluate((element) => element.contains(document.activeElement)), true);
     await page.mouse.click(10, 10);
-    assert.equal(await page.evaluate(() => underClicks), 0, 'backdrop never clicks through');
+    assert.equal(await page.evaluate(() => window.underClicks), 0, 'backdrop never clicks through');
     assert.equal(await page.locator(dialog).isVisible(), false);
     await page.evaluate(() => document.getElementById('test-under-modal').remove());
     await page.locator('#shareScreen').click();
     await page.screenshot({ path: join(evidence, 'share-dialog.png') });
     await page.locator('[data-screen-share-start]').click();
-    await page.waitForFunction(() => captureRequests.length === 1);
-    const capture = await page.evaluate(() => captureRequests[0]);
+    await page.waitForFunction(() => window.captureRequests.length === 1);
+    const capture = await page.evaluate(() => window.captureRequests[0]);
     assert.equal(capture.active, true, 'start keeps transient browser user activation');
     assert.equal(capture.options.video.width.ideal, 2560);
     assert.equal(capture.options.video.frameRate.ideal, 60);
     await page.waitForFunction(() => !document.getElementById('shareScreen').disabled);
     await page.locator('#shareScreen').click();
     await page.locator('[data-screen-share-cancel]').click();
-    assert.equal(await page.evaluate(() => captureRequests.length), 1);
+    assert.equal(await page.evaluate(() => window.captureRequests.length), 1);
     await page.locator('#shareScreen').click();
     await page.keyboard.press('Escape');
     assert.equal(await page.locator(dialog).isVisible(), false);
@@ -189,13 +191,13 @@ try {
         window.underClicks = 0;
         const button = document.createElement('button');
         button.style.cssText = 'position:fixed;left:0;top:0;width:40px;height:40px;z-index:20000';
-        button.onclick = () => { underClicks++; };
+        button.onclick = () => { window.underClicks++; };
         document.body.append(button);
     });
     await legacy.keyboard.press('Shift+Tab');
     assert.equal(await legacy.locator(dialog).evaluate((element) => element.contains(document.activeElement)), true);
     await legacy.mouse.click(10, 10);
-    assert.equal(await legacy.evaluate(() => underClicks), 0);
+    assert.equal(await legacy.evaluate(() => window.underClicks), 0);
     assert.equal(await legacy.locator(dialog).evaluate((element) => document.getElementById('buttons').contains(element)), true);
     await legacy.locator('[data-control-menu="mic"]').click();
     assert.equal(await legacy.locator('[data-device-popover="mic"]').evaluate((element) => element.parentNode === document.body), true);

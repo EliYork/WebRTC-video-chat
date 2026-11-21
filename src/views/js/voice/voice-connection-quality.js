@@ -62,9 +62,10 @@
                     jitterMs: worst(entries.map(entry => entry.jitterMs)),
                 };
                 const sample = { ...metrics, micKbps: worst(entries.map(entry => entry.micKbps)) };
-                const bars = grade(metrics);
-                if (bars === null || entries.some(entry => grade(entry) === null))
+                const linkGrades = entries.map(grade);
+                if (linkGrades.includes(null))
                     return { ...result('unknown', '通话统计不完整，尚未确认质量'), ...sample };
+                const bars = Math.min(...linkGrades);
                 const label = ['连接较差', '连接一般', '连接尚可', '连接良好', '连接优秀'][bars - 1];
                 const number = (value, unit) => valid(value) ? `${Math.round(value * 10) / 10}${unit}` : '未提供';
                 return {

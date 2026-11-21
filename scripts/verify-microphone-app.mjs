@@ -13,7 +13,7 @@ const port = '39019';
 const publicUrl = process.env.MIC_TEST_URL;
 const app = publicUrl ? undefined : spawn(process.execPath, [resolve('src/server.js')], {
     cwd: evidence,
-    env: { ...process.env, PORT: port, USE_HTTPS: 'false', ENV: 'production', SFU_ENABLED: 'false', CHAT_HISTORY_FILE: join(evidence, 'history.json') },
+    env: { ...process.env, HOST: '127.0.0.1', PORT: port, USE_HTTPS: 'false', ENV: 'production', SFU_ENABLED: 'false', CHAT_HISTORY_FILE: join(evidence, 'history.json') },
     windowsHide: true,
 });
 let output = '';
@@ -24,7 +24,7 @@ const pages = [];
 const errors = [];
 const gain = (page) => page.locator('#micGainSlider').inputValue();
 const liveAudio = (page) => page.evaluate(async () => {
-    for (const pc of testConnections.filter((value) => value.connectionState === 'connected')) {
+    for (const pc of window.testConnections.filter((value) => value.connectionState === 'connected')) {
         for (const row of (await pc.getStats()).values()) {
             if (row.type === 'inbound-rtp' && row.kind === 'audio' && Number.isFinite(row.totalAudioEnergy)) {
                 return { id: row.id, energy: row.totalAudioEnergy, duration: row.totalSamplesDuration, level: row.audioLevel };
@@ -34,7 +34,7 @@ const liveAudio = (page) => page.evaluate(async () => {
 });
 const audible = async (page) => {
     await page.waitForFunction(async () => {
-        for (const pc of testConnections.filter((value) => value.connectionState === 'connected')) {
+        for (const pc of window.testConnections.filter((value) => value.connectionState === 'connected')) {
             for (const row of (await pc.getStats()).values()) {
                 if (row.type === 'inbound-rtp' && row.kind === 'audio' && row.audioLevel > 0.05) return true;
             }
@@ -50,7 +50,9 @@ const audible = async (page) => {
 };
 try {
     for (let i = 0; !publicUrl && i < 100; i++) {
-        try { if ((await fetch(`http://127.0.0.1:${port}/`)).ok) break; } catch {}
+        try { if ((await fetch(`http://127.0.0.1:${port}/`)).ok) break; } catch {
+            // The local server may still be starting.
+        }
         if (app.exitCode !== null) throw new Error(output);
         await new Promise((done) => setTimeout(done, 100));
     }
@@ -64,13 +66,13 @@ try {
             window.testContexts = [];
             const RTC = window.RTCPeerConnection;
             window.RTCPeerConnection = class extends RTC {
-                constructor(...args) { super(...args); testConnections.push(this); }
+                constructor(...args) { super(...args); window.testConnections.push(this); }
             };
             const Context = window.AudioContext;
             window.AudioContext = class extends Context {
                 constructor(...args) {
                     super(...args);
-                    testContexts.push(this);
+                    window.testContexts.push(this);
                     // Model a browser that requires resume, and a broken context.
                     if (window.testBlockProcessing) {
                         Object.defineProperty(this, 'state', { get: () => 'suspended' });
@@ -87,7 +89,7 @@ try {
             navigator.mediaDevices.getUserMedia = async (constraints) => {
                 if (!constraints.audio) throw new Error('only audio requested in this test');
                 const deviceId = constraints.audio.deviceId?.exact || 'default';
-                testRequests.push(deviceId);
+                window.testRequests.push(deviceId);
                 const context = new Context();
                 const oscillator = context.createOscillator();
                 oscillator.frequency.value = deviceId === 'mic-b' ? 880 : 440;
@@ -120,7 +122,7 @@ try {
     await pages[0].waitForFunction(() => document.getElementById('toggleAudio').getAttribute('aria-pressed') === 'false');
     await pages[0].locator('[data-device-control="mic"]').hover();
     await pages[0].locator('[data-device-type="mic"][data-device-id="mic-b"]').click();
-    await pages[0].waitForFunction(() => testRequests.at(-1) === 'mic-b');
+    await pages[0].waitForFunction(() => window.testRequests.at(-1) === 'mic-b');
     await pages[0].waitForTimeout(500);
     assert.equal(await pages[0].locator('#toggleAudio').getAttribute('aria-pressed'), 'false');
     await pages[0].locator('#toggleAudio').click();
@@ -130,9 +132,9 @@ try {
     await pages[0].evaluate(() => { window.testBlockProcessing = true; });
     await pages[0].locator('[data-device-control="mic"]').hover();
     await pages[0].locator('[data-device-type="mic"][data-device-id="default"]').click();
-    await pages[0].waitForFunction(() => testRequests.at(-1) === 'default');
+    await pages[0].waitForFunction(() => window.testRequests.at(-1) === 'default');
     await audible(pages[1]);
-    await pages[0].evaluate(() => VoiceDeviceRuntime && navigator.mediaDevices.dispatchEvent(new Event('devicechange')));
+    await pages[0].evaluate(() => window.VoiceDeviceRuntime && navigator.mediaDevices.dispatchEvent(new Event('devicechange')));
     await pages[0].waitForTimeout(400);
     assert.equal(await pages[0].locator('[data-device-type="mic"][data-device-id="default"]').getAttribute('aria-pressed'), 'true');
     assert.deepEqual(errors, []);

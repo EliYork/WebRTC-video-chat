@@ -2,6 +2,7 @@ import { createMorph } from '/vendor/morphicons/morphicons-dom.min.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const MORPH_SPRING = Object.freeze({ stiffness: 600, damping: 46 });
+const MIC_CAPSULE = Object.freeze({ x: 8, y: 2.5, width: 8, height: 12, rx: 4 });
 
 // Small, project-owned 24px stroke icon set. Keeping the endpoints on one
 // coordinate grid gives Morphicons stable interpolation without another icon
@@ -39,14 +40,14 @@ const ICONS = Object.freeze({
         ],
     ],
     mic: [
-        ['rect', { x: 9, y: 3, width: 6, height: 11, rx: 3 }],
+        ['rect', MIC_CAPSULE],
         ['path', { d: 'M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M9 21h6' }],
     ],
     'mic-off': [
         [
             'path',
             {
-                d: 'M9 9V6a3 3 0 0 1 5.7-1.3M15 10.5V11a3 3 0 0 1-.2 1.1M5.5 11a6.5 6.5 0 0 0 10.8 4.9M18.5 11a6.4 6.4 0 0 1-.7 2.9M12 17.5V21M9 21h6',
+                d: 'M8 8V6.5a4 4 0 0 1 6.9-2.75M16 11v.5a4 4 0 0 1-.25 1.4M5.5 11a6.5 6.5 0 0 0 10.8 4.9M18.5 11a6.4 6.4 0 0 1-.7 2.9M12 17.5V21M9 21h6',
             },
         ],
         ['line', { x1: 4, y1: 4, x2: 20, y2: 20 }],
@@ -114,17 +115,20 @@ const syncMicLevel = (button, value) => {
         const fill = document.createElementNS(SVG_NS, 'rect');
         clip.id = `voice-mic-meter-${++meterId}`;
         clip.setAttribute('clipPathUnits', 'userSpaceOnUse');
-        for (const [key, val] of Object.entries({ x: 9, y: 3, width: 6, height: 11, rx: 3 })) shape.setAttribute(key, val);
+        for (const [key, val] of Object.entries(MIC_CAPSULE)) shape.setAttribute(key, val);
         clip.append(shape); defs.append(clip);
         fill.classList.add('mic-level-fill');
-        fill.setAttribute('x', '9'); fill.setAttribute('width', '6');
-        fill.setAttribute('stroke', 'none'); fill.setAttribute('fill', '#2eac76');
+        fill.setAttribute('x', MIC_CAPSULE.x);
+        fill.setAttribute('width', MIC_CAPSULE.width);
+        fill.setAttribute('stroke', 'none');
+        fill.setAttribute('fill', 'var(--voice-speaking, #21865b)');
         fill.setAttribute('clip-path', `url(#${clip.id})`);
         instance.svg.prepend(defs, fill);
         instance.meter = fill;
     }
-    instance.meter.setAttribute('y', String(14 - level * 11));
-    instance.meter.setAttribute('height', String(level * 11));
+    const height = level * MIC_CAPSULE.height;
+    instance.meter.setAttribute('y', String(MIC_CAPSULE.y + MIC_CAPSULE.height - height));
+    instance.meter.setAttribute('height', String(height));
     button.dataset.micLevel = String(Math.round(level * 100));
     return true;
 };

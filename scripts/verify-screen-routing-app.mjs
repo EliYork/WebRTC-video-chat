@@ -10,19 +10,22 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const evidence = mkdtempSync(join(tmpdir(), 'webrtc-screen-sfu-'));
 mkdirSync(join(evidence, 'logs'));
 const port = process.env.SFU_APP_TEST_PORT || '39013';
+const sfuPort = Number(process.env.SFU_TEST_PORT || '44448');
 const priority = process.argv.includes('--priority');
 const expectedServerViewers = priority ? 1 : 4;
 const app = spawn(process.execPath, [resolve('src/server.js')], {
     cwd: evidence,
     env: {
         ...process.env,
+        HOST: '127.0.0.1',
         PORT: port,
         USE_HTTPS: 'false',
         ENV: 'production',
+        SCREEN_MEDIA_PROVIDER: 'legacy',
         SFU_ENABLED: 'true',
         SFU_ANNOUNCED_ADDRESS: '127.0.0.1',
         SFU_LISTEN_IP: '127.0.0.1',
-        SFU_PORT: '44448',
+        SFU_PORT: String(sfuPort),
         ...(priority ? { SFU_PAYLOAD_MBPS: '7', SFU_VIDEO_MBPS: '6.5' } : {}),
         CHAT_HISTORY_FILE: join(evidence, 'history.json'),
     },
@@ -39,11 +42,83 @@ const errors = [];
 const warnings = [];
 let browser;
 const pages = [];
+const focusedShare = '#video-grid > .is-stage-focus';
+const routeDialog = '.voice-route-dialog[open]';
+const shareScreen = async (page) => {
+    await page.locator('#shareScreen').click();
+    await page.locator('[data-screen-share-codec]').selectOption('vp8');
+    await page.locator('[data-screen-share-start]').click();
+    await page.locator(`${focusedShare}#local-video video`).waitFor();
+};
+const openRouteDialog = async (page) => {
+    await page.locator(`${focusedShare} .voice-player-more`).click();
+    await page.getByRole('menuitem', { name: '连接方式…' }).click();
+    await page.locator(routeDialog).waitFor();
+};
+const closeRouteDialog = (page) => page.locator(`${routeDialog} .voice-route-close`).click();
+const waitForRoute = (page, route, mode) => page.waitForFunction(
+    ({ focusedShare, route, mode }) => {
+        const control = document.querySelector(`${focusedShare} .voice-route-toggle`);
+        return Boolean(control && (!route || control.title.includes(route)) && (!mode || control.title.endsWith(`· ${mode}`)));
+    },
+    { focusedShare, route, mode },
+    { timeout: 15000 }
+);
+const waitForVideoTransport = (page, useServer, { sustained = false } = {}) => page.waitForFunction(
+    async ({ focusedShare, useServer, sfuPort, sustained }) => {
+        const currentVideo = () => document.querySelector(`${focusedShare} video`);
+        const video = currentVideo();
+        const track = video?.srcObject?.getVideoTracks()[0];
+        if (!track || !video.videoWidth) return false;
+        for (const pc of window.testConnections) {
+            if (pc.connectionState !== 'connected' || !pc.getReceivers().some((receiver) => receiver.track === track)) continue;
+            const stats = await pc.getStats();
+            for (const row of stats.values()) {
+                if (row.type !== 'inbound-rtp' || row.kind !== 'video' || row.trackIdentifier !== track.id || !(row.framesPerSecond > (sustained ? 5 : 0))) continue;
+                const transport = stats.get(row.transportId);
+                const pair = stats.get(transport?.selectedCandidatePairId);
+                const remote = stats.get(pair?.remoteCandidateId);
+                if (!remote || (useServer !== undefined && (remote.port === sfuPort) !== useServer)) continue;
+                if (!sustained) return true;
+
+                await new Promise((resolveSample) => setTimeout(resolveSample, 1200));
+                const next = (await pc.getStats()).get(row.id);
+                const elapsed = (next?.timestamp - row.timestamp) / 1000;
+                return currentVideo() === video && video.srcObject?.getVideoTracks()[0] === track &&
+                    next?.trackIdentifier === track.id && next.framesPerSecond > 5 &&
+                    elapsed >= 1 && (next.framesDecoded - row.framesDecoded) / elapsed > 5;
+            }
+        }
+        return false;
+    },
+    { focusedShare, useServer, sfuPort, sustained },
+    { timeout: 15000 }
+);
+const verifyManualRoute = async (page, useServer) => {
+    const label = useServer ? '服务器转发' : 'P2P';
+    await openRouteDialog(page);
+    const dialog = page.locator(routeDialog);
+    await dialog.locator('.voice-route-auto input').uncheck();
+    const choice = dialog.getByRole('button', { name: useServer ? '服务器转发' : 'P2P（可能经过 TURN）', exact: true });
+    await choice.click();
+    await waitForRoute(page, label, '手动');
+    await closeRouteDialog(page);
+    await page.locator('#stageChatToggle').click();
+    await page.locator('#stageChatToggle').click();
+    await waitForRoute(page, label, '手动');
+    await waitForVideoTransport(page, useServer);
+    await openRouteDialog(page);
+    assert.equal(await choice.getAttribute('aria-pressed'), 'true');
+    assert.equal(await dialog.locator('.voice-route-auto input').isChecked(), false);
+    await closeRouteDialog(page);
+};
 try {
     for (let i = 0; i < 100; i++) {
         try {
             if ((await fetch(`http://127.0.0.1:${port}/`)).ok) break;
-        } catch {}
+        } catch {
+            // The local server may still be starting.
+        }
         if (app.exitCode !== null) throw new Error(output);
         await new Promise((resolveWait) => setTimeout(resolveWait, 100));
     }
@@ -58,6 +133,7 @@ try {
     });
     for (let i = 0; i < 5; i++) {
         const page = await browser.newPage();
+        pages.push(page);
         page.on('pageerror', (error) => errors.push(`${i}: ${error.message}`));
         page.on('console', (message) => {
             if (message.type() === 'warning' || message.type() === 'error')
@@ -108,11 +184,11 @@ try {
             };
         });
         await page.goto(`http://127.0.0.1:${port}/room/game`);
-        await page.waitForFunction(() => testSocket?.io?.engine?.transport?.name === 'websocket', null, { timeout: 10000 });
+        await page.waitForFunction(() => window.testSocket?.io?.engine?.transport?.name === 'websocket', null, { timeout: 10000 });
         await page.evaluate(() => {
             window.testSfuConsumers = [];
-            const create = ScreenSfuClient.Device.prototype.createRecvTransport;
-            ScreenSfuClient.Device.prototype.createRecvTransport = function (...args) {
+            const create = window.ScreenSfuClient.Device.prototype.createRecvTransport;
+            window.ScreenSfuClient.Device.prototype.createRecvTransport = function (...args) {
                 const transport = create.apply(this, args);
                 const consume = transport.consume.bind(transport);
                 transport.consume = async (...parameters) => {
@@ -123,15 +199,15 @@ try {
                 return transport;
             };
         });
-        await page.locator('#destroyPeer').click();
-        if (await page.locator('#voiceJoinConfirm').isVisible())
-            await page.locator('#voiceJoinConfirm').click();
-        await page.waitForFunction(
-            () => document.getElementById('shareScreen')?.disabled === false,
-            null,
-            { timeout: 20000 }
-        );
-        await page.locator('#toggleAudio').click();
+        await page.locator('[data-audio-noise-mode]').evaluate((select) => {
+            select.value = 'browser';
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+        await page.locator('#stageJoinVoice').click();
+        await page.locator('#main[data-voice-state="joined"]').waitFor();
+        await page.locator('#toggleAudio[aria-busy="false"]').waitFor();
+        const microphone = page.locator('#toggleAudio');
+        if ((await microphone.getAttribute('aria-pressed')) !== 'true') await microphone.click();
         await page.waitForFunction(
             () =>
                 document
@@ -140,21 +216,20 @@ try {
             null,
             { timeout: 10000 }
         );
-        pages.push(page);
     }
-    await pages[0].locator('#shareScreen').click();
-    await pages[0].locator('[data-screen-share-start]').click();
+    const [publisher, firstViewer, ...laterViewers] = pages;
+    const viewers = [firstViewer, ...laterViewers];
+    await shareScreen(publisher);
+    // The room starts in P2P-first mode. Use the actual player UI to request SFU.
+    await Promise.all(viewers.map(openRouteDialog));
+    await firstViewer.locator(`${routeDialog} .voice-route-auto input`).check();
+    await waitForRoute(firstViewer, '服务器转发', '自动');
+    await Promise.all(laterViewers.map((viewer) => viewer.locator(`${routeDialog} .voice-route-auto input`).check()));
+    await Promise.all(laterViewers.map((viewer) => waitForRoute(viewer, priority ? 'P2P' : '服务器转发', '自动')));
+    await Promise.all(viewers.map(closeRouteDialog));
     await pages[0].waitForFunction(
         (count) =>
-            document
-                .getElementById('screenStatusText')
-                .textContent.includes(`服务器转发 ${count} 人`),
-        expectedServerViewers,
-        { timeout: 25000 }
-    );
-    await pages[0].waitForFunction(
-        (count) =>
-            testConnections
+            window.testConnections
                 .filter((pc) => pc.connectionState === 'connected')
                 .flatMap((pc) => pc.getSenders())
                 .filter((sender) => sender.track?.kind === 'video').length ===
@@ -206,73 +281,66 @@ try {
             'game sound must retain separate volume control'
         );
     }
-    for (const page of pages.slice(1)) {
-        const panel = page.locator('.video-tile:not(#local-video) .share-diagnostics').first();
-        await panel.locator('summary').click();
-        await page.waitForFunction(() => {
-            const text = document.querySelector('.video-tile:not(#local-video) .share-diagnostics[open] pre')?.textContent;
-            try {
-                const data = JSON.parse(text);
-                return data.连接.some((connection) => connection.视频流.some((video) => video.方向 === '接收' && video.采样间隔_ms > 0));
-            } catch { return false; }
-        }, null, { timeout: 12000 });
-    }
-    console.log('PASS: viewer diagnostics remain open and retain interval statistics across SFU samples');
+    await Promise.all(viewers.map((viewer, index) => waitForVideoTransport(viewer, index < expectedServerViewers)));
     if (priority) {
-        const viaServer = await Promise.all(
-            pages.slice(1).map((page) =>
-                page.evaluate(async () => {
-                    for (const pc of testConnections.filter(
-                        (value) => value.connectionState === 'connected'
-                    )) {
-                        const stats = [...(await pc.getStats()).values()];
-                        if (
-                            stats.some(
-                                (row) =>
-                                    row.type === 'remote-candidate' &&
-                                    row.port === 44448
-                            ) &&
-                            stats.some(
-                                (row) =>
-                                    row.type === 'inbound-rtp' &&
-                                    row.kind === 'video' &&
-                                    row.framesDecoded > 0
-                            )
-                        )
-                            return true;
-                    }
-                    return false;
-                })
-            )
-        );
-        assert.deepEqual(viaServer, [true, false, false, false]);
-        console.log(
-            'PASS: first viewer retains SFU; three later viewers still watch over real P2P with separate game audio'
-        );
-    } else
-        console.log(
-            'PASS: full room controls, four SFU viewers, one active video upload, P2P microphone and separate game audio'
-        );
+        console.log('PASS: first viewer keeps SFU and three later viewers decode over P2P with separate game audio');
+        // Keep these viewers on their existing routes while the first viewer frees and requests the slot again.
+        await Promise.all(laterViewers.map(async (viewer) => {
+            await openRouteDialog(viewer);
+            await viewer.locator(`${routeDialog} .voice-route-auto input`).uncheck();
+            await waitForRoute(viewer, 'P2P', '手动');
+            await closeRouteDialog(viewer);
+        }));
+    } else {
+        console.log('PASS: four SFU viewers, one active video upload, P2P microphone and separate game audio');
+    }
+    await firstViewer.bringToFront();
+    await firstViewer.locator(`${focusedShare} .voice-player-more`).click();
+    await firstViewer.getByRole('menuitemcheckbox', { name: '显示视频统计' }).click();
+    const panel = firstViewer.locator(`${focusedShare} .voice-share-stats`);
+    await panel.getByText('详细指标', { exact: true }).click();
+    await firstViewer.waitForFunction((selector) =>
+        [...document.querySelectorAll(`${selector} .voice-share-stats details[open] dt`)].some((label) =>
+            label.textContent === '统计区间' && parseFloat(label.nextElementSibling?.textContent) > 0
+        ), focusedShare, { timeout: 12000 });
+    await panel.getByRole('button', { name: '隐藏' }).click();
+    console.log('PASS: viewer diagnostics show video statistics across multiple samples');
+    await verifyManualRoute(firstViewer, false);
+    await verifyManualRoute(firstViewer, true);
+    console.log('PASS: manual P2P and SFU survive chat toggles and keep decoding on the selected ICE transport');
+
+    await openRouteDialog(firstViewer);
+    await firstViewer.locator(`${routeDialog} .voice-route-auto input`).check();
+    await waitForRoute(firstViewer, '服务器转发', '自动');
+    await closeRouteDialog(firstViewer);
+    if (priority) {
+        await Promise.all(laterViewers.map(async (viewer) => {
+            await openRouteDialog(viewer);
+            await viewer.locator(`${routeDialog} .voice-route-auto input`).check();
+            await waitForRoute(viewer, '', '自动');
+            await closeRouteDialog(viewer);
+        }));
+    }
     if (!priority) {
         // The native-worker test pauses actual SFU packets. Here, freeze only
         // receiver stats to exercise failover through the complete room UI.
         await pages[1].evaluate(async () => {
-            const consumer = testSfuConsumers.find((value) => value.kind === 'video' && !value.closed);
+            const consumer = window.testSfuConsumers.find((value) => value.kind === 'video' && !value.closed);
             const frozen = await consumer.getStats();
             consumer.getStats = async () => frozen;
         });
-        await pages[0].waitForFunction(() => document.getElementById('screenStatusText').textContent.includes('服务器转发 3 人'), null, { timeout: 20000 });
-        await pages[1].waitForFunction(async () => {
-            for (const pc of testConnections.filter((value) => value.connectionState === 'connected')) {
+        await waitForRoute(firstViewer, 'P2P', '自动');
+        await pages[1].waitForFunction(async (sfuPort) => {
+            for (const pc of window.testConnections.filter((value) => value.connectionState === 'connected')) {
                 const rows = [...(await pc.getStats()).values()];
-                if (!rows.some((row) => row.type === 'remote-candidate' && row.port === 44448) &&
+                if (!rows.some((row) => row.type === 'remote-candidate' && row.port === sfuPort) &&
                     rows.some((row) => row.type === 'inbound-rtp' && row.kind === 'video' && row.framesPerSecond > 5 && row.frameWidth === 1280 && row.frameHeight === 720)) return true;
             }
             return false;
-        }, null, { timeout: 15000 });
+        }, sfuPort, { timeout: 15000 });
         for (const page of pages.slice(2)) {
             assert.ok(await page.evaluate(async () => {
-                for (const consumer of testSfuConsumers.filter((value) => value.kind === 'video' && !value.closed)) {
+                for (const consumer of window.testSfuConsumers.filter((value) => value.kind === 'video' && !value.closed)) {
                     if ([...(await consumer.getStats()).values()].some((row) => row.type === 'inbound-rtp' && row.framesPerSecond > 5)) return true;
                 }
                 return false;
@@ -280,24 +348,23 @@ try {
         }
         console.log('PASS: stalled SFU receiver resumes real P2P at original capture resolution; other SFU viewers continue');
     }
-    await pages[0].locator('#shareScreen').click();
-    await pages[0].locator('#shareScreen').click();
-    await pages[0].locator('[data-screen-share-start]').click();
-    await pages[0].waitForFunction(
-        (count) =>
-            document
-                .getElementById('screenStatusText')
-                .textContent.includes(`服务器转发 ${count} 人`),
-        expectedServerViewers,
-        { timeout: 25000 }
-    );
+    await publisher.locator('[data-local-share-controls] [data-share-action="stop"]').click();
+    await Promise.all(pages.map((page) => page.locator('#main[data-stage-mode="voice"]').waitFor()));
+    await shareScreen(publisher);
+    await Promise.all(viewers.map(async (viewer, index) => {
+        try {
+            await waitForVideoTransport(viewer, undefined, { sustained: true });
+        } catch (cause) {
+            throw new Error(`Share restart: viewer ${index + 1} did not sustain more than 5 decoded FPS on the displayed track`, { cause });
+        }
+    }));
     console.log(
         'PASS: screen stop and restart retain room membership and playback'
     );
     app.kill();
     await pages[0].waitForFunction(
         () =>
-            testConnections
+            window.testConnections
                 .filter((pc) => pc.connectionState === 'connected')
                 .flatMap((pc) => pc.getSenders())
                 .filter((sender) => sender.track?.kind === 'video').length ===
@@ -308,7 +375,7 @@ try {
     for (const page of pages.slice(1)) {
         await page.waitForFunction(
             async () => {
-                for (const pc of testConnections.filter(
+                for (const pc of window.testConnections.filter(
                     (value) => value.connectionState === 'connected'
                 )) {
                     if (
@@ -342,7 +409,9 @@ try {
             index,
             await page.evaluate(() => ({
                 micPressed: document.getElementById('toggleAudio')?.getAttribute('aria-pressed'),
-                rtc: testConnections.map((pc) => ({
+                route: document.querySelector('#video-grid > .is-stage-focus .voice-route-toggle')?.title,
+                routeStatus: document.querySelector('.voice-route-dialog[open] .voice-route-status')?.textContent,
+                rtc: window.testConnections.map((pc) => ({
                     state: pc.connectionState,
                     send: pc.getSenders().map((s) => s.track?.kind),
                     recv: pc.getReceivers().map((r) => r.track.kind),

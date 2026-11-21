@@ -1380,6 +1380,7 @@ const restoreServerVoiceOwner = (reason = 'restore') => {
 
             await iceConfigRuntime.prepare();
             if (!voiceSessionRuntime.isCurrent(epoch) || peer !== currentPeer || peer.destroyed) return false;
+            const firstJoin = !joinedVoiceRoomId;
             joinedVoiceRoomId = roomId;
             selectedVoiceRoomId = roomId;
             adoptVoiceSessionGeneration(result.voiceSessionGeneration, {
@@ -1394,6 +1395,8 @@ const restoreServerVoiceOwner = (reason = 'restore') => {
             ) {
                 return false;
             }
+            if (!byId('local-video')) setLocalVideoStream(getActiveStream());
+            if (firstJoin && mainLayout.dataset.viewportMode === 'compact') stageLayout?.showStage();
             voicePeerRegistry.setSessionDisconnected(false);
             channelSounds.enter(roomId, sidebarRuntime?.getPresenceSnapshot());
             peerRetryController.reset('voice-restored');
@@ -1479,9 +1482,14 @@ const ensureSocket = () => {
             }
 
             const member = presenceMembersByPeerId.get(peerId);
+            const wasSharing = screenSharers.has(peerId) || member?.screenSharing === true;
             if (member) member.screenSharing = sharing;
             if (sharing) {
                 screenSharers.add(peerId);
+                // Restarting on an existing P2P receiver can reuse its video track
+                // without a new track event. Restore media stripped at share stop.
+                const stream = voicePeerRegistry.getQualitySource(peerId)?.stream;
+                if (!wasSharing && stream) renderRemoteMedia(peerId, stream);
             } else {
                 screenSharers.delete(peerId);
                 if (member?.cameraOn === false) {
@@ -3819,7 +3827,13 @@ const speakingRuntime = window.VoiceSpeakingRuntime.createRuntime({
         stream: tile.id === 'local-video' ? myVideoStream : getPrimaryTileMediaElement(tile)?.srcObject,
         enabled: getTileMember(tile).hasMic && !getTileMember(tile).muted,
     })),
-    onSpeaking: (id, speaking) => stageLayout.setSpeaking(id, speaking),
+    onSpeaking: (id, speaking) => {
+        stageLayout.setSpeaking(id, speaking);
+        if (id === 'local-video') {
+            mediaDockRoot.closest('.local-user-card')?.classList.toggle('is-speaking', speaking);
+        }
+        sidebarRuntime?.setSpeaking(id === 'local-video' ? localPeerId : id, speaking);
+    },
     onLevel: (id, level) => {
         if (id === 'local-video') window.VoiceMorphIconUI.syncMicLevel(byId('toggleAudio'), level);
     },

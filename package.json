@@ -23,8 +23,8 @@
         "dev": "node --watch ./src/server.js",
         "eslint": "eslint",
         "eslint:fix": "eslint . --fix",
-        "prettier": "prettier . --check",
-        "prettier:fix": "prettier . --write"
+        "format:check": "prettier src tests scripts desktop --check",
+        "format:write": "prettier src tests scripts desktop --write"
     },
     "keywords": [],
     "author": "",
