@@ -24,12 +24,8 @@ function showNotice() {
     element.prepend(title, detail); element.append(close); document.body.append(element);
 }
 ipcRenderer.on('voice:notice', (_event, value) => { notice = value; showNotice(); });
-ipcRenderer.on('voice:show-call-tools', () => {
-    const tools = document.querySelector('[data-call-log-actions]');
-    if (!tools?.showPopover || tools.matches(':popover-open')) return;
-    tools.showPopover();
-    tools.querySelector('button')?.focus();
-});
+ipcRenderer.on('voice:copy-call-diagnostics', () => document.querySelector('[data-copy-call-diagnostics]')?.click());
+ipcRenderer.on('voice:show-call-logs', () => document.querySelector('[data-show-call-logs]')?.click());
 
 let updateButton, updateState, updateAction;
 function renderUpdateButton() {

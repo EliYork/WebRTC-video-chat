@@ -85,7 +85,7 @@ test('event timeline defaults to the current call, filters category/scope, sorts
     const selects = dialog.querySelectorAll('select');
     assert.equal(selects[0].value, sessions[1].开始时间);
     const text = allText(dialog);
-    assert.match(text, /记录已截断/); assert.match(text, /订阅超时/);
+    assert.match(text, /部分较早或不完整的记录已省略/); assert.match(text, /订阅超时/);
     assert.match(text, /通话级（未归属单个视频）/);
     const items = dialog.querySelectorAll('details');
     assert.equal(items.length, 2); assert.match(items[0].querySelector('summary').textContent, /01.123/);
@@ -100,6 +100,32 @@ test('event timeline defaults to the current call, filters category/scope, sorts
     selects[0].value = sessions[0].开始时间; selects[0].dispatchEvent({ type: 'change' });
     assert.match(allText(dialog), /当前筛选下暂无事件/);
     dialog.close(); assert.equal(unsubscribed, true); assert.equal(dialog.isConnected, false);
+});
+
+test('log dialog copies the selected call and asks before clearing history', () => {
+    const f = fixture();
+    vm.runInNewContext(read('voice-player-events'), { window: f.window });
+    const sessions = ['2026-10-17T00:00:00.000Z', '2026-10-18T00:00:00.000Z'].map((开始时间) => ({ 开始时间, 事件: [] }));
+    let copied, cleared = 0;
+    const dialog = f.window.VoicePlayerEvents.show({
+        getLogs: () => ({ sessions, currentIndex: 1, storageState: '可用' }),
+        copySession: (_button, feedback, selected) => { copied = selected; feedback('诊断已复制'); },
+        clearLogs: () => { cleared++; },
+    });
+    const button = (name) => dialog.querySelectorAll('button').find((item) => item.textContent === name);
+    const select = dialog.querySelector('select');
+    select.value = sessions[0].开始时间;
+    select.dispatchEvent({ type: 'change' });
+    button('复制诊断').click();
+    assert.equal(copied, sessions[0].开始时间);
+    button('清除历史通话').click();
+    assert.equal(cleared, 0);
+    button('取消').click();
+    assert.equal(button('确认清除').hidden, true);
+    button('清除历史通话').click();
+    button('确认清除').click();
+    assert.equal(cleared, 1);
+    dialog.close();
 });
 
 test('video-only menu supports touch entry, keyboard navigation, dismissal, focus restore and reused remote volume', () => {

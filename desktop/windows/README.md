@@ -1,6 +1,6 @@
 # EliYork Voice · Windows x64
 
-下载对应版本的安装包（本次构建 **EliYork-Voice-Setup-0.1.10-x64.exe**）并双击，为当前用户安装（不需要管理员权限）。之后双击桌面 **EliYork Voice**。客户端打开独立窗口，默认连接 **https://voice.eliyork.com/room/lobby**，与普通浏览器共享频道、成员、聊天与语音。
+下载对应版本的安装包（本次构建 **EliYork-Voice-Setup-0.1.11-x64.exe**）并双击，为当前用户安装（不需要管理员权限）。之后双击桌面 **EliYork Voice**。客户端打开独立窗口，默认连接 **https://voice.eliyork.com/room/lobby**，与普通浏览器共享频道、成员、聊天与语音。
 
 不需要 Node、Go 或 PowerShell。旧 0.1.0 ZIP 需要先退出，再手动安装一次新版；旧目录可以保留。用户配置继续保存在 AppData。发布 ZIP 内包含安装包及更新元数据，不再是解压即用的便携目录。客户端内置 Electron/Chromium 与 Piik App/WGC 原生组件；网页无 Node 权限。客户端的受信房间主页面可按频道设置使用麦克风和摄像头。设备访问仍受 Windows 隐私设置约束。
 
@@ -18,7 +18,7 @@
 
 0.1.4 点击窗口 × 可选最小化到托盘或退出；关闭选择见下方「窗口与托盘」。右上角 **设置 → 退出** 仍会先结束媒体，再释放本次 App/采集进程。无需关闭日常浏览器。原生组件崩溃时语音聊天仍可用，重启客户端后重新开始原生共享；刷新/掉线后不自动恢复已结束采集。
 
-F12 打开诊断工具。页面“复制诊断”提供摘要；原生日志位于 `%APPDATA%\EliYork Voice\native\logs\client.log`，客户端生命周期日志在同目录上级 `desktop.log`。日志可含故障/网络信息，分享前核对。不要分享 App 配置/本机 capability。
+右上角「设置」可直接复制诊断或查看通话日志。在日志里可选择要复制的通话。F12 打开诊断工具。原生日志位于 `%APPDATA%\EliYork Voice\native\logs\client.log`，客户端生命周期日志在同目录上级 `desktop.log`。日志可含故障/网络信息，分享前核对。不要分享 App 配置/本机 capability。
 
 查看 NVIDIA 硬编：对应共享的 capture-state 应有 hardware=true、codec=h264、NVIDIA adapterName/encoderName，并与接收 video/H264、GPU Video Encode 负载对照；不能仅凭显卡存在或 H.264 文案确认。详细测试步骤见项目 `integrations/piik/ACCEPTANCE.md`。
 

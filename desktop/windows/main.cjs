@@ -388,6 +388,10 @@ else {
                 await stopNative();
             };
             const buildMenu = () => {
+                const sendCallCommand = (channel) => {
+                    if (!mainWindow.isDestroyed() && trusted(mainWindow.webContents.getURL()))
+                        mainWindow.webContents.send(channel);
+                };
                 Menu.setApplicationMenu(
                     Menu.buildFromTemplate([
                         {
@@ -398,11 +402,12 @@ else {
                                     click: () => void showAbout().catch(error => log(`about-error ${error.message}`)),
                                 },
                                 {
-                                    label: '通话日志…',
-                                    click: () => {
-                                        if (!mainWindow.isDestroyed() && trusted(mainWindow.webContents.getURL()))
-                                            mainWindow.webContents.send('voice:show-call-tools');
-                                    },
+                                    label: '复制诊断',
+                                    click: () => sendCallCommand('voice:copy-call-diagnostics'),
+                                },
+                                {
+                                    label: '查看通话日志…',
+                                    click: () => sendCallCommand('voice:show-call-logs'),
                                 },
                                 {
                                     label: '诊断工具',
@@ -635,15 +640,10 @@ else {
                         );
                         result.clipboardWrite =
                             (await clipboard.readText()) === marker;
-                        Menu.getApplicationMenu().items[0].submenu.items
-                            .find(item => item.label === '通话日志…').click();
-                        result.callDiagnosticsInSettings = await mainWindow.webContents.executeJavaScript(`(() => {
-                            const panel = document.querySelector('.workspace-topbar [data-call-log-actions]');
-                            const button = panel?.querySelector('[data-copy-call-diagnostics]');
-                            if (!panel?.matches(':popover-open') || !button.getClientRects().length) return false;
-                            button.click();
-                            return true;
-                        })()`);
+                        const copyFromMenu = Menu.getApplicationMenu().items[0].submenu.items
+                            .find(item => item.label === '复制诊断');
+                        result.callDiagnosticsInSettings = Boolean(copyFromMenu);
+                        copyFromMenu?.click();
                         for (let attempt = 0; attempt < 110; attempt++) {
                             // eslint-disable-next-line no-await-in-loop -- Poll this one clipboard operation in order.
                             const value = await clipboard.readText();

@@ -28,6 +28,7 @@ function createRuntime({
     onRemoteStream,
     onWarning,
     onRouteEvent,
+    onDiagnosticFailure,
     onPublicationFailure,
 }: any) {
     let socket: any;
@@ -56,6 +57,8 @@ function createRuntime({
     };
     const diagnostic = (owner: object, snapshot: any, sending: boolean, native: boolean) =>
         diagnosticConnection(snapshot, sending, native, observeDiagnostic(owner, snapshot));
+    const reportFailure = (stage: string, reason: string) =>
+        onDiagnosticFailure?.({ 来源: 'Piik', 阶段: stage, reason });
     const request = (input: any): Promise<any> =>
         new Promise((resolve, reject) => {
             // Never let cleanup/publication commands from an old owner sit in
@@ -76,15 +79,18 @@ function createRuntime({
         () => request({ action: 'list' }),
         (message?: string) => {
             desired = null;
+            reportFailure('capture', 'piik-native-capture-lost');
             if (message) onWarning?.(message);
             onPublicationFailure?.(message);
         }
     );
     const send = (edge: any, message: any) => {
         if (edge.closed) return false;
-        void request({ action: 'send', sessionId: edge.id, message }).catch(
-            (error) => onWarning?.('Piik 信令失败', error)
-        );
+        void request({ action: 'send', sessionId: edge.id, message }).catch((error) => {
+            if (edge.closed) return;
+            reportFailure('signaling', 'piik-signaling-failed');
+            onWarning?.('Piik 信令失败', error);
+        });
         return true;
     };
     const reportFailed = (
@@ -480,8 +486,10 @@ function createRuntime({
             } else if (
                 message.type === 'route-status' &&
                 message.state === 'failed'
-            )
+            ) {
+                reportFailure('watch', 'piik-no-direct-path');
                 onWarning?.('Piik 没有可用的直连路径');
+            }
         };
         edges.set(id, edge);
         return edge;
@@ -535,6 +543,7 @@ function createRuntime({
                 if (watchers.get(share.id) !== marker) continue;
                 watchers.delete(share.id);
                 retryWatch(share.id);
+                reportFailure('watch', 'piik-watch-failed');
                 onWarning?.('Piik 观看失败', error);
             }
         }
@@ -556,17 +565,22 @@ function createRuntime({
                     if (decoded.type === 'authenticated')
                         edge.selfPeerId = decoded.peerId;
                     onRouteEvent?.({
-                        provider: 'piik',
-                        type: decoded.type,
-                        revision:
+                        来源: 'Piik',
+                        event: decoded.type,
+                        角色: edge.role === 'viewer' ? '观看者' : '共享者',
+                        状态: decoded.type === 'route-status' ? decoded.state : undefined,
+                        修订:
                             'revision' in decoded
                                 ? decoded.revision
                                 : undefined,
                     });
                     edge.receive(decoded);
-                    if (decoded.type === 'error')
+                    if (decoded.type === 'error') {
+                        reportFailure('signaling', 'piik-protocol-error');
                         onWarning?.(`Piik: ${decoded.code}`);
+                    }
                 } catch (error) {
+                    reportFailure('signaling', 'piik-protocol-failed');
                     onWarning?.('Piik 协议失败', error);
                     dispose(edge);
                 }
@@ -578,6 +592,7 @@ function createRuntime({
                 if (publicationLost) {
                     local = null;
                     desired = null;
+                    reportFailure('publication', 'piik-publication-lost');
                     onWarning?.('Piik 共享连接已结束，请重新开始共享');
                     onPublicationFailure?.();
                 } else if (edge?.role === 'viewer') retryWatch(edge.shareId);
@@ -615,12 +630,17 @@ function createRuntime({
                         void reconcile();
                     }
                 })
-                .catch((error) => onWarning?.('Piik 会话失败', error));
+                .catch((error) => {
+                    if (token !== epoch) return;
+                    reportFailure('session', 'piik-session-failed');
+                    onWarning?.('Piik 会话失败', error);
+                });
             if (desired?.stream.getVideoTracks()[0]?.readyState === 'live') {
                 const recovering = this.publish(desired.stream, desired.options, desired.codecPrimary);
                 const version = publicationVersion;
                 void recovering.catch((error) => {
                     if (token !== epoch || version !== publicationVersion) return;
+                    reportFailure('publication', 'piik-publication-recovery-failed');
                     onWarning?.('Piik 共享恢复失败', error);
                     onPublicationFailure?.();
                 });
@@ -753,6 +773,7 @@ function createRuntime({
             route: 'p2p',
             sharing: !!local,
             原生共享音频: nativeCapture.audioDiagnostics(),
+            原生采集: nativeCapture.captureDiagnostics(),
             viewing: watchers.size,
             sfu: false,
             relay: false,

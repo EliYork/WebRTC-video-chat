@@ -32,12 +32,13 @@ class Element {
     remove() { this.removed = true; }
 }
 
-function fixture({ clipboardFails = false } = {}) {
+function fixture({ clipboardFails = false, saved = [] } = {}) {
     const timers = new Map();
     const elements = [];
     const copied = [];
     const downloads = [];
     const shares = [];
+    const connections = [];
     const state = { 会话: { state: 'idle', generation: null }, 本机音频: { 输入设备: '默认', deviceId: 'secret' },
         共享路径变化: { routeHistory: [] } };
     let id = 0;
@@ -51,7 +52,7 @@ function fixture({ clipboardFails = false } = {}) {
         } },
         setTimeout(fn) { timers.set(++id, fn); return id; },
         clearTimeout(key) { timers.delete(key); },
-        localStorage: { getItem: () => null, setItem() {} },
+        localStorage: { getItem: () => JSON.stringify(saved), setItem() {} },
         Blob,
         URL: { createObjectURL(blob) { downloads.push(blob); return 'blob:diagnostics'; }, revokeObjectURL() {} },
     };
@@ -59,10 +60,10 @@ function fixture({ clipboardFails = false } = {}) {
     vm.runInNewContext(read('js/voice/voice-call-diagnostics.js'), { window });
     const health = { 接收健康格式: 1, 活跃接收: [], 最近回退: [] };
     const runtime = window.VoiceCallDiagnostics.createRuntime({ sanitize: sanitizeVoiceDiagnostic,
-        getState: () => state, getSources: () => shares, getConnections: () => [], getReceiverHealth: () => health });
+        getState: () => state, getSources: () => shares, getConnections: () => connections, getReceiverHealth: () => health });
     const button = new Element('button');
     button.textContent = '复制诊断';
-    return { runtime, button, window, timers, copied, downloads, elements, state, shares, health };
+    return { runtime, button, window, timers, copied, downloads, elements, state, shares, connections, health };
 }
 
 test('room places call log actions in the header and keeps a direct download link', () => {
@@ -80,7 +81,7 @@ test('room places call log actions in the header and keeps a direct download lin
     assert.doesNotMatch(html, /复制双方诊断|复制脱敏诊断/);
     assert.match(html, /data-call-log-actions/);
     assert.match(html, /data-show-call-logs/);
-    assert.match(html, /data-clear-call-logs/);
+    assert.doesNotMatch(html, /data-clear-call-logs/);
     assert.match(html, /id="copyRoomLink"/);
     const script = read('script.js');
     const binding = script.split('\n').filter((line) => line.includes('[data-copy-call-diagnostics]'));
@@ -123,7 +124,7 @@ test('copy works before joining or sharing, blocks concurrent clicks and restore
     finish();
     await pending;
     assert.equal(f.button.textContent, '诊断已复制');
-    assert.deepEqual(feedback, ['诊断已复制']);
+    assert.deepEqual(feedback, ['正在收集诊断…', '诊断已复制']);
     assert.equal(f.button.disabled, false);
     assert.equal(f.button.attributes['aria-busy'], 'false');
     [...f.timers.values()][0]();
@@ -138,14 +139,67 @@ test('copy without screen sharing keeps successful peers and explicit non-respon
     await flush();
     f.runtime.attachSocket({ connected: true, on() {}, off() {}, timeout() { return this; }, emit(_, ack) {
         ack(null, { ok: true, results: [{ 序号: 1, 状态: '已采样', 数据: { 当前状态: { 本机音频: { AEC: true } } } },
-            { 序号: 2, 状态: '未响应（旧版本、离线或超时）' }], omitted: 0 });
+            { 序号: 2, 状态: '未响应（旧版本、离线或超时）' },
+            { 序号: 3, 状态: '已采样', 数据: { 当前会话: { 事件: 'malformed', 历史采样: [null, { 共享: {} }] } } }],
+        omitted: 0 });
     } });
     await f.runtime.copyCombined(f.button);
     const data = f.copied[0];
     assert.equal(data.对端[0].数据.当前状态.本机音频.AEC, true);
     assert.match(data.对端[1].状态, /未响应/);
+    assert.deepEqual(data.对端[2].数据.当前会话.事件, []);
+    assert.equal(data.对端[2].数据.当前会话.脱敏截断, true);
     assert.ok(data.本机.当前会话.历史采样.length);
     assert.equal(f.button.textContent, '诊断已复制');
+    f.runtime.destroy();
+});
+
+test('long call copies the last event and measurements before and after leaving', async () => {
+    const f = fixture();
+    f.state.会话 = { state: 'joined', generation: 1 };
+    for (let index = 0; index < 6; index++) {
+        const audio = { id: 'private-inbound', type: 'inbound-rtp', kind: 'audio', timestamp: 1234, packetsLost: 1 };
+        f.connections.push({ getStats: async () => new Map([[audio.id, audio]]) });
+    }
+    f.runtime.start();
+    await flush();
+    const bulky = Array.from({ length: 6 }, () => ({ 音频流: Array(4).fill({ 累计丢包: 1, 抖动_ms: 8, 码率_Mbps: .07,
+        音量: .55, 编码: 'audio/opus', 方向: '接收', '隐藏样本比例_%': 1 }) }));
+    for (let index = 0; index < 100; index++) f.runtime.record('状态变化', { 连接: bulky, 会话: { state: 'joined' } });
+    f.runtime.record('Piik 共享异常', { 来源: 'Piik', 阶段: 'watch', reason: 'piik-watch-failed', peerId: 'private-peer' });
+    await f.runtime.copyCombined(f.button);
+    const active = f.copied[0].本机.当前会话;
+    assert.equal(active.事件.length, 40);
+    assert.ok(active.历史采样.length && active.精简时间线.length > 100);
+    assert.equal(active.事件.at(-1).内容.reason, 'piik-watch-failed');
+    assert.equal(active.复制截断, true);
+    assert.equal(active.脱敏截断, false);
+    f.runtime.end('user-leave');
+    f.state.会话 = { state: 'idle', generation: null };
+    await f.runtime.copyCombined(f.button);
+    const ended = f.copied[1];
+    assert.equal(ended.本机.当前会话, null);
+    assert.equal(ended.本机.最近会话.结束原因, 'user-leave');
+    assert.equal(ended.本机.最近会话.最后异常.内容.reason, 'piik-watch-failed');
+    assert.equal(ended.本机.当前状态.连接.length, 6);
+    assert.equal(ended.未响应原因, 'socket-disconnected');
+    assert.doesNotMatch(JSON.stringify(ended), /private-/);
+    f.runtime.destroy();
+});
+
+test('legacy history with missing rows can be selected while a different call is active', async () => {
+    const 开始时间 = '2026-10-17T00:00:00.000Z';
+    const f = fixture({ saved: [{ 开始时间, 结束时间: '2026-10-17T00:00:01.000Z', 事件: [null, { 类型: '通话结束' }],
+        历史采样: [null], 当前状态: { 会话: { state: 'failed', generation: 999, 失败原因: 'join-failed' } } }] });
+    f.runtime.start();
+    f.runtime.attachSocket({ connected: true, on() {}, off() {}, timeout() { throw new Error('historical copy must stay local'); } });
+    await f.runtime.copyCombined(f.button, undefined, 开始时间);
+    const { 本机, 未响应原因 } = f.copied[0];
+    assert.equal(本机.最近会话.开始时间, 开始时间);
+    assert.equal(本机.最近会话.脱敏截断, true);
+    assert.equal(本机.当前状态.会话.失败原因, 'join-failed');
+    assert.equal(本机.当前状态.会话.generation, undefined);
+    assert.equal(未响应原因, 'historical-local-only');
     f.runtime.destroy();
 });
 

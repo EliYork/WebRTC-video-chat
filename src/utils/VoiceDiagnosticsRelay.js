@@ -5,16 +5,51 @@ import { sanitizeVoiceDiagnostic } from '../views/js/shared/voice-diagnostic-sch
 export const createVoiceDiagnosticsRelay = ({ io, getVoiceOwner, getMembers = () => [...(io.sockets?.sockets?.values() || [])], now = Date.now, timeoutMs = 6500 }) => {
     const roomLimits = new Map();
     const checkpoints = new Map();
+    const departures = new Map();
+    const lifetimeMs = 120000;
+    const peerLimit = 8;
     const identity = (socket, owner) => JSON.stringify([socket.id, owner.voiceSessionGeneration, owner.peerId]);
     const prune = () => {
-        for (const [key, row] of checkpoints) if (now() - row.time > 120000) checkpoints.delete(key);
+        const time = now();
+        for (const [key, row] of checkpoints) if (time - row.time > lifetimeMs) checkpoints.delete(key);
+        for (const [socket, departure] of departures) if (time - departure.time > lifetimeMs) departures.delete(socket);
     };
     const ownerMatches = (socket, owner) => {
         const current = getVoiceOwner(socket);
         return current && current.roomId === owner.roomId && current.peerId === owner.peerId &&
             current.voiceSessionGeneration === owner.voiceSessionGeneration;
     };
+    const eligibleCheckpoints = (socket, owner) => {
+        const requester = identity(socket, owner);
+        return [...checkpoints.values()].filter((row) => row.owner.roomId === owner.roomId &&
+            row.socketId !== socket.id && row.audience.has(requester)).sort((a, b) => b.time - a.time);
+    };
+    const cachedResult = (row, index, status) => ({ 序号: index + 1, 状态: status,
+        缓存时间: new Date(row.time).toISOString(), 缓存年龄_ms: Math.max(0, now() - row.time), 数据: row.report });
     return {
+        rememberDeparture(socket) {
+            const owner = getVoiceOwner(socket);
+            if (!owner) return;
+            prune();
+            const rows = eligibleCheckpoints(socket, owner);
+            departures.delete(socket);
+            departures.set(socket, { time: now(), generation: owner.voiceSessionGeneration,
+                rows: rows.slice(0, peerLimit), omitted: Math.max(0, rows.length - peerLimit) });
+            while (departures.size > 32) departures.delete(departures.keys().next().value);
+        },
+        forgetDeparture(socket) {
+            departures.delete(socket);
+        },
+        collectRecent(socket, generation) {
+            prune();
+            const departure = departures.get(socket);
+            if (getVoiceOwner(socket) || !departure || generation !== departure.generation)
+                return { ok: false, reason: 'recent-cache-unavailable' };
+            const time = now();
+            const results = departure.rows.filter((row) => time - row.time <= lifetimeMs)
+                .map((row, index) => cachedResult(row, index, '近期缓存（本机已离开）'));
+            return { ok: true, requestedAt: new Date(time).toISOString(), results, omitted: departure.omitted };
+        },
         checkpoint(socket, payload) {
             const owner = getVoiceOwner(socket);
             if (!owner || payload?.voiceSessionGeneration !== owner.voiceSessionGeneration || !payload.report) return false;
@@ -45,12 +80,8 @@ export const createVoiceDiagnosticsRelay = ({ io, getVoiceOwner, getMembers = ()
                     const other = getVoiceOwner(member);
                     return member.id !== socket.id && other?.roomId === owner.roomId;
                 });
-                const requester = identity(socket, owner);
-                const cached = [...checkpoints.values()].filter((row) => row.owner.roomId === owner.roomId &&
-                    row.socketId !== socket.id && row.audience.has(requester)).sort((a, b) => b.time - a.time);
-                const cachedResult = (row, index, status) => ({ 序号: index + 1, 状态: status,
-                    缓存时间: new Date(row.time).toISOString(), 缓存年龄_ms: Math.max(0, now() - row.time), 数据: row.report });
-                const results = await Promise.all(members.slice(0, 8).map(async (member, index) => {
+                const cached = eligibleCheckpoints(socket, owner);
+                const results = await Promise.all(members.slice(0, peerLimit).map(async (member, index) => {
                     const other = getVoiceOwner(member);
                     const result = await new Promise((resolve) => {
                         member.timeout(timeoutMs).emit('voice:diagnostics:sample',
@@ -70,10 +101,10 @@ export const createVoiceDiagnosticsRelay = ({ io, getVoiceOwner, getMembers = ()
                     const active = getVoiceOwner(member);
                     return active && identity(member, active) === JSON.stringify([row.socketId, row.owner.voiceSessionGeneration, row.owner.peerId]);
                 }));
-                const remaining = Math.max(0, 8 - results.length);
+                const remaining = Math.max(0, peerLimit - results.length);
                 departed.slice(0, remaining).forEach((row) => results.push(cachedResult(row, results.length, '近期缓存（对端已离开）')));
                 return { ok: true, requestedAt: new Date(started).toISOString(), results,
-                    omitted: Math.max(0, members.length - 8) + Math.max(0, departed.length - remaining) };
+                    omitted: Math.max(0, members.length - peerLimit) + Math.max(0, departed.length - remaining) };
             } catch {
                 return { ok: false, reason: 'collection-failed' };
             }

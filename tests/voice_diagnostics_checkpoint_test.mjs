@@ -53,6 +53,25 @@ test('cache never crosses rooms, later joiners or a new voice session of the sam
     assert.equal((await f.relay.collect(f.sender)).results.length, 0);
 });
 
+test('the departing socket only recovers authorized checkpoints from before its manual leave', () => {
+    const f = fixture();
+    assert.equal(f.save(), true);
+    f.relay.rememberDeparture(f.sender);
+    assert.equal(f.relay.collectRecent(f.sender, 1).ok, false);
+    f.sender.owner = null;
+    f.advance(6000);
+    const fresh = { ...f.report, 当前状态: { 状态: 'after-departure' } };
+    assert.equal(f.relay.checkpoint(f.viewer, { voiceSessionGeneration: 1, report: fresh }), true);
+    assert.equal(f.relay.collectRecent({ id: f.sender.id }, 1).ok, false);
+    assert.equal(f.relay.collectRecent(f.sender, 2).ok, false);
+    const cached = f.relay.collectRecent(f.sender, 1);
+    assert.equal(cached.ok, true);
+    assert.equal(cached.results[0].缓存年龄_ms, 6000);
+    assert.doesNotMatch(JSON.stringify(cached), /private|after-departure/);
+    f.advance(120001);
+    assert.equal(f.relay.collectRecent(f.sender, 1).ok, false);
+});
+
 test('live samples win over cache, timeout falls back explicitly, and checkpoints are throttled', async () => {
     const f = fixture();
     assert.equal(f.save(), true);

@@ -37,7 +37,7 @@ const bundle = await build({
             export class ViewerPeer {}
             export const decodeServerMessage = JSON.parse;
             export const applyVideoCaptureProfile = async () => {};
-            export const createNativeCapture = () => ({stop(){},isActive(){return false},get(){return null},audioDiagnostics(){return null}});
+            export const createNativeCapture = () => ({stop(){},isActive(){return false},get(){return null},audioDiagnostics(){return null},captureDiagnostics(){return null}});
         ` }));
     } }],
 });

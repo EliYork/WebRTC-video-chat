@@ -3,6 +3,7 @@
     const STORAGE_KEY = 'voice-call-diagnostics-v1';
     const limits = { sessions: 5, events: 200, samples: 24 };
     const copyLimits = { events: 40, samples: 10 };
+    const peerCopyLimits = { events: 12, samples: 4 };
     const diagnosticConnectionLimit = 16;
     const versionInfo = () => {
         const ua = global.navigator?.userAgent || '';
@@ -19,34 +20,56 @@
         };
     };
     const pick = (value, names) => Object.fromEntries(names.filter((key) => value?.[key] !== undefined).map((key) => [key, value[key]]));
+    const structuredCopy = (value) => JSON.parse(JSON.stringify(value));
+    const records = (value) => Array.isArray(value) ? value.filter(row => row && typeof row === 'object' && !Array.isArray(row)) : [];
     // Full settings belong in the current snapshot. History keeps measurements,
     // not repeated codec probes, send-policy requests and route-history arrays.
     const measurement = (state) => ({
-        ...pick(state, ['采样时间', '会话', '连接']),
+        ...pick(state, ['采样时间', '会话', '连接', '输出播放']),
         本机音频: pick(state?.本机音频, ['实际模式', '静音', '轨道静音', '麦克风存活', '输出静音']),
-        共享路径变化: pick(state?.共享路径变化, ['state', 'serverViewers', 'hasUplink', 'uplinkStatus']),
-        共享: (state?.共享 || []).map((share) => ({
-            ...pick(share, ['角色', '观看路径', '采样时间', 'SFU服务器统计', '采集轨道设置', '播放画面', '播放指标状态']),
-            连接: (share.连接 || []).map((connection) => pick(connection,
+        共享路径变化: pick(state?.共享路径变化, ['provider', 'route', 'sharing', 'viewing', 'state', 'serverViewers', 'hasUplink', 'uplinkStatus']),
+        共享: records(state?.共享).map((share) => ({
+            ...pick(share, ['角色', '观看路径', '采样时间', 'SFU服务器统计', '采集轨道设置', '原生采集', '播放画面', '播放指标状态']),
+            连接: records(share.连接).map((connection) => pick(connection,
                 ['序号', '路径', '实际传输路径', '编码协商', '连接状态', 'ICE状态', '状态', '统计来源', '统计年龄_ms', '视频流', '音频流'])),
         })),
     });
-    const compactReport = (report) => {
-        if (!report?.当前会话) return report;
-        const session = report.当前会话;
-        const history = session.历史采样 || [];
-        const samples = history.length > copyLimits.samples ? [...history.slice(0, 2), ...history.slice(-8)] : history;
-        return { ...report, 记录上限: { ...report.记录上限, ...copyLimits }, 当前会话: {
-            ...pick(session, ['开始时间', '结束时间', '结束原因', '事件总数', '采样总数']),
-            事件: (session.事件 || []).slice(-copyLimits.events).map((event) => {
-                if (event.类型 === '状态变化') return { ...event, 内容: measurement(event.内容) };
+    const eventSummary = (content) => ({
+        ...pick(content?.会话, ['state', '失败原因']),
+        ...pick(content, ['来源', '阶段', 'reason', 'event', '修订', '状态', 'state', '部件', '路径', '视频序号', '参与者序号']),
+    });
+    const timelineEvent = (event) => ({
+        ...pick(event, ['相对开始_ms', '类型']),
+        ...eventSummary(event.内容),
+    });
+    const compactReport = (report, limits = copyLimits) => {
+        const key = report?.当前会话 ? '当前会话' : '最近会话';
+        const session = report?.[key];
+        if (!session) return report;
+        // Old clients or reports that have passed through an exhausted
+        // allowlist budget can contain null entries.
+        const events = records(session.事件);
+        const history = records(session.历史采样);
+        const samples = history.length > limits.samples
+            ? [...history.slice(0, 2), ...history.slice(-(limits.samples - 2))]
+            : history;
+        return { ...report, 复制上限: limits, [key]: {
+            ...pick(session, ['开始时间', '结束时间', '结束原因', '结束状态', '最后异常', '事件总数', '采样总数']),
+            已结束: Boolean(session.结束时间),
+            事件: events.slice(-limits.events).map((event) => {
+                if (event.类型 === '状态变化') return { ...event, 内容: pick(event.内容, ['会话', '采样时间']) };
                 if (event.类型 === 'SFU接收回退诊断' || event.类型 === 'SFU接收异常诊断')
                     return { ...event, 内容: pick(event.内容, ['序号', 'reason', '时间']) };
                 return event;
             }),
+            精简时间线: Array.isArray(session.精简时间线) ? records(session.精简时间线) : events.map(timelineEvent),
             历史采样: samples.map(measurement),
-            截断: Boolean(session.截断 || history.length > copyLimits.samples || session.事件?.length > copyLimits.events),
-        }, 日志覆盖说明: '精简诊断：当前完整状态、最多40事件、2次起始及最近8次采样；SFU异常窗口完整保留。完整本机日志可在最近通话日志中下载。' };
+            记录截断: Boolean(session.记录截断 ?? session.截断),
+            复制截断: Boolean(session.复制截断 || history.length > limits.samples || events.length > limits.events),
+            脱敏截断: Boolean(session.脱敏截断 || events.length < (session.事件?.length || 0) || history.length < (session.历史采样?.length || 0)),
+            截断: Boolean(session.截断 || session.复制截断 || session.记录截断 || session.脱敏截断 ||
+                history.length > limits.samples || events.length > limits.events),
+        } };
     };
     const finite = (value) => Number.isFinite(value) ? Math.round(value * 100) / 100 : null;
     const audioBitrateKbps = (report, previous) => {
@@ -86,7 +109,7 @@
         };
     };
     const browserInfo = () => {
-        const ua = global.navigator.userAgent || '';
+        const ua = global.navigator?.userAgent || '';
         const match = ua.match(/(EdgA|EdgiOS|Edg)\/([0-9]+)/) || ua.match(/(Firefox|FxiOS)\/([0-9]+)/) ||
             ua.match(/(SamsungBrowser)\/([0-9]+)/) || ua.match(/(Chrome|CriOS)\/([0-9]+)/) ||
             (!/Android/.test(ua) && /Safari\//.test(ua) ? ua.match(/(Version)\/([0-9]+)/) : null);
@@ -108,6 +131,12 @@
         let timer;
         let saveTimer;
         let copyFeedbackTimer;
+        let copyFeedbackButton;
+        const resetCopyLabel = () => {
+            global.clearTimeout(copyFeedbackTimer);
+            if (copyFeedbackButton) copyFeedbackButton.textContent = '复制诊断';
+            copyFeedbackTimer = copyFeedbackButton = undefined;
+        };
         let disposed = false, copyRevision = 0, copyRequest;
         let pending;
         let pendingOwner;
@@ -122,6 +151,7 @@
         let lastCheckpoint = 0;
         let storageState = '可用';
         let baselines = new WeakMap();
+        const sessionGenerations = new WeakMap();
         // Observation baselines only; events still use the single bounded call log.
         const shareStates = new Map();
         let shareOrdinal = 0;
@@ -134,7 +164,15 @@
             storage ||= global.localStorage;
             if (!storage) throw new Error('storage-unavailable');
             const saved = JSON.parse(storage?.getItem(STORAGE_KEY) || '[]');
-            if (Array.isArray(saved)) sessions = saved.slice(-limits.sessions).map(sanitize);
+            if (Array.isArray(saved)) sessions = saved.slice(-limits.sessions)
+                .filter((session) => Number.isFinite(Date.parse(session?.开始时间)))
+                .map(({ 事件, 历史采样, 当前状态, ...session }) => ({
+                    ...sanitize(session),
+                    当前状态: sanitize(当前状态),
+                    事件: Array.isArray(事件) ? 事件.slice(-limits.events).filter((event) => typeof event?.类型 === 'string').map(sanitize) : [],
+                    历史采样: Array.isArray(历史采样) ? 历史采样.slice(-limits.samples).filter(Boolean).map(sanitize) : [],
+                    脱敏截断: Boolean(session.脱敏截断 || 事件?.includes?.(null) || 历史采样?.includes?.(null)),
+                }));
             for (const session of sessions) if (!session.结束时间) {
                 session.结束时间 = session.当前状态?.采样时间 || session.开始时间;
                 session.结束原因 = '页面关闭或中断（结束时间为最后记录）';
@@ -158,7 +196,11 @@
             if (['SFU接收异常诊断', 'SFU接收回退诊断'].includes(type) && Number.isInteger(content?.序号)) pendingReceiverIssues.add(content.序号);
             if (pendingReceiverIssues.size > limits.events) pendingReceiverIssues.delete(pendingReceiverIssues.values().next().value);
             current.事件总数++;
-            current.事件.push({ 时间: new Date().toISOString(), 相对开始_ms: Date.now() - Date.parse(current.开始时间), 类型: type, 内容: sanitize(content) });
+            const event = { 时间: new Date().toISOString(), 相对开始_ms: Date.now() - Date.parse(current.开始时间), 类型: type, 内容: sanitize(content) };
+            current.事件.push(event);
+            if (event.内容?.脱敏截断) current.脱敏截断 = true;
+            if (type !== '状态变化' && (/failed|timeout|disconnected|失败|异常|卡顿/.test(type) ||
+                /^(failed|disconnected)$/.test(content?.state || ''))) current.最后异常 = event;
             if (current.事件.length > limits.events) { current.事件.shift(); current.截断 = true; }
             saveSoon();
             notifyLogs();
@@ -217,11 +259,14 @@
         };
         const observe = () => {
             if (!current) return;
-            const state = sanitize(getState());
-            const signature = JSON.stringify(state);
+            const raw = getState();
+            if (raw?.会话?.generation > 0) sessionGenerations.set(current, raw.会话.generation);
+            const state = sanitize(raw);
+            const observed = pick(state, ['会话', '本机音频', '共享路径变化']);
+            const signature = JSON.stringify(observed);
             if (signature === lastObserved) return;
             lastObserved = signature;
-            record('状态变化', state);
+            record('状态变化', observed);
         };
         const sample = () => {
             if (disposed) return Promise.resolve(null);
@@ -280,7 +325,9 @@
                             return result;
                         });
                         sampleBaselines.set(pc, next);
-                        return { quality, 序号: index + 1, 参与者序号: entry.ordinal || null, 连接用途: entry.purpose || null, 路径: pc.screenRoute === 'SFU' ? 'SFU' : 'P2P', 连接状态: pc.connectionState || null, ICE状态: pc.iceConnectionState || null, 音频流: audio };
+                        return { quality, 序号: index + 1, 参与者序号: entry.ordinal || null, 连接用途: entry.purpose || null,
+                            路径: pc.screenRoute === 'SFU' ? 'SFU' : 'P2P', 实际传输路径: global.VoiceScreenCodecs?.describePath?.(pc, reports),
+                            连接状态: pc.connectionState || null, ICE状态: pc.iceConnectionState || null, 音频流: audio };
                     } catch { return { quality: pc.screenRoute !== 'SFU' ? { state: pc.connectionState || 'unknown' } : null, 序号: index + 1, 状态: '统计读取失败或超时' }; }
                     finally { global.clearTimeout(timeout); timeouts.delete(timeout); }
                 }));
@@ -288,7 +335,17 @@
                 if (onConnectionQuality) {
                     try { onConnectionQuality(connections.map(entry => entry?.quality).filter(Boolean)); } catch { /* UI cannot interrupt diagnostics. */ }
                 }
-                const snapshot = sanitize({ 采样时间: new Date().toISOString(), 浏览器: browserInfo(), ...local, 共享: shares.filter(Boolean), 连接: connections.slice(0, diagnosticConnectionLimit) });
+                const snapshot = sanitize({ 采样时间: new Date().toISOString(), 浏览器: browserInfo(), ...local,
+                    在线: global.navigator?.onLine, 信令已连接: socket?.connected,
+                    共享: shares.filter(Boolean).map((share) => {
+                        // These are reported once per sender. The per-share
+                        // overlay can still display the same data on its own.
+                        const { 共享音频采集, 原生采集, ...details } = share;
+                        return { ...details,
+                            ...(local?.共享音频采集 ? {} : { 共享音频采集 }),
+                            ...(local?.原生采集 ? {} : { 原生采集 }) };
+                    }), 连接: connections.slice(0, diagnosticConnectionLimit),
+                    未采集连接数: Math.max(0, seen.size - diagnosticConnectionLimit) });
                 if (owned && current === owned) {
                     // Reuse the existing SFU health decision and ordinal. No second
                     // low-FPS detector, and no guessed mapping to a video tile.
@@ -302,6 +359,7 @@
                         }
                     }
                     owned.当前状态 = snapshot;
+                    if (snapshot?.脱敏截断) owned.脱敏截断 = true;
                     owned.采样总数++;
                     owned.历史采样.push(snapshot);
                     // Keep two startup samples and a longer recent window;
@@ -327,6 +385,11 @@
         const end = (reason = '离开语音') => {
             invalidateSample();
             if (!current) return;
+            const state = getState();
+            if (state?.会话?.generation > 0) sessionGenerations.set(current, state.会话.generation);
+            current.结束状态 = sanitize({ 会话: state?.会话, 在线: global.navigator?.onLine, 信令已连接: socket?.connected });
+            const health = receiverHealth();
+            if (health) current.SFU接收健康 = health;
             [...shareStates.keys()].forEach(endShare);
             record('通话结束', { 状态: reason });
             current.结束时间 = new Date().toISOString();
@@ -353,17 +416,24 @@
             observe();
             void tick();
         };
-        const report = async () => {
+        const receiverHealth = () => {
+            const value = getReceiverHealth?.();
+            return value && !Array.isArray(value) ? sanitize(value) : undefined;
+        };
+        const report = async (selected = current || sessions.at(-1)) => {
             const owned = current, epoch = sampleEpoch;
-            const state = await sample();
+            const historical = selected && selected !== owned;
+            const state = historical ? selected.当前状态 : await sample();
             if (disposed || current !== owned || sampleEpoch !== epoch) throw new Error('session-changed');
+            const health = historical ? selected.SFU接收健康 : receiverHealth();
             return {
                 ...versionInfo(),
                 // Keep failure evidence ahead of large histories in the relay's
                 // bounded allowlist traversal; do not duplicate it per snapshot.
-                ...(getReceiverHealth ? { SFU接收健康: sanitize(getReceiverHealth()) } : {}),
+                ...(health ? { SFU接收健康: health } : {}),
                 当前状态: state,
-                当前会话: current ? sanitize(current) : null,
+                当前会话: historical ? null : selected ? structuredCopy(selected) : null,
+                ...(historical ? { 最近会话: structuredCopy(selected) } : {}),
                 存储状态: storageState,
                 记录上限: limits,
                 日志覆盖说明: '本机最近5次通话；每次最多200事件，保留前2与最近22次采样；不录音。页面关闭仅能记录最后保存时间。',
@@ -376,15 +446,23 @@
             const generation = getState()?.会话?.generation;
             if (!generation) return;
             try {
-                const value = compactReport({
+                const health = receiverHealth();
+                const value = {
                     ...versionInfo(),
-                    SFU接收健康: sanitize(getReceiverHealth?.() || {}),
-                    当前状态: current.当前状态, 当前会话: current,
-                });
-                // The server cache needs the latest sample and health windows,
-                // not another copy of the whole rolling history.
-                value.当前会话.历史采样 = [];
-                value.当前会话.事件 = value.当前会话.事件.slice(-6);
+                    ...(health ? { SFU接收健康: health } : {}),
+                    当前状态: current.当前状态,
+                    当前会话: {
+                        ...pick(current, ['开始时间', '结束时间', '最后异常', '事件总数', '采样总数']),
+                        事件: current.事件.slice(-6).map((event) => ({
+                            ...pick(event, ['时间', '相对开始_ms', '类型']),
+                            内容: eventSummary(event.内容),
+                        })),
+                        历史采样: [],
+                        记录截断: current.截断,
+                        脱敏截断: current.脱敏截断,
+                        复制截断: current.事件.length > 6 || current.历史采样.length > 0,
+                    },
+                };
                 socket.emit('voice:diagnostics:checkpoint', { voiceSessionGeneration: generation, critical, report: sanitize(value) });
                 lastCheckpoint = Date.now();
             } catch { /* Diagnostic delivery must never interrupt a call. */ }
@@ -395,33 +473,47 @@
             const owned = current;
             const value = await report().catch(() => null);
             if (current !== owned || getState()?.会话?.generation !== generation) return ack({ ok: false });
-            ack({ ok: Boolean(value), voiceSessionGeneration: generation, report: sanitize(compactReport(value)) });
+            ack({ ok: Boolean(value), voiceSessionGeneration: generation, report: compactReport(value, peerCopyLimits) });
         };
-        const collectCombined = async () => {
+        const collectCombined = async (sessionStart) => {
             const owned = current;
             const generation = getState()?.会话?.generation;
-            const localPromise = report();
+            const selected = sessionStart ? sessions.find((session) => session.开始时间 === sessionStart) : current || sessions.at(-1);
+            if (sessionStart && !selected) throw new Error('session-changed');
+            const started = new Date().toISOString();
+            const localPromise = report(selected);
             const remotePromise = new Promise((resolve) => {
-                if (!current || !socket?.connected) return resolve({ ok: false, reason: 'not-in-voice' });
-                socket.timeout(9000).emit('voice:diagnostics:collect', (error, result) => resolve(error ? { ok: false, reason: 'timeout' } : result));
+                if (!owned && !selected) return resolve({ ok: false, reason: 'not-in-voice' });
+                if (!socket?.connected) return resolve({ ok: false, reason: 'socket-disconnected' });
+                const complete = (error, result) => resolve(error ? { ok: false, reason: 'timeout' } : result);
+                if (owned && selected === owned) return socket.timeout(9000).emit('voice:diagnostics:collect', complete);
+                const recentGeneration = selected && !owned && selected === sessions.at(-1) && sessionGenerations.get(selected);
+                if (recentGeneration) return socket.timeout(9000).emit('voice:diagnostics:recent', recentGeneration, complete);
+                resolve({ ok: false, reason: selected ? 'historical-local-only' : 'not-in-voice' });
             });
             const [local, remote] = await Promise.all([localPromise, remotePromise]);
-            if (current !== owned || getState()?.会话?.generation !== generation) throw new Error('session-changed');
-            return { ...versionInfo(), 收集开始时间: remote?.requestedAt || null,
-                说明: '各端非严格同步；缓存对端会标注时间，不代表当前状态。无原始设备ID、地址、用户名或音频内容。', 本机: compactReport(local),
-                对端: remote?.ok ? remote.results.map((row) => row.数据 ? { ...row, 数据: compactReport(row.数据) } : row) : [],
+            if (current !== owned || getState()?.会话?.generation !== generation || (selected && !sessions.includes(selected)))
+                throw new Error('session-changed');
+            const localTime = Date.parse(local.当前状态?.采样时间);
+            return { ...versionInfo(), 收集开始时间: remote?.requestedAt || started, 本机: compactReport(local),
+                对端: remote?.ok ? remote.results.map((row) => {
+                    if (!row.数据) return row;
+                    const peerTime = Date.parse(row.数据.当前状态?.采样时间);
+                    return { ...row, 采样时间差_ms: finite(Math.abs(localTime - peerTime)), 数据: compactReport(row.数据, peerCopyLimits) };
+                }) : [],
                 未响应原因: remote?.ok ? null : remote?.reason || 'collection-failed', 未收集人数: remote?.omitted || 0 };
         };
-        const copyCombined = async (button, onFeedback) => {
+        const copyCombined = async (button, onFeedback, sessionStart) => {
             if (disposed || copyRequest || button?.disabled) return;
             const revision = ++copyRevision, owned = current, generation = getState()?.会话?.generation;
             const isCurrent = () => !disposed && revision === copyRevision;
             const sameSession = () => current === owned && getState()?.会话?.generation === generation;
             copyRequest = { button };
-            global.clearTimeout(copyFeedbackTimer);
+            resetCopyLabel();
             if (button) { button.disabled = true; button.setAttribute('aria-busy', 'true'); button.textContent = '正在收集诊断…'; }
             try {
-                const data = await collectCombined();
+                onFeedback?.('正在收集诊断…');
+                const data = await collectCombined(sessionStart);
                 if (!isCurrent()) return;
                 if (!sameSession()) throw new Error('session-changed');
                 const text = JSON.stringify(data, null, 2);
@@ -439,10 +531,11 @@
                     if (!sameSession()) throw new Error('session-changed');
                     showText(text);
                     if (button) button.textContent = '请在日志窗口手动复制';
+                    onFeedback?.('请在日志窗口手动复制');
                 }
-            } catch {
+            } catch (error) {
                 if (isCurrent()) {
-                    const message = '会话已变化，请重试';
+                    const message = error?.message === 'session-changed' ? '会话已变化，请重试' : '诊断收集失败，请重试';
                     if (button) button.textContent = message;
                     onFeedback?.(message);
                 }
@@ -452,10 +545,8 @@
                 if (isCurrent() && button) {
                     button.disabled = false;
                     button.setAttribute('aria-busy', 'false');
-                    copyFeedbackTimer = global.setTimeout(() => {
-                        if (!isCurrent()) return;
-                        button.textContent = '复制诊断'; copyFeedbackTimer = null;
-                    }, 2000);
+                    copyFeedbackButton = button;
+                    copyFeedbackTimer = global.setTimeout(() => { if (isCurrent()) resetCopyLabel(); }, 2000);
                 }
             }
         };
@@ -484,19 +575,23 @@
             (global.document.fullscreenElement || global.document.body).append(dialog);
             dialog.showModal();
         };
+        const getLogs = () => ({ sessions: sessions.map(structuredCopy), currentIndex: sessions.indexOf(current), storageState });
+        const clearLogs = () => { sessions = current ? [current] : []; persist(); notifyLogs(); };
         return {
             start, end, record, observe, sample, report, collectCombined, copyCombined,
             beginShare, endShare, observeShare,
             getShareOrdinal: (tile) => shareStates.get(tile)?.ordinal,
             attachSocket(next) { socket?.off?.('voice:diagnostics:sample', handleRequest); socket = next; socket?.on?.('voice:diagnostics:sample', handleRequest); },
-            getLogs: () => ({ sessions: sessions.map(sanitize), currentIndex: sessions.indexOf(current), storageState }),
+            getLogs,
             showLogs: (options = {}) => global.VoicePlayerEvents?.show({
-                getLogs: () => ({ sessions: sessions.map(sanitize), currentIndex: sessions.indexOf(current), storageState }),
+                getLogs,
                 subscribe(listener) { logListeners.add(listener); return () => logListeners.delete(listener); },
-                showRaw: () => showText(JSON.stringify({ ...versionInfo(), 存储状态: storageState, 通话: sessions.map(sanitize) }, null, 2)),
+                showRaw: () => showText(JSON.stringify({ ...versionInfo(), 存储状态: storageState, 通话: sessions }, null, 2)),
+                copySession: (button, feedback, selected) => copyCombined(button, feedback, selected),
+                clearLogs,
                 ...options,
             }),
-            clearLogs() { sessions = current ? [current] : []; persist(); notifyLogs(); },
+            clearLogs,
             destroy() {
                 if (disposed) return;
                 disposed = true; copyRevision++;
@@ -505,7 +600,7 @@
                     button.disabled = false; button.setAttribute('aria-busy', 'false'); button.textContent = '复制诊断';
                 }
                 copyRequest = undefined;
-                end('页面关闭'); global.clearTimeout(copyFeedbackTimer); socket?.off?.('voice:diagnostics:sample', handleRequest);
+                end('页面关闭'); resetCopyLabel(); socket?.off?.('voice:diagnostics:sample', handleRequest);
             },
         };
     };

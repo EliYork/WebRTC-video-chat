@@ -385,11 +385,11 @@
             ...(source.isLocal ? { 共享音频采集: source.captureAudio || global.VoiceMediaLifecycle?.describeScreenAudio(source.stream) || null } : {}),
             ...(source.isLocal
                 ? {
-                      采集轨道设置: {
+                      ...(source.nativeCapture ? { 原生采集: source.nativeCapture } : { 采集轨道设置: {
                           宽: number(settings.width),
                           高: number(settings.height),
                           帧率: number(settings.frameRate),
-                      },
+                      } }),
                       共享目标: source.shareOptions || null,
                       编码器选择: source.codecDecision || null,
                   }

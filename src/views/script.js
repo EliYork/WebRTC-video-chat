@@ -134,7 +134,7 @@ voiceMediaDebug.record = (event) => {
     callDiagnostics?.record(event.event || 'media', {
         state: event.state,
         mode: event.mode,
-        部件: event.type,
+        部件: event.mediaType || event.type,
         reason: /^[a-z0-9-]{1,80}$/i.test(event.reason || '') ? event.reason : null,
     });
 };
@@ -313,6 +313,7 @@ screenSfuRuntime = (usingPiik ? window.PiikScreenMedia : window.VoiceScreenSfuRu
     },
     config: window.voiceScreenSfuConfig || {},
     onRouteEvent: (event) => callDiagnostics?.record('共享路径事件', event),
+    onDiagnosticFailure: (failure) => callDiagnostics?.record('Piik 共享异常', failure),
     onReceiverFailure: (failure) => callDiagnostics?.record('SFU接收回退诊断', failure),
     onReceiverIssue: (issue) => callDiagnostics?.record('SFU接收异常诊断', issue),
     onCodecEvent: (event) => callDiagnostics?.record('共享编码回退', event),
@@ -334,7 +335,8 @@ screenSfuRuntime = (usingPiik ? window.PiikScreenMedia : window.VoiceScreenSfuRu
     onRemoteStream: ({ peerId, stream, publicationId, trackRoles }) => {
         callDiagnostics?.record('观看路径切换', {
             参与者序号: voicePeerRegistry.getPeerIds().indexOf(peerId) + 1,
-            路径: stream ? 'SFU' : 'P2P（等待画面确认）',
+            路径: usingPiik ? 'Piik P2P' : stream ? 'SFU' : 'P2P（等待画面确认）',
+            状态: stream ? '已接入' : '已移除',
         });
         if (stream) remoteScreenSfuSources.set(peerId, { stream, publicationId, trackRoles });
         else if (remoteScreenSfuSources.get(peerId)?.publicationId === publicationId) remoteScreenSfuSources.delete(peerId);
@@ -348,6 +350,7 @@ screenSfuRuntime = (usingPiik ? window.PiikScreenMedia : window.VoiceScreenSfuRu
     onWarning: (message, error) => console.warn('[screen-route]', message, error?.message || ''),
 });
 const getDiagnosticQualitySource = (peerId) => {
+        const { 原生共享音频, 原生采集, ...routeStatus } = screenSfuRuntime.snapshot();
         if (peerId === 'local-video') {
             const tile = document.getElementById('local-video');
             return {
@@ -357,9 +360,10 @@ const getDiagnosticQualitySource = (peerId) => {
                     state: audioProcessingRuntime.diagnostics(myVideoStream),
                     microphoneGain: noiseSettingsUI.getMicGain(),
                 },
-                routeStatus: screenSfuRuntime.snapshot(),
+                routeStatus,
+                nativeCapture: 原生采集,
                 outputGain: remoteAudioGain.getSnapshot(),
-                captureAudio: voiceMediaLifecycle.describeScreenAudio(currentScreenStream, navigator.mediaDevices?.getSupportedConstraints?.()),
+                captureAudio: 原生共享音频 || voiceMediaLifecycle.describeScreenAudio(currentScreenStream, navigator.mediaDevices?.getSupportedConstraints?.()),
                 shareOptions: currentScreenShareSession?.shareOptions,
                 codecDecision: currentScreenShareSession?.codecDecision,
                 onSample: (snapshot) => screenSfuRuntime.observeSender(snapshot, {
@@ -392,7 +396,7 @@ const getDiagnosticQualitySource = (peerId) => {
                 state: audioProcessingRuntime.diagnostics(myVideoStream),
                 microphoneGain: noiseSettingsUI.getMicGain(),
             },
-            routeStatus: screenSfuRuntime.snapshot(),
+            routeStatus,
             piikConnections: usingPiik ? screenSfuRuntime.getDiagnosticConnections?.(peerId) : undefined,
             outputGain: remoteAudioGain.getSnapshot(),
             ...(serverSource ? { pc: serverSource.pc } : {}),
@@ -3495,16 +3499,17 @@ window.addEventListener('popstate', () => {
 callDiagnostics = window.VoiceCallDiagnostics.createRuntime({
     onConnectionQuality: sample => { connectionQuality.accept(sample); mediaDockAdapter?.notify(); },
     sanitize: sanitizeVoiceDiagnostic,
-    getReceiverHealth: () => screenSfuRuntime.getReceiverHealth(),
+    getReceiverHealth: usingPiik ? undefined : () => screenSfuRuntime.getReceiverHealth(),
     getState: () => {
         const session = voiceSessionRuntime.getSnapshot();
         const settings = audioSettingsController.snapshot();
         const processing = audioProcessingRuntime.diagnostics(myVideoStream);
         const track = myVideoStream?.getAudioTracks()[0];
         const actual = track?.getSettings?.() || {};
-        const sharePath = screenSfuRuntime.snapshot();
+        const { 原生共享音频, 原生采集, ...sharePath } = screenSfuRuntime.snapshot();
         return {
-            会话: { state: session.state, generation: session.serverGeneration },
+            会话: { state: session.state, generation: session.serverGeneration,
+                失败原因: /^[a-z0-9-]{1,80}$/i.test(session.failureReason || '') ? session.failureReason : undefined },
             本机音频: {
                 请求模式: settings.requested.mode,
                 实际模式: processing?.mode || null,
@@ -3540,7 +3545,9 @@ callDiagnostics = window.VoiceCallDiagnostics.createRuntime({
                 放大播放: remoteAudioGain.getSnapshot(),
             },
             共享路径变化: sharePath,
-            共享音频采集: sharePath.原生共享音频 || voiceMediaLifecycle.describeScreenAudio(currentScreenStream, navigator.mediaDevices?.getSupportedConstraints?.()),
+            ...(currentScreenStream ? { 共享音频采集: 原生共享音频 || voiceMediaLifecycle.describeScreenAudio(currentScreenStream,
+                navigator.mediaDevices?.getSupportedConstraints?.()) } : {}),
+            ...(原生采集 ? { 原生采集 } : {}),
             输出播放: voicePeerRegistry.getPeerIds().map((peerId, index) => {
                 const screen = screenShareVolumeController.getSnapshot(peerId);
                 const tile = document.getElementById(peerId);
@@ -3587,7 +3594,8 @@ callTools?.querySelector('[data-copy-call-diagnostics]')?.addEventListener('clic
         if (!callDiagnosticsFeedback) return;
         window.clearTimeout(callDiagnosticsFeedbackTimer);
         callDiagnosticsFeedback.textContent = message;
-        callDiagnosticsFeedbackTimer = window.setTimeout(() => { callDiagnosticsFeedback.textContent = ''; }, 3000);
+        if (message !== '正在收集诊断…')
+            callDiagnosticsFeedbackTimer = window.setTimeout(() => { callDiagnosticsFeedback.textContent = ''; }, 3000);
     });
 });
 window.VoicePlayerMenu.configure({
@@ -3601,13 +3609,6 @@ document.addEventListener('voice:share-sample', ({ detail }) => callDiagnostics.
 callTools?.querySelector('[data-show-call-logs]')?.addEventListener('click', () => {
     callTools.hidePopover?.();
     callDiagnostics.showLogs();
-});
-callTools?.querySelector('[data-clear-call-logs]')?.addEventListener('click', (event) => {
-    callDiagnostics.clearLogs();
-    event.currentTarget.textContent = '历史日志已清除';
-});
-callTools?.addEventListener('toggle', (event) => {
-    if (event.newState === 'open') callTools.querySelector('[data-clear-call-logs]').textContent = '清除日志';
 });
 remoteVolumeUI.init();
 

@@ -237,7 +237,7 @@ const probe = `(() => {
         }
         return createAnswer.call(this,options);
     };
-    let factory; Object.defineProperty(window,'io',{configurable:true,get(){return factory;},set(value){factory=new Proxy(value,{apply(T,self,args){const socket=Reflect.apply(T,self,args);window.__socket=socket;socket.on('piik:message',({sessionId,message})=>{(window.__piikMessages??=[]).push({sessionId,type:message.type,phase:message.phase,revision:message.revision});});return socket;}});}});
+    let factory; Object.defineProperty(window,'io',{configurable:true,get(){return factory;},set(value){factory=new Proxy(value,{apply(T,self,args){const socket=Reflect.apply(T,self,args);window.__socket=socket;socket.onAnyOutgoing((event)=>{if(event==='voice:diagnostics:checkpoint') window.__diagnosticCheckpoint=Date.now();});socket.on('piik:message',({sessionId,message})=>{(window.__piikMessages??=[]).push({sessionId,type:message.type,phase:message.phase,revision:message.revision});});return socket;}});}});
     navigator.mediaDevices.getDisplayMedia=async(options)=>{
         window.__lastCaptureOptions=options;
         if(window.__cancelNextCapture){
@@ -701,6 +701,10 @@ try {
         const diagnostics = (await evaluate(b, 'JSON.parse(window.__diagnosticsCopy)')).本机;
         assert.equal(diagnostics.网页版本, JSON.parse(readFileSync('package.json', 'utf8')).version);
         assert.equal(diagnostics.客户端类型, '浏览器');
+        const routeLog = diagnostics.当前会话.精简时间线;
+        assert.ok(routeLog.some(row => row.类型 === '共享路径事件' && row.来源 === 'Piik' && row.event));
+        assert.ok(routeLog.some(row => row.类型 === '观看路径切换' && row.路径 === 'Piik P2P'));
+        assert.equal(diagnostics.SFU接收健康, undefined);
         assert.ok(diagnostics.当前状态.共享.some(s => s.连接.some(c =>
             c.统计来源 === 'Piik WebRTC stats' && c.视频流.some(v => v.编码 === `video/${webCodec}` && v.实际帧率 > 0))),
             'real Piik receive statistics reach the original call diagnostic export');
@@ -820,12 +824,23 @@ try {
         );
         await click(b, '#stageJoinVoice');
         await wait(() => receiving(b), 'rejoin receives existing Piik share');
+        const rejoinedAt = Date.now();
+        await wait(() => evaluate(b, `window.__diagnosticCheckpoint >= ${rejoinedAt}`), 'viewer checkpoints after rejoining');
         await click(a, '#destroyPeer');
         await wait(
             async () =>
                 (await mediaRequest(b, { action: 'list' })).shares.length === 0,
             'publisher departure cleanup'
         );
+        await click(a, '.workspace-call-tools-toggle');
+        await click(a, '[data-copy-call-diagnostics]');
+        await wait(() => evaluate(a, '!!window.__diagnosticsCopy'), 'diagnostic export after leaving');
+        const afterLeave = await evaluate(a, 'JSON.parse(window.__diagnosticsCopy)');
+        assert.equal(afterLeave.本机.当前会话, null);
+        assert.equal(afterLeave.本机.最近会话.结束原因, 'media-dock-hangup');
+        assert.ok(afterLeave.对端.some(row => row.状态 === '近期缓存（本机已离开）' && row.数据.当前状态), JSON.stringify({
+            reason: afterLeave.未响应原因, states: afterLeave.对端.map(row => row.状态),
+        }));
         assert.deepEqual(errors, []);
         const report = {
             status: 'passed',
@@ -843,6 +858,7 @@ try {
                 'separate screen audio sender accepts the 256 kbps ceiling',
                 'source picker cancellation and replacement failure retain live video; success retires old capture without republishing',
                 'copy feedback remains visible after the tools menu closes',
+                'Piik route events survive the diagnostic export and a departed publisher can read the preceding peer checkpoint',
                 'viewer automatically resumes after its media signaling session closes',
                 'viewer automatically recovers an ended video track without leaving voice',
                 'pending capture stop discards late stream without leaving voice',

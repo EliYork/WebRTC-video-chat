@@ -401,6 +401,7 @@ const handleVoiceJoin = async (payload, socket) => {
     const result = await voiceCallSignaling.join(payload, socket);
 
     if (result.ok) {
+        voiceDiagnostics.forgetDeparture(socket);
         if (previousOwner && (previousOwner.peerId !== socket.data.voicePeerId || previousOwner.voiceSessionGeneration !== result.voiceSessionGeneration)) { screenSfu.cleanupSocket(socket); piikMedia?.cleanupSocket(socket); }
         Log.info(
             `[joinVoice] socket=${socket.id} peerId=${socket.data.voicePeerId} roomId=${socket.data.voiceRoomId}`
@@ -417,12 +418,14 @@ const handleVoiceJoin = async (payload, socket) => {
  * Reads voiceRoomId / voicePeerId from socket.data to avoid stale closured values.
  */
 const handleDisconnectingVoice = (socket) => {
+    voiceDiagnostics.forgetDeparture(socket);
     piikMedia?.cleanupSocket(socket);
     screenSfu.cleanupSocket(socket);
     return voiceCallSignaling.leave(socket, { reason: 'socket-disconnecting' });
 };
 
 const handleVoicePeerLeft = (socket) => {
+    voiceDiagnostics.rememberDeparture(socket);
     piikMedia?.cleanupSocket(socket);
     screenSfu.cleanupSocket(socket);
     void voiceCallSignaling.leave(socket, { reason: 'voicePeerLeft' });
@@ -755,6 +758,10 @@ io.on('connection', (socket) => {
     socket.on('voice:diagnostics:collect', (acknowledge) => {
         if (typeof acknowledge !== 'function') return;
         void voiceDiagnostics.collect(socket).then(acknowledge);
+    });
+    socket.on('voice:diagnostics:recent', (generation, acknowledge) => {
+        if (typeof acknowledge !== 'function' || !Number.isSafeInteger(generation) || generation < 1) return;
+        acknowledge(voiceDiagnostics.collectRecent(socket, generation));
     });
     socket.on('chat:join', (payload) => {
         void handleChatJoin(payload || {}, socket).catch((error) => {

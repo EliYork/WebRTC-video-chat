@@ -366,6 +366,18 @@ export function createNativeCapture(
         },
         get: (stream: MediaStream) =>
             active?.stream === stream ? active : null,
+        captureDiagnostics: () => {
+            if (!active) return null;
+            const state = active.encoderStatus;
+            const confirmed = state?.state === 'active' && Boolean(state.codec);
+            return {
+                状态: state?.state || '未确认',
+                编码: confirmed ? state.codec : null,
+                硬件编码: confirmed ? state.hardware : null,
+                编码器: confirmed ? state.encoder || null : null,
+                显卡: confirmed ? state.adapter || null : null,
+            };
+        },
         audioDiagnostics: () => {
             if (!active) return null;
             const state = active.encoderStatus;

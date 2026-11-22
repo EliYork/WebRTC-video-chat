@@ -16,6 +16,7 @@ for (const key of `最近异常 缓存时间 缓存年龄_ms`.split(' ')) keys.a
 for (const key of `指标状态 统计状态 播放指标状态 视频序号 浏览器报告帧率 预览隐藏`.split(' ')) keys.add(key);
 for (const key of `网页版本 网页构建 客户端类型 客户端版本 Electron版本 统计来源 统计年龄_ms 原生输出帧率 码率口径 播放采样间隔_ms 播放丢帧采样间隔_ms 最近帧解码准备_ms 最近帧收齐到提交_ms 最近帧回调滞后_ms`.split(' ')) keys.add(key);
 for (const key of `编码协商 实际传输路径 requested negotiated actual hardwareAcceleration trials support av1Send av1Receive actualCodec resolutionReduced remoteSdpAV1 uplinkStatus`.split(' ')) keys.add(key);
+for (const key of `最近会话 最后异常 结束状态 已结束 精简时间线 记录截断 复制截断 脱敏截断 复制上限 在线 信令已连接 未采集连接数 失败原因 处理负载 median p95 max slowFrames 来源 阶段 修订 provider route sharing viewing 原生采集 硬件编码 编码器 显卡`.split(' ')) keys.add(key);
 
 export function sanitizeVoiceDiagnostic(value) {
     let budget = 16000;
@@ -30,6 +31,9 @@ export function sanitizeVoiceDiagnostic(value) {
             .map(([key, row]) => [key, visit(row, depth + 1)]));
     };
     const result = visit(value, 0);
-    if (budget < 0 && result && !Array.isArray(result) && typeof result === 'object') result.截断 = true;
+    if (budget < 0 && result && !Array.isArray(result) && typeof result === 'object') {
+        result.截断 = true;
+        result.脱敏截断 = true;
+    }
     return result;
 }

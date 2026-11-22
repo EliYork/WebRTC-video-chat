@@ -244,6 +244,10 @@ export async function runNativeScenario({
         await wait(() => evaluate(a, `VoiceShareDiagnostics.getCached(document.getElementById('local-video'))?.连接.some(c =>
             c.统计来源==='Piik 原生 edge-quality' && c.视频流.some(v=>v.编码==='video/H264' && v.原生输出帧率>0))`),
             'native H264 output statistics in original diagnostics');
+        assert.ok(await evaluate(a, `(() => {
+            const sample = VoiceShareDiagnostics.getCached(document.getElementById('local-video'));
+            return sample?.原生采集 && !sample.采集轨道设置 && sample.共享音频采集.捕获来源;
+        })()`), 'native capture metadata stays separate from the local preview track');
         const listed = await mediaRequest(b, { action: 'list' });
         assert.equal(
             (
@@ -417,7 +421,7 @@ export async function runNativeScenario({
                 'approved site and capability required',
                 'original channel and stage',
                 'native H264 Pion fanout to three viewers',
-                'native output statistics reach original diagnostics without claiming hardware or capture timing',
+                'native capture status and output statistics reach diagnostics separately from preview track settings',
                 'single capture worker',
                 'no browser re-encoding',
                 'same-channel authority',
