@@ -343,9 +343,66 @@ npm run test:stage-browser
 5. 在新目录执行 `npm ci --omit=dev`，使用与现有服务一致的 Node 版本。失败则停止发布，不切换。不要上传本机 Windows 的 `node_modules`。
 6. 在维护窗口停止旧进程，把宝塔 Node 项目的运行目录改为新版本目录，保持原端口与环境配置，启动命令使用 `npm start`（入口 `src/server.js`）。同一端口不要同时启动新旧进程。
 7. 检查启动日志、页面，以及本机和公网的 `/readyz`：应返回 HTTP 200，JSON 的 `ok`、`mediaReady` 均为 `true`。`/healthz` 是存活检查，媒体不可用时仍返回 200；不能替代就绪检查。`scripts/deploy-baota.sh` 会等待本机页面及媒体就绪，再检查公网页面和就绪响应；失败进入既有回滚流程，只有全部通过才保存 PM2 配置。显式关闭 SFU 的 P2P 模式可以就绪，配置错误或已启用的 worker 启动失败则返回 503。
-8. 检查房间进入、聊天发送、语音加入、双端屏幕共享及实际接收画质。浏览器刷新后验收；就绪接口不证明公网媒体链路、TURN、声音听感或游戏画质。Piik 就绪仅表示内部健康接口成功响应。
+8. 按下节配置和核验 Nginx 的启动资源缓存。确认公网通过后，再完成发布验收。
+9. 检查房间进入、聊天发送、语音加入、双端屏幕共享及实际接收画质。浏览器刷新后验收；就绪接口不证明公网媒体链路、TURN、声音听感或游戏画质。Piik 就绪仅表示内部健康接口成功响应。
 
 具体宝塔界面因版本和 Node 管理方式而异；不要删除旧 Node 项目或反向代理来代替切换目录。若管理器不支持更改目录，先确认现有启动管理方式再操作。
+
+### Nginx 启动资源缓存
+
+把以下精确匹配的 `location` 放入语音站的 HTTPS `server` 块。宝塔站点通过 `/www/server/panel/vhost/nginx/extension/voice.eliyork.com/voice-startup-cache.conf` 加载额外的缓存规则。启用 Piik 的版本发布前也要加上 `/vendor/piik-client.js` 的规则。若 Node 监听端口有变化，替换下面的 `127.0.0.1:3000`。`expires off` 和 `proxy_cache off` 让公网响应沿用 Node 根据版本哈希生成的缓存头。
+
+```nginx
+location = /style.css {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_http_version 1.1;
+    proxy_cache off;
+    expires off;
+}
+
+location = /script.js {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_http_version 1.1;
+    proxy_cache off;
+    expires off;
+}
+
+location = /js/room/boot-runtime.js {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_http_version 1.1;
+    proxy_cache off;
+    expires off;
+}
+
+location = /vendor/piik-client.js {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_http_version 1.1;
+    proxy_cache off;
+    expires off;
+}
+```
+
+在服务器运行 `nginx -t`，通过后用 `nginx -s reload` 生效。从仓库根目录执行以下只读检查，目标使用对外访问域名。
+
+```powershell
+python scripts/deploy-ui-update.py verify-cache https://voice.eliyork.com
+```
+
+检查从房间 HTML 提取资源的版本哈希，核对响应内容，并要求匹配版本返回 `public, max-age=31536000, immutable`，无版本、旧版本和重复版本参数返回 `no-cache`。启用 Piik 时一并检查浏览器使用的 Piik 脚本。Piik 网页适配器有改动时，先运行 `npm run build:piik -- --web-only`，并将生成的 `integrations/piik/.build/client.js` 纳入发布计划。`deploy-ui-update.py` 在准备阶段对照清单校验候选脚本，在激活后核对公网脚本是否与候选一致。公网校验失败时走既有回滚流程。
+
+Piik Go 依赖或服务有改动时，从仓库根目录运行 `npm run build:piik -- --linux-server` 生成 Linux amd64 的服务二进制及对应许可清单，再通过 `npm run package:piik:server` 准备完整服务包。Windows 原生采集改动随 `npm run build:piik:app` 生成的采集程序进入客户端安装包。
 
 ## 可选 TURN 中继
 

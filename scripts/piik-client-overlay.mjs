@@ -11,6 +11,8 @@ export function editOnce(text, before, after) {
 export function patchPiikClient(file, text) {
     text = text.replaceAll('\r\n', '\n');
     if (file.endsWith('/native/wire.ts')) {
+        text = editOnce(text, 'hardwareH264: z.array(nativeEncoderSchema).max(64),', 'hardwareH264: z.array(nativeEncoderSchema).max(64),\n    hardwareAv1: z.array(nativeEncoderSchema).max(64).default([]),');
+        text = editOnce(text, 'const nativeVideoCodecSchema = z.enum(["h264", "vp8"]);', 'const nativeVideoCodecSchema = z.enum(["h264", "vp8", "av1"]);');
         text = editOnce(text, 'processAudio: z.boolean().default(false),', 'independentAudio: z.boolean().default(false),\n      processAudio: z.boolean().default(false),');
         text = editOnce(text, 'code: z.literal("operation-failed"),', 'code: z.literal("operation-failed"),\n    reason: z.enum(["hardware-unavailable", "encoder-failed", "media-capture-failed", "audio-target-invalid", "audio-capture-failed", "system-exclusion-unavailable", "capture-unconfirmed"]).optional(),');
         text = editOnce(text, 'type: z.literal("share-ended"),\n      failed: z.boolean(),', 'type: z.literal("share-ended"),\n      reason: z.enum(["hardware-unavailable", "encoder-failed", "media-capture-failed", "capture-unconfirmed"]).optional(),\n      failed: z.boolean(),');
@@ -24,11 +26,36 @@ export const platformAudioListSchema = z.object({ ...responseBase, type: z.liter
   }).strict()).max(1024), systemSafe: z.boolean(),
 }).strict();
 export const platformShareStatusSchema = z.object({ ...responseBase, type: z.literal("platform-share-status"),
-  shareId: opaqueIdentifierSchema, codec: z.enum(["", "h264", "vp8"]), hardware: z.boolean(),
+  shareId: opaqueIdentifierSchema, codec: z.enum(["", "h264", "vp8", "av1"]), hardware: z.boolean(),
   state: z.enum(["unknown", "starting", "active"]), encoder: z.string().max(512), adapter: z.string().max(512),
   audio: z.enum(["none", "active", "failed"]),
 }).strict();
 `;
+    } else if (file.endsWith('/webrtc/video-codec.ts')) {
+        text = editOnce(text, '  primary: BrowserVideoCodec;', '  primary: BrowserVideoCodec | "av1";');
+        text = editOnce(text, '  const vp8 = vp8Codecs(codecs);', `  const vp8 = vp8Codecs(codecs);
+  if (preference.primary === "av1") {
+    const av1 = codecs.filter(({ mimeType, sdpFmtpLine }) =>
+      mimeType.toLowerCase() === "video/av1" &&
+      Number(/(?:^|;)\\s*profile=(\\d+)/i.exec(sdpFmtpLine ?? "")?.[1] ?? 0) === 0,
+    );
+    const compatible = [...av1, ...h264ModeOneCodecs(codecs), ...vp8];
+    return compatible.length > 0 && applyCodecs(transceiver, [...compatible, ...repairCodecs(codecs)]);
+  }`);
+    } else if (file.endsWith('/webrtc/viewer-peer.ts')) {
+        // Piik 81b4f27: the last live video track can end while signaling stays connected.
+        text = editOnce(text, '  onFirstDecodedFrame?: (connectionId: string) => boolean;',
+            '  onFirstDecodedFrame?: (connectionId: string) => boolean;\n  onVideoTrackEnded?: (connectionId: string) => boolean;');
+        text = editOnce(text, '    this.connectionLifetime = new AbortController();',
+            '    const lifetime = this.connectionLifetime = new AbortController();');
+        text = editOnce(text, '        this.remoteStream.addTrack(event.track);',
+            `        this.remoteStream.addTrack(event.track);
+        if (event.track.kind === "video") event.track.addEventListener("ended", () => {
+          if (!this.isCurrentConnection(connection, connectionId) ||
+              this.remoteStream.getVideoTracks().some(track => track.readyState === "live")) return;
+          this.stopDecodedFrameProof();
+          if (!this.events.onVideoTrackEnded?.(connectionId)) this.reportRecoveryExhausted();
+        }, { once: true, signal: lifetime.signal });`);
     } else if (file.endsWith('/native/client.ts')) {
         text = editOnce(text, 'import {\n  captureOptionsResponseSchema,', 'import {\n  platformAudioListSchema, platformShareStatusSchema,\n  captureOptionsResponseSchema,');
         text = editOnce(text, '  audio: boolean;\n  excludeAudio?', '  audio: boolean;\n  audioMode?: "none" | "system" | "application";\n  audioTarget?: { pid: number; creationTime: string };\n  microphoneMixing?: boolean;\n  excludeAudio?');
@@ -52,7 +79,7 @@ export const platformShareStatusSchema = z.object({ ...responseBase, type: z.lit
     return text;
 }
 export const piikClientOverlay = { name: 'piik-share-control', setup(build) {
-    build.onLoad({ filter: /[\\/]src[\\/]client[\\/]native[\\/](client|wire)\.ts$/ }, args => ({
+    build.onLoad({ filter: /[\\/]src[\\/]client[\\/](native[\\/](client|wire)|webrtc[\\/](viewer-peer|video-codec))\.ts$/ }, args => ({
         contents: patchPiikClient(args.path.replaceAll('\\', '/'), readFileSync(args.path, 'utf8')), loader: 'ts',
     }));
 } };

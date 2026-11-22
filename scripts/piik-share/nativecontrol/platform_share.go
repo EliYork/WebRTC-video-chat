@@ -51,7 +51,8 @@ func (session *Session) validatePlatformAudio(ctx context.Context, request *star
 		}
 		return nil
 	}
-	if runtime.GOOS != "windows" || !session.capabilities.IndependentAudio || request.Codec != "h264" || request.MicrophoneMixing || request.ExcludeAudio != nil {
+	if runtime.GOOS != "windows" || !session.capabilities.IndependentAudio ||
+		(request.Codec != "h264" && request.Codec != "av1") || request.MicrophoneMixing || request.ExcludeAudio != nil {
 		return nativecapture.PlatformError("audio-target-invalid")
 	}
 	switch request.AudioMode {

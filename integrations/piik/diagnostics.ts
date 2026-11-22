@@ -15,6 +15,9 @@ export function diagnosticConnection(
     const metric = (n: unknown) => fresh ? finite(n) : null;
     const rate = (n: unknown) => metric(n) !== null && m.sampleWindowMs && m.sampleWindowMs > 0
         ? round(metric(n)! * 1000 / m.sampleWindowMs) : null;
+    const webSender = sending && !native;
+    const availableKbps = webSender ? metric(m.availableOutgoingKbps) : null;
+    const limitation = m.qualityLimitationReason;
     return {
         路径: 'Piik P2P',
         实际传输路径: m.localCandidateType === 'relay' || m.remoteCandidateType === 'relay' ? 'TURN' :
@@ -33,10 +36,14 @@ export function diagnosticConnection(
             原生输出帧率: native ? metric(m.framesPerSecond) : null,
             帧率口径: native ? '原生输出帧率（不是独立采集或编码计时）' : sending ? '编码帧率' : '解码帧率',
             采样间隔_ms: metric(m.sampleWindowMs),
-            区间编码帧率: sending && !native ? rate(m.intervalFramesEncoded) : null,
-            区间发送帧率: sending && !native ? rate(m.intervalFramesSent) : null,
+            采集实际帧率: webSender ? metric(m.mediaSourceFramesPerSecond) : null,
+            区间编码帧率: webSender ? rate(m.intervalFramesEncoded) : null,
+            区间发送帧率: webSender ? rate(m.intervalFramesSent) : null,
             区间解码帧率: !sending ? rate(m.intervalFramesDecoded) : null,
             码率_Mbps: metric(m.bitrateKbps) === null ? null : round(m.bitrateKbps! / 1000),
+            本端连接估计可用上行_Mbps: availableKbps === null ? null : round(availableKbps / 1000),
+            编码受限原因: fresh && webSender && limitation && ['none', 'cpu', 'bandwidth', 'other'].includes(limitation)
+                ? limitation : null,
             码率口径: native ? '音视频合计' : '视频 RTP',
             每帧编解码_ms: native ? null : metric(sending ? m.intervalEncodeMs : m.intervalDecodeMs),
             往返延迟_ms: metric(m.rttMs), 抖动_ms: metric(m.jitterMs),

@@ -609,8 +609,11 @@ else {
                     writeFileSync(join(app.getPath('userData'), 'desktop-chrome.png'), (await mainWindow.webContents.capturePage()).toPNG());
                     // Verify real renderer -> OS clipboard, without exposing or
                     // losing the user's clipboard. Do not restore over a new copy.
+                    const clipboardItems = (await clipboard.read()).filter(
+                        (item) => item.types.length > 0
+                    );
                     const previousClipboard = await Promise.all(
-                        (await clipboard.read()).map(async (item) => {
+                        clipboardItems.map(async (item) => {
                             const entries = await Promise.all(
                                 item.types.map(async (type) => [
                                     type,

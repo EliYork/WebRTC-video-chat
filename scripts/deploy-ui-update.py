@@ -2,6 +2,7 @@
 
 Run prepare|activate|rollback in a private client-ui-* backup with plan.json and
 patch.tar.gz. Plan lists exact old/new SHA256 values. No external dependencies.
+Run verify-cache [base-url] from a checkout for a read-only public cache check.
 """
 import hashlib
 import json
@@ -15,26 +16,11 @@ import tarfile
 import time
 import urllib.request
 
-os.umask(0o077)
-os.environ['PATH'] = '/www/server/nodejs/v24.15.0/bin:' + os.environ['PATH']
 ROOT = Path('/www/wwwroot/voice.eliyork.com')
-mode, location = sys.argv[1:3]
-backup = Path(location)
-assert backup.parent == Path('/www/backup/voice-deploy')
-assert re.fullmatch(r'client-ui-[0-9T-]+', backup.name)
-plan = json.loads((backup / 'plan.json').read_text())
-assert re.fullmatch('[a-f0-9]{40}', plan['revision'])
-for name in plan['files']:
-    assert '..' not in Path(name).parts and not name.startswith('/')
-    assert name.startswith('src/') or name in {
-        'integrations/piik/.build/client.js',
-        'integrations/piik/.build/third-party-web.txt',
-    }, name
-    if plan['files'][name]['new'] is None:
-        assert plan['files'][name]['old'] is not None, name
-
-written_files = {name for name, hashes in plan['files'].items() if hashes['new'] is not None}
-removed_files = set(plan['files']) - written_files
+PUBLIC_URL = 'https://voice.eliyork.com'
+STARTUP_PATHS = ('/style.css', '/script.js', '/js/room/boot-runtime.js')
+PIIK_CLIENT_PATH = '/vendor/piik-client.js'
+PIIK_CLIENT_FILE = 'integrations/piik/.build/client.js'
 
 
 def sha(path):
@@ -88,6 +74,45 @@ def health(base, revision):
     raise RuntimeError('Health failed: ' + base)
 
 
+def verify_startup_cache(base, html=None, expected_piik=None):
+    base = base.rstrip('/')
+    if html is None:
+        request = urllib.request.Request(base + '/room/lobby', headers={'Cache-Control': 'no-cache'})
+        with urllib.request.urlopen(request, timeout=10) as response:
+            html = response.read().decode()
+
+    paths = STARTUP_PATHS
+    if expected_piik is not None or re.search(r'["\']' + re.escape(PIIK_CLIENT_PATH) + r'(?=[?"\'])', html):
+        paths += (PIIK_CLIENT_PATH,)
+    checked = {}
+    for path in paths:
+        versions = set(re.findall(r'["\']' + re.escape(path) + r'\?v=([0-9a-f]{64})["\']', html))
+        if len(versions) != 1:
+            raise RuntimeError(f'{base}/room/lobby must advertise one SHA-256 version for {path}')
+        version, = versions
+        if path == PIIK_CLIENT_PATH and expected_piik is not None and version != expected_piik:
+            raise RuntimeError(f'{base}{path} version does not match the release manifest')
+        stale = ('1' if version[0] == '0' else '0') + version[1:]
+        cases = (
+            (f'?v={version}', {'public', 'max-age=31536000', 'immutable'}),
+            ('', {'no-cache'}),
+            (f'?v={stale}', {'no-cache'}),
+            (f'?v={version}&v={version}', {'no-cache'}),
+        )
+        for query, expected in cases:
+            url = base + path + query
+            request = urllib.request.Request(url, headers={'Accept-Encoding': 'identity'})
+            with urllib.request.urlopen(request, timeout=10) as response:
+                directives = {part.strip().lower() for header in response.headers.get_all('Cache-Control', [])
+                              for part in header.split(',')}
+                if directives != expected:
+                    raise RuntimeError(f'{url} Cache-Control expected {sorted(expected)}, got {sorted(directives)}')
+                if 'immutable' in expected and hashlib.sha256(response.read()).hexdigest() != version:
+                    raise RuntimeError(f'{url} body SHA-256 does not match the room HTML')
+        checked[path] = version
+    return checked
+
+
 def restart(revision):
     env = {**os.environ, 'VOICE_BUILD_ID': revision}
     run('pm2', 'restart', 'voice-room', '--update-env', env=env)
@@ -111,6 +136,31 @@ def rollback():
     run('pm2', 'save')
     print(json.dumps({'rolledBack': True, 'health': result}))
 
+
+if sys.argv[1:2] == ['verify-cache']:
+    url = sys.argv[2] if len(sys.argv) > 2 else PUBLIC_URL
+    print(json.dumps(verify_startup_cache(url)))
+    sys.exit(0)
+
+os.umask(0o077)
+os.environ['PATH'] = '/www/server/nodejs/v24.15.0/bin:' + os.environ['PATH']
+mode, location = sys.argv[1:3]
+backup = Path(location)
+assert backup.parent == Path('/www/backup/voice-deploy')
+assert re.fullmatch(r'client-ui-[0-9T-]+', backup.name)
+plan = json.loads((backup / 'plan.json').read_text())
+assert re.fullmatch('[a-f0-9]{40}', plan['revision'])
+for name in plan['files']:
+    assert '..' not in Path(name).parts and not name.startswith('/')
+    assert name.startswith('src/') or name in {
+        PIIK_CLIENT_FILE,
+        'integrations/piik/.build/third-party-web.txt',
+    }, name
+    if plan['files'][name]['new'] is None:
+        assert plan['files'][name]['old'] is not None, name
+
+written_files = {name for name, hashes in plan['files'].items() if hashes['new'] is not None}
+removed_files = set(plan['files']) - written_files
 
 if mode == 'prepare':
     assert not (backup / 'snapshot.json').exists()
@@ -191,9 +241,11 @@ if mode == 'prepare':
             assert 'share-dialog-title' in html
             assert 'data-share-action="stop"' in html
             assert plan['revision'] in html
+            startup_cache = verify_startup_cache('http://127.0.0.1:17888', html, files.get(PIIK_CLIENT_FILE))
             available = int(next(line.split()[1] for line in Path('/proc/meminfo').read_text().splitlines() if line.startswith('MemAvailable:')))
             assert available > 160 * 1024, 'Insufficient candidate memory headroom'
-            (backup / 'prepared.json').write_text(json.dumps({'health': result, 'availableKiB': available}))
+            (backup / 'prepared.json').write_text(json.dumps({'health': result, 'availableKiB': available,
+                                                              'startupAssetCache': startup_cache}))
         finally:
             child.terminate()
             try: child.wait(timeout=8)
@@ -202,7 +254,11 @@ if mode == 'prepare':
 elif mode == 'rollback':
     rollback()
 elif mode == 'activate':
-    assert (backup / 'prepared.json').is_file()
+    prepared = json.loads((backup / 'prepared.json').read_text())
+    staged_manifest = json.loads((backup / 'after' / 'voice-build-manifest.json').read_text())
+    piik_version = staged_manifest['files'].get(PIIK_CLIENT_FILE)
+    if piik_version is not None:
+        assert prepared.get('startupAssetCache', {}).get(PIIK_CLIENT_PATH) == piik_version, 'Prepare this Piik bundle before activation'
     snapshot = json.loads((backup / 'snapshot.json').read_text())
     assert sha(ROOT / '.env') == snapshot['envHash']
     for name, expected in snapshot['before'].items():
@@ -213,12 +269,14 @@ elif mode == 'activate':
         apply_release(ROOT)
         result = restart(plan['revision'])
         local_seconds = round(time.time() - started, 2)
-        public = health('https://voice.eliyork.com', plan['revision'])
+        public = health(PUBLIC_URL, plan['revision'])
+        public_seconds = round(time.time() - started, 2)
+        startup_cache = verify_startup_cache(PUBLIC_URL, expected_piik=piik_version)
         assert sha(ROOT / '.env') == snapshot['envHash']
         assert protected(processes()) == snapshot['protected']
         run('pm2', 'save')
-        report = {'revision': plan['revision'], 'health': result, 'public': public,
-                  'stopToLocalHealthySeconds': local_seconds, 'stopToPublicHealthySeconds': round(time.time()-started, 2),
+        report = {'revision': plan['revision'], 'health': result, 'public': public, 'startupAssetCache': startup_cache,
+                  'stopToLocalHealthySeconds': local_seconds, 'stopToPublicHealthySeconds': public_seconds,
                   'backup': str(backup), 'changedFiles': len(plan['files'])}
         (backup / 'result.json').write_text(json.dumps(report, indent=2))
         print(json.dumps(report))

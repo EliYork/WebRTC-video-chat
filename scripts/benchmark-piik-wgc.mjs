@@ -9,7 +9,8 @@ if (!process.argv.includes('--allow-window')) throw Error('Requires --allow-wind
 const home = resolve('integrations/piik/.build/performance');
 const capture = resolve(process.env.PIIK_PERF_CAPTURE || 'integrations/piik/.build/runtime/native/piik-capture.exe');
 const tag = process.env.PIIK_PERF_TAG || 'wgc-baseline';
-const width = 3840, height = 2160, bitrate = 15000000;
+const codec = process.argv.includes('--av1') ? 'av1' : 'h264';
+const [width, height, bitrate] = process.argv.includes('--1080p60') ? [1920, 1080, 6000000] : [3840, 2160, 15000000];
 assert.equal(execFileSync('powershell.exe', ['-NoProfile', '-Command', '@(Get-Process piik-capture -ErrorAction SilentlyContinue).Count'], { encoding: 'utf8', windowsHide: true }).trim(), '0', 'do not contend with an existing capture');
 const motion = spawn(join(home, 'native/motion-window.exe'), [String(width), String(height), '30'], { windowsHide: true, stdio: 'pipe' });
 let text = '', identity, motionError = '', captureProcess, failure, log = '', buffer = Buffer.alloc(0);
@@ -25,7 +26,8 @@ try {
     await wait(() => identity, 'owned motion window');
     captureProcess = spawn(capture, ['--capture-video', 'window', identity.hwnd, String(identity.pid), identity.creationTime,
         '--adapter-index', '0', '--mft-index', '0', '--width', String(width), '--height', String(height),
-        '--fps', '60', '--bitrate', String(bitrate), '--preference', 'maintain-framerate', '--codec', 'h264', '--protocol-v7',
+        '--fps', '60', '--bitrate', String(bitrate), '--preference', codec === 'av1' ? 'maintain-resolution' : 'maintain-framerate',
+        '--codec', codec, '--protocol-v7',
         '--output', String(width), String(height), '60', String(bitrate)],
     { windowsHide: true, stdio: 'pipe', env: { ...process.env, PIIK_CAPTURE_DEBUG: '1' } });
     captureProcess.on('error', e => { failure = e; });
@@ -39,7 +41,7 @@ try {
             const kind = buffer[5], row = { at: performance.now(), timestamp: Number(buffer.readBigUInt64BE(8)) / 10000,
                 bytes: size, width: buffer.readUInt16BE(24), height: buffer.readUInt16BE(26), key: buffer[6] === 1 };
             if (kind === 5) source.push(row);
-            if (kind === 2) frames.push(row);
+            if (kind === (codec === 'av1' ? 8 : 2)) frames.push(row);
             if (kind === 3) statuses.push(JSON.parse(buffer.toString('utf8', 32, 32 + size)));
             buffer = buffer.subarray(32 + size);
         }
@@ -51,7 +53,8 @@ try {
     const elapsed = (performance.now() - began) / 1000;
     const output = frames.slice(beforeFrames), input = source.slice(beforeSource);
     const delta = input.slice(1).map((r, i) => r.timestamp - input[i].timestamp).sort((a, b) => a - b);
-    const report = { tag, ownedSyntheticWindow: true, realWgc: true, audio: false, target: { width, height, fps: 60, bitrate }, elapsed,
+    assert.ok(statuses.some(status => status.state === 'active' && status.hardwareOnly && status.codec === codec), 'capture used the requested hardware encoder');
+    const report = { tag, ownedSyntheticWindow: true, realWgc: true, audio: false, target: { codec, width, height, fps: 60, bitrate }, elapsed,
         acceptedCaptureFps: input.length / elapsed, encodedFps: output.length / elapsed,
         reducedFrames: output.filter(r => r.width !== width || r.height !== height).length,
         mbps: output.reduce((sum, r) => sum + r.bytes, 0) * 8 / elapsed / 1e6,

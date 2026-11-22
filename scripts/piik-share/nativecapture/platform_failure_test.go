@@ -1,6 +1,31 @@
 package nativecapture
 
-import "testing"
+import (
+	"bytes"
+	"testing"
+	"time"
+)
+
+func TestPlatformAV1FrameUsesSeparateWireKind(t *testing.T) {
+	var stream bytes.Buffer
+	for _, frame := range []Frame{
+		{Kind: FrameAV1, KeyFrame: true, Layer: 1, Width: 1920, Height: 1080,
+			Timestamp: time.Second, Duration: time.Second / 60, Data: []byte{0x12, 0x00}},
+		{Kind: FrameControl, Data: []byte("Q")},
+	} {
+		if err := writeFrame(&stream, frame); err != nil {
+			t.Fatal(err)
+		}
+	}
+	video, err := readFrame(&stream)
+	if err != nil || !video.MatchesVideoCodec("av1") || video.MatchesVideoCodec("h264") || !video.KeyFrame || video.Layer != 1 {
+		t.Fatalf("invalid AV1 round trip: %+v, %v", video, err)
+	}
+	control, err := readFrame(&stream)
+	if err != nil || control.Kind != FrameControl || string(control.Data) != "Q" {
+		t.Fatalf("invalid control round trip: %+v, %v", control, err)
+	}
+}
 
 func TestPlatformFixedErrorReasons(t *testing.T) {
 	for _, item := range []struct{ stage, reason string }{

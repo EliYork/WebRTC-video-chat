@@ -2525,6 +2525,36 @@ const requestDisplayMedia = navigator.mediaDevices?.getDisplayMedia?.bind(
     navigator.mediaDevices
 );
 
+const activateScreenCapture = (peer, session) => {
+    const { stream, track } = session;
+    currentScreenShareSession = session;
+    currentScreenStream = stream;
+    activeVideoTrack = track;
+    sharingNow = true;
+    mediaOperationController.setActive('screen', stream);
+    setLocalVideoStream(getActiveStream());
+
+    session.endedListener = () => {
+        if (!voiceMediaLifecycle.isCurrentScreenCapture({
+            currentSession: currentScreenShareSession,
+            currentStream: currentScreenStream,
+            session,
+            sharing: sharingNow,
+            stream,
+        })) return;
+
+        console.warn('Screen sharing stopped by the browser.');
+        mediaOperationController.setDesired('screen', false);
+        mediaOperationController.invalidate('screen');
+        emitScreenShareState(false, session.voiceSessionGeneration);
+        stopCurrentScreenStream();
+        restoreCameraAfterScreenShare(peer);
+        emitLocalPresenceUpdate();
+    };
+    track.addEventListener('ended', session.endedListener);
+    sendVideoTrackToPeers(peer);
+};
+
 const startScreenShare = async (peer, options = {}, preparedStream) => {
     if (screenShareRequestPending || sharingNow) {
         localMediaTrackStopper.stopStream(preparedStream);
@@ -2560,7 +2590,7 @@ const startScreenShare = async (peer, options = {}, preparedStream) => {
                 const cancelled = () => codecAbort.abort();
                 track?.addEventListener('ended', cancelled, { once: true });
                 try {
-                    if (track && !usingPiik) codecDecision = await window.VoiceScreenCodecs.prepare(
+                    if (track && (!usingPiik || (options.provider === 'web' && options.codecMode === 'av1'))) codecDecision = await window.VoiceScreenCodecs.prepare(
                         track, voiceMediaLifecycle.normalizeScreenShareOptions(options), { signal: codecAbort.signal }
                     );
                 } catch (error) {
@@ -2629,7 +2659,6 @@ const startScreenShare = async (peer, options = {}, preparedStream) => {
     }
 
     setMediaOperationError('screen', capture);
-    currentScreenStream = shareScreen;
     const screenShareSession = {
         codecDecision,
         shareOptions: voiceMediaLifecycle.normalizeScreenShareOptions(options),
@@ -2638,40 +2667,11 @@ const startScreenShare = async (peer, options = {}, preparedStream) => {
         track,
         voiceSessionGeneration: localVoiceSessionGeneration,
     };
-    currentScreenShareSession = screenShareSession;
     if (!usingPiik) {
         for (const audioTrack of screenAudioTracks)
             window.VoiceScreenSendPolicy.registerAudio(audioTrack, window.voiceScreenSfuConfig.audioBitrate);
     }
-    activeVideoTrack = track;
-    sharingNow = true;
-    mediaOperationController.setActive('screen', shareScreen);
-    setLocalVideoStream(getActiveStream());
-    const handleScreenTrackEnded = () => {
-        if (
-            !voiceMediaLifecycle.isCurrentScreenCapture({
-                currentSession: currentScreenShareSession,
-                currentStream: currentScreenStream,
-                session: screenShareSession,
-                sharing: sharingNow,
-                stream: shareScreen,
-            })
-        ) {
-            return;
-        }
-
-        console.warn('Screen sharing stopped by the browser.');
-        mediaOperationController.setDesired('screen', false);
-        mediaOperationController.invalidate('screen');
-        emitScreenShareState(false, screenShareSession.voiceSessionGeneration);
-        stopCurrentScreenStream();
-        restoreCameraAfterScreenShare(peer);
-        emitLocalPresenceUpdate();
-    };
-    screenShareSession.endedListener = handleScreenTrackEnded;
-    track.addEventListener('ended', handleScreenTrackEnded);
-
-    sendVideoTrackToPeers(peer, track);
+    activateScreenCapture(peer, screenShareSession);
     if (screenAudioTracks.length > 0) {
         console.info('[screen] sending screen audio track', {
             count: screenAudioTracks.length,
@@ -2681,7 +2681,7 @@ const startScreenShare = async (peer, options = {}, preparedStream) => {
     }
 
     if (usingPiik) {
-        try { await screenSfuRuntime.publish(shareScreen, screenShareSession.shareOptions); }
+        try { await screenSfuRuntime.publish(shareScreen, screenShareSession.shareOptions, codecDecision?.primary); }
         catch (error) {
             if (currentScreenShareSession !== screenShareSession) { finishRequest(); return false; }
             console.warn('[piik] 共享启动失败', error);
@@ -2716,21 +2716,20 @@ const stopScreenShare = (peer) => {
     return true;
 };
 
-// Source replacement has a single publication owner. Browser permission is
-// obtained before retiring the old stream, so cancelling keeps it running.
 const updateScreenShare = async (peer, options, change = 'quality') => {
     const session = currentScreenShareSession;
     if (!session || screenShareRequestPending) return false;
     const next = voiceMediaLifecycle.normalizeScreenShareOptions(options);
     const old = session.shareOptions;
-    const inPlace = usingPiik && next.provider === old.provider && next.shareAudio === old.shareAudio &&
+    const inPlace = usingPiik && next.provider === old.provider && next.shareAudio === old.shareAudio && next.codecMode === old.codecMode &&
         (next.provider !== 'native' || (next.nativeAudioMode === old.nativeAudioMode && next.nativeAudioTargetKey === old.nativeAudioTargetKey &&
             !(change === 'source' && next.nativeAudioMode !== 'none'))) &&
-        (next.provider === 'native' || (change === 'quality' && next.codecMode === old.codecMode &&
+        (next.provider === 'native' || (change === 'quality' &&
             !(next.resolutionPreset === 'original' && old.resolutionPreset !== 'original')));
     const controller = new AbortController();
     screenCodecAbort = controller;
     setScreenShareRequestPending(true);
+    let candidate;
     try {
         if (inPlace) {
             if (next.provider === 'native') await screenSfuRuntime.updateNative(session.stream, next, change === 'source');
@@ -2742,23 +2741,36 @@ const updateScreenShare = async (peer, options, change = 'quality') => {
             notifyMediaDock();
             return true;
         }
-        // A native audio/provider change needs a new negotiated session. The
-        // dialog explicitly labels this as restarting, never as a live change.
-        let candidate;
         if (next.provider === 'web') {
             const result = await voiceMediaLifecycle.requestScreenCapture({ getDisplayMedia: requestDisplayMedia,
                 supportedConstraints: navigator.mediaDevices?.getSupportedConstraints?.(), options: next });
             if (!result.ok) return false;
             candidate = result.stream;
         }
-        if (controller.signal.aborted || currentScreenShareSession !== session) {
-            localMediaTrackStopper.stopStream(candidate);
-            return false;
+        if (controller.signal.aborted || currentScreenShareSession !== session) return false;
+        if (usingPiik && candidate && old.provider === 'web' && next.codecMode === old.codecMode) {
+            const previousStream = session.stream;
+            await screenSfuRuntime.updateWeb(previousStream, next, candidate);
+            if (controller.signal.aborted || currentScreenShareSession !== session) return false;
+            unbindScreenTrackEnded(session);
+            session.stream = candidate;
+            session.track = candidate.getVideoTracks()[0];
+            session.shareOptions = next;
+            candidate = undefined;
+            activateScreenCapture(peer, session);
+            localMediaTrackStopper.stopStream(previousStream);
+            voiceStatusView.clearMediaError?.('screen');
+            emitLocalPresenceUpdate();
+            updateLocalUserCard();
+            return true;
         }
+        // Provider and codec changes still require a new negotiated publication.
         screenCodecAbort = undefined;
         setScreenShareRequestPending(false);
         stopScreenShare(peer);
-        return await startScreenShare(peer, next, candidate);
+        const prepared = candidate;
+        candidate = undefined;
+        return await startScreenShare(peer, next, prepared);
     } catch (error) {
         if (!controller.signal.aborted) {
             console.warn('[screen] 修改共享失败', error);
@@ -2766,6 +2778,7 @@ const updateScreenShare = async (peer, options, change = 'quality') => {
         }
         return false;
     } finally {
+        localMediaTrackStopper.stopStream(candidate);
         if (screenCodecAbort === controller) {
             screenCodecAbort = undefined;
             setScreenShareRequestPending(false);
@@ -3566,7 +3579,17 @@ callDiagnostics = window.VoiceCallDiagnostics.createRuntime({
     },
 });
 const callTools = byId('call-tools');
-callTools?.querySelector('[data-copy-call-diagnostics]')?.addEventListener('click', (event) => callDiagnostics.copyCombined(event.currentTarget));
+const callDiagnosticsFeedback = byId('callDiagnosticsFeedback');
+let callDiagnosticsFeedbackTimer;
+callTools?.querySelector('[data-copy-call-diagnostics]')?.addEventListener('click', (event) => {
+    callTools.hidePopover?.();
+    void callDiagnostics.copyCombined(event.currentTarget, (message) => {
+        if (!callDiagnosticsFeedback) return;
+        window.clearTimeout(callDiagnosticsFeedbackTimer);
+        callDiagnosticsFeedback.textContent = message;
+        callDiagnosticsFeedbackTimer = window.setTimeout(() => { callDiagnosticsFeedback.textContent = ''; }, 3000);
+    });
+});
 window.VoicePlayerMenu.configure({
     beforeOpen: () => remoteVolumeUI.closePopover(),
     showEvents: (tile) => callDiagnostics.showLogs({ shareOrdinal: callDiagnostics.getShareOrdinal(tile), host: tile }),

@@ -87,7 +87,8 @@ test('optimized startup is discarded after a source edit or output corruption', 
 
 test('rendered room embeds CSP protected recovery before downloads and loads only the active media SDK', async () => {
     const template = fileURLToPath(new URL('../src/views/room/index.ejs', import.meta.url));
-    const roomAssetVersions = getRoomAssetVersions(createRoomAssets(fileURLToPath(new URL('../src/views/', import.meta.url))));
+    const roomAssets = createRoomAssets(fileURLToPath(new URL('../src/views/', import.meta.url)));
+    const roomAssetVersions = getRoomAssetVersions({ ...roomAssets, piikClient: Buffer.from('Piik fixture') });
     await Promise.all([true, false].map(async (piikEnabled) => {
         const html = await ejs.renderFile(template, {
             piikEnabled, channels: [], roomId: 'lobby', channelName: '大厅', cspNonce: 'test-nonce', roomBootstrap: '{}', roomAssetVersions,
@@ -95,7 +96,7 @@ test('rendered room embeds CSP protected recovery before downloads and loads onl
         assert.match(html, /<script nonce="test-nonce">\(function exposeRoomBoot/);
         assert.doesNotMatch(html, /src="\/js\/shared\/room-boot\.js/);
         assert.ok(html.indexOf('exposeRoomBoot') < html.indexOf('src="/socket.io/socket.io.js"'));
-        assert.equal(html.includes('src="/vendor/piik-client.js"'), piikEnabled);
+        assert.equal(html.includes(`src="/vendor/piik-client.js?v=${roomAssetVersions.piikClient}"`), piikEnabled);
         assert.equal(html.includes('src="/vendor/screen-sfu-client.js"'), !piikEnabled);
         assert.ok(html.includes(`href="/style.css?v=${roomAssetVersions.stylesheet}"`));
         assert.ok(html.indexOf('const roomBootstrap') < html.indexOf('data-room-startup-style href='));

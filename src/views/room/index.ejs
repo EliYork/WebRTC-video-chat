@@ -58,6 +58,7 @@
             <a class="workspace-download" href="/download/windows" target="_blank" rel="noopener" title="下载 Windows 客户端（Windows 10/11，64 位）" aria-label="下载 Windows 客户端（64 位）"><i class="fa-solid fa-download" aria-hidden="true"></i><span>下载客户端</span></a>
         </div>
         <p id="stageConnectionStatus" class="stage-connection-status" role="status" hidden></p>
+        <p id="callDiagnosticsFeedback" class="stage-connection-status call-diagnostics-feedback" role="status" aria-atomic="true"></p>
     </header>
     <div id="main" class="room-layout stage-layout" data-stage-mode="voice" data-mobile-panel="stage" aria-busy="true" inert>
         <div class="stage-sidebar-column">
@@ -238,7 +239,7 @@
         </aside>
 
     </div> 
-    <% if (piikPrototype) { %><script defer src="/vendor/piik-client.js"></script><% } else { %><script defer src="/vendor/screen-sfu-client.js"></script><% } %>
+    <% if (piikPrototype) { %><script defer src="/vendor/piik-client.js?v=<%= roomAssetVersions.piikClient %>"></script><% } else { %><script defer src="/vendor/screen-sfu-client.js"></script><% } %>
     <script defer src="/js/room/boot-runtime.js?v=<%= roomAssetVersions.runtime %>"></script>
     <script type="module" src="/script.js?v=<%= roomAssetVersions.mainScript %>"></script>
 </body>

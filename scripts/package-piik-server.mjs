@@ -60,7 +60,7 @@ for (const name of [
     const dest = `integrations/piik/.build/${name}`;
     mkdirSync(dirname(join(stage, dest)), { recursive: true });
     copyFileSync(
-        join(build, name === 'piik-server' ? 'production/piik-server' : name),
+        join(build, name === 'piik-server' || name === 'third-party-go.txt' ? join('production', name) : name),
         join(stage, dest)
     );
     files.push(dest);

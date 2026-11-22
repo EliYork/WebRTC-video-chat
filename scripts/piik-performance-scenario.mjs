@@ -6,15 +6,17 @@ import { join, resolve } from 'node:path';
 
 // Encoded synthetic motion is held constant between App builds. This measures
 // nativehost/Pion/receiver playback, not WGC or the physical H.264 encoder.
-export async function runNativePerformance({ open, evaluate, click, wait, port, work }) {
+export async function runNativePerformance({ open, evaluate, click, wait, send, port, work }) {
     const realWgc = process.argv.includes('--real-wgc');
     if (realWgc && !process.argv.includes('--allow-window')) throw Error('Real WGC requires --allow-window');
+    const codec = process.argv.includes('--av1') ? 'av1' : 'h264';
+    if (codec === 'av1' && !realWgc) throw Error('AV1 performance requires the real hardware capture path');
     const preset = process.argv.find(a => a.startsWith('--performance='))?.split('=')[1] || '2160p';
     const [width, height, bitrate] = { '1080p': [1920, 1080, 6000000], '1440p': [2560, 1440, 10000000], '2160p': [3840, 2160, 15000000] }[preset] || [];
     assert.ok(width, 'known bounded performance preset');
     const home = resolve('integrations/piik/.build/performance');
     mkdirSync(home, { recursive: true });
-    const publisher = await open();
+    const publisher = await open('lobby', { desktop: true });
     const viewer = await open();
     const clipsPath = join(home, `motion-${preset}.json`);
     if (!realWgc && !existsSync(clipsPath)) {
@@ -32,7 +34,7 @@ export async function runNativePerformance({ open, evaluate, click, wait, port, 
     }
     let motion, identity, motionError = '', motionText = '';
     const render = [];
-    const capture = resolve(process.env.PIIK_PERF_CAPTURE || 'integrations/piik/.build/native-overlay/output/piik-capture.exe');
+    const capture = resolve(process.env.PIIK_PERF_CAPTURE || 'integrations/piik/.build/runtime/native/piik-capture.exe');
     if (realWgc) {
         assert.equal(execFileSync('powershell.exe', ['-NoProfile', '-Command', '@(Get-Process piik-capture -ErrorAction SilentlyContinue).Count'], { windowsHide: true, encoding: 'utf8' }).trim(), '0', 'no existing capture contention');
         execFileSync(process.env.PIIK_GO || 'go', ['build', '-o', join(home, 'owned-wgc.exe'), resolve('scripts/fixtures/piik-owned-wgc.go')], { windowsHide: true });
@@ -76,14 +78,14 @@ export async function runNativePerformance({ open, evaluate, click, wait, port, 
             await wait(() => evaluate(s, `document.querySelector('#destroyPeer').dataset.sessionAction==='hangup'`), 'performance voice join');
         }
         await click(publisher, '#shareScreen');
-        await evaluate(publisher, `document.querySelector('[data-screen-share-audio]').checked=false`);
-        await evaluate(publisher, `(()=>{for(const [sel,val]of [['[data-screen-share-resolution]','${preset}'],['[data-screen-share-frame-rate]','60'],['[data-screen-share-provider]','native']]){const e=document.querySelector(sel);e.value=val;e.dispatchEvent(new Event('change',{bubbles:true}));}document.querySelector('[data-screen-share-bitrate]').value='${bitrate}';})()`);
+        await evaluate(publisher, `(()=>{for(const [sel,val]of [['[data-screen-share-resolution]','${preset}'],['[data-screen-share-frame-rate]','60'],['[data-screen-share-provider]','native'],['[data-screen-share-codec]','${codec}'],['[data-native-audio-mode]','none'],['[data-screen-share-bitrate]','${bitrate}']]){const e=document.querySelector(sel);e.value=val;e.dispatchEvent(new Event('change',{bubbles:true}));}})()`);
         const group = realWgc ? 'window' : 'display';
         await wait(() => evaluate(publisher, `document.querySelector('[data-source-group="${group}"] img')?.naturalWidth>0`), 'authorized source preview');
         if (realWgc) assert.equal(await evaluate(publisher, `document.querySelectorAll('[data-native-source-key]').length`), 1, 'only owned window exposed');
         await click(publisher, `[data-source-group="${group}"] [data-native-source-key]`);
-        assert.equal(await evaluate(publisher, `document.querySelector('[data-piik-native-audio]').checked`), false, 'screen audio stays disabled');
+        assert.equal(await evaluate(publisher, `document.querySelector('[data-native-audio-mode]').value`), 'none', 'screen audio stays disabled');
         await click(publisher, '[data-screen-share-start]');
+        await send('Page.bringToFront', {}, viewer);
         await wait(() => evaluate(viewer, `__mediaStats().then(a=>a.some(r=>r.kind==='video'&&r.framesDecoded>10))`), 'native Pion receive');
         await evaluate(viewer, `(()=>{window.__perfVideo=[...document.querySelectorAll('#video-grid video')].find(v=>v.videoWidth>0&&v.closest('.video-tile').id!=='local-video');window.__perfVisibility=0;document.addEventListener('visibilitychange',()=>__perfVisibility++);window.__perfPresentation={count:0,intervals:[],previous:null};const cb=(now,m)=>{const s=__perfPresentation;s.count=m.presentedFrames;s.callbackTime=now;s.processingDuration=m.processingDuration;s.receiveToPresent=m.presentationTime-m.receiveTime;if(s.previous!==null){s.intervals.push(now-s.previous);if(s.intervals.length>1200)s.intervals.shift();}s.previous=now;__perfVideo.requestVideoFrameCallback(cb);};__perfVideo.requestVideoFrameCallback(cb);window.__perfRead=async()=>{const pcs=[];for(const pc of __pcs){for(const r of(await pc.getStats()).values()){if(r.type==='inbound-rtp'&&r.kind==='video')pcs.push({timestamp:r.timestamp,framesDecoded:r.framesDecoded,framesReceived:r.framesReceived,bytesReceived:r.bytesReceived,framesDropped:r.framesDropped,totalDecodeTime:r.totalDecodeTime,jitterBufferDelay:r.jitterBufferDelay,jitterBufferEmittedCount:r.jitterBufferEmittedCount,packetsLost:r.packetsLost,frameWidth:r.frameWidth,frameHeight:r.frameHeight,decoderImplementation:r.decoderImplementation,powerEfficientDecoder:r.powerEfficientDecoder});}}const q=__perfVideo.getVideoPlaybackQuality();return {now:performance.now(),rtc:pcs,presentation:{...__perfPresentation,intervals:__perfPresentation.intervals.slice()},dropped:q.droppedVideoFrames,total:q.totalVideoFrames,hidden:document.hidden,visibilityChanges:__perfVisibility,width:__perfVideo.videoWidth,height:__perfVideo.videoHeight};};})()`);
         await new Promise(r => setTimeout(r, 3000));
@@ -95,7 +97,7 @@ export async function runNativePerformance({ open, evaluate, click, wait, port, 
         }
         const cpuSeconds = cpu() - cpuBefore, elapsed = (Date.now() - began) / 1000;
         const routes = await evaluate(viewer, `(async()=>{const rows=[];for(const pc of __pcs){const stats=await pc.getStats();for(const r of stats.values()){if(r.type!=='inbound-rtp'||r.kind!=='video')continue;const transport=stats.get(r.transportId),pair=stats.get(transport?.selectedCandidatePairId);rows.push({codec:stats.get(r.codecId)?.mimeType,localCandidateType:stats.get(pair?.localCandidateId)?.candidateType,remoteCandidateType:stats.get(pair?.remoteCandidateId)?.candidateType,protocol:stats.get(pair?.localCandidateId)?.protocol});}}return rows;})()`);
-        assert.ok(routes.some(r => r.codec?.toLowerCase() === 'video/h264'), 'actual H.264 negotiated');
+        assert.ok(routes.some(r => r.codec?.toLowerCase() === 'video/' + codec), 'actual codec negotiated');
         const intervals = samples.slice(1).map((b, i) => {
             const a = samples[i], av = a.rtc[0], bv = b.rtc[0];
             assert.ok(av && bv, 'receiver RTC reports');
@@ -117,11 +119,19 @@ export async function runNativePerformance({ open, evaluate, click, wait, port, 
         mkdirSync(retained, { recursive: true });
         for (const name of ['client.log', 'client.log.1']) if (existsSync(join(logDir, name))) copyFileSync(join(logDir, name), join(retained, name));
         if (realWgc) assert.equal(realCaptureRows().length, 1, 'one WGC capture worker retained in filtered log');
-        const report = { tag, preset, syntheticReplay: !realWgc, hardwareCaptureMeasured: realWgc, gpuAllowed: process.argv.includes('--gpu-receiver'),
+        const captureStates = realWgc ? logRows().filter(r => r.event === 'capture-state' && r.codec === codec) : [];
+        if (codec === 'av1') {
+            assert.ok(captureStates.some(r => r.state === 'starting' && r.hardware && r.encoderName) &&
+                captureStates.some(r => r.state === 'active' && r.hardware),
+                'AV1 has a reported hardware backend');
+            assert.equal(await evaluate(publisher, `__mediaStats().then(rows=>rows.some(r=>r.kind==='video'&&r.type==='outbound-rtp'&&r.framesEncoded>0))`), false,
+                'the publisher browser must not re-encode native AV1');
+        }
+        const report = { tag, preset, codec, syntheticReplay: !realWgc, hardwareCaptureMeasured: realWgc, gpuAllowed: process.argv.includes('--gpu-receiver'),
             fixtureLimit: realWgc ? 'owned D3D motion window; real WGC/MFT; headless receiver, not physical display or game; decoder implementation is in rawSamples' : 'prerecorded encoder ignores live bitrate controls; actual RTP bitrate is measured, not assumed from target',
             cpuSeconds, elapsed, appCpuCores: cpuSeconds / elapsed, retainedLogBytes: logBytes,
             captureWorkers: realWgc ? realCaptureRows().length : readFileSync(launches, 'utf8').trim().split(/\s+/).length,
-            render, realCapture: realWgc ? capture : null,
+            render, captureStates, realCapture: realWgc ? capture : null,
             nativeEncoderSamples: realWgc ? logRows().filter(r => r.line?.startsWith('event=encoder-stats')).map(r => r.line) : [],
             senderSamples: realWgc ? logRows().filter(r => r.msg === 'media-sample').map(r => ({ local: r.local, windowMs: r.windowMs, fps: r.fps, bitrateKbps: r.bitrateKbps, width: r.width, height: r.height, output: r.output })) : [],
             intervals, routes, rawSamples: samples, audioOutputMuted: true };
@@ -130,6 +140,8 @@ export async function runNativePerformance({ open, evaluate, click, wait, port, 
         report.captureCleanupPassed = true;
         await wait(() => evaluate(publisher, `document.querySelector('#destroyPeer').dataset.sessionAction==='hangup'`), 'stop keeps voice');
         writeFileSync(join(home, `${tag}-${preset}-p2p.json`), JSON.stringify(report, null, 2));
+        if (codec === 'av1') assert.ok(intervals.every(row => row.width === width && row.height === height && row.submittedFps >= 55),
+            'native AV1 must sustain playback at the requested resolution');
         return report;
     } finally {
         app.stdin.end();

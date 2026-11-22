@@ -110,11 +110,6 @@ app.use((req, res, next) =>
     })(req, res, next)
 );
 app.use('/peerjs', peerServer);
-if (process.env.PIIK_ENABLED === 'true') {
-    const piikAssets = join(__dirname, '../integrations/piik/.build');
-    app.get('/vendor/piik-client.js', (_, res) => res.sendFile('client.js', { root: piikAssets }));
-    app.get('/vendor/piik-licenses.txt', (_, res) => res.sendFile('third-party-web.txt', { root: piikAssets }));
-}
 
 const CHANNELS = [
     {
@@ -319,6 +314,8 @@ const normalizeCursorPosition = (value) => {
 app.set('view engine', 'ejs');
 app.set('views', __dirname + '/views');
 const roomAssets = createRoomAssets(join(__dirname, 'views'));
+const piikAssets = join(__dirname, '../integrations/piik/.build');
+if (piikEnabled) roomAssets.piikClient = fs.readFileSync(join(piikAssets, 'client.js'));
 const roomAssetVersions = getRoomAssetVersions(roomAssets);
 const serveRoomAsset = (key, type) => (req, res) => {
     // Unversioned URLs and URLs from older pages still serve current bytes,
@@ -329,6 +326,10 @@ const serveRoomAsset = (key, type) => (req, res) => {
     res.set('Cache-Control', cache).type(type).send(roomAssets[key]);
 };
 app.get('/js/room/boot-runtime.js', serveRoomAsset('runtime', 'js'));
+if (piikEnabled) {
+    app.get('/vendor/piik-client.js', serveRoomAsset('piikClient', 'js'));
+    app.get('/vendor/piik-licenses.txt', (_, res) => res.sendFile('third-party-web.txt', { root: piikAssets }));
+}
 ['assets', 'audio-worklet', 'js', 'styles', 'vendor', 'wasm'].forEach((directory) =>
     app.use(
         `/${directory}`,

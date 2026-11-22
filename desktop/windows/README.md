@@ -1,6 +1,6 @@
 # EliYork Voice · Windows x64
 
-下载对应版本的安装包（本次构建 **EliYork-Voice-Setup-0.1.9-x64.exe**）并双击，为当前用户安装（不需要管理员权限）。之后双击桌面 **EliYork Voice**。客户端打开独立窗口，默认连接 **https://voice.eliyork.com/room/lobby**，与普通浏览器共享频道、成员、聊天与语音。
+下载对应版本的安装包（本次构建 **EliYork-Voice-Setup-0.1.10-x64.exe**）并双击，为当前用户安装（不需要管理员权限）。之后双击桌面 **EliYork Voice**。客户端打开独立窗口，默认连接 **https://voice.eliyork.com/room/lobby**，与普通浏览器共享频道、成员、聊天与语音。
 
 不需要 Node、Go 或 PowerShell。旧 0.1.0 ZIP 需要先退出，再手动安装一次新版；旧目录可以保留。用户配置继续保存在 AppData。发布 ZIP 内包含安装包及更新元数据，不再是解压即用的便携目录。客户端内置 Electron/Chromium 与 Piik App/WGC 原生组件；网页无 Node 权限。客户端的受信房间主页面可按频道设置使用麦克风和摄像头。设备访问仍受 Windows 隐私设置约束。
 

@@ -129,17 +129,21 @@ func TestPlatformAudioIndependentSilenceFailureAndRetirement(t *testing.T) {
 	}
 }
 func TestPlatformEncoderFactsAreNotEnumerationPreferences(t *testing.T) {
-	session := &Session{}
-	if session.PlatformStatus().Hardware {
-		t.Fatal("unknown is not hardware")
-	}
-	session.platformObserve(CaptureState{State: "starting", Codec: "h264", HardwareOnly: true, EncoderName: "Actual MFT", AdapterName: "Actual GPU"})
-	if session.PlatformStatus().Hardware {
-		t.Fatal("starting is not confirmed output")
-	}
-	session.platformObserve(CaptureState{State: "active", Codec: "h264", HardwareOnly: true})
-	state := session.PlatformStatus()
-	if !state.Hardware || state.Encoder != "Actual MFT" || state.Adapter != "Actual GPU" {
-		t.Fatal(state)
+	for _, codec := range []string{"h264", "av1"} {
+		t.Run(codec, func(t *testing.T) {
+			session := &Session{}
+			if session.PlatformStatus().Hardware {
+				t.Fatal("unknown is not hardware")
+			}
+			session.platformObserve(CaptureState{State: "starting", Codec: codec, HardwareOnly: true, EncoderName: "Actual MFT", AdapterName: "Actual GPU"})
+			if session.PlatformStatus().Hardware {
+				t.Fatal("starting is not confirmed output")
+			}
+			session.platformObserve(CaptureState{State: "active", Codec: codec, HardwareOnly: true})
+			state := session.PlatformStatus()
+			if !state.Hardware || state.Codec != codec || state.Encoder != "Actual MFT" || state.Adapter != "Actual GPU" {
+				t.Fatal(state)
+			}
+		})
 	}
 }

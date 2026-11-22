@@ -8,6 +8,8 @@
 #stageChatToggle:not([data-unread-count='0'])[data-unread-count]::after { content: attr(data-unread-label); display: inline-grid; place-items: center; min-width: 18px; height: 18px; margin-left: 4px; padding: 0 4px; border-radius: 10px; background: var(--accent-strong); color: white; font-size: 11px; line-height: 1; vertical-align: middle; }
 .stage-connection-status { position: fixed; z-index: 1100; top: calc(var(--workspace-bar-height) + env(safe-area-inset-top) + 8px); left: 50%; transform: translateX(-50%); width: max-content; max-width: calc(100vw - 24px); margin: 0; padding: 8px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); box-shadow: var(--shadow); font-size: 13px; overflow-wrap: anywhere; }
 .stage-connection-status[hidden], .stage-share-notice[hidden], #chatJumpToLatest[hidden], .share-watch-message[hidden], .share-watch-message button[hidden] { display: none; }
+.call-diagnostics-feedback { left: auto; right: max(14px, env(safe-area-inset-right)); transform: none; pointer-events: none; }
+.call-diagnostics-feedback:empty { opacity: 0; }
 .stage-share-notice { margin: 0 0 12px; color: var(--accent-strong); font-size: 13px; }
 #chatJumpToLatest { margin-top: 8px; min-height: 40px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--accent-soft); color: var(--accent-strong); cursor: pointer; }
 .share-watch-message { position: absolute; z-index: 8; left: 50%; top: 50%; transform: translate(-50%, -50%); display: grid; gap: 12px; justify-items: center; width: max-content; max-width: calc(100% - 24px); padding: 14px 18px; border-radius: 14px; color: #fff; background: #241d26e8; font-size: 14px; text-align: center; }

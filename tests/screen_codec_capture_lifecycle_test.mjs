@@ -52,7 +52,7 @@ function fixture() {
         const localVoiceSessionGeneration = 1;
         const setScreenShareRequestPending = (value) => { screenShareRequestPending = value; };
         ${section('const stopCurrentScreenStream =', 'const restoreCameraAfterScreenShare =')}
-        ${section('const startScreenShare =', 'const stopScreenShare =')}
+        ${section('const activateScreenCapture =', 'const stopScreenShare =')}
     `, context);
     return { video, audio, audioRegistrations, controller, window, pubs: () => pubs, signal: () => signal,
         complete: () => complete(), run: () => vm.runInContext('startScreenShare({}, { codecMode: "auto", frameRate: 60 })', context),

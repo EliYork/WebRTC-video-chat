@@ -18,7 +18,7 @@ export function createNativeCapture(
     let connecting: Promise<NativeClient> | null = null;
     let generation = 0;
     let sources: NativeCaptureTarget[] = [];
-    let path: { adapterIndex: number; encoderIndex: number } | null = null;
+    let paths: Partial<Record<'h264' | 'av1', { adapterIndex: number; encoderIndex: number }>> = {};
     let active: any = null;
     let capturing: symbol | null = null;
     let cleanup = Promise.resolve();
@@ -99,7 +99,7 @@ export function createNativeCapture(
         previous?.bridge.dispose();
         clearTimeout(previous?.statusTimer);
         sources = [];
-        path = null;
+        paths = {};
         if (previousClient) {
             cleanup = previous
                 ? previousClient
@@ -133,20 +133,21 @@ export function createNativeCapture(
             }
             client = next;
             try {
-                const availablePath = defaultNativeCapturePath(
-                    await next.captureOptions(),
-                    'h264'
-                );
+                const adapters = await next.captureOptions();
+                const h264 = defaultNativeCapturePath(adapters, 'h264');
+                const av1Adapter = adapters.find(adapter => adapter.hardwareAv1.length > 0);
                 if (token !== generation || client !== next) throw Error('原生共享请求已取消');
-                if (!next.health.nativeMedia.video || !availablePath)
-                    throw new Error('Piik App 未发现可用的 H.264 硬件编码器');
+                if (!next.health.nativeMedia.video || (!h264 && !av1Adapter))
+                    throw new Error('未发现可用于屏幕共享的硬件编码器');
                 const availableSources = (await next.sources()).filter(
                     (source) => source.kind !== 'picker'
                 );
                 if (token !== generation || client !== next) throw Error('原生共享请求已取消');
                 if (!availableSources.length)
                     throw new Error('Piik App 没有可用的显示器或窗口');
-                path = availablePath;
+                paths = {};
+                if (h264) paths.h264 = h264;
+                if (av1Adapter) paths.av1 = { adapterIndex: av1Adapter.index, encoderIndex: av1Adapter.hardwareAv1[0].index };
                 sources = availableSources;
                 return next;
             } catch (error) {
@@ -228,7 +229,12 @@ export function createNativeCapture(
             const source = sources.find(
                 (s) => nativeCaptureTargetKey(s) === options.nativeSourceKey
             );
-            if (!source || !path) throw new Error('请先选择有效的原生采集源');
+            const codec = options.codecMode === 'av1' || (options.codecMode !== 'h264' && !paths.h264) ? 'av1' : 'h264';
+            const path = paths[codec];
+            if (!source) throw new Error('请先选择有效的原生采集源');
+            if (!path) throw new Error(codec === 'av1'
+                ? '当前客户端或显卡没有可用的 AV1 硬件编码，请选择 H.264。'
+                : '未发现可用的 H.264 硬件编码器。');
             const audio = nativeAudioSelection(options, next, source);
             const profile = profileFor(options);
             const shareId = crypto.randomUUID();
@@ -244,7 +250,7 @@ export function createNativeCapture(
                 captureAudioMode: 'audioMode' in audio ? audio.audioMode : (audio.audio ? 'source' : 'none'),
                 audioTargetKey: options.nativeAudioTargetKey || '',
                 path,
-                codec: 'h264',
+                codec,
                 stream: null,
             };
             active = owner;
@@ -283,9 +289,9 @@ export function createNativeCapture(
                     showCaptureBorder: true,
                     edgeCapacity: 3,
                     profile,
-                    codec: 'h264',
+                    codec,
                 });
-                if (result.codec !== 'h264')
+                if (result.codec !== codec)
                     throw new Error(
                         `原生编码器返回 ${result.codec}，未启用静默软件回退`
                     );

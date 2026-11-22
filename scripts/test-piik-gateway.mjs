@@ -166,8 +166,24 @@ try {
         [],
         'late room allocation cannot restore cancelled publication'
     );
+    const publish = () => gateway.request(d, { action: 'publish', quality: protocol.DEFAULT_QUALITY_SETTINGS });
+    releaseCreate = undefined;
+    holdCreate = true;
+    const cancelled = assert.rejects(publish(), /publish-cancelled/);
+    const releaseCancelled = await wait(() => releaseCreate);
+    await gateway.request(d, { action: 'stop' });
+    releaseCreate = undefined;
+    holdCreate = true;
+    const restarting = publish();
+    const releaseRestart = await Promise.race([wait(() => releaseCreate), restarting]);
+    releaseCancelled();
+    await cancelled;
+    await assert.rejects(publish(), /already-publishing/, 'cancelled creation cannot release a newer reservation');
+    releaseRestart();
+    const recovered = await restarting;
+    assert.deepEqual(gateway.snapshot(d), [{ id: recovered.shareId, peerId: 'dana' }]);
     process.stdout.write(
-        'PASS: real Piik auth, channel isolation, credential confinement, session ownership/generation, multi-publisher and departure cleanup\n'
+        'PASS: real Piik auth, channel isolation, session ownership, multi-publisher, departure and immediate restart after cancellation\n'
     );
 } finally {
     gateway.close();

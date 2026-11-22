@@ -46,6 +46,10 @@ func TestPlatformAudioRejectsReusedPIDBeforeCapture(t *testing.T) {
 	executable, _ := os.Executable()
 	session := New(executable, nativecapture.Capabilities{ProcessAudio: true, IndependentAudio: true}, false)
 	defer session.Close()
+	av1 := startShareRequest{Type: "platform-start-share", Codec: "av1", AudioMode: "none"}
+	if err := session.validatePlatformAudio(context.Background(), &av1); err != nil {
+		t.Fatalf("independent audio control rejected AV1: %v", err)
+	}
 	request := startShareRequest{Type: "platform-start-share", Codec: "h264", AudioMode: "application", Audio: true, AudioTarget: &nativecapture.ProcessAudioTarget{PID: 42, CreationTime: "111"}}
 	if session.validatePlatformAudio(context.Background(), &request) == nil {
 		t.Fatal("reused PID accepted")

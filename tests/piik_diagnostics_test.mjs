@@ -10,7 +10,9 @@ const snapshot = { connectionState: 'connected', iceConnectionState: 'connected'
         intervalFramesSent: 110, bitrateKbps: 8000, frameWidth: 1920, frameHeight: 1080,
         localCandidateType: 'host', remoteCandidateType: 'srflx',
         remoteCandidateAddress: 'secret-address', encoderImplementation: 'not-exported',
-        powerEfficientEncoder: true, packetLossPercent: 0 } };
+        powerEfficientEncoder: true, packetLossPercent: 0,
+        mediaSourceFramesPerSecond: 29.5, captureFramesPerSecond: 60,
+        availableOutgoingKbps: 1850, qualityLimitationReason: 'bandwidth' } };
 
 test('Piik viewer diagnostics preserve derived codec, interval decode, bitrate and actual path without IDs', () => {
     const row = diagnosticConnection(snapshot, false, false, 50);
@@ -23,6 +25,21 @@ test('Piik viewer diagnostics preserve derived codec, interval decode, bitrate a
     assert.equal(video.编码, 'video/H264');
     assert.doesNotMatch(JSON.stringify(row), /secret|not-exported/);
     assert.equal(sanitizeVoiceDiagnostic(row).统计来源, 'Piik WebRTC stats');
+});
+
+test('only fresh web sender diagnostics expose actual source FPS, encoder limits and estimated uplink', () => {
+    const sample = (sending, native, age) =>
+        sanitizeVoiceDiagnostic(diagnosticConnection(snapshot, sending, native, age)).视频流[0];
+    const web = sample(true, false, 50);
+    assert.equal(web.采集实际帧率, 29.5);
+    assert.equal(web.编码受限原因, 'bandwidth');
+    assert.equal(web.本端连接估计可用上行_Mbps, 1.85);
+    for (const [sending, native, age] of [[true, true, 50], [false, false, 50], [true, false, 11000]]) {
+        const video = sample(sending, native, age);
+        assert.equal(video.采集实际帧率, null);
+        assert.equal(video.编码受限原因, null);
+        assert.equal(video.本端连接估计可用上行_Mbps, null);
+    }
 });
 
 test('native output is not mislabeled as measured capture, hardware or encode timing; stale rates become null', () => {

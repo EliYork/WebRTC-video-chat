@@ -527,10 +527,15 @@
                 modeSelect.value = shareMode;
                 modeSelect.disabled = screenSelectDisabled;
             }
-            for (const [selector, value] of [['[data-screen-share-codec]', codecMode], ['[data-screen-share-start-bitrate]', startBitrate]]) {
+            const selectedCodec = native && codecMode === 'vp8' ? 'auto' : codecMode;
+            for (const [selector, value] of [['[data-screen-share-codec]', selectedCodec], ['[data-screen-share-start-bitrate]', startBitrate]]) {
                 const select = screenField(selector);
                 if (select) { select.value = value; select.disabled = screenSelectDisabled; }
             }
+            const vp8Option = screenField('[data-screen-share-codec] option[value="vp8"]');
+            if (vp8Option) { vp8Option.hidden = native; vp8Option.disabled = native; }
+            const av1Option = screenField('[data-screen-share-codec] option[value="av1"]');
+            setText(av1Option, native ? 'AV1 硬件编码' : 'AV1 优先（实验）');
             const stateText = screenPending ? '正在处理共享…' : sharing ? (lastSnapshot.screenShareAudioActive ? '共享画面和声音' : '共享画面') : '已停止共享';
             setText(refs.screenStatus, stateText);
             refs.screenStatus.dataset.shareState = screenPending ? 'pending' : sharing ? 'active' : 'stopped';
@@ -550,8 +555,6 @@
             if (browserSource) browserSource.hidden = native;
             const nativeSection = screenField('[data-piik-native-options]');
             if (nativeSection) nativeSection.hidden = !native;
-            const webOnly = screenField('[data-share-web-only]');
-            if (webOnly) webOnly.hidden = native;
             const modeRow = screenField('[data-share-mode-row]');
             if (modeRow) modeRow.hidden = native;
             screenPanel()?.querySelectorAll('[data-screen-share-audio], [data-screen-share-bitrate], [data-native-audio-mode], [data-native-audio-target]').forEach(el => { el.disabled = screenPending; });
@@ -561,7 +564,7 @@
             const audio = native ? audioMode !== 'none' : screenField('[data-screen-share-audio]')?.checked === true;
             const restart = sharing && (old?.provider !== (native ? 'native' : 'web') || old?.shareAudio !== audio ||
                 (native && (old?.nativeAudioMode !== audioMode || old?.nativeAudioTargetKey !== (screenField('[data-native-audio-target]')?.value || '') || (editorMode === 'source' && audioMode !== 'none'))) ||
-                (!native && (old?.codecMode !== codecMode || !provider)));
+                old?.codecMode !== selectedCodec || (!native && !provider));
             setText(
                 refs.screenSettingsStatus,
                 screenPending ? '正在应用…' : restart ? '观看画面将短暂中断' : ''
@@ -660,7 +663,7 @@
                           frameRate,
                           resolutionPreset,
                           mode: shareMode,
-                          codecMode,
+                          codecMode: screenField('[data-screen-share-provider]')?.value === 'native' && codecMode === 'vp8' ? 'auto' : codecMode,
                           startBitrate,
                           provider: screenField('[data-screen-share-provider]')?.value || 'web',
                           nativeSourceKey: screenField('[data-piik-native-source]')?.value || snapshot.screenShareOptions?.nativeSourceKey || '',

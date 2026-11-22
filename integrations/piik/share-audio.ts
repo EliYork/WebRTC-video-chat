@@ -39,8 +39,8 @@ export function nativeAudioSelection(options: any, client: NativeClient, source:
 export function nativeFailureText(error: any) {
     const reason = error?.cause?.reason;
     return ({
-        'hardware-unavailable': '没有可用的 H.264 硬件编码器；未启用软件回退',
-        'encoder-failed': 'H.264 硬件编码初始化或运行失败；请检查显卡驱动和编码负载',
+        'hardware-unavailable': '当前编码没有可用的硬件编码器，请切换视频编码后重试',
+        'encoder-failed': '硬件编码初始化或运行失败，请检查显卡驱动和编码负载',
         'media-capture-failed': '画面采集失败；请检查目标窗口是否已关闭或受保护',
         'audio-target-invalid': '应用音源已退出、重启或不可访问，请刷新并重新选择',
         'audio-capture-failed': '共享音频采集失败；未切换为系统声音，请重新选择音源',

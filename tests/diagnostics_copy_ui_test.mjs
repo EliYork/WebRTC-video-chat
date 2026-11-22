@@ -85,7 +85,7 @@ test('room places call log actions in the header and keeps a direct download lin
     const script = read('script.js');
     const binding = script.split('\n').filter((line) => line.includes('[data-copy-call-diagnostics]'));
     assert.equal(binding.length, 1);
-    assert.match(binding[0], /callTools\?\.querySelector.*addEventListener\('click'.*callDiagnostics\.copyCombined\(event.currentTarget\)/);
+    assert.match(script, /callTools\?\.querySelector\('\[data-copy-call-diagnostics\]'\)\?\.addEventListener\('click',[\s\S]*?callTools\.hidePopover\?\.\(\);\s+void callDiagnostics\.copyCombined\(event.currentTarget,/);
     assert.doesNotMatch(script, /window\.VoiceCallDiagnostics\.copyCombined\s*=/);
     assert.doesNotMatch(read('js/voice/voice-share-diagnostics.js'), /createElement\('button'\)|clipboard|copyCombined/);
 });
@@ -108,7 +108,8 @@ test('copy works before joining or sharing, blocks concurrent clicks and restore
     f.window.navigator.clipboard.writeText = (text) => new Promise((resolve) => {
         f.copied.push(JSON.parse(text)); finish = resolve;
     });
-    const pending = f.runtime.copyCombined(f.button);
+    const feedback = [];
+    const pending = f.runtime.copyCombined(f.button, (message) => feedback.push(message));
     assert.equal(f.button.textContent, '正在收集诊断…');
     assert.equal(f.button.disabled, true);
     assert.equal(f.button.attributes['aria-busy'], 'true');
@@ -122,6 +123,7 @@ test('copy works before joining or sharing, blocks concurrent clicks and restore
     finish();
     await pending;
     assert.equal(f.button.textContent, '诊断已复制');
+    assert.deepEqual(feedback, ['诊断已复制']);
     assert.equal(f.button.disabled, false);
     assert.equal(f.button.attributes['aria-busy'], 'false');
     [...f.timers.values()][0]();

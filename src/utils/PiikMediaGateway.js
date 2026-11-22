@@ -213,9 +213,10 @@ export function createPiikMediaGateway({
             throw new Error('invalid-request');
         if (input.action === 'list') return { shares: snapshot(socket) };
         if (input.action === 'publish') {
+            const revision = revisions.get(socket) || 0;
             if (
                 [...shares.values()].some((s) => s.socket === socket) ||
-                pending.has(socket)
+                pending.get(socket)?.revision === revision
             )
                 throw new Error('already-publishing');
             const quality = protocol.qualitySettingsSchema.parse(input.quality);
@@ -226,7 +227,7 @@ export function createPiikMediaGateway({
                 quality.maxBitrate > 60000000
             )
                 throw new Error('quality-out-of-range');
-            const revision = revisions.get(socket) || 0;
+            const reservation = { revision };
             const operation = (async () => {
                 const response = await fetchImpl(new URL('/api/rooms', url), {
                     method: 'POST',
@@ -267,11 +268,11 @@ export function createPiikMediaGateway({
                 broadcast(owner.roomId);
                 return { ...session, shareId: share.id };
             })();
-            pending.set(socket, operation);
+            pending.set(socket, reservation);
             try {
                 return await operation;
             } finally {
-                pending.delete(socket);
+                if (pending.get(socket) === reservation) pending.delete(socket);
             }
         }
         const share = shares.get(input.shareId);

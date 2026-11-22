@@ -72,7 +72,7 @@ func (session *Session) PlatformStatus() PlatformStatus {
 	session.mu.Lock()
 	defer session.mu.Unlock()
 	state := session.platformCapture
-	status := PlatformStatus{Codec: state.Codec, Hardware: state.HardwareOnly && state.State == "active" && state.Codec == "h264",
+	status := PlatformStatus{Codec: state.Codec, Hardware: state.HardwareOnly && state.State == "active" && (state.Codec == "h264" || state.Codec == "av1"),
 		State: state.State, Encoder: state.EncoderName, Adapter: state.AdapterName, Audio: "none"}
 	if status.State == "" {
 		status.State = "unknown"

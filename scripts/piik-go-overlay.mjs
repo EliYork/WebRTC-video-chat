@@ -4,6 +4,11 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { preparePiikShareOverlay } from './piik-share-overlay.mjs';
+import { editOnce } from './piik-client-overlay.mjs';
+
+// GO-2026-6865 was fixed in v1.20.2. Use the patched version and checksums
+// from Piik e79e658 while keeping the pinned Piik source and protocol intact.
+const PIIK_COMPRESS_VERSION = 'v1.20.5';
 
 export function preparePiikGoOverlay(source, out) {
     const directory = join(out, 'go-overlay');
@@ -34,6 +39,20 @@ export function preparePiikGoOverlay(source, out) {
         ],
     ]);
     const Replace = {};
+    const moduleFile = join(source, 'go.mod');
+    const checksumFile = join(source, 'go.sum');
+    const compress = 'github.com/klauspost/compress';
+    const goMod = editOnce(readFileSync(moduleFile, 'utf8'), `${compress} v1.20.1`, `${compress} ${PIIK_COMPRESS_VERSION}`);
+    const goSum = readFileSync(checksumFile, 'utf8').trimEnd() + '\n' +
+        `${compress} ${PIIK_COMPRESS_VERSION} h1:rJj5VjH4xQxbnLphg6eqUcDxRFCw1jpMdDY9qXlrwSs=\n` +
+        `${compress} ${PIIK_COMPRESS_VERSION}/go.mod h1:LUdAzn7YLVvxLpc7y3V1m40wESHTgc1422pwwBSKYuI=\n`;
+    for (const [original, generated, content] of [
+        [moduleFile, join(directory, 'go.mod'), goMod],
+        [checksumFile, join(directory, 'go.sum'), goSum],
+    ]) {
+        writeFileSync(generated, content);
+        Replace[original] = generated;
+    }
     for (const [name, edits] of replacements) {
         const original = join(source, 'internal/server/signal', name);
         let text = readFileSync(original, 'utf8').replaceAll('\r\n', '\n');

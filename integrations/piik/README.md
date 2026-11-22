@@ -57,13 +57,15 @@ Node 只决定“谁有权参与哪个共享”；Piik 决定“媒体连接如�
 | 观看者转发 | 未接入，观看者宣告 relay capacity = 0 |
 | BrowserEncodingPool（网页模式） | 未接入，多个直连观看者仍可能各占编码资源 |
 | SFU 兜底 | 此开发实例禁用；不修改原 `.env` 或线上 SFU |
-| Windows App / 原生采集编码 | 已接入原共享弹窗，复用 WGC/D3D11 + Media Foundation H.264 + Pion；App 合成输入链路已通过，实际 WGC/硬编仍待用户验收 |
+| Windows App / 原生采集编码 | WGC/D3D11 + Media Foundation H.264 或 AV1 硬编 + Pion。本地 RTX 5070 Ti 已验证两个编码的 1080p60 共享链路 |
 | App 共享编码输出复用 | 已接入上游 nativehost 的同一 source 和输出分组；三观看者共享一采集进程，浏览器无视频发送器 |
-| 原生 AV1 / NVENC / 4K60 提升 | 未验证，不能由本轮 Piik 集成推导 |
+| 原生 AV1 硬编 | Windows 共享弹窗可手动选择，已验证本地 P2P；4K60、其他显卡和公网仍待实测 |
 | Android / 移动公网互通 | 尚待真实设备验收 |
 | 统一诊断统计 | 有适配器摘要，尚未完整映射 Piik PC 到原诊断面板 |
 
-网页模式使用 `getDisplayMedia` 与浏览器 H.264/VP8 编码；App 模式固定请求原生 H.264 硬件路径，未发现硬件编码器或返回其他 codec 会失败，不静默退回 VP8。每连接最大目标码率 15 Mbps、保持分辨率，不是实际码率保证。每路最多 3 个直连观看者，P2P 总上行仍随观看者增加，编码复用不会消除网络副本。Piik 模式隐藏 AV1，旧 provider 的 AV1 回退链保留。
+网页模式通过 `getDisplayMedia` 采集。默认使用 H.264/VP8，也可手动选择「AV1 优先（实验）」。选择 AV1 时先验证本地编码能输出视频，发送端向每个观看端独立协商 AV1、H.264 或 VP8。实际编码、发送码率和帧率可在复制的诊断中查看。Windows 客户端自动选择优先使用 H.264 硬编。手动选择「AV1 硬件编码」需要驱动提供 AV1 硬件 MFT，观看端需要支持 AV1。遇到兼容问题可切换为 H.264，共享会重新建立。
+
+每连接的 15 Mbps 为默认目标码率上限。每路最多 3 个直连观看者，P2P 总上行仍随观看者增加。可在本地运行 `npm run test:piik:browser -- --av1 --measure` 和 `npm run test:piik:browser -- --h264 --measure`，对比 720p 合成媒体的实际 RTP 码率、编码及播放帧率。结果记录在 `integrations/piik/artifacts/`，用于观察该测试环境下的差异。公网丢包、硬件能力和同画质带宽仍需实测。
 
 App 中兼容的观看者复用已编码输出，而不是每个 Viewer 新建一次屏幕采集。上游保留原始/较高输出，并在需求不同时派生、分组及回收较低输出；因此不能承诺所有网络条件下只有一个硬件编码器。合成输入测试能证明一个采集进程和没有浏览器重编码，不能测量实际 MF/NVIDIA 编码实例数或 GPU 负载。浏览器模式的 BrowserEncodingPool 仍未接入。
 
@@ -84,7 +86,8 @@ App 控制需要上游批准的站点 Origin、随机 instance capability 和 v1
 - 上游：[TNTcraftHIM/Piik](https://github.com/TNTcraftHIM/Piik)。固定 commit：[`9925486cec9910c0a76e47208b29b6f39942e096`](https://github.com/TNTcraftHIM/Piik/tree/9925486cec9910c0a76e47208b29b6f39942e096)，协议 `piik-v24`，见 `source.json`。
 - `.deps/upstream` 是可追踪的固定源码依赖，没有无来源地拷贝媒体实现。构建不修改其 tracked 源码；HEAD 不符或有本地改动时失败，不 reset 用户改动。`scripts/piik-go-overlay.mjs` 记录即时离开的两个 Go 文件改动，使用 Go `-overlay` 生成构建输入，匹配上下文变化时失败；媒体图和选路算法不修改。升级上游时需要重新审核这一局部扩展。
 - 上游 MIT 原文保留在 `LICENSE-Piik.txt`。浏览器运行依赖 `sdp-transform@3.0.0`、`zod@4.4.3` 均 MIT；构建生成其完整 notices，页面通过 `/vendor/piik-licenses.txt` 提供。
-- Go 构建沿用上游 `go.mod/go.sum`、依赖替换与 notice 收集器。生成 `.build/third-party-go.txt`，缺少可识别许可时构建失败；分发 Go 二进制时必须附带这份 notice 和 Piik MIT。
+- Go 构建基于上游 `go.mod/go.sum`，通过 overlay 使用 Piik 主线的 `klauspost/compress v1.20.5` 及对应校验和，覆盖 [GO-2026-6865](https://pkg.go.dev/vuln/GO-2026-6865) 的修复。许可证收集使用同一套依赖。分发 Go 二进制时须附带对应的 `third-party-go.txt` 和 Piik MIT。
+- Windows 采集构建采用上游 [f7e703e](https://github.com/TNTcraftHIM/Piik/commit/f7e703e5f02f55d386ccd556a03450296b873dfd) 的 Constrained Baseline 配置和校验。网页观看端采用 [81b4f27](https://github.com/TNTcraftHIM/Piik/commit/81b4f27eff2a1de1dfe6131c06b525b7ba3508a8) 的视频轨道结束恢复逻辑。
 - Go 模块含 MIT/BSD/Apache 及组件自身的其他许可文本，不能笼统视为 Piik MIT。上游有固定 LiveKit fork `f10692c6f232790ab95a063e24220531eeda6032` 及少量维护过的依赖，来源/撤销条件在其 `internal/thirdparty/README.md`。App 构建另生成 `.build/THIRD-PARTY-NOTICES.txt`，包含 Pion/Go 模块与 Windows WebRTC/libvpx 组合 NOTICE；固定 SDK 版本、SHA256 和许可证哈希由上游脚本核对。实际分发必须附带这些声明，本轮仅交付本地开发构建。
 - `.deps/`、`.build/`、`artifacts/` 全部忽略。原发布 ZIP 白名单未增加这些资源，本轮不是正式发布候选包。
 
@@ -119,7 +122,7 @@ npm run dev:piik
 npm run build:piik:app
 ```
 
-本机 Visual Studio Community 18 的 C++ 工具链已成功编译。上游固定 WebRTC SDK `m152.7977.0.2` ZIP 约 739 MB，含配套编译依赖，缓存在 `.deps/upstream/build/encoder-pool`；不进入 Git。采集程序使用 WGC/D3D11、adapter-bound Media Foundation H.264，Go App 使用 Pion。不需要把独立 NVENC AV1 实验或 NVIDIA SDK 移入这里，也不能因此声称使用 NVENC AV1。硬件编码可用性由 App 探测所选适配器/MFT，驱动必须提供对应 H.264 硬件 MFT。
+本机 Visual Studio Community 18 的 C++ 工具链已成功编译。上游固定 WebRTC SDK `m152.7977.0.2` ZIP 约 739 MB，含配套编译依赖，缓存在 `.deps/upstream/build/encoder-pool`。采集程序使用 WGC/D3D11 和按显卡选择的 Media Foundation 硬件编码器，Go App 使用 Pion。AV1 使用驱动暴露的 Main 8-bit 4:2:0 硬件 MFT。
 
 保留 `npm run dev:piik` 运行，在另一终端手动启动本地开发 App（这一步由用户选择执行，会按上游行为打开网站）：
 
@@ -148,6 +151,14 @@ npm run test:piik:native
 
 本地报告在 `artifacts/browser-report.json`、`artifacts/native-browser-report.json`。native 测试只将采集输入替换为 WebCodecs 生成的动态 H.264，运行真实 App/nativehost/Pion/频道/舞台，验证三 Viewer、无浏览器重编码、双向语音、网页与原生同时发布、满员立即重入和停止/退出。它不启动真实 WGC，不证明物理硬编或稳定目标 FPS。
 
+在 Windows 上构建共享组件和测试窗口后，可以验证真实 WGC、硬件 AV1、P2P 播放和停止后的清理。报告位于 `integrations/piik/.build/performance/`，使用本地 UDP 链路和静音测试画面。
+
+```powershell
+npm run build:piik:app
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-piik-performance.ps1 -CaptureCadence
+npm run test:piik:browser -- --performance=1080p --real-wgc --allow-window --av1 --gpu-receiver
+```
+
 ## 手动验收与下一阶段门槛
 
 ### 本机功能
@@ -169,9 +180,9 @@ npm run test:piik:native
 ## 后续实施顺序与成本
 
 1. **先做真实验收：** 原生 WGC/H.264、实际共享声音、完整 Piik PC 统计、开发 HTTPS/受控 STUN 配置与 Android。已实现的 viewer 即时离开保留上游意外断连宽限。
-2. **完善 App 使用：** 用户验证所选适配器/驱动、多个窗口/显示器和长时间共享；原生 AV1 暂不移植。网页前端仍掌握本地 source 生命周期，Node 掌握频道授权。
+2. **完善 App 使用：** 验证更多显卡和驱动、多个窗口或显示器、长时间原生共享。网页前端管理本地源的生命周期，Node 验证频道权限。
 3. **网页编码池与观看者转发：** App 原生共享 source/输出已复用；下一步另接 BrowserEncodingPool 与 ViewerRelay，覆盖转发者离开和弱网 prepare/active 切换后再启用。当前强制 viewer relay capacity 为 0，保持上游唯一选路控制器。
 4. **SFU 有预算后才开：** Piik 当前 admission 的 ingress/egress capacity 按流数，不能代替 Mbps 预算。多个媒体子房间必须共用全站额度，20 Mbps 公网出口需给语音/信令/开销留余量（例如媒体最多 16 Mbps，实际要实测），还需基于实际出口和预留做准入/退出。预算授权应落在 Piik admission 边界，选路仍由 Piik 唯一控制。
-5. **切换默认并退役旧共享路径：** 用户验收后单独确认切换；保留旧版本回滚，完成后去掉旧共享路由控制，保留现有语音/聊天/交互。原 NVENC AV1 实验继续独立，只有确实跑通原生 AV1 WebRTC 时才合并能力声明。
+5. **切换默认并退役旧共享路径：** 用户验收后单独确认切换。保留旧版本用于回滚，完成后去掉旧共享路由控制。
 
 结论：A 已有可运行的最小闭环，值得继续验证 App/编码池/转发的收益。当前没有性能证据支持全面迁移 B 或承诺 4K60；App 能否通过稳定适配接口接入、全站出口预算与上游 API 更新成本，是决定正式 Windows 客户端投入的下一组门槛。

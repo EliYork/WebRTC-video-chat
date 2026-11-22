@@ -18,8 +18,8 @@ const home = join(root, 'integrations/piik');
 const pin = JSON.parse(readFileSync(join(home, 'source.json')));
 const source = join(home, '.deps/upstream');
 const out = join(home, '.build');
-const run = (exe, args, cwd = source) =>
-    execFileSync(exe, args, { cwd, stdio: 'inherit', windowsHide: true });
+const run = (exe, args, cwd = source, env = process.env) =>
+    execFileSync(exe, args, { cwd, env, stdio: 'inherit', windowsHide: true });
 mkdirSync(join(home, '.deps'), { recursive: true });
 mkdirSync(out, { recursive: true });
 if (!existsSync(join(source, '.git'))) {
@@ -93,28 +93,40 @@ writeFileSync(
 if (!process.argv.includes('--web-only')) {
     const go = process.env.PIIK_GO || 'go';
     const overlay = preparePiikGoOverlay(source, out);
+    const linuxServer = process.argv.includes('--linux-server');
+    const serverTarget = { goos: linuxServer || process.platform !== 'win32' ? 'linux' : 'windows', goarch: 'amd64' };
+    const serverDirectory = linuxServer ? join(out, 'production') : out;
+    mkdirSync(serverDirectory, { recursive: true });
+    const goFlags = ['-mod=readonly', '-overlay', overlay];
+    // The upstream notice generator runs go list in a child process. Apply
+    // the same overlay so it reports the modules actually compiled above.
+    const writeGoNotices = (write) => {
+        const previous = process.env.GOFLAGS;
+        process.env.GOFLAGS = [previous, '-mod=readonly', `"-overlay=${overlay.replaceAll('\\', '/')}"`].filter(Boolean).join(' ');
+        try { write(); }
+        finally {
+            if (previous === undefined) delete process.env.GOFLAGS;
+            else process.env.GOFLAGS = previous;
+        }
+    };
     run(go, [
         'build',
-        '-overlay',
-        overlay,
+        ...goFlags,
         '-p',
         '4',
         '-o',
         join(
-            out,
-            process.platform === 'win32' ? 'piik-server.exe' : 'piik-server'
+            serverDirectory,
+            serverTarget.goos === 'windows' ? 'piik-server.exe' : 'piik-server'
         ),
         './cmd/piik-server',
-    ]);
-    licenses.writeServerLicenseNotices(
+    ], source, { ...process.env, GOOS: serverTarget.goos, GOARCH: serverTarget.goarch, CGO_ENABLED: '0' });
+    writeGoNotices(() => licenses.writeServerLicenseNotices(
         source,
-        join(out, 'third-party-go.txt'),
+        join(serverDirectory, 'third-party-go.txt'),
         go,
-        {
-            goos: process.platform === 'win32' ? 'windows' : 'linux',
-            goarch: 'amd64',
-        }
-    );
+        serverTarget,
+    ));
     if (process.argv.includes('--native')) {
         if (process.platform !== 'win32')
             throw new Error('This native build target requires Windows');
@@ -153,20 +165,19 @@ if (!process.argv.includes('--web-only')) {
         ]);
         run(go, [
             'build',
-            '-overlay',
-            overlay,
+            ...goFlags,
             '-p',
             '4',
             '-o',
             join(out, 'piik-app.exe'),
             './cmd/piik-app',
-        ]);
+        ], source, { ...process.env, GOOS: 'windows', GOARCH: 'amd64', CGO_ENABLED: '0' });
         mkdirSync(join(out, 'runtime/native'), { recursive: true });
         copyFileSync(
             join(source, 'build/platform-native/piik-capture.exe'),
             join(out, 'runtime/native/piik-capture.exe')
         );
-        licenses.writeAppLicenseNotices(
+        writeGoNotices(() => licenses.writeAppLicenseNotices(
             source,
             out,
             go,
@@ -176,7 +187,7 @@ if (!process.argv.includes('--web-only')) {
                 captureName: 'piik-capture.exe',
             },
             null
-        );
+        ));
     }
 }
 process.stdout.write(`Piik source ${pin.revision}; output ${out}\n`);

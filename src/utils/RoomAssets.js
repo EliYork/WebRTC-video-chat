@@ -4,8 +4,8 @@ import { createHash } from 'node:crypto';
 
 const sha = value => createHash('sha256').update(value).digest('hex');
 
-export function getRoomAssetVersions({ runtime, stylesheet, mainScript }) {
-    return { runtime: sha(runtime), stylesheet: sha(stylesheet), mainScript: sha(mainScript) };
+export function getRoomAssetVersions(assets) {
+    return Object.fromEntries(Object.entries(assets).map(([key, contents]) => [key, sha(contents)]));
 }
 
 // Assemble existing sources once at startup. No browser loader or media changes.

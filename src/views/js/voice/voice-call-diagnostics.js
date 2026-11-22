@@ -412,7 +412,7 @@
                 对端: remote?.ok ? remote.results.map((row) => row.数据 ? { ...row, 数据: compactReport(row.数据) } : row) : [],
                 未响应原因: remote?.ok ? null : remote?.reason || 'collection-failed', 未收集人数: remote?.omitted || 0 };
         };
-        const copyCombined = async (button) => {
+        const copyCombined = async (button, onFeedback) => {
             if (disposed || copyRequest || button?.disabled) return;
             const revision = ++copyRevision, owned = current, generation = getState()?.会话?.generation;
             const isCurrent = () => !disposed && revision === copyRevision;
@@ -432,6 +432,7 @@
                     if (!isCurrent()) return;
                     if (!sameSession()) throw new Error('session-changed');
                     if (button) button.textContent = '诊断已复制';
+                    onFeedback?.('诊断已复制');
                 }
                 catch {
                     if (!isCurrent()) return;
@@ -439,7 +440,13 @@
                     showText(text);
                     if (button) button.textContent = '请在日志窗口手动复制';
                 }
-            } catch { if (isCurrent() && button) button.textContent = '会话已变化，请重试'; }
+            } catch {
+                if (isCurrent()) {
+                    const message = '会话已变化，请重试';
+                    if (button) button.textContent = message;
+                    onFeedback?.(message);
+                }
+            }
             finally {
                 if (isCurrent()) copyRequest = undefined;
                 if (isCurrent() && button) {
