@@ -2,7 +2,9 @@
     "name": "WebRTC-video-chat",
     "version": "1.0.6",
     "description": "",
-    "main": "index.js",
+    "engines": {
+        "node": ">=22"
+    },
     "type": "module",
     "scripts": {
         "package:release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-release.ps1",
@@ -18,6 +20,7 @@
         "test:piik:browser": "node scripts/test-piik-browser.mjs",
         "test:piik:native": "node scripts/test-piik-browser.mjs --native",
         "test": "node --test tests/*.mjs",
+        "test:ci": "node scripts/test-ci.mjs",
         "test:stage-browser": "node scripts/test-stage-browser.mjs",
         "start": "node ./src/server.js",
         "dev": "node --watch ./src/server.js",

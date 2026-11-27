@@ -280,6 +280,30 @@ const fixture = (options = {}) => {
 };
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
+test('a processing fallback can rebuild on the live microphone and preserve mute without recapturing', async () => {
+    const f = fixture();
+    const output = await f.start('rnnoise');
+    const playback = output.getAudioTracks()[0];
+    playback.enabled = false;
+    const { stream: raw, track } = f.captures[0];
+    const request = f.runtime.diagnostics(output).request;
+    assert.equal(f.runtime.bypassFailedProcessor(output), true);
+
+    const superseded = await f.runtime.prepare(raw, request, { borrowsRaw: true });
+    f.runtime.dispose(superseded);
+    assert.equal(track.readyState, 'live');
+    assert.equal(playback.readyState, 'live');
+
+    const repaired = await f.runtime.prepare(raw, request, { borrowsRaw: true });
+    assert.equal(f.runtime.adopt(repaired), output);
+    assert.equal(f.runtime.diagnostics(output).mode, 'rnnoise');
+    assert.equal(playback.enabled, false);
+    assert.equal(track.readyState, 'live');
+    assert.equal(f.captures.length, 1);
+    f.runtime.dispose(output);
+    assert.equal(track.readyState, 'ended');
+});
+
 test('enhanced denoising preserves the muted output track and frees each private model context on switches', async () => {
     const f = fixture();
     const stream = await f.start('rnnoise');

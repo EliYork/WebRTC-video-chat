@@ -39,6 +39,22 @@ const fixture = (options = {}) => {
     };
 };
 
+test('a manual recovery retries failed calls without restarting a new negotiation', async () => {
+    const restarted = [];
+    const peers = [
+        { peerId: 'new', connection: { connectionState: 'new' } },
+        { peerId: 'failed', connection: { connectionState: 'failed' } },
+    ];
+    const f = fixture({
+        getPeerStates: () => peers,
+        onPeerRecovery: (peerId) => restarted.push(peerId),
+    });
+    f.runtime.recover({ userGesture: true });
+    await flush();
+    assert.deepEqual(restarted, ['failed']);
+    f.runtime.dispose();
+});
+
 test('paused replacement playback recovers automatically; permission denial offers a gesture retry', async () => {
     const blocked = [];
     let plays = 0;
@@ -157,6 +173,69 @@ for (const completion of ['rejection', 'timeout']) {
         f.runtime.dispose();
     });
 }
+
+test('hidden processing defers downgrade and repairs on return from the same capture', async () => {
+    let visible = false, resumes = 0, attempts = 0;
+    const source = {};
+    const state = { context: { state: 'running' }, processorContext: {
+        state: 'suspended', resume() { resumes++; return Promise.reject(new Error('interrupted')); },
+    } };
+    let active = state;
+    const f = fixture({
+        isForeground: () => visible,
+        getProcessingState: () => active,
+        onProcessingFailure: () => {
+            active = undefined;
+            f.runtime.queueProcessingRepair({ source, isCurrent: () => true, tryRepair: () => ++attempts === 1 });
+        },
+    });
+    f.runtime.recover();
+    await flush();
+    assert.equal(resumes, 0);
+    visible = true;
+    f.runtime.recover();
+    await flush();
+    assert.equal(resumes, 1, 'resume checks the private processing context as well as the output context');
+    visible = false;
+    f.runtime.recover();
+    await flush();
+    assert.equal(attempts, 0);
+    visible = true;
+    f.runtime.recover();
+    await flush();
+    f.runtime.recover();
+    await flush();
+    assert.equal(attempts, 1);
+    f.runtime.dispose();
+});
+
+test('processing repair checks superseding settings after preparation and caps retries per capture', async () => {
+    const f = fixture();
+    let current = true, applied = 0, attempts = 0, release;
+    const source = {};
+    f.runtime.queueProcessingRepair({ source, isCurrent: () => current, async tryRepair(isCurrent) {
+        await new Promise(resolve => { release = resolve; });
+        if (isCurrent()) applied++;
+    } });
+    f.runtime.recover();
+    await flush();
+    current = false;
+    release();
+    await flush();
+    assert.equal(applied, 0);
+    const request = { source, isCurrent: () => true, tryRepair: () => { attempts++; return true; } };
+    const repair = async () => {
+        f.advance(30000);
+        f.runtime.queueProcessingRepair(request);
+        f.runtime.recover();
+        await flush();
+    };
+    await repair();
+    await repair();
+    await repair();
+    assert.equal(attempts, 2, 'successful recovery does not replenish the budget of the same capture');
+    f.runtime.dispose();
+});
 
 test('disposing recovery clears its pending processing timeout before resume settles', async () => {
     let reject;

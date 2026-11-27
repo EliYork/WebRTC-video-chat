@@ -34,7 +34,7 @@ node scripts/test-voice-desktop.mjs '<unpacked>/EliYork Voice.exe'
 
 运行依赖许可证随安装包保留，合并在 LICENSES-desktop.txt；lazy-val 1.0.5 的 npm/source 无独立许可文件，保留原 package 元数据声明的 MIT、作者及来源版本，并附标准 MIT 条款。`npm audit --omit=dev --prefix desktop/windows` 为运行依赖审计；构建依赖仍有 8 项 moderate，来自 electron-builder 下载工具的 sprintf-js 链，不进入客户端运行包。没有使用 npm audit fix --force。
 
-自动检查使用隐藏隔离 Electron、假媒体、静音；真实系统剪贴板写入/读回后恢复测试前内容（若期间用户另行复制则不覆盖）。检查原页面“复制诊断”、拒绝网页读取剪贴板、220px 瓦片 FPS 完整显示和原生 App 退出清理。更新测试运行真实库、loopback HTTP、合成下载：静默不下载、显式下载、摘要验证、稍后不安装、清理顺序、无新版、摘要错误及 HTTP 故障。不会安装测试版本，不动用户正在运行的客户端或浏览器。
+桌面冒烟使用隐藏、静音的 Electron，配合假媒体、独立聊天文件和新建的用户目录。默认用进程内剪贴板验证网页与桌面菜单的诊断复制、IPC 写入和网页读取拒绝。需要检查实际系统剪贴板时，在专用测试桌面运行 `npm run test:desktop -- --real-clipboard`，该模式会替换测试桌面的剪贴板内容。更新测试通过回环 HTTP 提供合成下载，检查显式下载、摘要验证、安装前清理、安装失败后恢复和网络故障。
 
 这些结果不代表真实安装覆盖升级、Android、NVIDIA 编码或 4K60 验收通过。下一次真实版本发布后，需手动验收实际安装升级及配置保留。
 
@@ -42,12 +42,12 @@ node scripts/test-voice-desktop.mjs '<unpacked>/EliYork Voice.exe'
 
 下载使用 Nginx 独立精确白名单位置，不经过 Node、不开放 Piik 内部接口。每连接 256 KiB/s，最多两个下载连接（约总计 4.2 Mbps）；忙时 429，可稍后重试。复用既有 perserver zone，仅给本站下载 location 设置限制。没有修改语音/SFU带宽参数，下载仍占服务器出口，不能承诺完全无竞争。
 
-`scripts/deploy-desktop-update.py` 在授权服务器上运行：向 `/www/backup/voice-deploy/client-<timestamp>/after` 上传四个前端资源和三个下载文件、plan.json 与 deploy.py → `prepare` → `activate`。prepare 验证生产文件未漂移、上传摘要，备份原文件/manifest/Nginx 配置、环境和聊天快照及 PM2 状态。activate 先发布安装包，最后发布 feed，nginx -t 后平滑 reload；不重启 Node/Go。失败自动回滚，回滚不覆盖实时聊天或 .env。
+`scripts/deploy-desktop-update.py` 在授权服务器上运行：向 `<VOICE_BACKUP_ROOT>/client-<timestamp>/after` 上传四个前端资源和三个下载文件、plan.json 与 deploy.py → `prepare` → `activate`。prepare 验证生产文件未漂移、上传摘要，备份原文件/manifest/Nginx 配置、环境和聊天快照及 PM2 状态。activate 先发布安装包，最后发布 feed，nginx -t 后平滑 reload；不重启 Node/Go。失败自动回滚，回滚不覆盖实时聊天或 .env。
 
 ```sh
-python3 /www/backup/voice-deploy/client-<timestamp>/deploy.py rollback /www/backup/voice-deploy/client-<timestamp>
+python3 <VOICE_BACKUP_ROOT>/client-<timestamp>/deploy.py rollback <VOICE_BACKUP_ROOT>/client-<timestamp>
 # 或
-sh /www/backup/voice-deploy/client-<timestamp>/rollback.sh
+sh <VOICE_BACKUP_ROOT>/client-<timestamp>/rollback.sh
 ```
 
 仅停止更新分发：移走/撤回 latest.yml（不影响语音或 Piik）；恢复时确保安装包/blockmap 已就位再恢复 feed。回滚 feed 不会让已升级客户端自动降级；修复版本须更高版本号，或手动安装保留旧版。实际备份路径、发布 revision 和健康检查结果见部署记录。

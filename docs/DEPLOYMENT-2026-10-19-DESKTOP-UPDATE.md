@@ -55,20 +55,20 @@ ZIP SHA256：
 
 ## 备份、回滚与停止分发
 
-服务器备份：`/www/backup/voice-deploy/client-20261019T010800`（权限 700）。含 before、after、plan.json、snapshot.json、manifest、原 .env/聊天安全快照、nginx-before.txt、pm2-before.json、deploy.py、rollback.sh、result.json。上传、备份和线上文件均核对摘要；备份不公开。
+服务器备份：`<VOICE_BACKUP_ROOT>/client-20261019T010800`（权限 700）。含 before、after、plan.json、snapshot.json、manifest、原 .env/聊天安全快照、nginx-before.txt、pm2-before.json、deploy.py、rollback.sh、result.json。上传、备份和线上文件均核对摘要；备份不公开。
 
 恢复本次前端/下载 feed/Nginx location（不覆盖实时 .env 或聊天、不重启 Node/Go）：
 
 ```sh
-sh /www/backup/voice-deploy/client-20261019T010800/rollback.sh
+sh <VOICE_BACKUP_ROOT>/client-20261019T010800/rollback.sh
 ```
 
 仅撤回更新分发，保持语音/共享可用：
 
 ```sh
-mv /www/wwwroot/voice.eliyork.com/downloads/windows/latest.yml /www/backup/voice-deploy/client-20261019T010800/withdrawn-latest.yml
+mv <VOICE_APP_ROOT>/downloads/windows/latest.yml <VOICE_BACKUP_ROOT>/client-20261019T010800/withdrawn-latest.yml
 ```
 
 已安装版本不自动降级。客户端回退可先退出安装版，使用保留的 0.1.0 便携目录；后续坏版本修复须增加版本号。
 
-本站服务停止命令与完整原融合部署回滚继续见 PIIK-PRODUCTION.md。原先完整备份 `/www/backup/voice-deploy/piik-20261018-180715` 及分辨率热修复备份均未删除。本次回滚入口仅处理 0.1.1 与四个前端修复。
+本站服务停止命令与完整原融合部署回滚继续见 PIIK-PRODUCTION.md。原先完整备份 `<VOICE_BACKUP_ROOT>/piik-20261018-180715` 及分辨率热修复备份均未删除。本次回滚入口仅处理 0.1.1 与四个前端修复。

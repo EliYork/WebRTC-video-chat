@@ -31,14 +31,14 @@
 ## 生产写入、备份与回滚
 
 - 只新增 `downloads/windows/EliYork-Voice-Setup-0.1.5-x64.exe` 和 `.blockmap`，替换 `downloads/windows/latest.yml`，更新 `voice-build-manifest.json` 中桌面版本、桌面 revision、下载文件摘要和桌面发布记录；保留原网页 build / frontend revision。
-- 私有发布目录 `/www/backup/voice-deploy/client-20261022T123900`，包含发布计划、差异数据、重建安装包、旧 feed/manifest、安全摘要、发布结果及回滚脚本。备份和旧 0.1.4 安装包均保留，未做清理。
+- 私有发布目录 `<VOICE_BACKUP_ROOT>/client-20261022T123900`，包含发布计划、差异数据、重建安装包、旧 feed/manifest、安全摘要、发布结果及回滚脚本。备份和旧 0.1.4 安装包均保留，未做清理。
 - 切换前后核对 `.env`、聊天数据、完整 `src/` 目录及下载 Nginx 配置摘要均未变化；全部 PM2 进程 PID 与 restart count 不变。未重启 Node、Go 或其他站点，未 reload Nginx，未修改下载限速/并发、SSH、cron、TLS、防火墙或系统配置。
 - 公网 `/healthz` 为 200、`ok=true`、`mediaReady=true`，生产网页 build 继续为 `5be534293c1bbd22a2f5bf9ee8d076fe3f8ae2f9`，不是本次 Git 提交；不据此声称累计网页/服务端改进已经部署。
 
 紧急撤回在线更新源时，在服务器执行：
 
 ```sh
-sh /www/backup/voice-deploy/client-20261022T123900/rollback.sh
+sh <VOICE_BACKUP_ROOT>/client-20261022T123900/rollback.sh
 ```
 
 该操作恢复旧 feed 与 manifest，保留不可变安装包，不重启服务、不恢复旧聊天数据。已安装新版不会自动降级；回滚入口已生成，本轮未执行生产回滚。

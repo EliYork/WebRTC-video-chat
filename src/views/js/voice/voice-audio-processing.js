@@ -242,7 +242,7 @@
             releaseProcessor(pipeline);
             disconnect(pipeline.source);
             disconnect(pipeline.gain);
-            if (!preserveRaw) stopStream(pipeline.rawStream);
+            if (!preserveRaw && !pipeline.borrowsRaw) stopStream(pipeline.rawStream);
         };
         const close = (context) => {
             try {
@@ -278,7 +278,8 @@
 
         const prepare = async (
             rawStream,
-            request = { mode: 'browser', deviceId: 'default' }
+            request = { mode: 'browser', deviceId: 'default' },
+            { borrowsRaw = false } = {}
         ) => {
             const revision = stageRevision;
             const reusable =
@@ -288,7 +289,7 @@
             try {
                 context = reusable ? active.context : createContext();
             } catch (error) {
-                stopStream(rawStream);
+                if (!borrowsRaw) stopStream(rawStream);
                 throw error;
             }
             const pipeline = {
@@ -298,6 +299,7 @@
                 rawStream,
                 ...captures.get(rawStream),
                 request,
+                borrowsRaw,
             };
             pendingPreparations.add(pipeline);
             const ensureCurrent = () => {
@@ -563,7 +565,7 @@
                 // including its mute flag, and video/share senders stay untouched.
                 disconnect(candidate.gain);
                 candidate.gain.connect(previous.destination);
-                releaseBranch(previous);
+                releaseBranch(previous, { preserveRaw: previous.rawStream === candidate.rawStream });
                 pipelines.delete(stream);
                 stopStream(stream);
                 candidate.stream = previous.stream;
@@ -571,7 +573,8 @@
                 candidate.ownsContext = true;
                 pipelines.set(candidate.stream, candidate);
             } else if (previous && previous !== candidate)
-                dispose(previous.stream);
+                dispose(previous.stream, { preserveRaw: previous.rawStream === candidate.rawStream });
+            candidate.borrowsRaw = false;
             active = candidate;
             lastSwitchFailure = null;
             candidate.rawTrack = candidate.rawStream.getAudioTracks()[0];

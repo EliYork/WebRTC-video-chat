@@ -1,0 +1,41 @@
+name: Automated checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      GOMAXPROCS: '2'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24.15.0'
+          cache: npm
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.27.2'
+          cache: false
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build:piik
+      - run: npm run build:web
+      - name: Verify tracked startup assets
+        run: git diff --exit-code -- src/views/js/room/startup-assets.json src/views/js/room/startup.runtime.min.js src/views/js/room/startup.mainScript.min.js src/views/styles/startup.min.css
+      - run: npm run eslint -- --max-warnings 0
+      - run: npm run test:ci
+      - run: npm run test:piik:gateway
+      - name: Verify Go media and signaling overlays
+        working-directory: integrations/piik/.deps/upstream
+        run: go test -p 2 -timeout 2m -mod=readonly -overlay ../../.build/go-overlay/overlay.json ./internal/server/route ./internal/server/signal ./internal/server/app ./internal/app/nativecapture ./internal/app/nativehost ./internal/app/nativecontrol

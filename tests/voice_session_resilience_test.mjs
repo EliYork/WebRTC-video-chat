@@ -554,7 +554,9 @@ test('epoch-surviving captures still run and report current failures after a pre
     assert.equal(controller.getSnapshot('camera').state, 'failed');
 });
 
-test('screen sharing releases a prepared stream when cancelled before capture starts', async () => {
+for (const pickerCancellation of [false, true]) test(pickerCancellation
+    ? 'screen sharing composition handles picker cancellation without publishing or leaving pending state'
+    : 'screen sharing releases a prepared stream when cancelled before capture starts', async () => {
     const script = readFileSync(
         new URL('../src/views/script.js', import.meta.url),
         'utf8'
@@ -568,6 +570,9 @@ test('screen sharing releases a prepared stream when cancelled before capture st
     let pending = false;
     let captureCalls = 0;
     let codecCalls = 0;
+    const errors = [];
+    const captureError = Object.assign(new Error('cancelled by picker'), { name: 'NotAllowedError' });
+    const lifecycle = loadBrowserApi('../src/views/js/voice/voice-media-lifecycle.js', 'VoiceMediaLifecycle');
     const context = vm.createContext({
         AbortController,
         mediaOperationController: controller,
@@ -583,14 +588,15 @@ test('screen sharing releases a prepared stream when cancelled before capture st
         setScreenShareRequestPending: (value) => {
             pending = value;
         },
-        setMediaOperationError: () => {},
+        setMediaOperationError: (_kind, result) => errors.push(result),
+        requestDisplayMedia: async () => {
+            captureCalls += 1;
+            throw captureError;
+        },
         voiceSessionRuntime: { getSnapshot: () => ({ epoch: 0 }) },
         voiceMediaLifecycle: {
             normalizeScreenShareOptions: (options) => options,
-            requestScreenCapture: () => {
-                captureCalls += 1;
-                throw Error('unexpected capture');
-            },
+            requestScreenCapture: lifecycle.requestScreenCapture,
         },
         window: {
             VoiceScreenCodecs: {
@@ -601,13 +607,18 @@ test('screen sharing releases a prepared stream when cancelled before capture st
         },
     });
     const start = vm.runInContext(`${source}\nstartScreenShare`, context);
-    const result = start(undefined, {}, prepared);
-    controller.invalidate('screen');
+    const result = start(undefined, {}, pickerCancellation ? undefined : prepared);
+    if (!pickerCancellation) controller.invalidate('screen');
     assert.equal(await result, false);
-    assert.equal(captureCalls, 0);
+    assert.equal(captureCalls, Number(pickerCancellation));
     assert.equal(codecCalls, 0);
     assert.equal(pending, false);
-    assert.equal(prepared.tracks[0].stopCount, 1);
+    if (pickerCancellation) {
+        assert.equal(controller.getSnapshot('screen').desired, false);
+        assert.equal(errors.length, 1);
+        assert.equal(errors[0].errorType, 'user-cancelled');
+        assert.equal(errors[0].error, captureError);
+    } else assert.equal(prepared.tracks[0].stopCount, 1);
 });
 
 test('media capture can survive a transport epoch change when the operation remains desired', async () => {
@@ -888,6 +899,7 @@ test('same socket can replace its PeerJS owner and receives an epoch-tagged cano
     const io = new FakeIo();
     const signaling = createVoiceCallSignaling({
         io,
+        authorizePeer: () => true,
         resolveRoomId: (roomId) => (roomId === 'lobby' ? roomId : undefined),
     });
     const remote = new FakeSocket(io, 'remote-socket');
@@ -927,6 +939,7 @@ test('duplicate voice rejoin is idempotent but still returns the current target 
     const io = new FakeIo();
     const signaling = createVoiceCallSignaling({
         io,
+        authorizePeer: () => true,
         resolveRoomId: (roomId) => roomId,
     });
     const a = new FakeSocket(io, 'a');

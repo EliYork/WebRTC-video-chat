@@ -76,6 +76,7 @@ const createFixture = () => {
     const rooms = new Set(['lobby', 'game']);
     const signaling = createVoiceCallSignaling({
         io,
+        authorizePeer: () => true,
         resolveRoomId: (roomId) => (rooms.has(roomId) ? roomId : undefined),
     });
     return { io, signaling };

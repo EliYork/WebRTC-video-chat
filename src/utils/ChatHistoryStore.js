@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -16,6 +17,7 @@ export const createChatHistoryStore = ({
     let version = 0, savedVersion = 0, stateRevision = 0;
     let writing = null, writingVersion = 0, timer = null, closed = false;
     let retryDelay = retryMs, writeFailed = false;
+    let preserveBeforeWrite = false;
     const warn = message => { try { logger?.warn?.(message); } catch { /* Disk failures must stay nonfatal. */ } };
     const getPersistence = roomId => ({ ...(persistence.get(roomId) || {
         state: filePath ? 'saved' : 'disabled', revision: 0,
@@ -29,17 +31,23 @@ export const createChatHistoryStore = ({
     };
 
     const load = () => {
-        if (!filePath || !fs.existsSync(filePath)) {
-            return;
-        }
+        if (!filePath) return;
         try {
             const stored = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-            Object.entries(stored || {}).forEach(([roomId, messages]) => {
+            if (!stored || typeof stored !== 'object' || Array.isArray(stored)) {
+                throw new SyntaxError('Invalid chat history');
+            }
+            Object.entries(stored).forEach(([roomId, messages]) => {
                 if (Array.isArray(messages)) {
                     histories.set(roomId, messages.slice(-limit));
+                } else {
+                    preserveBeforeWrite = true;
                 }
             });
+            if (preserveBeforeWrite) warn('[chat-history] some history could not be loaded');
         } catch (error) {
+            if (error.code === 'ENOENT') return;
+            preserveBeforeWrite = true;
             warn(`[chat-history] could not load history (${error.code || error.name})`);
         }
     };
@@ -68,6 +76,12 @@ export const createChatHistoryStore = ({
         writing = (async () => {
             try {
                 await fileSystem.mkdir(path.dirname(filePath), { recursive: true });
+                if (preserveBeforeWrite) {
+                    // Keep the original intact if either backup or replacement fails.
+                    const recoveryPath = `${filePath}.${randomUUID()}.recovery`;
+                    await fileSystem.copyFile(filePath, recoveryPath, fs.constants.COPYFILE_EXCL);
+                    preserveBeforeWrite = false;
+                }
                 await fileSystem.writeFile(temporaryPath, snapshot, { mode: 0o600 });
                 await fileSystem.rename(temporaryPath, filePath);
                 savedVersion = requestedVersion;

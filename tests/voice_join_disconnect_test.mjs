@@ -21,6 +21,7 @@ for (const phase of ['queued', 'discovery', 'joining']) {
             to: () => ({ emit: (...args) => events.push(args) }),
         };
         const signaling = createVoiceCallSignaling({
+            authorizePeer: () => true,
             resolveRoomId: (room) => (room === 'lobby' ? room : undefined),
             io: {
                 in: () => ({

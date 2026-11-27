@@ -2,6 +2,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
 import { openRoom } from '../desktop/windows/startup-recovery.cjs';
 import { createNativeRuntime } from '../desktop/windows/native-runtime.cjs';
 
@@ -104,4 +106,55 @@ test('spawn failure surfaces as recoverable without leaking raw child output', a
     await assert.rejects(loading, /ENOENT/);
     assert.equal(f.controller.snapshot().state, 'failed');
     await f.controller.stop();
+});
+
+test('failed install can resume a suspended native runtime but actual quit is final', async () => {
+    const f = fixture(), first = f.controller.start();
+    f.ready(); await first;
+    await f.controller.suspendForInstall();
+    assert.deepEqual(f.stops, [1]);
+    assert.deepEqual(f.controller.snapshot(), { state: 'stopped', port: null });
+    await assert.rejects(f.controller.start(), /stopped/);
+    const restarting = f.controller.resumeAfterInstallFailure();
+    await tick();
+    f.ready(); await restarting;
+    assert.equal(f.children.length, 2);
+    assert.deepEqual(f.controller.snapshot(), { state: 'ready', port: 31234 });
+    await f.controller.stop();
+    await assert.rejects(f.controller.resumeAfterInstallFailure(), /stopped/);
+    assert.deepEqual(f.stops, [1, 2]);
+});
+
+test('capture picker serializes source discovery and cleans up a failed load', async () => {
+    const source = readFileSync(new URL('../desktop/windows/main.cjs', import.meta.url), 'utf8');
+    const frame = { url: 'https://voice.example.test/' };
+    const owner = { webContents: { mainFrame: frame }, isDestroyed: () => false };
+    const results = [];
+    const ipcMain = new EventEmitter();
+    let releaseSources, opened = 0;
+    const context = vm.createContext({
+        mainWindow: owner, quitting: false, openingPicker: false, picker: null,
+        desktopCapturer: { getSources: () => new Promise(resolve => { releaseSources = resolve; }) },
+        webContents: { fromFrame: () => owner.webContents },
+        owned: contents => contents === owner.webContents,
+        BrowserWindow: class extends EventEmitter {
+            constructor() { super(); opened++; }
+            isDestroyed() { return Boolean(this.destroyed); }
+            async loadFile() { throw Error('test load failed'); }
+            destroy() { this.destroyed = true; this.emit('closed'); }
+        },
+        ipcMain, smoke: false, log() {}, join: (...args) => args.join('/'), __dirname: 'local',
+    });
+    vm.runInContext(source.slice(source.indexOf('async function chooseSource'),
+        source.indexOf('if (!app.requestSingleInstanceLock()')), context);
+    const callback = value => results.push(Object.keys(value));
+    const first = context.chooseSource({ frame }, callback);
+    await context.chooseSource({ frame }, callback);
+    assert.deepEqual(results, [[]]);
+    releaseSources([]);
+    await first;
+    assert.deepEqual(results, [[], []]);
+    assert.equal(opened, 1);
+    assert.equal(context.picker, null);
+    assert.equal(ipcMain.listenerCount('pick-source'), 0);
 });

@@ -21,7 +21,7 @@ const fixture=()=>{
         setAudioButtonNoMic(){},setAudioButtonState(){},setCameraButtonState(){},notifyMediaDock(){},syncRoomCompositionState(){},
         createPeerInstance:async()=>({}),rebindLiveLocalTrackEndedHandlers(){},
         iceConfigRuntime:{stop(){}},screenSfuRuntime:{leave(){}},peerRetryController:{reset(){}},
-        voicePeerRegistry:{teardown(){}},getVideoTiles:()=>[],updateMobileTileView(){},updateMobileRoomState(){},
+        voicePeerRegistry:{teardown(){}},clearIncomingVoiceAuthorization(){},getVideoTiles:()=>[],updateMobileTileView(){},updateMobileRoomState(){},
         emitLocalPresenceUpdate(){},updateLocalUserCard(){},
         audioSettingsController:{cancel(){calls.push('cancel-settings');}},
         audioProcessingRuntime:{cancelPending(){calls.push('cancel-pipeline');}},

@@ -13,7 +13,7 @@
 - 包：`release/webrtc-video-chat-1.0.5-20261018-030409-255.zip`，111 个文件。
 - SHA256：`0E25CFC309ADCE4A5C051539F7E7DE18D30CBDF750451F29010441483775F8E1`。
 - 打包脚本完成白名单、清单和逐项 SHA256 检查；ZIP 未提交 Git。
-- 服务端私有备份：`/www/backup/voice-deploy/stage-20261018-030409-255/`。
+- 服务端私有备份：`<VOICE_BACKUP_ROOT>/stage-20261018-030409-255/`。
 - 旧 `src/` 与 `package.json` 完整保留在 `originals/`；另存当时的配置及聊天记录供恢复核对。
 - 发布前逐项确认线上完整源码及依赖清单与上一份已验证发布包一致；暂存候选后检查所有 JS 语法、依赖一致性及同文件系统条件。
 - 持有部署锁，仅停止/重启 `voice-room`，通过目录重命名替换 `src/` 和 `package.json`。依赖及锁文件一致，无需安装依赖。
@@ -21,7 +21,7 @@
 回滚命令：
 
 ```sh
-python3 /www/backup/voice-deploy/stage-20261018-030409-255/rollback.py
+python3 <VOICE_BACKUP_ROOT>/stage-20261018-030409-255/rollback.py
 ```
 
 回滚脚本检查当前文件仍与本次发布一致、备份哈希正确后，保存当前程序并恢复旧程序，仅重启 `voice-room`，不回退配置或聊天数据。脚本语法已检查，未执行生产回滚测试。发布过程包含失败自动恢复。

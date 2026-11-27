@@ -8,7 +8,8 @@ import { screenRouterCodecs } from '../src/utils/ScreenSfuService.js';
 import { sanitizeVoiceDiagnostic } from '../src/views/js/shared/voice-diagnostic-schema.js';
 import { createVoiceCallSignaling } from '../src/utils/VoiceCallSignaling.js';
 
-test('installed mediasoup and client ORTC accept AV1 + RTX and reject an incompatible mixed receiver without transcoding', { skip: !ortc && 'optional mediasoup not installed' }, () => {
+test('installed mediasoup and client ORTC accept AV1 + RTX and reject an incompatible mixed receiver without transcoding', { skip: !ortc && process.env.CI !== 'true' && 'optional mediasoup not installed' }, () => {
+    assert.ok(ortc, 'the CI media tests require mediasoup');
     const caps = ortc.generateRouterRtpCapabilities(structuredClone(screenRouterCodecs));
     const params = { codecs: [
         { mimeType: 'video/AV1', payloadType: 96, clockRate: 90000, parameters: { profile: 0 }, rtcpFeedback: [{ type: 'nack', parameter: '' }, { type: 'nack', parameter: 'pli' }] },

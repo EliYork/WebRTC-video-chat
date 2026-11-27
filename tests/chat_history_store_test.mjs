@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync, promises as fileSystem } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync, existsSync, promises as fileSystem } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -146,20 +146,39 @@ test('close flushes queued messages; disabled storage never claims a persistent 
     } finally { rmSync(directory,{recursive:true,force:true}); }
 });
 
-test('corrupt history is ignored without preventing future persistence', async () => {
+test('corrupt history is preserved before replacing it on disk', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'webrtc-chat-history-'));
     const filePath = join(directory, 'history.json');
     try {
         writeFileSync(filePath, '{invalid');
         const warnings = [];
+        let canBackUp = false;
         const store = createChatHistoryStore({
             filePath,
+            batchMs: 60000,
+            retryMs: 60000,
+            fileSystem: {
+                ...fileSystem,
+                copyFile: (...args) => {
+                    if (!canBackUp) throw Object.assign(Error('backup unavailable'), { code: 'EACCES' });
+                    return fileSystem.copyFile(...args);
+                },
+            },
             logger: { warn: (...args) => warnings.push(args) },
         });
         assert.deepEqual(store.get('lobby'), []);
         store.append({ id: '1', roomId: 'lobby' });
+        assert.equal(await store.persist(), false);
+        assert.equal(store.getPersistence('lobby').state, 'failed');
+        assert.equal(readFileSync(filePath, 'utf8'), '{invalid');
+        assert.deepEqual(readdirSync(directory), ['history.json']);
+        canBackUp = true;
         assert.equal(await store.close(), true);
-        assert.equal(warnings.length, 1);
+        const [backup] = readdirSync(directory).filter(name => name.endsWith('.recovery'));
+        assert.ok(backup);
+        assert.equal(readFileSync(join(directory, backup), 'utf8'), '{invalid');
+        assert.equal(createChatHistoryStore({ filePath }).get('lobby')[0].id, '1');
+        assert.equal(warnings.length, 2);
     } finally {
         rmSync(directory, { recursive: true, force: true });
     }

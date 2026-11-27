@@ -10,6 +10,7 @@ export function createPiikMediaGateway({
     baseURL,
     onSharing,
     fetchImpl = fetch,
+    warn = () => {},
 }) {
     const url = new URL(baseURL);
     if (
@@ -19,9 +20,14 @@ export function createPiikMediaGateway({
     ) {
         throw new Error('PIIK_INTERNAL_URL must be an HTTP loopback origin');
     }
+    const roomCredentialsSchema = protocol.createRoomResponseSchema
+        .pick({ roomId: true, hostToken: true })
+        .strip();
     const shares = new Map();
     const connections = new Map();
     const pending = new Map();
+    const operations = new Set();
+    const cleanups = new Set();
     const revisions = new WeakMap();
     let closed = false;
     const sameOwner = (a, b) =>
@@ -50,11 +56,6 @@ export function createPiikMediaGateway({
     const closeConnection = (connection) => {
         if (!connections.delete(connection.id)) return;
         clearTimeout(connection.timer);
-        if (
-            connection.role === 'host' &&
-            connection.ws.readyState === WebSocket.OPEN
-        )
-            connection.ws.send(JSON.stringify({ type: 'abandon-room' }));
         connection.ws.close(
             1000,
             connection.role === 'viewer' ? 'viewer-left' : 'share-ended'
@@ -65,8 +66,12 @@ export function createPiikMediaGateway({
         if (!shares.delete(share.id)) return;
         for (const connection of [...connections.values()])
             if (connection.share === share) closeConnection(connection);
-        onSharing(share.socket, false, share.owner);
-        broadcast(share.owner.roomId);
+        try {
+            onSharing(share.socket, false, share.owner);
+            broadcast(share.owner.roomId);
+        } finally {
+            void reclaim(share.room);
+        }
     };
     const cleanupSocket = (socket) => {
         revisions.set(socket, (revisions.get(socket) || 0) + 1);
@@ -81,13 +86,15 @@ export function createPiikMediaGateway({
             wsURL.protocol = 'ws:';
             const ws = new WebSocket(wsURL, {
                 origin: url.origin,
-                handshakeTimeout: 5000,
+                maxPayload: 256 * 1024,
+                handshakeTimeout: 1200,
             });
-            const timer = setTimeout(() => ws.terminate(), 8000);
+            let reclaimed = false;
+            const timer = setTimeout(() => ws.terminate(), 1200);
             ws.on('error', () => {});
             ws.on('close', () => {
                 clearTimeout(timer);
-                resolve();
+                resolve(reclaimed);
             });
             ws.on('open', () =>
                 ws.send(
@@ -98,6 +105,7 @@ export function createPiikMediaGateway({
                         role: 'host',
                         token: room.hostToken,
                         clientId: randomUUID(),
+                        roomSession: true,
                         roomOnly: true,
                         routePolicy: {
                             peerOnly: true,
@@ -108,13 +116,32 @@ export function createPiikMediaGateway({
                 )
             );
             ws.on('message', (bytes) => {
-                const message = JSON.parse(bytes.toString());
+                let message;
+                try {
+                    message = protocol.decodeServerMessage(bytes.toString());
+                } catch {
+                    return; // The cleanup connection can still receive its acknowledgement.
+                }
                 if (message.type === 'authenticated') {
                     ws.send(JSON.stringify({ type: 'abandon-room' }));
+                } else if (message.type === 'room-closed') {
+                    reclaimed = true;
+                    ws.close();
+                } else if (message.type === 'error') {
+                    reclaimed = message.code === 'ROOM_NOT_FOUND';
                     ws.close();
                 }
             });
         });
+    const reclaim = (room) => {
+        const operation = (async () => {
+            if (await abandon(room) || await abandon(room)) return;
+            warn('Piik room cleanup was not acknowledged; upstream expiry remains responsible');
+        })().catch(() => warn('Piik room cleanup failed; upstream expiry remains responsible'));
+        cleanups.add(operation);
+        void operation.finally(() => cleanups.delete(operation));
+        return operation;
+    };
     const open = (socket, share, role) => {
         const owner = getVoiceOwner(socket);
         const existing = [...connections.values()].find(
@@ -127,6 +154,7 @@ export function createPiikMediaGateway({
             origin: url.origin,
             maxPayload: 256 * 1024,
             handshakeTimeout: 5000,
+            closeTimeout: 1200,
         });
         const connection = {
             id: randomUUID(),
@@ -137,12 +165,13 @@ export function createPiikMediaGateway({
             ws,
         };
         connections.set(connection.id, connection);
-        connection.timer = setTimeout(() => {
+        const fail = () => {
             if (role === 'host') stop(share);
             else closeConnection(connection);
-        }, 8000);
+        };
+        connection.timer = setTimeout(fail, 8000);
         ws.on('open', () => {
-            if (!current(connection)) return closeConnection(connection);
+            if (!current(connection)) return fail();
             ws.send(
                 JSON.stringify({
                     type: 'authenticate',
@@ -166,16 +195,15 @@ export function createPiikMediaGateway({
             );
         });
         ws.on('message', (bytes) => {
-            if (!current(connection)) return closeConnection(connection);
+            if (!current(connection)) return fail();
             let message;
             try {
                 message = protocol.decodeServerMessage(bytes.toString());
             } catch {
-                if (role === 'host') stop(share);
-                else closeConnection(connection);
-                return;
+                return fail();
             }
             if (message.type === 'authenticated') {
+                connection.authenticated = true;
                 clearTimeout(connection.timer);
                 if (role === 'viewer')
                     ws.send(
@@ -186,6 +214,7 @@ export function createPiikMediaGateway({
                     );
             }
             socket.emit('piik:message', { sessionId: connection.id, message });
+            if (message.type === 'room-closed' || (message.type === 'error' && !connection.authenticated)) fail();
         });
         ws.on('error', () => {}); // close owns resource cleanup; credentials never enter logs.
         ws.on('close', () => {
@@ -239,39 +268,45 @@ export function createPiikMediaGateway({
                     signal: AbortSignal.timeout(5000),
                 });
                 if (!response.ok) throw new Error('piik-room-create-failed');
-                const room = protocol.createRoomResponseSchema.parse(
-                    await response.json()
-                );
-                const share = {
-                    id: randomUUID(),
-                    owner: { ...owner },
-                    socket,
-                    room,
-                    quality,
-                    grant: new URLSearchParams(
-                        new URL(room.inviteUrl).hash.slice(1)
-                    ).get('v'),
-                };
-                // Cancellation still claims and abandons the just-created room.
-                if (
-                    closed ||
-                    !sameOwner(owner, getVoiceOwner(socket)) ||
-                    socket.disconnected ||
-                    revision !== (revisions.get(socket) || 0)
-                ) {
-                    await abandon(room);
-                    throw new Error('publish-cancelled');
+                let body;
+                let share, published = false;
+                try {
+                    body = await response.json();
+                    const room = protocol.createRoomResponseSchema.parse(body);
+                    const grant = new URLSearchParams(new URL(room.inviteUrl).hash.slice(1)).get('v');
+                    if (!grant) throw new Error('piik-room-invite-missing');
+                    if (
+                        closed ||
+                        !sameOwner(owner, getVoiceOwner(socket)) ||
+                        socket.disconnected ||
+                        revision !== (revisions.get(socket) || 0)
+                    ) {
+                        throw new Error('publish-cancelled');
+                    }
+                    share = { id: randomUUID(), owner, socket, room, quality, grant };
+                    shares.set(share.id, share);
+                    const session = open(socket, share, 'host');
+                    onSharing(socket, true, owner);
+                    broadcast(owner.roomId);
+                    published = true;
+                    return { ...session, shareId: share.id };
+                } finally {
+                    if (!published) {
+                        if (share) stop(share);
+                        else {
+                            const credentials = roomCredentialsSchema.safeParse(body);
+                            if (credentials.success) await reclaim(credentials.data);
+                            else warn('Piik room response lacked cleanup credentials; upstream expiry remains responsible');
+                        }
+                    }
                 }
-                shares.set(share.id, share);
-                const session = open(socket, share, 'host');
-                onSharing(socket, true, owner);
-                broadcast(owner.roomId);
-                return { ...session, shareId: share.id };
             })();
             pending.set(socket, reservation);
+            operations.add(operation);
             try {
                 return await operation;
             } finally {
+                operations.delete(operation);
                 if (pending.get(socket) === reservation) pending.delete(socket);
             }
         }
@@ -316,9 +351,11 @@ export function createPiikMediaGateway({
         cleanupSocket,
         snapshot,
         request,
-        close: () => {
+        close: async () => {
             closed = true;
             for (const share of [...shares.values()]) stop(share);
+            await Promise.allSettled(operations);
+            await Promise.allSettled(cleanups);
         },
     };
 }

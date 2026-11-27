@@ -120,6 +120,46 @@ test('checking and real progress are observable, operations coalesce, install re
     }
 });
 
+for (const phase of ['prepare', 'throw', 'event']) {
+    test(`install ${phase} failure recovers the native component once`, async () => {
+        const recovery = deferred();
+        const failed = deferred();
+        let attempts = 0, installerCalls = 0;
+        const f = fixture({
+            prepareInstall: async () => {
+                if (phase === 'prepare') throw Error('Unable to suspend');
+            },
+            recoverInstall: () => { attempts++; return recovery.promise; },
+        });
+        try {
+            f.controller.subscribe(state => { if (state.status === 'error') failed.resolve(state); });
+            f.updater.emit('update-downloaded', { version: '0.1.4' });
+            f.updater.quitAndInstall = () => {
+                installerCalls++;
+                if (phase === 'throw') throw Error('Installer failed');
+            };
+            const installing = f.controller.install();
+            if (phase === 'event') {
+                await installing;
+                f.updater.emit('error', Error('Installer failed'));
+                f.updater.emit('error', Error('Duplicate installer error'));
+            }
+            await new Promise(resolve => setImmediate(resolve));
+            assert.equal(attempts, 1);
+            assert.equal(installerCalls, phase === 'prepare' ? 0 : 1);
+            assert.equal(f.controller.snapshot().busy, true);
+            recovery.resolve(phase !== 'prepare');
+            const result = await failed.promise;
+            assert.equal(result.busy, false);
+            assert.match(result.error, phase === 'prepare' ? /请重新启动客户端/ : /原生共享可重新开启/);
+            await installing;
+        } finally {
+            recovery.resolve(false);
+            f.controller.stop();
+        }
+    });
+}
+
 test('cancel cannot install, retry requires a fresh check, closing subscribers does not cancel a download', async () => {
     const f = fixture();
     try {

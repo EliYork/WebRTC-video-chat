@@ -569,17 +569,6 @@ test('button, double click, and Esc share fullscreenchange restoration without d
     assert.equal(tile.requestCount, 1);
     assert.equal(tile.classList.contains('is-fullscreen'), true);
     assert.equal(api.isTileLayoutWriteBlocked(tile), true);
-    const persistedLayout = { height: 360, width: 640, x: 24, y: 36 };
-    const fullscreenLayout = { height: 1080, width: 1920, x: 0, y: 0 };
-    if (!api.isTileLayoutWriteBlocked(tile)) {
-        Object.assign(persistedLayout, fullscreenLayout);
-    }
-    assert.deepEqual(persistedLayout, {
-        height: 360,
-        width: 640,
-        x: 24,
-        y: 36,
-    });
 
     tile.setAttribute(
         'style',

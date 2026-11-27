@@ -11,7 +11,7 @@ class FakeSocket {
         this.id = id;
         this.io = io;
         this.rooms = new Set([id]);
-        io.sockets.push(this);
+        io.sockets.sockets.set(id, this);
     }
 
     async join(roomId) {
@@ -29,7 +29,7 @@ class FakeSocket {
     to(roomId) {
         return {
             emit: (event, payload) => {
-                this.io.sockets
+                [...this.io.sockets.sockets.values()]
                     .filter(
                         (socket) => socket !== this && socket.rooms.has(roomId)
                     )
@@ -41,22 +41,23 @@ class FakeSocket {
 
 class FakeIo {
     constructor() {
-        this.sockets = [];
+        this.sockets = { sockets: new Map() };
     }
 
     in(roomId) {
         return {
             fetchSockets: async () =>
-                this.sockets.filter((socket) => socket.rooms.has(roomId)),
+                [...this.sockets.sockets.values()].filter((socket) => socket.rooms.has(roomId)),
         };
     }
 }
 
-const createFixture = () => {
+const createFixture = (authorizePeer = () => true) => {
     const io = new FakeIo();
     const screenChanges = [];
     const signaling = createVoiceCallSignaling({
         io,
+        authorizePeer,
         onScreenShareChange: ({ socket, ...event }) =>
             screenChanges.push({ ...event, socketId: socket.id }),
         resolveRoomId: (roomId) =>
@@ -75,6 +76,35 @@ const clearEvents = (...sockets) =>
 
 const join = (signaling, socket, roomId, peerId) =>
     signaling.join({ peerId, roomId }, socket);
+
+test('voice admission fails closed without a verifier, and relays require both owners in the same room', async () => {
+    const io = new FakeIo();
+    const reject = createVoiceCallSignaling({ io, resolveRoomId: value => value });
+    const a = new FakeSocket(io, 'a'), b = new FakeSocket(io, 'b'), c = new FakeSocket(io, 'c');
+    assert.equal((await join(reject, a, 'lobby', 'A')).reason, 'voice-peer-unverified');
+    const allow = createVoiceCallSignaling({ io, resolveRoomId: value => value, authorizePeer: () => true });
+    await join(allow, a, 'lobby', 'A');
+    assert.equal(allow.canRelay('A', 'B'), false);
+    await join(allow, b, 'lobby', 'B');
+    await join(allow, c, 'game', 'C');
+    assert.equal(allow.canRelay('A', 'B'), true);
+    assert.equal(allow.canRelay('C', 'A'), false);
+    await allow.leave(b);
+    assert.equal(allow.canRelay('A', 'B'), false);
+});
+
+test('voice join checks signalling ownership before publishing membership', async () => {
+    const { io, signaling } = createFixture((peerId, token) => peerId === 'peer-a' && token === 'verified');
+    const member = new FakeSocket(io, 'member');
+    const roomId = 'lobby', peerId = 'peer-a';
+    assert.deepEqual(await join(signaling, member, roomId, peerId), {
+        ok: false, reason: 'voice-peer-unverified',
+    });
+    assert.equal(member.rooms.has(roomId), false);
+    assert.equal((await signaling.join({ peerId, roomId, peerToken: 'verified' }, member)).ok, true);
+    assert.equal(member.rooms.has(roomId), true);
+    assert.equal(Object.hasOwn(member.data, 'peerToken'), false);
+});
 
 test('legal screen-share broadcasts canonical owner identity and boolean state', async () => {
     const { io, screenChanges, signaling } = createFixture();
@@ -102,6 +132,7 @@ test('legal screen-share broadcasts canonical owner identity and boolean state',
                 peerId: 'peer-a',
                 roomId: 'lobby',
                 sharing: true,
+                sourceVoiceSessionGeneration: joined.voiceSessionGeneration,
                 voiceSessionGeneration: joined.voiceSessionGeneration,
             },
         },
@@ -143,6 +174,7 @@ test('cross-room and peer spoof fields cannot select broadcast target or identit
         peerId: 'peer-a',
         roomId: 'lobby',
         sharing: true,
+        sourceVoiceSessionGeneration: joined.voiceSessionGeneration,
         voiceSessionGeneration: joined.voiceSessionGeneration,
     });
 });
@@ -283,6 +315,7 @@ test('active leave clears sharing before peer removal and disconnect is duplicat
                     peerId: 'peer-a',
                     roomId: 'lobby',
                     sharing: false,
+                    sourceVoiceSessionGeneration: joined.voiceSessionGeneration,
                     voiceSessionGeneration: joined.voiceSessionGeneration,
                 },
             },
@@ -308,6 +341,10 @@ test('rejoin gets a new session and late old events cannot modify the new room',
     const sharer = new FakeSocket(io, 'sharer');
     await join(signaling, lobbyObserver, 'lobby', 'lobby-peer');
     await join(signaling, gameObserver, 'game', 'game-peer');
+    await signaling.leave(gameObserver);
+    await join(signaling, gameObserver, 'game', 'game-peer');
+    await signaling.leave(gameObserver);
+    const viewerSession = await join(signaling, gameObserver, 'game', 'game-peer');
     const oldSession = await join(signaling, sharer, 'lobby', 'peer-a');
     signaling.updateScreenShare(
         {
@@ -350,22 +387,29 @@ test('rejoin gets a new session and late old events cannot modify the new room',
         peerId: 'peer-b',
         roomId: 'game',
         sharing: true,
-        voiceSessionGeneration: newSession.voiceSessionGeneration,
+        sourceVoiceSessionGeneration: newSession.voiceSessionGeneration,
+        voiceSessionGeneration: viewerSession.voiceSessionGeneration,
     });
+    assert.equal(viewerSession.voiceSessionGeneration, 3);
 });
 
-test('duplicate peer identity in one voice room is rejected', async () => {
+test('a peer identity can only be owned in one voice room, including concurrent joins', async () => {
     const { io, signaling } = createFixture();
     const original = new FakeSocket(io, 'original');
     const impersonator = new FakeSocket(io, 'impersonator');
-    await join(signaling, original, 'lobby', 'peer-a');
-
-    assert.deepEqual(await join(signaling, impersonator, 'lobby', 'peer-a'), {
+    const [accepted, refused] = await Promise.all([
+        join(signaling, original, 'lobby', 'peer-a'),
+        join(signaling, impersonator, 'game', 'peer-a'),
+    ]);
+    assert.equal(accepted.ok, true);
+    assert.deepEqual(refused, {
         ok: false,
         reason: 'voice-peer-id-in-use',
     });
-    assert.equal(impersonator.rooms.has('lobby'), false);
+    assert.equal(impersonator.rooms.has('game'), false);
     assert.deepEqual(impersonator.data, {});
+    await signaling.leave(original);
+    assert.equal((await join(signaling, impersonator, 'game', 'peer-a')).ok, true);
 });
 
 test('screen-share protocol contract removes legacy events and client identity fields', () => {
@@ -387,13 +431,7 @@ test('screen-share protocol contract removes legacy events and client identity f
     });
     assert.match(serverSource, /socket\.on\('screen:share'/);
     assert.doesNotMatch(serverSource, /Boolean\(screenSharing\)/);
-    assert.equal(
-        serverSource.match(
-            /screenSharing: socket\.data\.voiceScreenSharing === true/g
-        )?.length,
-        2
-    );
-    assert.match(signalingSource, /socket\.to\(owner\.roomId\)/);
+    assert.match(serverSource, /screenSharing: socket\.data\.voiceScreenSharing === true/);
     assert.match(
         scriptSource,
         /emit\('screen:share', \{\s*sharing,\s*voiceSessionGeneration,?\s*\}\)/

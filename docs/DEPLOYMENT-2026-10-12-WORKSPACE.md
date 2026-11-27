@@ -12,7 +12,7 @@
 - 本地与公网真实 Edge 155、假麦克风、真实 WASM/CSP 检查均通过：8 次运行时往返、6 次进入语音后的设置控件往返、连续快速选择、同一输出轨道与静音保持、实际 NS 与模式一致、门控确认。普通 nonce 脚本的异步 JS eval 被浏览器 CSP 拒绝。没有关闭 CSP、替换业务模块或使用物理麦克风；公网检查使用独立测试房间，结束后离开并关闭浏览器。
 - 本地证据：`%TEMP%/webrtc-noise-switch-oYOY1o/result.json`；公网证据：`%TEMP%/webrtc-noise-switch-ui7P1h/result.json`。回归入口：`scripts/verify-noise-mode-switch-app.mjs`。
 - 部署验证：旧源码/依赖逐项备份，staging HTTP/CSP 与真实 worker/router 检查通过；120 个部署文件与 ZIP 哈希一致。生产本机与公网 HTML/Worklet CSP 均正确，HTTP、实际加入语音的信令及 SFU UDP/TCP 44444 正常。真实配置、聊天记录和其他服务 PID 保持不变。
-- 当前回执与回滚：`/www/backup/voice-deploy/mode-switch-20261012-192243`；回滚命令：`python3 /www/backup/voice-deploy/mode-switch-20261012-192243/rollback.py`。回滚脚本已检查语法，未为测试执行生产回滚。
+- 当前回执与回滚：`<VOICE_BACKUP_ROOT>/mode-switch-20261012-192243`；回滚命令：`python3 <VOICE_BACKUP_ROOT>/mode-switch-20261012-192243/rollback.py`。回滚脚本已检查语法，未为测试执行生产回滚。
 - 加载新版需要刷新并重新加入一次；此后的正常模式切换无需退出语音或重开共享。仍需用户试听真实键盘、人声与外放回声，自动行为检查不代表降噪听感通过。
 
 ## 上次更新：键盘残留抑制
@@ -24,7 +24,7 @@
 - 295 项自动测试、源码及涉及测试文件 lint、模板与 Worklet 语法检查通过；包含真实 WASM 离线处理合成敲击，未代替用户真实键盘和说话试听。
 - 部署再次完成旧版本备份和逐项校验、备用 HTTP / worker/router 检查；120 个线上运行文件与包一致，8 个变更 JS 的公网哈希一致。新版键盘抑制节点存在，公网 WebSocket 正常，SFU UDP/TCP 44444 正常。
 - `voice-room` PID 517456 在线且无额外崩溃重启；`friend-footprints` PID 500768 未变。真实配置、最终聊天记录及旧备份保留。
-- 最新回执与回滚路径：`/www/backup/voice-deploy/keyboard-20261012-181339`。需要撤回此次更新时运行 `python3 /www/backup/voice-deploy/keyboard-20261012-181339/rollback.py`，恢复上一个整合版本的程序与依赖，保留当前数据及配置。回滚脚本语法检查通过，未为测试执行生产回滚。
+- 最新回执与回滚路径：`<VOICE_BACKUP_ROOT>/keyboard-20261012-181339`。需要撤回此次更新时运行 `python3 <VOICE_BACKUP_ROOT>/keyboard-20261012-181339/rollback.py`，恢复上一个整合版本的程序与依赖，保留当前数据及配置。回滚脚本语法检查通过，未为测试执行生产回滚。
 - 双方刷新并重新加入以加载新版后，选择 RNNoise，确认诊断显示“键盘抑制开”；对比不讲话打字、边讲话边打字及轻声。主要改善低人声概率的残留，不能保证讲话期间完全消除键盘声；轻声或首字变弱时可关闭对比。
 
 以下为此次键盘抑制更新前的整合发布记录，旧包和回滚点继续保留。
@@ -33,7 +33,7 @@
 
 - 源码提交：`dee7f4525507b5d200ae58c8fc16a16ce4ddf229`，已推送 `origin/master`。
 - 网站：<https://voice.eliyork.com/room/lobby>。
-- 程序目录：`/www/wwwroot/voice.eliyork.com`；PM2：`voice-room`。
+- 程序目录：`<VOICE_APP_ROOT>`；PM2：`voice-room`。
 - 运行包：`release/webrtc-video-chat-1.0.5-20261012-175339-296.zip`。
 - SHA256：`C802088E1845C1A8657644C9B71948FC41C0022943A964D94A84AE052CC50793`。
 - 运行包包含 119 个白名单文件；服务器部署后逐项哈希全部一致。
@@ -67,18 +67,18 @@
 
 完整备份及服务器回执：
 
-`/www/backup/voice-deploy/workspace-20261012-175339`
+`<VOICE_BACKUP_ROOT>/workspace-20261012-175339`
 
 回滚命令：
 
 ```sh
-python3 /www/backup/voice-deploy/workspace-20261012-175339/rollback.py
+python3 <VOICE_BACKUP_ROOT>/workspace-20261012-175339/rollback.py
 ```
 
 脚本保留回滚前程序，恢复旧源码及依赖，重启同一 PM2 服务并检查 HTTP，不回退当前聊天记录或真实配置。脚本语法已检查，未为测试执行生产回滚。
 
 上传包和部署脚本保存在服务器私有目录：
 
-`/www/backup/voice-deploy/incoming-workspace-20261012-175339`
+`<VOICE_BACKUP_ROOT>/incoming-workspace-20261012-175339`
 
 本报告提交只增加部署记录，不改变已部署的运行文件；服务器回执中的源码提交对应本次运行包。

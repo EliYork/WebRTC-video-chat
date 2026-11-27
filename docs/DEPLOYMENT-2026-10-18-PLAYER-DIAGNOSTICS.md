@@ -28,8 +28,8 @@
 
 ## 服务端操作与保留
 
-- 上传发布包、清单和部署脚本到 `/www/backup/voice-deploy/`，保留全部既有包与回滚文件。
-- 创建私有备份目录 `/www/backup/voice-deploy/player-diagnostics-20261018-180726-836`，保存旧源码、环境备份及停服时的聊天历史副本。
+- 上传发布包、清单和部署脚本到 `<VOICE_BACKUP_ROOT>/`，保留全部既有包与回滚文件。
+- 创建私有备份目录 `<VOICE_BACKUP_ROOT>/player-diagnostics-20261018-180726-836`，保存旧源码、环境备份及停服时的聊天历史副本。
 - 替换现有运行目录中的 `src/` 和内容相同的 `package.json`；只停止/重启 `voice-room`。
 - `.env`、依赖、锁文件与聊天历史校验保持一致。`friend-footprints` PID 1389 和运行状态未变。
 - 未修改反向代理、TLS、防火墙、账号、系统配置或媒体策略。
@@ -37,7 +37,7 @@
 ## 回滚
 
 ```sh
-python3 /www/backup/voice-deploy/player-diagnostics-20261018-180726-836/rollback.py
+python3 <VOICE_BACKUP_ROOT>/player-diagnostics-20261018-180726-836/rollback.py
 ```
 
 回滚脚本会先检查线上仍为本次部署清单，保留回滚前源码，再恢复此前源码并只重启 `voice-room`。不回退聊天数据。

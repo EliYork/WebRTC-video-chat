@@ -421,29 +421,6 @@
     text-overflow: ellipsis;
 }
 
-.noise-toggle {
-    cursor: pointer;
-    user-select: none;
-}
-
-.noise-toggle:hover {
-    opacity: 0.72;
-}
-
-.noise-toggle[aria-pressed='true'] {
-    border-color: rgba(78, 168, 118, 0.22);
-    background-color: #e7f6ed;
-    color: #3d7b59;
-}
-
-.noise-toggle[aria-pressed='true'] strong {
-    color: #2f704c;
-}
-
-.noise-toggle[aria-pressed='false'] {
-    opacity: 0.68;
-}
-
 .screen-status-chip {
     border-color: rgba(78, 168, 118, 0.22);
     background-color: #e7f6ed;
@@ -475,11 +452,6 @@
 .restart-effect-notice.is-visible {
     opacity: 1;
     transform: translateY(0);
-}
-
-.noise-toggle.na {
-    opacity: 0.45;
-    pointer-events: none;
 }
 
 .copy-room-link {

@@ -25,6 +25,7 @@ const bash =
 const probeTimeoutMs = 20000;
 const bashUnavailable =
     !existsSync(bash) &&
+    process.env.CI !== 'true' &&
     'Bash unavailable; run this deployment gate check on the deployment host';
 const source = readFileSync(
     new URL('../scripts/deploy-baota.sh', import.meta.url),

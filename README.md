@@ -2,7 +2,7 @@
 
 # 朋友频道语音房间
 
-一个面向朋友小群体的自托管固定频道语音房间：在同一页面中提供语音、视频、屏幕共享、频道聊天、在线状态、共享鼠标与可保存的自由布局。
+一个面向朋友小群体的自托管固定频道语音房间，提供语音、视频、屏幕共享、频道聊天、在线状态和共享鼠标。屏幕共享集中在舞台，桌面和手机使用各自的自适应布局。
 
 > 当前定位是轻量自用工具，不是带账号、持久化身份、房间权限或服务等级承诺的完整会议平台。
 
@@ -13,9 +13,10 @@
 - 加入语音时优先请求麦克风；摄像头由用户按需开启。
 - 支持麦克风静音、摄像头、屏幕画面与系统音频共享、输出设备/音量控制、远端音量和全屏观看；参与者麦克风与屏幕共享系统音频可分别调节音量和静音，本地共享 Tile 也可隐藏预览而不停止发送。开始屏幕共享前可选择自动、720p、1080p、1440p 或原始分辨率，以及 15/30/60 fps 目标值。
 - 同频道文字聊天；服务端保留每个频道最近 50 条消息并异步保存到磁盘，每条消息最多 500 个字符。已打开页面最多显示最近 500 条，裁剪后显示提示；这不是完整聊天归档，见 [保留窗口](docs/CHAT-RETENTION-2026-10-22.md)。
+- 触屏键盘的回车用于换行，点发送按钮提交。桌面键盘使用 Enter 发送，Shift+Enter 换行。
 - 同频道在线成员、麦克风/摄像头/屏幕共享状态和全页面共享鼠标。
 - 浏览、聊天、共享鼠标和语音均按频道隔离；服务端以 Socket 所拥有的房间状态校验实时事件。
-- 页面级布局支持真实 DOM 组件的移动、缩放、隐藏、恢复、网格吸附和浏览器本地保存。
+- 共享舞台支持多个共享源之间切换焦点，聊天和媒体控件随窗口宽度调整。
 - 语音会话包含有限重试、Socket/Peer 恢复、媒体操作串行化、设备变化回退和意外 track 结束处理。
 - 可选的浏览器端降噪和接收端屏幕共享分辨率/FPS 标签。
 
@@ -25,11 +26,10 @@
 | --- | --- | --- |
 | Chat Panel | 代码完成，待浏览器复测 | `VoiceChatPanelRuntime` 单独拥有聊天业务 DOM、表单状态、消息渲染和生命周期；Socket 适配器不创建或销毁页面 Socket。 |
 | Sidebar | 代码完成，待浏览器复测 | `VoiceSidebarRuntime` 单独拥有真实频道树、浏览/语音目标状态和成员列表；presence 适配器只负责订阅。 |
-| Page Layout | 已实现并有合同/identity 测试 | 移动真实业务节点，不克隆或用备用 shell 重建；布局按房间保存在 `localStorage`。 |
+| Stage Layout | 已实现并有 Node 与浏览器测试 | `VoiceStageLayout` 管理舞台焦点、视频瓦片、成员区与移动导航。 |
 | Voice Session / Media | 已模块化并有 Node 行为测试 | `script.js` 仍是页面 composition owner；session、retry、device、operation、registry 和 quality 模块各自维护窄边界。 |
 | Media Dock | 代码完成，待浏览器复测 | `VoiceMediaDockRuntime` 单独拥有真实 Dock DOM、媒体按钮、设备/音量 UI、状态与 listener 生命周期；窄 adapter 只转发意图和 snapshot。 |
-| Stage / Video Grid | 尚未正式组件化 | 仍由页面 composition 与媒体 registry 协作管理。 |
-| Mobile Nav / bootstrap | 尚未正式组件化 | 保留为后续独立任务；Stage / Video Grid 也未被 Media Dock 越界接管。 |
+| Room bootstrap | 启动资源已统一打包 | 服务端按 `boot-scripts.json` 排序组装运行时；`script.js` 负责页面组合。 |
 
 “代码完成，待浏览器复测”表示静态检查和 Node 行为/合同测试已覆盖，但真实浏览器、弱网、权限、设备拔插或部署环境仍需要验收；它不等同于生产验证完成。
 
@@ -82,10 +82,10 @@ B -> A：只携带 B 当前发布的媒体
 
 ## 本地运行
 
-要求：安装 Node.js 22 或更新版本及 npm，并使用现代 Chromium 系浏览器进行媒体测试。
+安装 Node.js 22 或更新版本及 npm。运行完整自动回归还需要 Python 3，可通过 `PYTHON` 指定解释器。`npm run test:stage-browser` 使用已安装的 Chromium 或 Edge，可通过 `STAGE_TEST_BROWSER` 指定路径。
 
 ```bash
-npm install
+npm ci
 cp .env.example .env
 npm start
 ```
@@ -93,6 +93,7 @@ npm start
 Windows PowerShell 可使用：
 
 ```powershell
+npm.cmd ci
 Copy-Item .env.example .env
 npm.cmd start
 ```
@@ -105,7 +106,9 @@ npm run dev
 
 开发命令使用 Node 内置 watch：服务入口或已导入模块修改后自动重启，无需安装 nodemon。前端静态文件和 EJS 模板修改后刷新页面；此命令不提供浏览器热更新。生产启动继续使用 `npm start`。
 
-运行 `npm test` 执行自动回归测试；浏览器和实机验收命令见下文。
+运行 `npm test` 执行自动回归测试。`scripts/verify-*-app.mjs` 等独立浏览器验收脚本额外依赖 Playwright 和 Chromium 浏览器。可在外部测试目录安装 `playwright`，运行 `npx playwright install chromium`，再将 `PLAYWRIGHT_MODULE` 指向该目录下的 `node_modules/playwright`。浏览器和实机验收命令见下文。
+
+干净环境跑完整测试时，先准备 Bash 和 Python 3，再运行 `npm ci` 安装锁定依赖。若 Windows 的 mediasoup 安装脚本无法获取或构建 worker，可在安装和测试前把 `MEDIASOUP_WORKER_BIN` 指向已验证的同版本 worker。运行 `npm run build:piik -- --web-only` 获取固定的 Piik 源码及浏览器构建依赖。`npm run test:ci` 使用并发 2、30 秒测试超时，出现失败、跳过或 TODO 会返回错误。GitHub Actions 使用 Node 24.15.0，另检查启动资源同步和 ESLint。
 
 ## 环境变量
 
@@ -175,9 +178,9 @@ git diff --check
 
 `npm run format:check` 和 `npm run format:write` 是开发时的格式检查和整理工具。有存量格式差异时，`format:check` 会以非零状态退出。发布以静态检查和 Node 测试为门禁。只整理本次修改时，用 `npx prettier --write <文件路径>` 指定文件。
 
-测试覆盖 voice 协议/协商、peer registry、会话恢复、媒体质量、服务端信任边界与 disconnect 生命周期、view/chat room 生命周期、页面布局 identity，以及 Chat Panel、Sidebar、Media Dock 生命周期、屏幕共享独立音量和本地预览显隐。它们是 Node 模型与合同测试，不是浏览器 E2E。
+Node 测试覆盖 voice 协商、peer registry、会话恢复、服务端房间边界、聊天持久化和组件生命周期。`npm run test:stage-browser` 在隔离 Chromium 中验证舞台、跨端布局、实际 WebRTC 连接和合成媒体。
 
-真实验收至少应使用两个独立浏览器上下文，检查双向麦克风、后开媒体、摄像头与屏幕切换、系统音频、麦克风与共享音量独立性、本地预览隐藏/恢复、加入/离开/刷新、断网重连、权限拒绝、设备拔插、频道隔离、聊天、共享鼠标和布局恢复。
+真实验收至少应使用两个独立浏览器上下文，检查双向麦克风、后开媒体、摄像头与屏幕切换、系统音频、麦克风与共享音量独立性、本地预览隐藏/恢复、加入/离开/刷新、断网重连、权限拒绝、设备拔插、频道隔离、聊天、共享鼠标和舞台焦点恢复。
 
 ## 调试
 
@@ -203,10 +206,10 @@ exportVoiceMediaDebug();
 - 默认只有公共 STUN；可选 TURN 临时凭据接入已实现，但仍需配置实际中继并验收受限网络连通性。当前本地自动测试不证明公网 TURN 可用。
 - 没有账号、登录、持久身份、权限或房间管理；显示名不是可信身份。
 - presence 和相关实时状态仍在内存中；频道聊天历史会异步保存到磁盘并在失败时提示、重试，异常断电或强制退出仍可能丢失尚未保存的消息。
+- 运行部署时由单个 Node 实例写入聊天历史，同一路径应分配给一个进程。
 - 应用中 PeerJS/Socket.IO 的 WebSocket upgrade 接管冲突已修复，当前本地真实双协议测试通过；线上异常仍需用当前日志与代理配置单独核对。
 - 已有隔离浏览器完整页面测试，覆盖聊天保存、TURN 配置与过期连接等流程；合成媒体不代表真实麦克风、屏幕画质、手机或公网弱网验收通过。
 - Voice Session Resilience、权限/设备错误恢复、Chat Panel、Sidebar、Media Dock，以及屏幕共享选择、独立音量、本地预览显隐和质量标签仍需要更多真实浏览器、弱网与设备拔插复测。
-- Mobile Nav 尚未正式组件化；Stage / Video Grid 和 script loader/bootstrap 也仍待收敛。
 - 根项目已移除 nodemon 带入的已知开发依赖漏洞链，独立全量与生产依赖审计均为 0；范围与验证记录见 [依赖检查](docs/DEPENDENCY-AUDIT-2026-10-22.md)。其他子项目需分别审计，依赖变化后仍需复核。
 - 核心网页资源已本地化，过时的 CDN CSP 许可已移除，见 [本地资源验证](docs/LOCAL-ASSETS-CSP-2026-10-22.md)。WebSocket 来源、其他安全策略、CSS/z-index、旧布局组件和重复 popover owner 仍待进一步整理。
 
@@ -214,7 +217,8 @@ exportVoiceMediaDebug();
 
 ## 安全边界
 
-- 实时事件的房间与 peer 所有权由服务端 `socket.data` 决定；客户端 payload 不是认证事实。
+- 实时事件的房间与 peer 所有权由服务端维护。PeerJS 连接身份和当前房间成员列表共同决定浏览器可以应答哪些入站媒体呼叫。
+- 语音连接使用 HTTPS 或本机安全上下文。服务端升级到这一版后，已打开的房间页面需要刷新以取得新版信令代码。
 - Chat Panel 与 Sidebar 的动态昵称、状态和聊天正文通过 `textContent` 写入，不把用户文本当 HTML 执行。
 - 服务端会限制显示名和聊天正文长度并拒绝跨 owner room 的聊天；这不等同于账号认证、授权、审计或反滥用系统。
 - 项目没有账号系统，任何人只要能访问部署地址就可能加入固定频道；公开部署应在反向代理或网络层增加访问控制。
@@ -231,7 +235,7 @@ exportVoiceMediaDebug();
 - [服务端 Socket disconnect 生命周期](./docs/server-socket-lifecycle.md)
 - [Chat Panel 组件边界](./docs/chat-panel-component.md)
 - [Sidebar 组件边界](./docs/sidebar-component.md)
-- [页面布局合同与恢复测试](./tests/page_layout_contract_test.mjs)
+- [共享舞台与布局测试](./tests/stage_layout_test.mjs)
 - [架构修复待办](./docs/architecture-repair-backlog.md)
 
 ## 关于与开源致谢 / Credits

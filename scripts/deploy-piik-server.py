@@ -57,12 +57,13 @@ def restore_go(directory, app):
     if app.get('status') != 'online': run('pm2', 'stop', 'voice-piik')
 
 
-def health(url, revision=None):
+def health(url, revision=None, *, require_media=False):
     for _ in range(60):
         try:
             with urllib.request.urlopen(url, timeout=3) as response:
                 data = json.load(response)
-            if data.get('ok') and (not revision or data.get('build') == revision and data.get('mediaReady')):
+            if (data.get('ok') is True and (not revision or data.get('build') == revision)
+                    and (not (revision or require_media) or data.get('mediaReady') is True)):
                 return data
         except Exception:
             pass
@@ -204,7 +205,8 @@ def prepare(directory, archive_path, expected):
             usage[name] = run('ps', '-p', str(child.pid), '-o', 'rss=,%cpu=').strip()
         available = int(next(l.split()[1] for l in Path('/proc/meminfo').read_text().splitlines() if l.startswith('MemAvailable:')))
         assert available > 160 * 1024, 'insufficient available memory with candidate'
-        report = {'health': result, 'rssKiB_cpuPercent': usage, 'availableKiB': available, 'passed': True}
+        report = {'health': result, 'rssKiB_cpuPercent': usage, 'availableKiB': available, 'passed': True,
+                  'manifestHash': digest(stage / 'manifest.json')}
         (directory / 'candidate-result.json').write_text(json.dumps(report, indent=2))
         print(json.dumps(report))
     finally:
@@ -251,18 +253,37 @@ def restore(directory):
             break
         except Exception: time.sleep(.25)
     else: raise RuntimeError('rollback Node health failed')
-    if env['PIIK_ENABLED'] == 'true':
-        health('http://127.0.0.1:3000/healthz', env['VOICE_BUILD_ID'])
+    try:
+        health('http://127.0.0.1:3000/readyz', env['VOICE_BUILD_ID'], require_media=True)
+    except RuntimeError as error:
+        raise RuntimeError('rollback media readiness failed') from error
     assert digest(ROOT / '.env') == info['envHash']
     run('pm2', 'save')
     print('Rolled back code; live chat and .env preserved.')
 
 
-def activate(directory):
-    directory = checked(directory)
-    assert json.loads((directory / 'candidate-result.json').read_text())['passed']
+def verify_release_candidate(directory):
+    result = json.loads((directory / 'candidate-result.json').read_text())
     stage = directory / 'candidate'
     manifest = json.loads((stage / 'manifest.json').read_text())
+    if manifest.get('kind') != 'release' or manifest.get('dirty') is not False:
+        raise RuntimeError('Production activation requires a clean formal Piik release')
+    if result.get('passed') is not True or result.get('manifestHash') != digest(stage / 'manifest.json'):
+        raise RuntimeError('Formal release must match the prepared candidate manifest')
+    for name, expected in manifest['files'].items():
+        if digest(stage / name) != expected:
+            raise RuntimeError('Prepared candidate changed: ' + name)
+    for name in ['src', 'integrations/piik']:
+        for path in (stage / name).rglob('*'):
+            if path.is_symlink() or (path.is_file() and path.relative_to(stage).as_posix() not in manifest['files']):
+                raise RuntimeError('Unexpected file in prepared candidate: ' + path.relative_to(stage).as_posix())
+    return manifest
+
+
+def activate(directory):
+    directory = checked(directory)
+    manifest = verify_release_candidate(directory)
+    stage = directory / 'candidate'
     before = json.loads((directory / 'backup.json').read_text())
     assert digest(ROOT / '.env') == before['envHash']
     assert digest(ROOT / 'src/server.js') == before['serverHash'], 'production changed since backup'

@@ -28,14 +28,14 @@ SFU_INITIAL_VIEWER_MBPS=3.5
 
 - 包：`release/webrtc-video-chat-1.0.5-20261018-190220-951.zip`，114 个白名单文件；逐项 SHA256 校验通过，ZIP 不提交 Git。
 - SHA256：`0c6c7afaaad033aff715343736418d7f7c5c043d7e52d046e55baf7012a7343b`。
-- 私有备份：`/www/backup/voice-deploy/av1-20261018-190220-951/`。
+- 私有备份：`<VOICE_BACKUP_ROOT>/av1-20261018-190220-951/`。
 - 其中保存旧 `src/`、`package.json`、原 `.env`、停服时聊天历史副本、发布清单及回滚脚本；保留全部旧包与旧备份。
 - 持有部署锁，仅停止/重启 `voice-room`，通过同文件系统目录重命名替换源码。依赖与锁文件一致，无需安装依赖。包内其他文档和示例仅作校验、暂存，没有用示例覆盖线上配置。
 
 回滚命令：
 
 ```sh
-python3 /www/backup/voice-deploy/av1-20261018-190220-951/rollback.py
+python3 <VOICE_BACKUP_ROOT>/av1-20261018-190220-951/rollback.py
 ```
 
 脚本先核对线上仍为本次源码和配置哈希，再保存回滚前内容，恢复旧源码及匹配的旧 `.env`，仅重启 `voice-room`。不回退聊天数据。脚本通过语法检查；未执行生产回滚演练。本次发布未触发自动回滚。

@@ -6,12 +6,13 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
-import { once } from 'node:events';
+import { EventEmitter, once } from 'node:events';
 import { createServer } from 'node:net';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import WebSocket from 'ws';
 import Logger from '../src/utils/Log.js';
 import { createVoiceCallSignaling } from '../src/utils/VoiceCallSignaling.js';
+import { createVoicePeerBindings, readPeerHandshake } from '../src/utils/VoicePeerIdentity.js';
 
 const source = (path) => readFileSync(new URL(`../src/${path}`, import.meta.url), 'utf8');
 const deferred = () => {
@@ -36,6 +37,7 @@ for (const phase of ['queued', 'discovery', 'joining']) {
             to: () => ({ emit: (...args) => events.push(args) }),
         };
         const signaling = createVoiceCallSignaling({
+            authorizePeer: () => true,
             resolveRoomId: (room) => room === 'game' ? room : undefined,
             io: { in: () => ({ async fetchSockets() {
                 if (phase === 'discovery') { entered.resolve(); await gate.promise; }
@@ -67,6 +69,7 @@ for (const room of ['game', 'lobby']) {
             async leave(roomId) { this.rooms.delete(roomId); },
         };
         const signaling = createVoiceCallSignaling({
+            authorizePeer: () => true,
             resolveRoomId: (value) => ['game', 'lobby'].includes(value) ? value : undefined,
             io: { in: () => ({ fetchSockets: async () => [] }) },
         });
@@ -104,10 +107,10 @@ test('logger survives an unwritable path and resumes file logging after repair',
 
 test('wrong-shaped stored peer volumes are recoverable and explicit mute survives', () => {
     for (const saved of [null, 42, 'text', [], { peer: 0 }]) {
-        let stored = saved;
+        let stored = JSON.stringify(saved);
         const window = { VoiceViewUtils: {
-            readJsonStorage: () => stored,
-            writeJsonStorage: (_, value) => { stored = value; },
+            safeStorageGet: () => stored,
+            writeJsonStorage: (_, value) => { stored = JSON.stringify(value); },
         } };
         vm.runInNewContext(source('views/js/media/output-volume-state.js'), { window });
         const api = window.VoiceOutputVolumeState;
@@ -121,6 +124,25 @@ test('wrong-shaped stored peer volumes are recoverable and explicit mute survive
     }
 });
 
+test('peer volume retention preserves recent values and observes external storage updates', () => {
+    let stored = JSON.stringify(Object.fromEntries(
+        Array.from({ length: 300 }, (_, index) => [`peer-${index}`, 0.5])
+    ));
+    const window = { VoiceViewUtils: {
+        safeStorageGet: () => stored,
+        writeJsonStorage: (_, value) => { stored = JSON.stringify(value); },
+    } };
+    vm.runInNewContext(source('views/js/media/output-volume-state.js'), { window });
+    const api = window.VoiceOutputVolumeState;
+    api.setPeerVolume('peer-0', 0);
+    assert.equal(Object.keys(JSON.parse(stored)).length, 256);
+    assert.equal(api.getPeerVolume('peer-0'), 0);
+    assert.equal(api.getPeerVolume('peer-1'), 1);
+    assert.equal(api.getPeerVolume('peer-299'), 0.5);
+    stored = JSON.stringify({ 'peer-0': 2 });
+    assert.equal(api.getPeerVolume('peer-0'), 2);
+});
+
 test('stage runtime never accesses old layout storage, including denied storage', () => {
     const window = { get localStorage() { throw new Error('storage denied'); } };
     vm.runInNewContext(source('views/js/room/stage-layout-runtime.js'), { window });
@@ -128,7 +150,40 @@ test('stage runtime never accesses old layout storage, including denied storage'
     assert.doesNotMatch(source('views/script.js'), /PageLayout|voicePageLayout|initializeLayoutFromStorage/);
 });
 
-test('real server supports both WebSocket protocols and survives malformed PeerJS messages', { timeout: 20000 }, async () => {
+test('application and PeerServer agree on a unique handshake identity', () => {
+    const token = randomBytes(32).toString('hex');
+    const id = `voice-${createHash('sha256').update(token).digest('hex')}`;
+    const query = new URLSearchParams({ key: 'peerjs', id, token });
+    assert.deepEqual(readPeerHandshake(`/peerjs/peerjs?${query}`), { id, token });
+    query.append('token', token);
+    assert.equal(readPeerHandshake(`/peerjs/peerjs?${query}`), undefined);
+});
+
+test('PeerJS admission uses the registered Client credential and socket', () => {
+    const token = randomBytes(32).toString('hex');
+    const id = `voice-${createHash('sha256').update(token).digest('hex')}`;
+    const bindings = createVoicePeerBindings();
+    class Socket extends EventEmitter {
+        readyState = WebSocket.OPEN;
+        terminate() { this.readyState = WebSocket.CLOSED; this.emit('close'); }
+    }
+    let socket = new Socket();
+    let registeredToken = randomBytes(32).toString('hex');
+    const client = { getSocket: () => socket, getId: () => id, getToken: () => registeredToken };
+    bindings.observe(socket, { id, token });
+    assert.equal(bindings.authorizes(id, token), false, 'handshake alone grants no authority');
+    assert.equal(bindings.register(client), false);
+    assert.equal(socket.readyState, WebSocket.CLOSED);
+    socket = new Socket();
+    registeredToken = token;
+    bindings.observe(socket, { id, token });
+    assert.equal(bindings.register(client), true);
+    assert.equal(bindings.authorizes(id, token), true);
+    socket = new Socket();
+    assert.equal(bindings.authorizes(id, token), false, 'a different socket has to register before admission');
+});
+
+test('real PeerJS registration binds admission and same-room relay to the live connection', { timeout: 20000 }, async () => {
     const dir = mkdtempSync(join(tmpdir(), 'voice-upgrade-test-'));
     const reservation = createServer();
     reservation.listen(0, '127.0.0.1');
@@ -145,13 +200,28 @@ test('real server supports both WebSocket protocols and survives malformed PeerJ
     const clients = [];
     const opened = async (url, predicate) => {
         const client = new WebSocket(url);
+        client.on('error', () => {});
         clients.push(client);
-        const message = await new Promise((resolveMessage, reject) => {
-            client.on('error', reject);
-            client.on('message', (value) => { if (predicate(value.toString())) resolveMessage(value.toString()); });
-        });
+        const message = await waitMessage(client, predicate);
         return { client, message };
     };
+    const waitMessage = (client, predicate) => new Promise((done, reject) => {
+        const signal = AbortSignal.timeout(3000);
+        const cleanup = () => {
+            client.off('message', receive);
+            client.off('error', fail);
+            signal.removeEventListener('abort', onAbort);
+        };
+        const fail = (error) => { cleanup(); reject(error); };
+        const onAbort = () => fail(signal.reason);
+        const receive = (value) => {
+            const message = value.toString();
+            if (predicate(message)) { cleanup(); done(message); }
+        };
+        client.on('message', receive);
+        client.on('error', fail);
+        signal.addEventListener('abort', onAbort, { once: true });
+    });
     try {
         let ready = false;
         for (let i = 0; i < 100 && !ready; i++) {
@@ -188,18 +258,57 @@ test('real server supports both WebSocket protocols and survives malformed PeerJ
             assert.equal(scriptPolicy.includes("'unsafe-eval'"), false, 'JavaScript eval remains blocked');
             assert.doesNotMatch(policy, /unpkg\.com|(?:kit|ka-f)\.fontawesome\.com/, 'local assets do not need external CDN permissions');
         }));
-        const socket = await opened(`ws://127.0.0.1:${port}/socket.io/?EIO=4&transport=websocket`, (msg) => msg.startsWith('0'));
-        assert.ok(JSON.parse(socket.message.slice(1)).sid);
-        const connected = once(socket.client, 'message');
-        socket.client.send('40');
-        assert.match((await connected)[0].toString(), /^40/);
-        const peer = await opened(`ws://127.0.0.1:${port}/peerjs/peerjs?key=peerjs&id=audit-peer&token=audit`, (msg) => JSON.parse(msg).type === 'OPEN');
-        peer.client.send('{bad JSON');
-        peer.client.send('null');
-        peer.client.send('42');
-        const ack = once(socket.client, 'message');
-        socket.client.send('420["voice:snapshot"]');
-        assert.match((await ack)[0].toString(), /^430\[/);
+        const openSocket = async () => {
+            const socket = await opened(`ws://127.0.0.1:${port}/socket.io/?EIO=4&transport=websocket`, (msg) => msg.startsWith('0'));
+            assert.ok(JSON.parse(socket.message.slice(1)).sid);
+            const connected = waitMessage(socket.client, msg => msg.startsWith('40'));
+            socket.client.send('40');
+            await connected;
+            return socket.client;
+        };
+        const socket = await openSocket();
+        const token = randomBytes(32).toString('hex');
+        const id = `voice-${createHash('sha256').update(token).digest('hex')}`;
+        const peerQuery = new URLSearchParams({ key: 'peerjs', id, token });
+        const peerURL = `ws://127.0.0.1:${port}/peerjs/peerjs?${peerQuery}`;
+        const openPeer = (url = peerURL) => opened(url, (msg) => JSON.parse(msg).type === 'OPEN');
+        const peer = await openPeer();
+        let sequence = 0;
+        const request = async (name, payload, transport = socket) => {
+            const number = sequence++;
+            const prefix = `43${number}[`;
+            const response = waitMessage(transport, msg => msg.startsWith(prefix));
+            transport.send(`42${number}${JSON.stringify(payload === undefined ? [name] : [name, payload])}`);
+            return JSON.parse((await response).slice(prefix.length - 1))[0];
+        };
+        const credential = { peerId: id, peerToken: token, roomId: 'lobby' };
+        assert.equal((await request('voice:join', { ...credential, peerToken: randomBytes(32).toString('hex') })).reason, 'voice-peer-unverified');
+        assert.equal((await request('voice:snapshot')).ok, false);
+        const accepted = await request('voice:join', credential);
+        assert.equal(accepted.ok, true);
+        const firstClosed = once(peer.client, 'close', { signal: AbortSignal.timeout(3000) });
+        const replacement = await openPeer();
+        await firstClosed;
+        assert.equal((await request('voice:join', credential)).voiceSessionGeneration, accepted.voiceSessionGeneration);
+        const replacementClosed = once(replacement.client, 'close', { signal: AbortSignal.timeout(3000) });
+        replacement.client.close();
+        await replacementClosed;
+        assert.equal((await request('voice:join', credential)).reason, 'voice-peer-unverified');
+        const reconnected = await openPeer();
+        assert.equal((await request('voice:join', credential)).voiceSessionGeneration, accepted.voiceSessionGeneration);
+        const recipientSocket = await openSocket();
+        const recipientToken = randomBytes(32).toString('hex');
+        const recipientId = `voice-${createHash('sha256').update(recipientToken).digest('hex')}`;
+        const recipientQuery = new URLSearchParams({ key: 'peerjs', id: recipientId, token: recipientToken });
+        const recipient = await openPeer(`ws://127.0.0.1:${port}/peerjs/peerjs?${recipientQuery}`);
+        assert.equal((await request('voice:join', { peerId: recipientId, peerToken: recipientToken, roomId: 'lobby' }, recipientSocket)).ok, true);
+        const relayed = waitMessage(recipient.client, msg => JSON.parse(msg).type === 'OFFER');
+        reconnected.client.send(JSON.stringify({ type: 'OFFER', dst: recipientId, payload: { connectionId: 'fixture' } }));
+        assert.equal(JSON.parse(await relayed).src, id);
+        reconnected.client.send('{bad JSON');
+        reconnected.client.send('null');
+        reconnected.client.send('42');
+        assert.equal((await request('voice:snapshot')).peerId, id);
         assert.equal((await fetch(`http://127.0.0.1:${port}/room/game`)).status, 200);
         assert.equal(app.exitCode, null);
         const logs = readFileSync(join(dir, 'logs/node.log'), 'utf8');
@@ -207,7 +316,7 @@ test('real server supports both WebSocket protocols and survives malformed PeerJ
         assert.match(logs, /\[screen-media\] provider=legacy/);
     } finally {
         clients.forEach((client) => client.terminate());
-        const exit = app.exitCode === null ? once(app, 'exit') : undefined;
+        const exit = app.exitCode === null ? once(app, 'exit', { signal: AbortSignal.timeout(3000) }) : undefined;
         app.kill();
         await exit;
         rmSync(dir, { recursive: true });

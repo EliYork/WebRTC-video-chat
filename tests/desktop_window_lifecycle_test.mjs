@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createWindowPreferences } from '../desktop/windows/window-preferences.cjs';
@@ -87,11 +87,10 @@ function fixture({
     };
 }
 
-test('window preferences default safely, persist across instances, reject invalid values', () => {
-    const file = join(
-        mkdtempSync(join(tmpdir(), 'voice-window-pref-')),
-        'preferences.json'
-    );
+test('window preferences default safely, persist across instances, reject invalid values', (t) => {
+    const directory = mkdtempSync(join(tmpdir(), 'voice-window-pref-'));
+    t.after(() => rmSync(directory, { recursive: true, force: true }));
+    const file = join(directory, 'preferences.json');
     const prefs = createWindowPreferences(file);
     assert.equal(prefs.snapshot().closeBehavior, 'ask');
     prefs.setCloseBehavior('tray');
@@ -109,8 +108,9 @@ test('window preferences default safely, persist across instances, reject invali
     assert.equal(createWindowPreferences(file).snapshot().closeBehavior, 'ask');
 });
 
-test('failed preference write never claims success', () => {
+test('failed preference write never claims success', (t) => {
     const directory = mkdtempSync(join(tmpdir(), 'voice-window-pref-failure-'));
+    t.after(() => rmSync(directory, { recursive: true, force: true }));
     const file = join(directory, 'not-a-directory');
     writeFileSync(file, 'file');
     const prefs = createWindowPreferences(join(file, 'preferences.json'));

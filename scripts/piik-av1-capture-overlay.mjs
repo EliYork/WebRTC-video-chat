@@ -86,7 +86,8 @@ export function patchAv1Capture(text) {
         ['[&adapter, &device, encoder_index](const VideoProfile& selected_profile)', '[&adapter, &device, encoder_index, kind](const VideoProfile& selected_profile)'],
         ['auto activations = EnumerateHardwareEncoders(adapter);\n        auto selected', 'auto activations = EnumerateHardwareEncoders(adapter, true, kind);\n        auto selected'],
         ['std::move(selected), selected_profile);', 'std::move(selected), selected_profile, kind);'],
-        ['if (!active.exchange(true)) WriteVideoActive(writer, arguments, hardware, output);', 'if (!active.exchange(true)) WriteVideoActive(writer, arguments, hardware ? OutputKind::h264 : OutputKind::vp8, output);'],
+        ['const bool hardware = arguments.codec == "h264";\n  ProtocolWriter writer;', 'const bool hardware = arguments.codec == "h264";\n  const auto kind = encoder.kind;\n  ProtocolWriter writer;'],
+        ['if (!active.exchange(true)) WriteVideoActive(writer, arguments, hardware, output);', 'if (!active.exchange(true)) WriteVideoActive(writer, arguments, kind, output);'],
         ['const bool hardware = encoder.kind == OutputKind::h264;\n  piik::capture::CapturePresentation', 'const auto kind = encoder.kind;\n  piik::capture::CapturePresentation'],
         ['WriteVideoActive(writer, arguments, hardware, output);', 'WriteVideoActive(writer, arguments, kind, output);'],
     ]);

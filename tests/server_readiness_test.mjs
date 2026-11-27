@@ -6,7 +6,7 @@ import { createServer } from 'node:http';
 import { get as httpsGet } from 'node:https';
 import { createServer as reservePort } from 'node:net';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -158,6 +158,16 @@ async function isolatedServer(t, overrides = {}) {
         rmSync(directory, { recursive: true, force: true });
     });
     return { child, exited, output: () => output, url: `http://127.0.0.1:${port}`,
+        async waitForLog(pattern) {
+            const file = join(directory, 'logs/node.log');
+            for (let i = 0; i < 120; i++) {
+                const log = readFileSync(file, 'utf8');
+                if (pattern.test(log)) return;
+                if (child.exitCode !== null) break;
+                await new Promise(resolve => setTimeout(resolve, 30));
+            }
+            assert.fail(`Server did not log ${pattern}: ${output}`);
+        },
         async ready() {
             for (let i = 0; i < 120; i++) {
                 if (child.exitCode !== null) throw Error(output);
@@ -176,13 +186,15 @@ test('real server fails TLS startup before listening and does not disclose confi
     await assert.rejects(fetch(instance.url + '/healthz'));
 });
 
-for (const [name, overrides, expectedReady] of [
+for (const [name, overrides, expectedReady, startupLog] of [
     ['P2P only', {}, true],
     ['invalid SFU config', { SFU_VIDEO_MBPS: '9999' }, false],
-    ['configured worker cannot bind', { SFU_ENABLED: 'true', SFU_ANNOUNCED_ADDRESS: '127.0.0.1', SFU_LISTEN_IP: '203.0.113.254' }, false],
+    ['configured worker cannot bind', { SFU_ENABLED: 'true', SFU_ANNOUNCED_ADDRESS: '127.0.0.1', SFU_LISTEN_IP: '203.0.113.254' }, false,
+        /\[sfu\] unavailable; using P2P: .*bind\(\) failed/],
 ]) {
     test(`real server separates liveness and readiness: ${name}`, { timeout: 10000 }, async t => {
         const instance = await isolatedServer(t, overrides); await instance.ready();
+        if (startupLog) await instance.waitForLog(startupLog);
         for (const route of ['healthz', 'readyz']) {
             const response = await fetch(instance.url + '/' + route), body = await response.json();
             assert.equal(response.status, route === 'healthz' || expectedReady ? 200 : 503);

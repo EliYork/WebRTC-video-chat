@@ -7,6 +7,7 @@
         getMediaElements = () => [],
         getProcessingState = () => undefined,
         getPeerStates = () => [],
+        isForeground = () => true,
         onPlaybackBlocked,
         onProcessingFailure,
         onPeerRecovery,
@@ -20,11 +21,13 @@
         const peers = new Map();
         const processing = new WeakSet();
         const processingTimers = new Set();
+        const repairBudgets = new WeakMap();
         let disposed = false;
         let timer;
         let started = false;
         let blockedCount = 0;
         let failedPeers = false;
+        let repair;
 
         const playback = (element, userGesture) => {
             const stream = element.srcObject;
@@ -78,7 +81,7 @@
 
         const resumeProcessing = () => {
             const state = getProcessingState();
-            const context = state?.context;
+            const context = state?.context?.state === 'running' ? state.processorContext : state?.context;
             if (
                 !context ||
                 context.state === 'running' ||
@@ -108,7 +111,7 @@
                         throw new Error('audio-context-not-running');
                 })
                 .catch(() => {
-                    if (!disposed && getProcessingState() === state && context.state !== 'running') {
+                    if (!disposed && isForeground() && getProcessingState() === state && context.state !== 'running') {
                         return onProcessingFailure?.(state);
                     }
                 })
@@ -117,6 +120,29 @@
                     clearTimer(timeout);
                     processingTimers.delete(timeout);
                     processing.delete(context);
+                });
+        };
+
+        const repairProcessing = (userGesture) => {
+            const current = repair;
+            if (!current) return;
+            if (!current.isCurrent()) {
+                repair = undefined;
+                return;
+            }
+            if (current.pending) return;
+            const budget = current.budget;
+            if (userGesture && budget.attempts >= 3) budget.attempts = 0;
+            if (budget.attempts >= 3 || (!userGesture && now() < budget.nextAttempt)) return;
+            current.pending = true;
+            budget.attempts += 1;
+            const isCurrent = () => !disposed && repair === current && current.isCurrent() && isForeground();
+            void Promise.resolve().then(() => isCurrent() && current.tryRepair(isCurrent))
+                .then((recovered) => {
+                    if (recovered && repair === current) repair = undefined;
+                }).catch(() => {}).finally(() => {
+                    current.pending = false;
+                    budget.nextAttempt = now() + 1000 * 3 ** budget.attempts;
                 });
         };
 
@@ -159,13 +185,14 @@
                     state.nextAttempt = 0;
                 }
                 if (state.pending) continue;
+                const terminal = status === 'failed' || status === 'closed';
                 const grace =
-                    status === 'failed' || status === 'closed'
+                    terminal
                         ? 1000
                         : status === 'disconnected'
                           ? 4000
                           : 12000;
-                if (!userGesture && time - state.since < grace) continue;
+                if (!(userGesture && terminal) && time - state.since < grace) continue;
                 if (state.attempts >= 3) {
                     failed = true;
                     continue;
@@ -216,7 +243,10 @@
             for (const element of players.keys())
                 if (!elements.has(element)) players.delete(element);
             elements.forEach((element) => playback(element, userGesture));
-            resumeProcessing();
+            if (isForeground()) {
+                resumeProcessing();
+                repairProcessing(userGesture);
+            }
             recoverPeers(userGesture);
             const count = [...players.values()].filter(
                 (state) => state.blocked
@@ -235,6 +265,12 @@
         };
         return {
             recover,
+            queueProcessingRepair: (request) => {
+                if (disposed) return;
+                const budget = repairBudgets.get(request.source) || { attempts: 0, nextAttempt: now() };
+                repairBudgets.set(request.source, budget);
+                repair = { ...request, budget };
+            },
             start: () => {
                 if (!started && !disposed) {
                     started = true;
@@ -243,6 +279,7 @@
             },
             dispose: () => {
                 disposed = true;
+                repair = undefined;
                 clearTimer(timer);
                 processingTimers.forEach(pending => clearTimer(pending));
                 processingTimers.clear();

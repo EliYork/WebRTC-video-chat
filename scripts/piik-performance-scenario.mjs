@@ -147,8 +147,9 @@ export async function runNativePerformance({ open, evaluate, click, wait, send, 
         app.stdin.end();
         await new Promise(r => { if (app.exitCode !== null) return r(); app.once('exit', r); const t = setTimeout(() => app.kill(), 3000); t.unref(); });
         if (realWgc) {
-            for (const pid of capturePids()) if (alive(pid)) process.kill(pid);
             if (motion.exitCode === null) { motion.kill(); await new Promise(r => motion.once('exit', r)); }
+            const remaining = capturePids().filter(alive);
+            assert.equal(remaining.length, 0, 'the owned native app did not clean up all reported capture processes');
         }
     }
 }

@@ -85,11 +85,10 @@ test('screen sharing snapshot keeps microphone screen-audio and one active video
     assert.notEqual(latestSnapshot, oldSnapshot);
 });
 
-test('screen picker cancellation is caught and resets pending without media refresh', async () => {
+test('screen picker cancellation returns a rejected capture and resets pending', async () => {
     await Promise.all(
         ['NotAllowedError', 'AbortError'].map(async (name) => {
             const pendingStates = [];
-            let refreshCount = 0;
             const error = Object.assign(new Error('cancelled'), { name });
             const result = await lifecycle.requestScreenCapture({
                 getDisplayMedia: async () => {
@@ -98,14 +97,10 @@ test('screen picker cancellation is caught and resets pending without media refr
                 onPendingChange: (pending) => pendingStates.push(pending),
             });
 
-            if (result.ok) {
-                refreshCount += 1;
-            }
-
+            assert.equal(result.ok, false);
             assert.equal(result.cancelled, true);
             assert.equal(result.reason, 'screen-capture-cancelled');
             assert.deepEqual(pendingStates, [true, false]);
-            assert.equal(refreshCount, 0);
         })
     );
 });

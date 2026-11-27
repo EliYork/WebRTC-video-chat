@@ -2,24 +2,14 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-test('compact media controls do not cap the draggable window dimensions', () => {
+test('the stage dock keeps its actions on one row with shrinkable columns', () => {
     const css = readFileSync(
         new URL('../src/views/styles/controls.css', import.meta.url),
         'utf8'
     );
-    for (const [, selectors, declarations] of css.matchAll(
-        /([^{}]+)\{([^{}]*)\}/g
-    )) {
-        if (
-            selectors.includes('.page-tile-media-controls-panel') &&
-            !selectors.includes('#buttons')
-        ) {
-            assert.doesNotMatch(declarations, /max-(?:height|width)\s*:/);
-        }
-    }
-    // The compact one-row controls remain independent of window geometry.
-    assert.match(
-        css,
-        /grid-template-columns:\s*28px repeat\(4, minmax\(0, 1fr\)\)/
-    );
+    const actions = css.match(/\.media-dock-actions\s*\{([^{}]+)\}/)?.[1];
+    assert.ok(actions, 'the active stage dock action rule exists');
+    assert.match(actions, /display:\s*grid/);
+    assert.match(actions, /grid-template-columns:\s*28px repeat\(4, minmax\(0, 1fr\)\)/);
+    assert.match(actions, /min-width:\s*0\s*;/);
 });

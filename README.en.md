@@ -2,7 +2,7 @@
 
 # Friends Channel Voice Rooms
 
-A self-hosted fixed-channel voice room for small groups of friends, combining voice, video, screen sharing, channel chat, presence, shared cursors, and a saved free-form layout on one page.
+A self-hosted voice room for small groups of friends, with fixed channels, voice, video, screen sharing, chat, presence and shared cursors. A responsive stage keeps screen shares in focus on desktop and mobile.
 
 > The project is currently a lightweight personal tool, not a complete meeting platform with accounts, persistent identities, room permissions, or service-level guarantees.
 
@@ -12,10 +12,10 @@ A self-hosted fixed-channel voice room for small groups of friends, combining vo
 - Viewing a channel and joining voice are independent: a single click changes the viewed channel, while a double click requests its voice room.
 - Voice join is microphone-first; the camera starts only when the user enables it.
 - Microphone mute, camera, screen video and system-audio sharing, output device/volume controls, per-peer volume, and fullscreen viewing. Before sharing, users can target automatic, 720p, 1080p, 1440p, or original resolution at 15/30/60 fps.
-- Per-channel text chat; the server keeps the latest 50 messages per channel in memory and limits each message to 500 characters.
+- The server keeps the latest 50 chat messages per channel and saves them asynchronously. Each message has a 500-character limit.
 - Per-channel member presence, microphone/camera/screen status, and full-page shared cursors.
 - View, chat, cursor, and voice traffic are channel-isolated; the server validates realtime events against Socket-owned room state.
-- A page-level layout that moves real DOM components and supports resize, hide, restore, grid snap, and browser-local persistence.
+- A responsive stage lets viewers switch focus between active shares and adapts chat and media controls to the available space.
 - Bounded voice-session retries, Socket/Peer recovery, serialized media operations, device-change fallback, and unexpected track-end handling.
 - Optional browser-side noise suppression and viewer-side resolution/FPS labels for remote screen shares.
 
@@ -25,11 +25,10 @@ A self-hosted fixed-channel voice room for small groups of friends, combining vo
 | ---------------------- | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Chat Panel             | Code complete; browser retest pending    | `VoiceChatPanelRuntime` solely owns chat business DOM, form state, message rendering, and lifecycle. Its Socket adapter neither creates nor destroys the page Socket.                   |
 | Sidebar                | Code complete; browser retest pending    | `VoiceSidebarRuntime` solely owns the real channel tree, viewing/voice-target state, and member list. Its presence adapter only subscribes.                                             |
-| Page Layout            | Implemented with contract/identity tests | It moves real business nodes instead of cloning or rebuilding fallback shells, and persists layouts per room in `localStorage`.                                                         |
+| Stage Layout            | Covered by Node and browser tests       | `VoiceStageLayout` owns share focus, the member grid and compact navigation. |
 | Voice Session / Media  | Modularized with Node behavior tests     | `script.js` remains the page composition owner; session, retry, device, operation, registry, and quality modules have narrow boundaries.                                                |
 | Media Dock             | Code complete; browser retest pending    | `VoiceMediaDockRuntime` solely owns the real Dock DOM, media buttons, device/volume UI, state rendering, and listener lifecycle. Its narrow adapter only forwards intent and snapshots. |
-| Stage / Video Grid     | Not yet a formal component               | It is still jointly managed by page composition and the media registry.                                                                                                                 |
-| Mobile Nav / bootstrap | Not yet formal components                | They remain separate follow-up tasks; Media Dock does not absorb Stage / Video Grid ownership.                                                                                          |
+| Room bootstrap         | Bundled at server startup                 | `boot-scripts.json` defines the script order. `script.js` wires the room components together. |
 
 “Code complete; browser retest pending” means static checks and Node behavior/contract tests exist, while real browsers, weak networks, permissions, device unplugging, and deployed environments still need acceptance testing. It does not mean production verification is complete.
 
@@ -222,7 +221,7 @@ See the continuously maintained [Architecture Repair Backlog](./docs/architectur
 - [Server Socket disconnect lifecycle](./docs/server-socket-lifecycle.md)
 - [Chat Panel component boundary](./docs/chat-panel-component.md)
 - [Sidebar component boundary](./docs/sidebar-component.md)
-- [Page layout contract and recovery tests](./tests/page_layout_contract_test.mjs)
+- [Stage layout tests](./tests/stage_layout_test.mjs)
 - [Architecture Repair Backlog](./docs/architecture-repair-backlog.md)
 
 ## Special Thanks / Credits

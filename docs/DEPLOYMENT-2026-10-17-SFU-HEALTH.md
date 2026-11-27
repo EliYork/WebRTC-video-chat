@@ -28,12 +28,12 @@
 - ZIP SHA256：`EB9A384DB1452E40CD2F911E0003ABDBF1B454EDC6ECD26BF53F69C1E5B6F35A`。
 - 服务端再次检查ZIP整体SHA256、文件白名单、4个目标内容和旧文件基线。只部署4个JS，不全量覆盖128文件。
 - 旧文件逐项备份并核验，按原权限和属主写临时文件、逐文件原子替换。保留异常自动恢复路径；此次成功，未执行回滚。
-- 备份与完整服务端回执：`/www/backup/voice-deploy/sfu-health-20261017-043338-233/`。
+- 备份与完整服务端回执：`<VOICE_BACKUP_ROOT>/sfu-health-20261017-043338-233/`。
 
 回滚命令：
 
 ```sh
-python3 /www/backup/voice-deploy/sfu-health-20261017-043338-233/rollback.py
+python3 <VOICE_BACKUP_ROOT>/sfu-health-20261017-043338-233/rollback.py
 ```
 
 该脚本拒绝覆盖后续未知修改，先保存当前4文件，再恢复本次备份，并重启voice-room以重新加载旧schema。脚本语法已检查，未通过实际回滚测试。不会恢复旧聊天记录或配置。回滚也可能中断当前通话。

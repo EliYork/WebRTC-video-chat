@@ -75,6 +75,30 @@ export function preparePiikGoOverlay(source, out) {
     Replace[logging] = generated;
     Replace[join(source, 'internal/diagnostics/media_log_filter.go')] = resolve(import.meta.dirname, 'piik-media-log-filter.go');
     preparePiikShareOverlay(source, out, Replace);
+    const loopback = join(source, 'internal/app/loopback/server.go');
+    let loopbackSource = readFileSync(Replace[loopback] || loopback, 'utf8').replaceAll('\r\n', '\n');
+    for (const [oldSource, newSource] of [
+        ['"crypto/rand"', '"crypto/rand"\n\t"crypto/subtle"'],
+        ['"net/url"', '"net/url"\n\t"os"'],
+        ['\tserver.mu.Lock()\n\tconnectURL := server.connectURL',
+            '\tif !authorizeDesktopDiscovery(response, request) {\n\t\treturn\n\t}\n\tserver.mu.Lock()\n\tconnectURL := server.connectURL'],
+        ['\tresponse.Header().Set("Cache-Control", "no-store")\n\twriteJSON(response, http.StatusOK, Health{',
+            '\tif !authorizeDesktopDiscovery(response, request) {\n\t\treturn\n\t}\n\tresponse.Header().Set("Cache-Control", "no-store")\n\twriteJSON(response, http.StatusOK, Health{'],
+        ['func allowPrivateNetwork(', `func authorizeDesktopDiscovery(response http.ResponseWriter, request *http.Request) bool {
+\tproof := os.Getenv("ELIYORK_NATIVE_DISCOVERY_PROOF")
+\tif proof == "" || subtle.ConstantTimeCompare([]byte(proof), []byte(request.Header.Get("X-EliYork-Native-Discovery"))) == 1 {
+\t\treturn true
+\t}
+\tresponse.Header().Set("Cache-Control", "no-store")
+\thttp.Error(response, "forbidden", http.StatusForbidden)
+\treturn false
+}
+
+func allowPrivateNetwork(`],
+    ]) loopbackSource = editOnce(loopbackSource, oldSource, newSource);
+    const generatedLoopback = join(directory, 'loopback-server.go');
+    writeFileSync(generatedLoopback, loopbackSource);
+    Replace[loopback] = generatedLoopback;
     const manifest = join(directory, 'overlay.json');
     writeFileSync(manifest, JSON.stringify({ Replace }, null, 2));
     return manifest;

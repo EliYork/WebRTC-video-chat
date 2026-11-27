@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { EventEmitter } from 'node:events';
 import test from 'node:test';
 import vm from 'node:vm';
 
@@ -23,7 +24,62 @@ vm.runInNewContext(protocolSource, {
     window: registryWindow,
 });
 vm.runInNewContext(registrySource, { window: registryWindow });
-const { createRegistry } = registryWindow.VoicePeerRegistry;
+const { createIncomingCallGate, createRegistry } = registryWindow.VoicePeerRegistry;
+
+test('incoming calls wait for current membership and pending calls stay bounded', () => {
+    const activePeer = {};
+    const members = new Set();
+    const accepted = [];
+    const timers = new Set();
+    const gate = createIncomingCallGate({
+        isCurrent: ({ peer }) => peer === activePeer,
+        isAuthorized: ({ call }) => members.has(call.peer),
+        answer: ({ call }) => accepted.push(call.peer),
+        maxPending: 2,
+        timers: {
+            setTimeout: callback => { timers.add(callback); return callback; },
+            clearTimeout: callback => timers.delete(callback),
+        },
+    });
+    const createCall = (peer) => Object.assign(new EventEmitter(), {
+        peer,
+        metadata: { voiceMediaDirection: 'send', voiceMediaGeneration: 1 },
+        closed: false,
+        close() { this.closed = true; this.emit('close'); },
+    });
+    const joiningMember = createCall('joining-member');
+    const otherRoom = createCall('other-room');
+    const overflow = createCall('overflow');
+    const retiredPeer = createCall('retired-peer');
+    gate.receive(joiningMember, activePeer);
+    gate.receive(otherRoom, activePeer);
+    gate.receive(overflow, activePeer);
+    gate.receive(retiredPeer, {});
+    assert.deepEqual(accepted, []);
+    assert.equal(overflow.closed, true);
+    assert.equal(retiredPeer.closed, true);
+    assert.equal(timers.size, 2);
+
+    members.add('joining-member');
+    gate.reconcile();
+    assert.deepEqual(accepted, ['joining-member']);
+    assert.equal(joiningMember.closed, false);
+    assert.equal(joiningMember.listenerCount('close'), 0);
+    const [expire] = timers;
+    expire();
+    assert.equal(otherRoom.closed, true);
+    assert.equal(timers.size, 0);
+
+    const departing = createCall('departing');
+    const waiting = createCall('waiting');
+    gate.receive(departing, activePeer);
+    gate.receive(waiting, activePeer);
+    gate.remove('departing');
+    gate.clear();
+    assert.equal(departing.closed, true);
+    assert.equal(waiting.closed, true);
+    assert.equal(timers.size, 0);
+});
 
 const createFixture = (id, network, callbacks = {}) => {
     const attachments = [];

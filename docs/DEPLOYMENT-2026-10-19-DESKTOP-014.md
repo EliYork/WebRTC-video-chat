@@ -44,15 +44,15 @@
 
 ## 备份、回滚与写入范围
 
-- 网页私有备份：`/www/backup/voice-deploy/client-ui-20261019T093210`。含完整代码/env/data/Nginx/TLS/PM2 安全快照、旧文件、候选与发布结果。
-- 客户端私有备份：`/www/backup/voice-deploy/client-20261019T093210`。含旧 feed/manifest/Nginx、环境与聊天安全副本、摘要和最终验证。
+- 网页私有备份：`<VOICE_BACKUP_ROOT>/client-ui-20261019T093210`。含完整代码/env/data/Nginx/TLS/PM2 安全快照、旧文件、候选与发布结果。
+- 客户端私有备份：`<VOICE_BACKUP_ROOT>/client-20261019T093210`。含旧 feed/manifest/Nginx、环境与聊天安全副本、摘要和最终验证。
 - 原 0.1.3 安装包与既有备份、构建全部保留；本轮没有清理删除。
 
 完整回滚按顺序执行：
 
 ```sh
-sh /www/backup/voice-deploy/client-20261019T093210/rollback.sh
-sh /www/backup/voice-deploy/client-ui-20261019T093210/rollback.sh
+sh <VOICE_BACKUP_ROOT>/client-20261019T093210/rollback.sh
+sh <VOICE_BACKUP_ROOT>/client-ui-20261019T093210/rollback.sh
 ```
 
 更新通道回滚仅 reload Nginx；网页回滚重启本站 Node，不恢复旧聊天或覆盖实时环境。已安装新版不会自动降级。回滚入口已生成，未对生产执行回滚。

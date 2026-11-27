@@ -51,15 +51,15 @@
 
 备份目录使用 UTC 时间戳：
 
-- 网页：`/www/backup/voice-deploy/client-ui-20261019T082531`，含旧文件、完整代码/env/data/Nginx/TLS/PM2 安全快照、候选检查和最终报告。
-- 更新通道：`/www/backup/voice-deploy/client-20261019T082531`，含旧 feed/Nginx/manifest、文件摘要、环境与聊天安全副本。
+- 网页：`<VOICE_BACKUP_ROOT>/client-ui-20261019T082531`，含旧文件、完整代码/env/data/Nginx/TLS/PM2 安全快照、候选检查和最终报告。
+- 更新通道：`<VOICE_BACKUP_ROOT>/client-20261019T082531`，含旧 feed/Nginx/manifest、文件摘要、环境与聊天安全副本。
 - 两个新回滚入口，以及上次 `20261019T121719` 的回滚文件和压缩快照完整性已检查。未在生产执行回滚。
 
 整次撤回时按顺序运行：
 
 ```sh
-sh /www/backup/voice-deploy/client-20261019T082531/rollback.sh
-sh /www/backup/voice-deploy/client-ui-20261019T082531/rollback.sh
+sh <VOICE_BACKUP_ROOT>/client-20261019T082531/rollback.sh
+sh <VOICE_BACKUP_ROOT>/client-ui-20261019T082531/rollback.sh
 ```
 
 回滚不回写实时聊天或环境。网页回滚会重启本站 Node；更新通道回滚只 reload Nginx。已安装的 0.1.3 不会自动降级；0.1.2 安装包仍保留。
@@ -69,6 +69,6 @@ sh /www/backup/voice-deploy/client-ui-20261019T082531/rollback.sh
 自动安全审核拦截了本地批量递归删除命令，命令未启动。本轮没有换工具强行删除，服务器也只执行清理预检，**本地和服务器释放空间均为 0**。
 
 - 本地清单：`integrations/piik/.build/release-013/cleanup-local-plan.json`，74 项，合计约 **4.885 GiB**。主要是旧工作区失败/重复 Electron 打包目录、重复解包副本、过时 ZIP、已替代实验 EXE/OBJ。
-- 服务器清单：`/www/backup/voice-deploy/cleanup-20261019T082531.json`，18 项，合计 **914784175 B**，状态 `planned`。主要是过时差分备份、已结束候选、重复上传暂存。
+- 服务器清单：`<VOICE_BACKUP_ROOT>/cleanup-20261019T082531.json`，18 项，合计 **914784175 B**，状态 `planned`。主要是过时差分备份、已结束候选、重复上传暂存。
 - 拟保留当前与上一发布回滚材料、最初 Piik 接入前的运行/环境/数据/Nginx 备份、已发布安装包、性能原始记录、原版参考采集 EXE、源码、SDK、依赖、用户安装与设置。所有这些内容目前都还在。
 - 服务器私有清理脚本有 `--apply` 删除模式，本轮未调用；继续清理前应再次核对清单与当前服务状态。

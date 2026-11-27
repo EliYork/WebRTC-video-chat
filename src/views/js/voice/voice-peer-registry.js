@@ -12,10 +12,69 @@
     const isCall = (value) => Boolean(value && typeof value.on === 'function');
     const isGeneration = (value) =>
         Number.isInteger(Number(value)) && Number(value) > 0;
+    const validIncomingCall = (call) => isCall(call) && Boolean(call.peer) &&
+        call.metadata?.[MEDIA_DIRECTION_METADATA] === SEND_DIRECTION &&
+        Number.isSafeInteger(call.metadata?.[MEDIA_GENERATION_METADATA]) &&
+        call.metadata[MEDIA_GENERATION_METADATA] > 0;
     const getLiveTracks = (stream) =>
         (stream?.getTracks?.() || []).filter(
             (track) => track?.readyState !== 'ended'
         );
+
+    const createIncomingCallGate = ({
+        isCurrent,
+        isAuthorized,
+        answer,
+        maxPending = 24,
+        holdMs = 5000,
+        timers = global,
+    }) => {
+        const pending = new Map();
+        const release = (request) => {
+            if (pending.get(request.call.peer) !== request) return false;
+            pending.delete(request.call.peer);
+            timers.clearTimeout(request.timer);
+            request.call.off?.('close', request.onClose);
+            return true;
+        };
+        const discard = (request) => {
+            if (request && release(request)) request.call.close?.();
+        };
+        return {
+            receive(call, peer) {
+                const request = { call, peer };
+                if (!validIncomingCall(call) || !isCurrent(request)) {
+                    call?.close?.();
+                    return;
+                }
+                const previous = pending.get(call.peer);
+                if (isAuthorized(request)) {
+                    if (previous?.call === call) release(previous);
+                    else discard(previous);
+                    answer(request);
+                    return;
+                }
+                if (previous?.call === call) return;
+                if (!previous && pending.size >= maxPending) {
+                    call.close?.();
+                    return;
+                }
+                discard(previous);
+                request.onClose = () => release(request);
+                request.timer = timers.setTimeout(() => discard(request), holdMs);
+                pending.set(call.peer, request);
+                call.on('close', request.onClose);
+            },
+            reconcile() {
+                for (const request of pending.values()) {
+                    if (!isCurrent(request)) discard(request);
+                    else if (isAuthorized(request) && release(request)) answer(request);
+                }
+            },
+            remove: (peerId) => discard(pending.get(peerId)),
+            clear: () => pending.forEach(discard),
+        };
+    };
 
     const createRegistry = ({
         attachRemoteStream,
@@ -29,6 +88,7 @@
         onCodecFeedback,
         onWarning,
         prepareConnection,
+        authorizeIncoming = () => true,
         removeRemoteTile,
     } = {}) => {
         const entries = new Map();
@@ -713,23 +773,18 @@
             return { ok: true };
         };
 
-        const answerCallNow = ({ call } = {}) => {
-            const peerId = call?.peer;
-            const generation = Number(
-                call?.metadata?.[MEDIA_GENERATION_METADATA]
-            );
-            const direction = call?.metadata?.[MEDIA_DIRECTION_METADATA];
+        const answerCallNow = ({ call, peer } = {}) => {
             if (
                 sessionDisconnected ||
-                !isCall(call) ||
-                !peerId ||
-                direction !== SEND_DIRECTION ||
-                !isGeneration(generation)
+                !validIncomingCall(call) ||
+                !authorizeIncoming({ call, peer })
             ) {
                 closeCallOnce(call);
                 return undefined;
             }
 
+            const peerId = call.peer;
+            const generation = call.metadata[MEDIA_GENERATION_METADATA];
             const entry = ensureEntry(peerId);
             if (generation <= entry.lastIncomingGeneration) {
                 closeCallOnce(call);
@@ -798,10 +853,10 @@
 
         const answerCall = (request = {}) => {
             const { call, peer } = request;
-            const peerId = call?.peer, generation = Number(call?.metadata?.[MEDIA_GENERATION_METADATA]);
-            if (!prepareConnection || sessionDisconnected || !isCall(call) || !peerId ||
-                call.metadata?.[MEDIA_DIRECTION_METADATA] !== SEND_DIRECTION || !isGeneration(generation))
+            if (!prepareConnection || sessionDisconnected || !validIncomingCall(call) || !authorizeIncoming(request))
                 return answerCallNow(request);
+            const peerId = call.peer;
+            const generation = call.metadata[MEDIA_GENERATION_METADATA];
             const entry = ensureEntry(peerId);
             if (generation <= entry.lastIncomingGeneration) return answerCallNow(request);
             const pending = entry.preparing.incoming;
@@ -1023,6 +1078,7 @@
     };
 
     global.VoicePeerRegistry = {
+        createIncomingCallGate,
         createRegistry,
     };
 })(window);

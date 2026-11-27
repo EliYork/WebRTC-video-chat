@@ -501,7 +501,8 @@
                 event.key !== 'Enter' ||
                 event.shiftKey ||
                 event.isComposing ||
-                composing
+                composing ||
+                (!event.ctrlKey && !event.metaKey && global.matchMedia?.('(hover: none) and (pointer: coarse)').matches)
             ) {
                 return;
             }

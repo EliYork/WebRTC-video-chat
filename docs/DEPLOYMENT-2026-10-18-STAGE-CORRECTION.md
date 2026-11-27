@@ -25,14 +25,14 @@
 
 - 本地包：`release/webrtc-video-chat-1.0.5-20261018-163852-657.zip`，未提交 Git。
 - SHA256：`997371353107FCE032DE84E41E99D07C42F33DDA2FA7D5C01737F5528A842AF8`。
-- 服务端上传候选 ZIP、此次专用清单和部署脚本，写入私有备份目录 `/www/backup/voice-deploy/stage-correction-20261018-163852-657/`；旧发布包与旧备份继续保留。
+- 服务端上传候选 ZIP、此次专用清单和部署脚本，写入私有备份目录 `<VOICE_BACKUP_ROOT>/stage-correction-20261018-163852-657/`；旧发布包与旧备份继续保留。
 - 持部署锁，仅停止和重启 `voice-room`；通过同文件系统目录重命名替换 `src/` 及内容相同的 `package.json`。未安装依赖、修改系统配置或操作其他服务。
 - 旧程序保存在 `originals/`；另存重启前的配置和聊天记录用于恢复核对。私有目录中保存部署回执及受保护的回滚脚本。发布检查失败时自动恢复旧程序，本次未触发。
 
 回滚命令：
 
 ```sh
-python3 /www/backup/voice-deploy/stage-correction-20261018-163852-657/rollback.py
+python3 <VOICE_BACKUP_ROOT>/stage-correction-20261018-163852-657/rollback.py
 ```
 
 回滚脚本先校验当前版本及备份哈希，保存当前程序后恢复旧程序并仅重启语音服务；不回退配置或聊天数据。脚本已做语法检查，未执行生产回滚演练。

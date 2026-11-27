@@ -672,6 +672,23 @@ test('Enter submits once while Shift+Enter and Chinese composition do not submit
     assert.equal(fixture.transport.sendCalls.length, 1);
 });
 
+test('the touch keyboard can insert a newline before submitting with the send button', async () => {
+    const fixture = createRuntimeFixture();
+    fixture.window.matchMedia = () => ({ matches: true });
+    fixture.runtime.init();
+    fixture.runtime.setRoom('lobby');
+    fixture.transport.emitHistory('lobby', []);
+    fixture.input.value = '第一行';
+    const enter = new FakeEvent('keydown', { key: 'Enter' });
+    fixture.input.dispatchEvent(enter);
+    assert.equal(enter.defaultPrevented, false);
+    assert.equal(fixture.transport.sendCalls.length, 0);
+    fixture.input.value = '第一行\n第二行';
+    fixture.form.dispatchEvent(new FakeEvent('submit'));
+    await flush();
+    assert.equal(fixture.transport.sendCalls.length, 1);
+});
+
 test('a successful acknowledgement preserves a draft edited away from and back to its submitted text', async () => {
     const f = createRuntimeFixture(); let finish;
     f.transport.sendImplementation = () => new Promise(resolve => { finish = resolve; });

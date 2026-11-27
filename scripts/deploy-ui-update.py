@@ -2,7 +2,9 @@
 
 Run prepare|activate|rollback in a private client-ui-* backup with plan.json and
 patch.tar.gz. Plan lists exact old/new SHA256 values. No external dependencies.
+Only a plan declaring a clean source worktree can be activated.
 Run verify-cache [base-url] from a checkout for a read-only public cache check.
+Run stamp-plan --release|--candidate /path/to/plan.json in the source checkout.
 """
 import hashlib
 import json
@@ -23,12 +25,52 @@ PIIK_CLIENT_PATH = '/vendor/piik-client.js'
 PIIK_CLIENT_FILE = 'integrations/piik/.build/client.js'
 
 
+def verify_release_candidate(backup, plan, prepared, written_files):
+    if plan.get('kind') != 'release' or plan.get('dirty') is not False:
+        raise RuntimeError('Production activation requires a clean UI source worktree')
+    after = backup / 'after'
+    manifest_path = after / 'voice-build-manifest.json'
+    if prepared.get('planHash') != sha(backup / 'plan.json') or prepared.get('manifestHash') != sha(manifest_path):
+        raise RuntimeError('UI release must match the prepared plan and manifest')
+    for name in written_files:
+        if sha(after / name) != plan['files'][name]['new']:
+            raise RuntimeError('Prepared UI candidate changed: ' + name)
+    return json.loads(manifest_path.read_text())
+
+
 def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else None
 
 
 def run(*args, **kwargs):
     return subprocess.check_output(args, stderr=subprocess.STDOUT, **kwargs)
+
+
+def valid_patch_path(name):
+    return ('\\' not in name and '..' not in Path(name).parts and
+            (name.startswith('src/') or name in {
+                PIIK_CLIENT_FILE, 'integrations/piik/.build/third-party-web.txt',
+            }))
+
+
+def stamp_plan(path, kind, source):
+    if kind not in ('release', 'candidate'):
+        raise RuntimeError('Select --release or --candidate')
+    plan = json.loads(path.read_text())
+    status_command = ('git', 'status', '--porcelain', '--untracked-files=all')
+    head_command = ('git', 'rev-parse', 'HEAD')
+    dirty = bool(run(*status_command, cwd=source).strip())
+    revision = run(*head_command, cwd=source).decode().strip()
+    if kind == 'release' and dirty:
+        raise RuntimeError('Formal UI release requires a clean Git worktree')
+    if revision != plan['revision']:
+        raise RuntimeError('UI plan revision differs from the source checkout')
+    for name, hashes in plan['files'].items():
+        if not valid_patch_path(name) or sha(source / name) != hashes['new']:
+            raise RuntimeError('UI plan does not match the source file: ' + name)
+    if kind == 'release' and (run(*status_command, cwd=source).strip() or revision != run(*head_command, cwd=source).decode().strip()):
+        raise RuntimeError('Git worktree changed during formal UI plan verification')
+    path.write_text(json.dumps({**plan, 'dirty': dirty, 'kind': kind}, indent=2) + '\n')
 
 
 def processes():
@@ -142,6 +184,12 @@ if sys.argv[1:2] == ['verify-cache']:
     print(json.dumps(verify_startup_cache(url)))
     sys.exit(0)
 
+if sys.argv[1:2] == ['stamp-plan']:
+    if len(sys.argv) != 4 or sys.argv[2] not in ('--candidate', '--release'):
+        sys.exit('Usage: deploy-ui-update.py stamp-plan --release|--candidate /path/to/plan.json')
+    stamp_plan(Path(sys.argv[3]), sys.argv[2][2:], Path(__file__).resolve().parent.parent)
+    sys.exit(0)
+
 os.umask(0o077)
 os.environ['PATH'] = '/www/server/nodejs/v24.15.0/bin:' + os.environ['PATH']
 mode, location = sys.argv[1:3]
@@ -151,11 +199,7 @@ assert re.fullmatch(r'client-ui-[0-9T-]+', backup.name)
 plan = json.loads((backup / 'plan.json').read_text())
 assert re.fullmatch('[a-f0-9]{40}', plan['revision'])
 for name in plan['files']:
-    assert '..' not in Path(name).parts and not name.startswith('/')
-    assert name.startswith('src/') or name in {
-        PIIK_CLIENT_FILE,
-        'integrations/piik/.build/third-party-web.txt',
-    }, name
+    assert valid_patch_path(name), name
     if plan['files'][name]['new'] is None:
         assert plan['files'][name]['old'] is not None, name
 
@@ -164,9 +208,12 @@ removed_files = set(plan['files']) - written_files
 
 if mode == 'prepare':
     assert not (backup / 'snapshot.json').exists()
-    assert sha(ROOT / 'voice-build-manifest.json') == plan['beforeManifestHash']
+    baseline = ROOT / 'voice-build-manifest.json'
+    if not baseline.is_file():
+        raise RuntimeError('UI updates require an installed full Piik release with a verified manifest')
+    assert sha(baseline) == plan['beforeManifestHash']
     assert sha(backup / 'patch.tar.gz') == plan['archiveHash']
-    old_manifest = json.loads((ROOT / 'voice-build-manifest.json').read_text())
+    old_manifest = json.loads(baseline.read_text())
     assert old_manifest['piik'] == plan['piik']
     # Dependencies and deployed runtime must match the declared starting point.
     assert json.loads((ROOT / 'package-lock.json').read_text()) == plan['dependencyLock']
@@ -220,7 +267,7 @@ if mode == 'prepare':
     files = {name: digest for name, digest in old_manifest['files'].items() if name not in removed_files}
     files.update({name: plan['files'][name]['new'] for name in written_files})
     manifest = {**old_manifest, 'revision': plan['revision'], 'frontendRevision': plan['revision'],
-                'deployedAt': time.time(), 'files': files}
+                'kind': plan.get('kind'), 'dirty': plan.get('dirty'), 'deployedAt': time.time(), 'files': files}
     (after / 'voice-build-manifest.json').write_text(json.dumps(manifest, indent=2))
     candidate = backup / 'candidate'
     candidate.mkdir()
@@ -230,8 +277,10 @@ if mode == 'prepare':
         shutil.copy2(ROOT / name, candidate / name)
     (candidate / 'node_modules').symlink_to(ROOT / 'node_modules', target_is_directory=True)
     apply_release(candidate)
+    # The UI candidate must not start a worker on the live SFU port. Keep the
+    # Piik mode so prepare still verifies the Piik bundle and rendered URLs.
     child_env = {**os.environ, **{k:v for k,v in current['pm2_env'].items() if isinstance(v, str)},
-                 'PORT': '17888', 'HOST': '127.0.0.1', 'USE_HTTPS': 'false',
+                 'PORT': '17888', 'HOST': '127.0.0.1', 'USE_HTTPS': 'false', 'SFU_ENABLED': 'false',
                  'VOICE_BUILD_ID': plan['revision'], 'CHAT_HISTORY_FILE': str(backup / 'candidate-chat.json')}
     with (backup / 'candidate.log').open('w') as log:
         child = subprocess.Popen(['node', str(candidate / 'src/server.js')], cwd=candidate, env=child_env, stdout=log, stderr=subprocess.STDOUT)
@@ -245,7 +294,9 @@ if mode == 'prepare':
             available = int(next(line.split()[1] for line in Path('/proc/meminfo').read_text().splitlines() if line.startswith('MemAvailable:')))
             assert available > 160 * 1024, 'Insufficient candidate memory headroom'
             (backup / 'prepared.json').write_text(json.dumps({'health': result, 'availableKiB': available,
-                                                              'startupAssetCache': startup_cache}))
+                                                              'startupAssetCache': startup_cache,
+                                                              'planHash': sha(backup / 'plan.json'),
+                                                              'manifestHash': sha(after / 'voice-build-manifest.json')}))
         finally:
             child.terminate()
             try: child.wait(timeout=8)
@@ -255,7 +306,7 @@ elif mode == 'rollback':
     rollback()
 elif mode == 'activate':
     prepared = json.loads((backup / 'prepared.json').read_text())
-    staged_manifest = json.loads((backup / 'after' / 'voice-build-manifest.json').read_text())
+    staged_manifest = verify_release_candidate(backup, plan, prepared, written_files)
     piik_version = staged_manifest['files'].get(PIIK_CLIENT_FILE)
     if piik_version is not None:
         assert prepared.get('startupAssetCache', {}).get(PIIK_CLIENT_PATH) == piik_version, 'Prepare this Piik bundle before activation'

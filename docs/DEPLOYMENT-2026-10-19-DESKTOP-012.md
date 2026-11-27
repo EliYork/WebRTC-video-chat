@@ -32,7 +32,7 @@
 
 ## 线上运行与影响
 
-站点仍为 https://voice.eliyork.com ，目录 `/www/wwwroot/voice.eliyork.com`。
+站点仍为 https://voice.eliyork.com ，目录 `<VOICE_APP_ROOT>`。
 
 | 服务 | PID | 监听 | 最终 RSS / CPU 快照 |
 | --- | --- | --- | --- |
@@ -48,15 +48,15 @@
 
 ## 备份、回滚与停止
 
-- 网页备份：`/www/backup/voice-deploy/client-ui-20261019T121719`，含完整代码/env/data/Nginx/TLS/PM2 安全快照、旧新文件、摘要、部署脚本及 result。
-- 下载备份：`/www/backup/voice-deploy/client-20261019T121719`，含旧 feed/Nginx/manifest/资源、安全快照、摘要、部署脚本及 result。
+- 网页备份：`<VOICE_BACKUP_ROOT>/client-ui-20261019T121719`，含完整代码/env/data/Nginx/TLS/PM2 安全快照、旧新文件、摘要、部署脚本及 result。
+- 下载备份：`<VOICE_BACKUP_ROOT>/client-20261019T121719`，含旧 feed/Nginx/manifest/资源、安全快照、摘要、部署脚本及 result。
 - 所有旧备份与旧包保留，回滚入口已检查；未在生产演练回滚。
 
 如需撤回整次发布，先恢复下载，再恢复网页：
 
 ```sh
-sh /www/backup/voice-deploy/client-20261019T121719/rollback.sh
-sh /www/backup/voice-deploy/client-ui-20261019T121719/rollback.sh
+sh <VOICE_BACKUP_ROOT>/client-20261019T121719/rollback.sh
+sh <VOICE_BACKUP_ROOT>/client-ui-20261019T121719/rollback.sh
 ```
 
 回滚不覆盖实时环境或聊天。网页回滚会重启本站 Node，下载回滚只平滑 reload Nginx。仅停止更新分发可将 `downloads/windows/latest.yml` 移至私有备份；已安装客户端不会自动降级。

@@ -8,12 +8,12 @@ const {
     Menu,
     webContents,
     clipboard,
-    ClipboardItem,
     Tray,
     nativeImage,
 } = require('electron');
 const { spawn } = require('node:child_process');
-const { join } = require('node:path');
+const { randomBytes } = require('node:crypto');
+const { isAbsolute, join } = require('node:path');
 const { mkdirSync, writeFileSync, readFileSync } = require('node:fs');
 const { createRefresh, isRefreshKey } = require('./refresh.cjs');
 const { createAbout } = require('./about.cjs');
@@ -27,31 +27,42 @@ const { createFileLog } = require(app.isPackaged
     ? join(process.resourcesPath, 'file-log.cjs')
     : '../../src/utils/RotatingFileLog.cjs');
 const smoke = process.argv.includes('--smoke-test');
+const realSmokeClipboard = smoke && process.argv.includes('--smoke-real-clipboard');
+const loopbackOrigin = (value) => {
+    const url = new URL(value);
+    if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || url.username || url.password || url.pathname !== '/' || url.search || url.hash)
+        throw Error('Test windows require a plain loopback HTTP origin');
+    return url.origin;
+};
 // Explicit development preview only; installed clients keep the fixed origin.
 const previewArg = !app.isPackaged && process.argv.find(arg => arg.startsWith('--preview-origin='));
-const preview = previewArg && new URL(previewArg.slice('--preview-origin='.length));
-if (preview && (preview.protocol !== 'http:' || preview.hostname !== '127.0.0.1' || preview.username || preview.password || preview.pathname !== '/' || preview.search || preview.hash))
-    throw Error('Preview requires a plain loopback HTTP origin');
+const preview = previewArg && loopbackOrigin(previewArg.slice('--preview-origin='.length));
 const origin = smoke
-    ? new URL(process.env.ELIYORK_TEST_ORIGIN || 'http://127.0.0.1:3300').origin
-    : preview ? preview.origin : 'https://voice.eliyork.com';
+    ? loopbackOrigin(process.env.ELIYORK_TEST_ORIGIN)
+    : preview || 'https://voice.eliyork.com';
 if (preview) app.setPath('userData', process.env.ELIYORK_PREVIEW_USER_DATA || join(app.getPath('appData'), 'EliYork Voice UI Preview'));
 if (smoke) {
+    const profile = process.env.ELIYORK_TEST_USER_DATA;
+    if (!profile || !isAbsolute(profile)) throw Error('Smoke test requires a fresh absolute user data directory');
+    mkdirSync(profile, { mode: 0o700 });
+    app.setPath('userData', profile);
     app.commandLine.appendSwitch('mute-audio');
     app.commandLine.appendSwitch('use-fake-device-for-media-stream');
     app.disableHardwareAcceleration();
-    if (process.env.ELIYORK_TEST_USER_DATA)
-        app.setPath('userData', process.env.ELIYORK_TEST_USER_DATA);
 }
+let smokeClipboardText = '';
+const readSmokeClipboard = () => realSmokeClipboard ? clipboard.readText() : smokeClipboardText;
 app.setName('EliYork Voice');
 app.setAppUserModelId('com.eliyork.voice');
 let mainWindow,
     native,
     picker,
+    openingPicker = false,
     quitting = false,
     nativeReady,
     nativePort;
 let updates, panels, pendingNotice, windowLifecycle, windowStartup;
+let shutdown, quitScheduled = false, readyToQuit = false;
 let nativeNeedsRecovery = false;
 function nativeChanged({ state, port }) {
     nativePort = port;
@@ -76,6 +87,19 @@ const trusted = (value) => {
 };
 const owned = (contents, value) =>
     contents === mainWindow?.webContents && trusted(value);
+const nativeDiscoveryProof = randomBytes(32).toString('hex');
+const includeNativeDiscoveryProof = (details, callback) => {
+    const headers = details.requestHeaders;
+    if (nativePort && details.method === 'GET' && details.frame &&
+        details.frame === mainWindow?.webContents.mainFrame && owned(details.webContents, details.frame.url)) {
+        const url = new URL(details.url);
+        if (url.origin === `http://127.0.0.1:${nativePort}` &&
+            ['/health', '/connect-discovery'].includes(url.pathname)) {
+            headers['X-EliYork-Native-Discovery'] = nativeDiscoveryProof;
+        }
+    }
+    callback({ requestHeaders: headers });
+};
 const desktopLog = createFileLog({ filePath: () => join(app.getPath('userData'), 'desktop.log') });
 function log(text) { desktopLog.write(`${new Date().toISOString()} ${text}`); }
 function launchNative() {
@@ -99,7 +123,8 @@ function launchNative() {
         cwd: runtime,
         windowsHide: true,
         stdio: 'pipe',
-        env: { ...process.env, PIIK_CLIENT_GATE_NO_BROWSER: 'true', PIIK_SHARE_AUDIO_HOST_PID: String(process.pid) },
+        env: { ...process.env, PIIK_CLIENT_GATE_NO_BROWSER: 'true', PIIK_SHARE_AUDIO_HOST_PID: String(process.pid),
+            ELIYORK_NATIVE_DISCOVERY_PROOF: nativeDiscoveryProof },
     });
     return native;
 }
@@ -143,20 +168,43 @@ async function recoverNative() {
     try { await startNative(); return { ok: !quitting }; }
     catch { return { ok: false }; } // The state notification supplies a retry action.
 }
+function beginShutdown() {
+    if (shutdown) return shutdown;
+    quitting = true;
+    shutdown = Promise.resolve().then(async () => {
+        try {
+            updates?.stop();
+            windowStartup?.dispose();
+            windowLifecycle?.dispose();
+            picker?.close();
+            panels?.close();
+        } finally {
+            await stopNative();
+        }
+    }).catch(error => log(`shutdown-failed ${error.message}`));
+    return shutdown;
+}
 async function chooseSource(request, callback) {
-    if (
-        !request.frame ||
-        !owned(webContents.fromFrame(request.frame), request.frame.url) ||
-        request.frame !== mainWindow.webContents.mainFrame ||
-        picker
-    )
-        return callback({});
+    const owner = mainWindow;
+    const current = () => !quitting && owner === mainWindow && !owner?.isDestroyed() &&
+        request.frame && request.frame === owner?.webContents.mainFrame &&
+        owned(webContents.fromFrame(request.frame), request.frame.url);
+    if (!current() || picker || openingPicker) return callback({});
     if (smoke) return callback({ video: request.frame });
-    const sources = await desktopCapturer.getSources({
-        types: ['screen', 'window'],
-        thumbnailSize: { width: 320, height: 180 },
-    });
-    if (quitting || mainWindow.isDestroyed()) return callback({});
+    openingPicker = true;
+    let sources;
+    try {
+        sources = await desktopCapturer.getSources({
+            types: ['screen', 'window'],
+            thumbnailSize: { width: 320, height: 180 },
+        });
+    } catch (error) {
+        log(`picker-sources-failed ${error.message}`);
+        return callback({});
+    } finally {
+        openingPicker = false;
+    }
+    if (!current()) return callback({});
     const window = new BrowserWindow({
         icon: join(__dirname, 'assets/app.png'),
         parent: mainWindow,
@@ -184,6 +232,7 @@ async function chooseSource(request, callback) {
             event.senderFrame !== window.webContents.mainFrame
         )
             return;
+        if (!current()) { window.close(); return; }
         const source = sources.find((s) => s.id === selection?.id);
         if (!source || answered) return;
         answered = true;
@@ -201,16 +250,23 @@ async function chooseSource(request, callback) {
         picker = null;
         if (!answered) callback({});
     });
-    await window.loadFile(join(__dirname, 'picker.html'));
-    window.webContents.send('sources', {
-        sources: sources.map((s) => ({
-            id: s.id,
-            name: s.name,
-            thumbnail: s.thumbnail.toDataURL(),
-        })),
-        audioRequested: request.audioRequested,
-    });
-    window.show();
+    try {
+        await window.loadFile(join(__dirname, 'picker.html'));
+        if (window.isDestroyed()) return;
+        if (!current()) { window.close(); return; }
+        window.webContents.send('sources', {
+            sources: sources.map((s) => ({
+                id: s.id,
+                name: s.name,
+                thumbnail: s.thumbnail.toDataURL(),
+            })),
+            audioRequested: request.audioRequested,
+        });
+        window.show();
+    } catch (error) {
+        log(`picker-load-failed ${error.message}`);
+        if (!window.isDestroyed()) window.destroy();
+    }
 }
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
@@ -243,7 +299,8 @@ else {
                     Buffer.byteLength(text, 'utf8') > 8 * 1024 * 1024
                 )
                     throw Error('Clipboard write denied');
-                await clipboard.writeText(text);
+                if (smoke && !realSmokeClipboard) smokeClipboardText = text;
+                else await clipboard.writeText(text);
             });
             const permissions = new Set([
                 'fullscreen',
@@ -269,6 +326,9 @@ else {
                     callback(trustedRequest && (permissions.has(permission) ||
                         (permission === 'media' && details.isMainFrame === true)));
                 }
+            );
+            session.defaultSession.webRequest.onBeforeSendHeaders(
+                { urls: ['http://127.0.0.1/*'] }, includeNativeDiscoveryProof,
             );
             session.defaultSession.setDisplayMediaRequestHandler(
                 (request, callback) => {
@@ -327,7 +387,7 @@ else {
                 beforeHide: () => picker?.close(), log, enableTray: !smoke,
                 canRestore: () => windowStartup?.isReady() || false,
             });
-            mainWindow.on('session-end', () => { quitting = true; void stopNative().catch(error => log(error.message)); });
+            mainWindow.on('session-end', () => { void beginShutdown(); });
             const allowedFrame = (event) =>
                 owned(event.sender, event.senderFrame?.url) &&
                 event.senderFrame === mainWindow.webContents.mainFrame;
@@ -381,12 +441,6 @@ else {
             mainWindow.webContents.on('will-redirect', (event, url) => {
                 if (!trusted(url)) event.preventDefault();
             });
-            const installUpdate = async () => {
-                quitting = true;
-                windowLifecycle?.dispose();
-                picker?.close();
-                await stopNative();
-            };
             const buildMenu = () => {
                 const sendCallCommand = (channel) => {
                     if (!mainWindow.isDestroyed() && trusted(mainWindow.webContents.getURL()))
@@ -430,7 +484,13 @@ else {
                     app,
                     window: () => mainWindow,
                     log,
-                    prepareInstall: installUpdate,
+                    prepareInstall: () => nativeRuntime.suspendForInstall(),
+                    recoverInstall: async () => {
+                        if (quitting) return false;
+                        nativeReady = nativeRuntime.resumeAfterInstallFailure();
+                        await nativeReady;
+                        return !quitting;
+                    },
                 });
                 updates.subscribe(sendUpdateState);
             }
@@ -532,6 +592,11 @@ else {
                         await mainWindow.webContents.executeJavaScript(
                             `fetch('http://127.0.0.1:${nativePort}/health').then(r=>r.status)`
                         );
+                    const healthWithoutProof = await fetch(`http://127.0.0.1:${nativePort}/health`, {
+                        signal: AbortSignal.timeout(3000),
+                    });
+                    result.nativeDiscoveryWithoutProof = healthWithoutProof.status;
+                    await healthWithoutProof.body?.cancel();
                     const chromeGeometry = () => mainWindow.webContents.executeJavaScript(`(() => {
                         const r = document.querySelector('.desktop-refresh').getBoundingClientRect();
                         const h = document.querySelector('.workspace-topbar').getBoundingClientRect();
@@ -612,67 +677,37 @@ else {
                     if (!result.nativeRecovery || result.recoveredNativeHealth !== 200 || !result.healthyNativeKept)
                         throw Error('Native recovery failed');
                     writeFileSync(join(app.getPath('userData'), 'desktop-chrome.png'), (await mainWindow.webContents.capturePage()).toPNG());
-                    // Verify real renderer -> OS clipboard, without exposing or
-                    // losing the user's clipboard. Do not restore over a new copy.
-                    const clipboardItems = (await clipboard.read()).filter(
-                        (item) => item.types.length > 0
-                    );
-                    const previousClipboard = await Promise.all(
-                        clipboardItems.map(async (item) => {
-                            const entries = await Promise.all(
-                                item.types.map(async (type) => [
-                                    type,
-                                    await item.getType(type),
-                                ])
-                            );
-                            return new ClipboardItem(
-                                Object.fromEntries(entries)
-                            );
-                        })
-                    );
+                    // The default smoke run exercises the renderer and IPC
+                    // bridge with an in-memory clipboard sink.
+                    result.clipboardMode = realSmokeClipboard ? 'system' : 'memory';
                     const marker = `EliYork clipboard smoke ${Date.now()}`;
-                    let writtenText = marker;
-                    try {
-                        // Same delayed path used by Copy diagnostics, no active
-                        // user gesture and no mock navigator.clipboard.
-                        await mainWindow.webContents.executeJavaScript(
-                            `EliYorkDesktop.writeClipboardText(${JSON.stringify(marker)})`
-                        );
-                        result.clipboardWrite =
-                            (await clipboard.readText()) === marker;
-                        const copyFromMenu = Menu.getApplicationMenu().items[0].submenu.items
-                            .find(item => item.label === '复制诊断');
-                        result.callDiagnosticsInSettings = Boolean(copyFromMenu);
-                        copyFromMenu?.click();
-                        for (let attempt = 0; attempt < 110; attempt++) {
-                            // eslint-disable-next-line no-await-in-loop -- Poll this one clipboard operation in order.
-                            const value = await clipboard.readText();
-                            if (value !== marker) {
-                                const data = JSON.parse(value);
-                                result.diagnosticsCopied = data.诊断格式 >= 4;
-                                result.diagnosticVersions = {
-                                    web: data.网页版本,
-                                    desktop: data.客户端版本,
-                                    schema: data.诊断格式,
-                                };
-                                writtenText = value;
-                                break;
-                            }
-                            // eslint-disable-next-line no-await-in-loop -- Bound the asynchronous OS clipboard check.
-                            await new Promise((done) => setTimeout(done, 100));
+                    await mainWindow.webContents.executeJavaScript(
+                        `EliYorkDesktop.writeClipboardText(${JSON.stringify(marker)})`
+                    );
+                    result.clipboardWrite = (await readSmokeClipboard()) === marker;
+                    const copyFromMenu = Menu.getApplicationMenu().items[0].submenu.items
+                        .find(item => item.label === '复制诊断');
+                    result.callDiagnosticsInSettings = Boolean(copyFromMenu);
+                    copyFromMenu?.click();
+                    for (let attempt = 0; attempt < 110; attempt++) {
+                        // eslint-disable-next-line no-await-in-loop -- A system clipboard read can be asynchronous.
+                        const value = await readSmokeClipboard();
+                        if (value !== marker) {
+                            const data = JSON.parse(value);
+                            result.diagnosticsCopied = data.诊断格式 >= 4;
+                            result.diagnosticVersions = {
+                                web: data.网页版本,
+                                desktop: data.客户端版本,
+                                schema: data.诊断格式,
+                            };
+                            break;
                         }
-                        result.clipboardReadDenied =
-                            await mainWindow.webContents.executeJavaScript(
-                                `navigator.clipboard.readText().then(()=>false,()=>true)`
-                            );
-                    } finally {
-                        const currentText = await clipboard.readText();
-                        if (currentText === writtenText) {
-                            if (previousClipboard.length)
-                                await clipboard.write(previousClipboard);
-                            else clipboard.clear();
-                        }
+                        // eslint-disable-next-line no-await-in-loop -- Bound the asynchronous copy check.
+                        await new Promise((done) => setTimeout(done, 100));
                     }
+                    result.clipboardReadDenied = await mainWindow.webContents.executeJavaScript(
+                        `navigator.clipboard.readText().then(()=>false,()=>true)`
+                    );
                     if (
                         result.url !== origin ||
                         result.nodeExposed ||
@@ -682,6 +717,7 @@ else {
                         !media.embedded ||
                         media.display !== 1 ||
                         result.nativeHealth !== 200 ||
+                        result.nativeDiscoveryWithoutProof !== 403 ||
                         !result.clipboardWrite ||
                         !result.clipboardReadDenied ||
                         !result.diagnosticsCopied ||
@@ -720,14 +756,10 @@ else {
         });
     app.on('window-all-closed', () => app.quit());
     app.on('before-quit', (event) => {
-        updates?.stop();
-        if (quitting) return;
+        if (readyToQuit) return;
         event.preventDefault();
-        quitting = true;
-        windowStartup?.dispose();
-        windowLifecycle?.dispose();
-        picker?.close();
-        panels?.close();
-        void stopNative().catch(error => log(error.message)).finally(() => app.quit());
+        if (quitScheduled) return;
+        quitScheduled = true;
+        void beginShutdown().finally(() => { readyToQuit = true; app.quit(); });
     });
 }

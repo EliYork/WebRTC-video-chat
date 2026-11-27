@@ -2,6 +2,7 @@ const fieldsByEvent = {
     'voice:join': {
         roomId: 'string',
         peerId: 'string',
+        peerToken: 'string',
         clientSessionEpoch: 'number',
     },
     'chat:join': { roomId: 'string', joinRequestId: 'number' },

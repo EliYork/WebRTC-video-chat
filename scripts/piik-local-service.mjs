@@ -5,8 +5,8 @@ import { once } from 'node:events';
 import { createServer } from 'node:net';
 export async function startPiikLocal() {
     const listener = createServer();
-    listener.listen(30000 + Math.floor(Math.random() * 10000), '127.0.0.1');
-    await once(listener, 'listening');
+    listener.listen(0, '127.0.0.1');
+    await once(listener, 'listening', { signal: AbortSignal.timeout(2000) });
     const port = listener.address().port;
     await new Promise((done) => listener.close(done));
     const baseURL = `http://127.0.0.1:${port}`;
@@ -42,21 +42,19 @@ export async function startPiikLocal() {
         }
     );
     let log = '';
-    processHandle.stdout.on('data', (b) => {
-        log += b;
-    });
-    processHandle.stderr.on('data', (b) => {
-        log += b;
-    });
+    const appendLog = (chunk) => { log = (log + chunk).slice(-16 * 1024); };
+    processHandle.stdout.on('data', appendLog);
+    processHandle.stderr.on('data', appendLog);
     let failure;
     processHandle.on('error', (error) => {
         failure = error;
     });
-    for (let i = 0; i < 100; i++) {
+    const deadline = Date.now() + 10000;
+    while (Date.now() < deadline) {
         if (failure || processHandle.exitCode !== null)
             throw failure || new Error(`Piik startup failed: ${log}`);
         try {
-            if ((await fetch(`${baseURL}/healthz`)).ok)
+            if ((await fetch(`${baseURL}/healthz`, { signal: AbortSignal.timeout(500) })).ok)
                 return {
                     baseURL,
                     close: () => processHandle.kill(),

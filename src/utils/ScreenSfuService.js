@@ -95,6 +95,7 @@ export const createScreenSfuService = ({
     resourceSample,
     egressSample = createHostEgressSampler(),
     now = Date.now,
+    operationTimeoutMs = 15000,
 } = {}) => {
     const budget = createScreenSfuBudget(config);
     const rooms = new Map();
@@ -129,6 +130,7 @@ export const createScreenSfuService = ({
     const validClient = (client) => {
         const owner = getVoiceOwner(client.socket);
         return (
+            !stopped &&
             !client.socket.disconnected &&
             clients.get(client.socket.id) === client &&
             owner?.peerId === client.peerId &&
@@ -219,6 +221,19 @@ export const createScreenSfuService = ({
             emit(client, 'sfu:fallback', { reason });
             cleanupSocket(client.socket, reason);
         });
+    };
+    const retire = (reason) => {
+        if (stopped) return;
+        ready = false;
+        clearInterval(healthTimer);
+        clearInterval(trafficTimer);
+        try {
+            fallbackAll(reason);
+        } finally {
+            stopped = true;
+            budget.clear();
+            worker?.close();
+        }
     };
     const sampleHealth = async () => {
         try {
@@ -481,6 +496,10 @@ export const createScreenSfuService = ({
         if (!router) {
             // Requests are serialized globally below, including router creation.
             router = await worker.createRouter({ mediaCodecs: codecs });
+            if (stopped || workerDied) {
+                router.close();
+                throw fail('sfu-unavailable');
+            }
             rooms.set(owner.roomId, router);
         }
         client = {
@@ -683,7 +702,10 @@ export const createScreenSfuService = ({
                 throw error;
             }
             publication.producers.set(role, producer);
-            producer.on('transportclose', () => stopPublication(client));
+            producer.on('transportclose', () => {
+                if (client.publication === publication && publication.producers.get(role) === producer)
+                    stopPublication(client);
+            });
             return { id: producer.id, publicationId: publication.id };
         }
         if (payload.action === 'publish') {
@@ -843,6 +865,20 @@ export const createScreenSfuService = ({
     // Native operations are asynchronous. Serialize mutations to make the
     // global budget and room/router ownership atomic, including different sockets.
     let mutationQueue = Promise.resolve();
+    const runMutation = (socket, payload) => {
+        if (stopped || workerDied) return Promise.reject(fail('sfu-unavailable'));
+        let timer;
+        const deadline = new Promise((_, reject) => {
+            timer = setTimeout(() => {
+                // Closing the worker fences native results before releasing the queue.
+                unhealthy = true;
+                try { retire('sfu-operation-timeout'); }
+                catch { logger?.warn?.('[sfu] worker cleanup failed after operation timeout'); }
+                reject(fail('sfu-operation-timeout'));
+            }, operationTimeoutMs);
+        });
+        return Promise.race([perform(socket, payload), deadline]).finally(() => clearTimeout(timer));
+    };
     const request = (socket, payload) => {
         const pending = queues.get(socket.id) || 0;
         if (pending >= 12)
@@ -850,7 +886,7 @@ export const createScreenSfuService = ({
         queues.set(socket.id, pending + 1);
         const operation = mutationQueue
             .catch(() => {})
-            .then(() => perform(socket, payload));
+            .then(() => runMutation(socket, payload));
         mutationQueue = operation;
         return operation
             .then(
@@ -883,14 +919,6 @@ export const createScreenSfuService = ({
             health,
             egress: { ...egress, admissionBlocked: egressBlocked },
         }),
-        close: () => {
-            ready = false;
-            stopped = true;
-            clearInterval(healthTimer);
-            clearInterval(trafficTimer);
-            fallbackAll('server-stopped');
-            budget.clear();
-            worker?.close();
-        },
+        close: () => retire('server-stopped'),
     };
 };

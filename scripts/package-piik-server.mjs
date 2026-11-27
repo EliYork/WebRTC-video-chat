@@ -3,14 +3,25 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync, copyFile
 import { resolve, join, dirname } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { piikServerArtifacts, verifyPiikServerBuild } from './piik-build-provenance.mjs';
 const root = resolve(import.meta.dirname, '..');
-const revision = execFileSync('git', ['rev-parse', 'HEAD'], {
+const git = args => execFileSync('git', args, {
     cwd: root,
     encoding: 'utf8',
     windowsHide: true,
-}).trim();
+});
+const revision = git(['rev-parse', 'HEAD']).trim();
+const [mode = '--candidate', ...extra] = process.argv.slice(2);
+if (!['--candidate', '--release'].includes(mode) || extra.length) {
+    throw new Error('Usage: npm run package:piik:server -- [--candidate|--release]');
+}
+const isDirty = () => Boolean(git(['status', '--porcelain', '--untracked-files=all']).trim());
+const dirty = isDirty();
+const kind = mode === '--release' ? 'release' : 'candidate';
+if (kind === 'release' && dirty) throw new Error('Formal Piik release requires a clean Git worktree');
 const stamp = new Date().toISOString().replace(/[-:.]/g, '');
 const build = join(root, 'integrations/piik/.build');
+const piikBuild = verifyPiikServerBuild(root, build);
 const stage = join(build, `server-${stamp}`);
 mkdirSync(stage, { recursive: true });
 const roomAssets = [
@@ -19,11 +30,7 @@ const roomAssets = [
     'src/views/js/room/startup.mainScript.min.js',
     'src/views/styles/startup.min.css',
 ];
-const sourceEntries = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z', '--', 'src'], {
-    cwd: root,
-    encoding: 'utf8',
-    windowsHide: true,
-}).split('\0');
+const sourceEntries = git(['ls-files', '--cached', '--others', '--exclude-standard', '-z', '--', 'src']).split('\0');
 const files = [...new Set(sourceEntries)].filter((file) =>
     file && !roomAssets.includes(file) && existsSync(join(root, file))
 );
@@ -49,18 +56,11 @@ execFileSync(process.execPath, [join(root, 'scripts/build-room-assets.mjs'), joi
     stdio: 'inherit',
 });
 files.push(...roomAssets);
-for (const name of [
-    'client.js',
-    'protocol.mjs',
-    'third-party-web.txt',
-    'third-party-go.txt',
-    'LICENSE-Piik.txt',
-    'piik-server',
-]) {
+for (const [name, builtPath] of Object.entries(piikServerArtifacts)) {
     const dest = `integrations/piik/.build/${name}`;
     mkdirSync(dirname(join(stage, dest)), { recursive: true });
     copyFileSync(
-        join(build, name === 'piik-server' || name === 'third-party-go.txt' ? join('production', name) : name),
+        join(build, builtPath),
         join(stage, dest)
     );
     files.push(dest);
@@ -73,11 +73,21 @@ const hashes = Object.fromEntries(
             .digest('hex'),
     ])
 );
+for (const [name, builtPath] of Object.entries(piikServerArtifacts)) {
+    if (hashes[`integrations/piik/.build/${name}`] !== piikBuild.artifacts[builtPath])
+        throw Error(`Piik artifact changed during packaging: ${name}`);
+}
 const manifest = {
     revision,
+    kind,
+    dirty,
     piik: JSON.parse(readFileSync(join(root, 'integrations/piik/source.json'))),
+    piikBuild,
     files: hashes,
 };
+if (kind === 'release' && (isDirty() || git(['rev-parse', 'HEAD']).trim() !== revision)) {
+    throw new Error('Git worktree changed during formal Piik packaging');
+}
 writeFileSync(join(stage, 'manifest.json'), JSON.stringify(manifest, null, 2));
 const archive = join(build, `eliyork-voice-piik-server-${stamp}.tar.gz`);
 execFileSync(
@@ -86,9 +96,9 @@ execFileSync(
     { windowsHide: true, stdio: 'inherit' }
 );
 execFileSync(
-    'python',
+    process.env.PYTHON || 'python',
     [
-        '-c',
+        '-I', '-c',
         "import tarfile,json,hashlib,sys; t=tarfile.open(sys.argv[1]); m=json.load(t.extractfile('manifest.json')); assert set(t.getnames())==set(m['files'])|{'manifest.json'}; assert all(hashlib.sha256(t.extractfile(p).read()).hexdigest()==h for p,h in m['files'].items()); print('Server archive entries/SHA256 verified:',len(m['files']))",
         archive,
     ],

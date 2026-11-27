@@ -26,12 +26,12 @@ Node `voice-room` PID **56090**，127.0.0.1:3000；Piik PID **43641**，127.0.0.
 
 ## 备份与回滚
 
-服务器私有备份：`/www/backup/voice-deploy/client-ui-20261019T094426`，含完整代码/env/data/Nginx/TLS/PM2 安全快照、旧文件、候选、摘要及结果。
+服务器私有备份：`<VOICE_BACKUP_ROOT>/client-ui-20261019T094426`，含完整代码/env/data/Nginx/TLS/PM2 安全快照、旧文件、候选、摘要及结果。
 
 撤回此次网页修复：
 
 ```sh
-sh /www/backup/voice-deploy/client-ui-20261019T094426/rollback.sh
+sh <VOICE_BACKUP_ROOT>/client-ui-20261019T094426/rollback.sh
 ```
 
 该命令仅恢复本站旧代码/build 并重启 Node，不回写实时聊天或环境。回滚入口已生成，未在生产执行。

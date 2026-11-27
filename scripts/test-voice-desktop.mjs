@@ -14,6 +14,8 @@ import { createServer } from 'node:net';
 import assert from 'node:assert/strict';
 import { startPiikLocal } from './piik-local-service.mjs';
 const work = mkdtempSync(join(tmpdir(), 'eliyork-desktop-'));
+const profile = join(work, 'profile');
+const realClipboard = process.argv.includes('--real-clipboard');
 const listener = createServer().listen(0, '127.0.0.1');
 await once(listener, 'listening');
 const port = listener.address().port;
@@ -33,6 +35,7 @@ const node = spawn(process.execPath, [resolve('src/server.js')], {
         SFU_ENABLED: 'false',
         PIIK_ENABLED: 'true',
         PIIK_INTERNAL_URL: piik.baseURL,
+        CHAT_HISTORY_FILE: join(work, 'chat-history.json'),
     },
 });
 let output = '';
@@ -51,18 +54,19 @@ try {
     }
     assert.ok(ready, output);
     const report = join(work, 'report.json');
-    const packaged = process.argv[2];
+    const packaged = process.argv.slice(2).find(arg => arg !== '--real-clipboard');
     desktop = spawn(
         packaged ||
             resolve('desktop/windows/node_modules/electron/dist/electron.exe'),
-        [...(packaged ? [] : [resolve('desktop/windows')]), '--smoke-test'],
+        [...(packaged ? [] : [resolve('desktop/windows')]), '--smoke-test',
+            ...(realClipboard ? ['--smoke-real-clipboard'] : [])],
         {
             windowsHide: true,
             stdio: 'pipe',
             env: {
                 ...process.env,
                 ELIYORK_TEST_ORIGIN: origin,
-                ELIYORK_TEST_USER_DATA: work,
+                ELIYORK_TEST_USER_DATA: profile,
                 ELIYORK_TEST_CAPTURE: resolve(
                     'integrations/piik/.build/synthetic-capture.exe'
                 ),
@@ -77,13 +81,14 @@ try {
     clearTimeout(timeout);
     assert.ok(
         existsSync(report),
-        `${output}\n${existsSync(join(work, 'desktop.log')) ? readFileSync(join(work, 'desktop.log'), 'utf8') : ''}`
+        `${output}\n${existsSync(join(profile, 'desktop.log')) ? readFileSync(join(profile, 'desktop.log'), 'utf8') : ''}`
     );
     const data = JSON.parse(readFileSync(report));
     assert.equal(code, 0, output);
     assert.equal(data.audioMuted, true);
     assert.equal(data.roomReady, true);
     assert.equal(data.nativeHealth, 200);
+    assert.equal(data.nativeDiscoveryWithoutProof, 403);
     assert.equal(data.microphone, 1);
     assert.equal(data.camera, 1);
     assert.equal(data.embedded, true);
@@ -94,6 +99,7 @@ try {
         cards: undefined, approvalVisible: false, backdropBelowTitlebar: true,
     });
     assert.equal(data.clipboardWrite, true);
+    assert.equal(data.clipboardMode, realClipboard ? 'system' : 'memory');
     assert.equal(data.diagnosticsCopied, true);
     assert.equal(data.callDiagnosticsInSettings, true);
     assert.equal(data.diagnosticVersions.web, JSON.parse(readFileSync('package.json', 'utf8')).version);
@@ -121,8 +127,8 @@ try {
     const artifacts = resolve('integrations/piik/artifacts');
     mkdirSync(artifacts, { recursive: true });
     copyFileSync(report, join(artifacts, 'desktop-smoke.json'));
-    copyFileSync(join(work, 'desktop-chrome.png'), join(artifacts, 'desktop-chrome.png'));
-    copyFileSync(join(work, 'desktop-native-recovery.png'), join(artifacts, 'desktop-native-recovery.png'));
+    copyFileSync(join(profile, 'desktop-chrome.png'), join(artifacts, 'desktop-chrome.png'));
+    copyFileSync(join(profile, 'desktop-native-recovery.png'), join(artifacts, 'desktop-native-recovery.png'));
     process.stdout.write(
         `PASS hidden Electron: single overlay title bar, guarded refresh/Ctrl+R, retained native PID, sandbox, diagnostics clipboard, updater, fake media, muted output and App cleanup. Logs ${work}\n`
     );

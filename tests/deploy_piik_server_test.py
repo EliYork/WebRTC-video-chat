@@ -1,5 +1,6 @@
 """Filesystem rollback regression; all process/network operations are mocked."""
 import importlib.util
+import ast
 import hashlib
 import io
 import json
@@ -16,8 +17,86 @@ deploy = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(deploy)
 
 
+class ReleaseGate(unittest.TestCase):
+    def test_formal_activation_rejects_dirty_unknown_and_changed_candidates(self):
+        with tempfile.TemporaryDirectory(prefix='voice-release-gate-') as temporary:
+            backups = Path(temporary)
+            directory = backups / 'piik-fixture'
+            stage = directory / 'candidate'
+            (stage / 'src').mkdir(parents=True)
+            (directory / 'backup.json').write_text('{}')
+            source = stage / 'src/server.js'
+            source.write_text('verified bytes')
+            manifest_path = stage / 'manifest.json'
+            manifest = {'kind': 'release', 'dirty': False, 'files': {'src/server.js': deploy.digest(source)}}
+
+            def prepare(value):
+                manifest_path.write_text(json.dumps(value))
+                (directory / 'candidate-result.json').write_text(json.dumps({
+                    'passed': True, 'manifestHash': deploy.digest(manifest_path),
+                }))
+
+            with patch.object(deploy, 'BACKUPS', backups), patch.object(deploy, 'run') as run:
+                for invalid in ({**manifest, 'dirty': True}, {**manifest, 'dirty': None}, {**manifest, 'kind': 'candidate'}):
+                    prepare(invalid)
+                    with self.assertRaisesRegex(RuntimeError, 'clean formal'):
+                        deploy.activate(directory)
+                prepare(manifest)
+                self.assertEqual(deploy.verify_release_candidate(directory), manifest)
+                manifest_path.write_text(json.dumps({**manifest, 'revision': 'other'}))
+                with self.assertRaisesRegex(RuntimeError, 'prepared candidate manifest'):
+                    deploy.activate(directory)
+                prepare(manifest)
+                source.write_text('staged content modified')
+                with self.assertRaisesRegex(RuntimeError, 'candidate changed'):
+                    deploy.activate(directory)
+                run.assert_not_called()
+
+    def test_ui_stamp_and_activation_gate_keep_dirty_candidates_preview_only(self):
+        script = Path(__file__).parents[1] / 'scripts/deploy-ui-update.py'
+        # Load the real function definitions without executing the standalone host CLI.
+        functions = [node for node in ast.parse(script.read_text(encoding='utf-8')).body if isinstance(node, ast.FunctionDef)]
+        namespace = {'Path': Path, 'hashlib': hashlib, 'json': json,
+                     'PIIK_CLIENT_FILE': 'integrations/piik/.build/client.js'}
+        exec(compile(ast.Module(body=functions, type_ignores=[]), str(script), 'exec'), namespace)
+        with tempfile.TemporaryDirectory(prefix='voice-ui-release-') as temporary:
+            directory = Path(temporary)
+            source, backup = directory / 'checkout', directory / 'backup'
+            (source / 'src').mkdir(parents=True)
+            after = backup / 'after'
+            (after / 'src').mkdir(parents=True)
+            (source / 'src/script.js').write_text('source')
+            staged = after / 'src/script.js'
+            staged.write_text('source')
+            plan_path = backup / 'plan.json'
+            manifest = after / 'voice-build-manifest.json'
+            manifest.write_text('{}')
+            revision = 'a' * 40
+            dirty = b' M src/script.js\n'
+            namespace['run'] = lambda _, command, *args, **kwargs: dirty if command == 'status' else revision.encode()
+            plan_path.write_text(json.dumps({'revision': revision, 'files': {'src/script.js': {'new': deploy.digest(staged)}}}))
+            stamp, verify = namespace['stamp_plan'], namespace['verify_release_candidate']
+            def receipt():
+                return {'planHash': deploy.digest(plan_path), 'manifestHash': deploy.digest(manifest)}
+            with self.assertRaisesRegex(RuntimeError, 'clean Git worktree'):
+                stamp(plan_path, 'release', source)
+            stamp(plan_path, 'candidate', source)
+            candidate = json.loads(plan_path.read_text())
+            self.assertTrue(candidate['dirty'])
+            with self.assertRaisesRegex(RuntimeError, 'clean UI source'):
+                verify(backup, candidate, receipt(), candidate['files'])
+            dirty = b''
+            stamp(plan_path, 'release', source)
+            release = json.loads(plan_path.read_text())
+            prepared = receipt()
+            self.assertEqual(verify(backup, release, prepared, release['files']), {})
+            staged.write_text('changed after preparation')
+            with self.assertRaisesRegex(RuntimeError, 'candidate changed'):
+                verify(backup, release, prepared, release['files'])
+
+
 class Rollback(unittest.TestCase):
-    def exercise(self, integrated, corrupt=False, go_status='online'):
+    def exercise(self, integrated, corrupt=False, go_status='online', ready=True):
         with tempfile.TemporaryDirectory(prefix='voice-rollback-') as temporary:
             home = Path(temporary)
             root, backups = home / 'site', home / 'backups'
@@ -68,7 +147,12 @@ class Rollback(unittest.TestCase):
                     with self.assertRaisesRegex(AssertionError, 'backup damaged'): deploy.restore(directory)
                     self.assertEqual(commands, [], 'Reject bad backups before stopping any service')
                     return
-                deploy.restore(directory)
+                if ready:
+                    deploy.restore(directory)
+                else:
+                    health.side_effect = RuntimeError('media not ready')
+                    with self.assertRaisesRegex(RuntimeError, 'rollback media readiness failed'):
+                        deploy.restore(directory)
             for name, content in old.items(): self.assertEqual((root / name).read_bytes(), content)
             self.assertEqual((root / 'data/chat-history.json').read_text(), 'live chat after backup')
             self.assertEqual(deploy.digest(root / '.env'), info['envHash'])
@@ -82,13 +166,22 @@ class Rollback(unittest.TestCase):
                 self.assertEqual(app['max_memory_restart'], 123456789)
                 self.assertTrue(any(args[:2] == ('pm2', 'start') for args, _ in commands))
                 self.assertEqual(any(args == ('pm2', 'stop', 'voice-piik') for args, _ in commands), go_status != 'online')
-                health.assert_called_once_with('http://127.0.0.1:3000/healthz', 'previous-revision')
-            else: health.assert_not_called()
+            health.assert_called_once_with('http://127.0.0.1:3000/readyz', 'previous-revision', require_media=True)
+            self.assertEqual(any(args == ('pm2', 'save') for args, _ in commands), ready)
 
     def test_fusion_rollback_preserves_original_build_and_go(self): self.exercise(True)
     def test_legacy_rollback_does_not_introduce_go(self): self.exercise(False)
+    def test_legacy_rollback_reports_unready_media(self): self.exercise(False, ready=False)
     def test_rollback_preserves_stopped_go(self): self.exercise(True, go_status='stopped')
     def test_corrupt_backup_does_not_stop_services(self): self.exercise(True, corrupt=True)
+
+    def test_readyz_requires_media_even_for_an_unversioned_rollback(self):
+        with patch.object(deploy.time, 'sleep'), patch.object(deploy.urllib.request, 'urlopen') as open_url:
+            def response(*args, **kwargs):
+                return io.BytesIO(b'{"ok": true, "mediaReady": false}')
+            open_url.side_effect = response
+            with self.assertRaisesRegex(RuntimeError, 'health failed'):
+                deploy.health('http://127.0.0.1:3000/readyz', require_media=True)
 
     def test_candidate_cannot_use_production_go_or_stun(self):
         with tempfile.TemporaryDirectory(prefix='voice-candidate-') as temporary:

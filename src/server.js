@@ -13,6 +13,7 @@ import { createRoomAssets, getRoomAssetVersions } from './utils/RoomAssets.js';
 import { Server as SocketServer } from 'socket.io';
 import { ExpressPeerServer } from 'peer';
 import { createPeerWebSocketServer } from './utils/PeerWebSocketServer.js';
+import { createVoicePeerBindings } from './utils/VoicePeerIdentity.js';
 
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
@@ -22,6 +23,7 @@ import Logger from './utils/Log.js';
 import { iceServers as iceServersList } from './utils/iceServers.js';
 import { createTurnCredentials } from './utils/TurnCredentials.js';
 import { createChatRateLimiter } from './utils/ChatRateLimit.js';
+import { createPresenceUpdateLimiter } from './utils/PresenceUpdateLimiter.js';
 import { validateSocketPacket } from './utils/SocketPacketValidation.js';
 import { createChatHistoryStore } from './utils/ChatHistoryStore.js';
 import {
@@ -60,11 +62,16 @@ const turnCredentials = createTurnCredentials();
 
 const io = new SocketServer(httpServer);
 
+const peerBindings = createVoicePeerBindings();
 const peerServer = ExpressPeerServer(httpServer, {
     path: '/',
     proxied: true,
-    createWebSocketServer: createPeerWebSocketServer,
+    createWebSocketServer: options => createPeerWebSocketServer({
+        ...options, bindings: peerBindings,
+        canRelay: (sender, recipient) => voiceCallSignaling.canRelay(sender, recipient),
+    }),
 });
+peerServer.on('connection', peerBindings.register);
 
 const Log = new Logger(process.env.ENV);
 // Release ZIPs exclude runtime logs; initialize the directory before SFU startup logging.
@@ -142,6 +149,7 @@ const CHANNELS = [
 const getChannel = (slug) => CHANNELS.find((channel) => channel.slug === slug);
 const voiceCallSignaling = createVoiceCallSignaling({
     io,
+    authorizePeer: peerBindings.authorizes,
     logger: Log,
     onScreenShareChange: (event) => syncPresenceScreenSharing(event),
     resolveRoomId: (roomId) => getChannel(roomId)?.slug,
@@ -153,6 +161,7 @@ const piikMedia = piikEnabled ? createPiikMediaGateway({
     getVoiceOwner: socket => voiceCallSignaling.getVoiceOwner(socket),
     protocol: await import('../integrations/piik/.build/protocol.mjs'),
     baseURL: piikBaseURL,
+    warn: (message) => Log.warn(`[piik] ${message}`),
     onSharing: (socket, sharing, owner) => voiceCallSignaling.updateScreenShare({ sharing, voiceSessionGeneration: owner.voiceSessionGeneration }, socket),
 }) : undefined;
 let screenSfuConfig;
@@ -196,6 +205,7 @@ const CHAT_HISTORY_LIMIT = 50;
 const CHAT_MESSAGE_MAX_LENGTH = 500;
 const onlineMembersByRoom = new Map();
 const chatRateLimiter = createChatRateLimiter({});
+const shareStartRateLimiter = createChatRateLimiter({ maxMessages: 12, windowMs: 10000 });
 const chatHistoryStore = createChatHistoryStore({
     filePath:
         process.env.CHAT_HISTORY_FILE ||
@@ -418,6 +428,7 @@ const handleVoiceJoin = async (payload, socket) => {
  * Reads voiceRoomId / voicePeerId from socket.data to avoid stale closured values.
  */
 const handleDisconnectingVoice = (socket) => {
+    presenceUpdateLimiter.clear(socket);
     voiceDiagnostics.forgetDeparture(socket);
     piikMedia?.cleanupSocket(socket);
     screenSfu.cleanupSocket(socket);
@@ -425,6 +436,7 @@ const handleDisconnectingVoice = (socket) => {
 };
 
 const handleVoicePeerLeft = (socket) => {
+    presenceUpdateLimiter.clear(socket);
     voiceDiagnostics.rememberDeparture(socket);
     piikMedia?.cleanupSocket(socket);
     screenSfu.cleanupSocket(socket);
@@ -433,55 +445,6 @@ const handleVoicePeerLeft = (socket) => {
 
 const hasOnlyOptionalBooleans = (values) =>
     values.every((value) => value === undefined || typeof value === 'boolean');
-
-const handlePresenceJoinVoice = (
-    { senderName, hasMic, micPermissionDenied, muted, cameraOn } = {},
-    socket
-) => {
-    const owner = voiceCallSignaling.getVoiceOwner(socket);
-    const channel = getChannel(owner?.roomId);
-
-    if (
-        !channel ||
-        !owner ||
-        !hasOnlyOptionalBooleans([hasMic, micPermissionDenied, muted, cameraOn])
-    ) {
-        return;
-    }
-
-    const { peerId } = owner;
-
-    if (
-        socket.data.presenceRoomId &&
-        socket.data.presenceRoomId !== channel.slug
-    ) {
-        removePresenceMember(socket);
-    }
-
-    const members = onlineMembersByRoom.get(channel.slug) || new Map();
-    const member = members.get(socket.id);
-    const nextMember = {
-        socketId: socket.id,
-        peerId,
-        roomId: channel.slug,
-        senderName: normalizeSenderName(senderName),
-        joinedVoice: true,
-        hasMic: hasMic === true,
-        micPermissionDenied: micPermissionDenied === true,
-        muted: muted === true,
-        cameraOn: cameraOn === true,
-        screenSharing: socket.data.voiceScreenSharing === true,
-        updatedAt: new Date().toISOString(),
-    };
-    if (samePresenceState(member, nextMember)) {
-        return;
-    }
-    members.set(socket.id, nextMember);
-
-    onlineMembersByRoom.set(channel.slug, members);
-    socket.data.presenceRoomId = channel.slug;
-    broadcastPresence();
-};
 
 const handlePresenceUpdate = (
     { senderName, hasMic, micPermissionDenied, muted, cameraOn } = {},
@@ -499,6 +462,10 @@ const handlePresenceUpdate = (
     }
 
     const { peerId } = owner;
+
+    if (socket.data.presenceRoomId && socket.data.presenceRoomId !== channel.slug) {
+        removePresenceMember(socket);
+    }
 
     const members = onlineMembersByRoom.get(channel.slug) || new Map();
     const member = members.get(socket.id) || {};
@@ -533,11 +500,30 @@ const handlePresenceUpdate = (
 };
 
 const handlePresenceLeaveVoice = (socket) => {
+    presenceUpdateLimiter.discard(socket);
     const removed = removePresenceMember(socket);
     delete socket.data.presenceRoomId;
     if (removed) {
         broadcastPresence();
     }
+};
+
+const presenceUpdateLimiter = createPresenceUpdateLimiter({
+    getOwner: (socket) => voiceCallSignaling.getVoiceOwner(socket),
+    apply: handlePresenceUpdate,
+});
+
+const submitPresenceUpdate = (socket, { senderName, hasMic, micPermissionDenied, muted, cameraOn }, joining = false) => {
+    const fields = { senderName: joining ? normalizeSenderName(senderName) : senderName,
+        hasMic, micPermissionDenied, muted, cameraOn };
+    if (joining) {
+        for (const key of ['hasMic', 'micPermissionDenied', 'muted', 'cameraOn']) {
+            fields[key] = fields[key] === true;
+        }
+    }
+    presenceUpdateLimiter.submit(socket, Object.fromEntries(
+        Object.entries(fields).filter(([, value]) => value !== undefined)
+    ));
 };
 
 const handleChatJoin = async ({ roomId, joinRequestId } = {}, socket) => {
@@ -707,6 +693,10 @@ io.on('connection', (socket) => {
                 run: () => chatRateLimiter.clear(socket.id),
             },
             {
+                name: 'share-rate-limit-cleanup',
+                run: () => shareStartRateLimiter.clear(socket.id),
+            },
+            {
                 name: 'ice-rate-limit-cleanup',
                 run: () => turnCredentials.clear(socket),
             },
@@ -772,18 +762,16 @@ io.on('connection', (socket) => {
         const result = handleChatSend(payload || {}, socket);
         if (typeof acknowledge === 'function') acknowledge(result);
     });
-    socket.on('presence:joinVoice', (payload) =>
-        handlePresenceJoinVoice(payload, socket)
-    );
+    socket.on('presence:joinVoice', (payload) => submitPresenceUpdate(socket, payload, true));
     socket.on('presence:leaveVoice', () => handlePresenceLeaveVoice(socket));
-    socket.on('presence:update', (payload) =>
-        handlePresenceUpdate(payload, socket)
-    );
+    socket.on('presence:update', (payload) => submitPresenceUpdate(socket, payload));
     socket.on('voicePeerLeft', () => handleVoicePeerLeft(socket));
     socket.on('cursor:move', (payload) => handleCursorMove(payload, socket));
     socket.on('cursor:leave', (payload) => handleCursorLeave(payload, socket));
     socket.on('screen:share', (payload) => {
         if (piikEnabled) return; // Piik publication lifetime owns sharing state.
+        if (payload.sharing === true && socket.data.voiceScreenSharing !== true &&
+            !shareStartRateLimiter.allow(socket.id)) return;
         const result = voiceCallSignaling.updateScreenShare(payload, socket);
         if (result.ok && payload.sharing === false) screenSfu.stopScreen(socket);
     });
@@ -802,12 +790,11 @@ let shuttingDown = false;
 const shutdown = async () => {
     if (shuttingDown) return;
     shuttingDown = true;
-    const deadline = setTimeout(() => process.exit(1), 5000);
+    const deadline = setTimeout(() => process.exit(1), 8000);
     try {
         io.close();
         screenSfu.close();
-        piikMedia?.close();
-        const saved = await chatHistoryStore.close();
+        const [saved] = await Promise.all([chatHistoryStore.close(), piikMedia?.close()]);
         if (!saved) Log.warn('[chat-history] final save failed during shutdown');
         process.exitCode = saved ? 0 : 1;
     } catch (error) {

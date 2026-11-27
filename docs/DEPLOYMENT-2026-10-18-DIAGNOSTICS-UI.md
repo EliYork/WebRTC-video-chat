@@ -22,13 +22,13 @@
 - 本地包：`release/webrtc-video-chat-1.0.5-20261018-021128-876.zip`。
 - 128 个文件；打包脚本校验白名单、清单和逐项 SHA256。
 - ZIP SHA256：`A3EFD495FAB9542C22B41D37B9BF91484FB697E2E69F629A67C448A10CA6E0AD`。
-- 服务端包位于 `/www/backup/voice-deploy/`，仅从包中取上述 8 文件，不覆盖全部运行文件或安装依赖。
-- 备份、部署回执与回滚脚本：`/www/backup/voice-deploy/diagnostics-ui-20261018-021128-876/`。
+- 服务端包位于 `<VOICE_BACKUP_ROOT>/`，仅从包中取上述 8 文件，不覆盖全部运行文件或安装依赖。
+- 备份、部署回执与回滚脚本：`<VOICE_BACKUP_ROOT>/diagnostics-ui-20261018-021128-876/`。
 
 回滚命令：
 
 ```sh
-python3 /www/backup/voice-deploy/diagnostics-ui-20261018-021128-876/rollback.py
+python3 <VOICE_BACKUP_ROOT>/diagnostics-ui-20261018-021128-876/rollback.py
 ```
 
 回滚脚本先检查线上文件是否仍为本次版本，拒绝覆盖后续未知修改；保存当前文件后恢复 8 个旧文件并重启 `voice-room`。不回退配置或聊天记录。脚本语法已检查，未执行生产回滚测试。

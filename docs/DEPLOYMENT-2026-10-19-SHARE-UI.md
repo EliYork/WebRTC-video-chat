@@ -36,14 +36,14 @@
 ## 备份、回滚与变更清单
 
 本次独立私有备份（目录权限 700）：
-`/www/backup/voice-deploy/client-ui-20261019T024025`
+`<VOICE_BACKUP_ROOT>/client-ui-20261019T024025`
 
 包含旧/新文件、起点摘要、plan.json、压缩包、PM2 状态、安全快照（完整原运行源码、.env、聊天数据、本站 Nginx/TLS、PM2 dump）、隔离候选、校验结果、deploy.py 和 rollback.sh。安全压缩包 31713160 字节；旧文件备份与原文件逐项摘要相同。旧的发布备份均保留。
 
 SSH 到服务器后可回滚本次更新：
 
 ```sh
-sh /www/backup/voice-deploy/client-ui-20261019T024025/rollback.sh
+sh <VOICE_BACKUP_ROOT>/client-ui-20261019T024025/rollback.sh
 ```
 
 回滚只恢复这次改变的代码和构建清单，重启 Node 并恢复旧 VOICE_BUILD_ID；不会覆盖实时聊天或 .env，不停止 Go 或其他站点。备份完整性和入口已检查，未在生产演练回滚。

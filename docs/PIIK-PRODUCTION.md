@@ -25,6 +25,7 @@
 - Node `voice-room`：`127.0.0.1:3000`，Nginx 现有 HTTPS/WSS 代理不变。
 - Go `voice-piik`：HTTP `127.0.0.1:17887`，内部控制不加入 Nginx 公网路由；内置 STUN 仅监听 loopback UDP 3478。
 - 公网连接只经过 Node 校验频道/owner/generation 的 Socket.IO 网关。App 通过站点领取授权，不信任客户端自报的 Piik 房间/token。
+- Windows 客户端启动 Piik 时创建发现凭据。主进程只为受信房间主 frame 发往本次 Piik 回环端口的发现请求附加凭据，原生桥接校验后才返回控制所需信息。
 - Piik 固定来源与 MIT/依赖声明见 `integrations/piik/source.json`、LICENSE-Piik.txt、分发 notices。无来源 SDK/生成二进制不提交 Git。
 - 当前 peerOnly P2P + 公共 STUN，无 TURN、Piik SFU 或多级转发。不占服务器屏幕视频出口；严格 NAT/禁 UDP 的网络可能失败，没有中继兜底。20 Mbps 服务器预算未修改。
 - Piik 开启时旧屏幕 SFU 不启动；语音仍为原 PeerJS，聊天/成员仍由原 Node 管理。Go 崩溃不应关闭 Node，`/healthz` 保持 Node 存活并报告 `mediaReady=false`。
@@ -34,7 +35,9 @@
 
 先 `npm test`、三个 `test:piik:*`、`npm run test:desktop`。桌面 `desktop/windows` 中 `npm ci`、`npm run package`；需固定 Electron 下载运行库、已构建 Piik App/helper/notices。上游原生使用静态 MSVC CRT，运行机无需编译工具，需支持 WGC 的 Windows 10/11 x64 和可用的 H.264 硬件驱动。
 
-服务用 Linux amd64 Go 交叉编译产物（CGO_ENABLED=0），再 `npm run package:piik:server`；独立 TAR 位于忽略的 `integrations/piik/.build`。显式运行资源白名单包括 Piik JS/protocol、Go binary 和许可声明，原 `package:release` ZIP 契约保持不变。客户端 ZIP 位于 `release/`，均验证文件清单和每项 SHA256。Git revision/上游版本写入 manifest。
+在项目根目录使用 `npm run build:piik -- --linux-server` 生成 Linux amd64 服务、浏览器包和许可清单。正式包使用 `npm run package:piik:server -- --release`，需要干净的 Git 工作区。`npm run package:piik:server -- --candidate` 允许包含工作区改动，默认也使用候选模式。独立 TAR 位于 `integrations/piik/.build`。manifest 记录 Git 提交、工作区状态、候选或正式类型，以及 Piik 固定来源、补丁和产物的 SHA256。生产激活会重新核对候选验收回执及暂存文件，只接受已完成 prepare 的干净正式包。
+
+首次从基础 ZIP 切到 Piik 时，先按完整 Piik TAR 流程安装，完成后即有供 UI 热更新使用的 manifest。创建 UI 更新计划后，在源码工作区运行 `python scripts/deploy-ui-update.py stamp-plan --release <plan.json>`，把计划放在工作区之外。脚本核对 Git 提交、工作区状态及计划内的新文件摘要。`--candidate` 可登记含工作区改动的预览计划。生产 `activate` 只接受干净的正式计划和对应的 `prepare` 回执。基础服务的 `package:release` ZIP 使用原有发布流程。
 
 部署工具 `scripts/deploy-piik-server.py` 在授权服务器运行：`backup` → 上传并验证 TAR → `prepare <backup> <archive> <sha256>` → 检查候选结果 → `activate <backup>`。prepare 需要同一备份内放入 `gateway-test.mjs`（本仓库 test-piik-gateway），自动使用真实生产模式 Go 验证权限和清理。候选 Node 只绑定 loopback 17888、隔离聊天数据；候选进程验证后退出。锁文件变化时拒绝复用生产依赖。
 
@@ -56,7 +59,7 @@ pm2 restart voice-piik
 # 完全停止本站（会中断本站服务）：
 pm2 stop voice-room voice-piik
 # 回滚到备份旧版：
-sh /www/backup/voice-deploy/<本次备份>/rollback.sh
+sh <VOICE_BACKUP_ROOT>/<本次备份>/rollback.sh
 ```
 
 不要公开备份中的环境/PM2/TLS 密钥，也不要分享本机 App capability。原生 App 完整兼容性、真实硬件编码和公网多设备表现留给实机验收后再决定下一阶段。

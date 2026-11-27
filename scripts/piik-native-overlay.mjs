@@ -46,8 +46,29 @@ export function preparePiikNativeOverlay(source, out) {
     let main = patchCaptureCadence(readFileSync(join(native, 'main.cpp'), 'utf8'));
     main = editOnce(main, 'int wmain(int argc, wchar_t** argv) {\n  try {\n    ProductArguments',
         'namespace piik::capture { int WriteAudioApplications(); }\nint wmain(int argc, wchar_t** argv) {\n  if (argc == 2 && wcscmp(argv[1], L"--list-audio-applications") == 0) return piik::capture::WriteAudioApplications();\n  try {\n    ProductArguments');
-    main = editOnce(main, '<< ",\\"microphone\\":true,\\"softwareVP8\\":true"', '<< ",\\"independentAudio\\":true,\\"microphone\\":true,\\"softwareVP8\\":true"');
+    main = editOnce(main, '<< ",\\"microphone\\":true,\\"softwareVP8\\":true"',
+        '<< ",\\"independentAudio\\":" << (process_audio || process_audio_exclusion ? "true" : "false")\n         << ",\\"microphone\\":true,\\"softwareVP8\\":true"');
     writeFileSync(join(directory, 'main.cpp'), patchAv1Capture(main));
+    const statusTestPath = join(directory, 'output_worker.test.cpp');
+    let statusTest = readFileSync(statusTestPath, 'utf8').replaceAll('\r\n', '\n');
+    statusTest = editOnce(statusTest, 'WriteVideoActive(writer, arguments, true, output);',
+        'WriteVideoActive(writer, arguments, OutputKind::h264, output);');
+    statusTest = editOnce(statusTest, '  assert(status.find("42c01f") == std::string::npos);', String.raw`  assert(status.find("42c01f") == std::string::npos);
+  WriteVideoActive(writer, arguments, OutputKind::av1, output);
+  assert(ReadFile(read, bytes.data(), static_cast<DWORD>(bytes.size()), &count, nullptr));
+  const std::string av1_status(bytes.data(), count);
+  assert(av1_status.find("\"codec\":\"av1\"") != std::string::npos);
+  assert(av1_status.find("\"hardwareOnly\":true") != std::string::npos);
+  assert(av1_status.find("profileLevelId") == std::string::npos);`);
+    const apertureFixture = join(source, 'native/fixtures/h264-padding/aperture.h264').replaceAll('\\', '/');
+    statusTest = editOnce(statusTest, `std::filesystem::path(__FILE__).parent_path().parent_path().parent_path() /
+      "fixtures" / "h264-padding" / "aperture.h264"`,
+    `std::filesystem::path(LR"PIIK_FIXTURE(${apertureFixture})PIIK_FIXTURE")`);
+    writeFileSync(statusTestPath, statusTest);
+    const adaptiveTestPath = join(directory, 'adaptive_encoder.test.cpp');
+    writeFileSync(adaptiveTestPath, editOnce(readFileSync(adaptiveTestPath, 'utf8'),
+        'HardwareEncoder encoder(env, profile,',
+        'HardwareEncoder encoder(piik::capture::OutputKind::h264, env, profile,'));
     const h264Path = join(directory, 'h264_encoder.cpp');
     const h264 = readFileSync(join(native, 'h264_encoder.cpp'), 'utf8').replaceAll('\r\n', '\n');
     // Follow Piik f7e703e: request and validate the same Constrained Baseline profile.
@@ -69,6 +90,7 @@ export function preparePiikNativeOverlay(source, out) {
         ["$source = Join-Path $helperDirectory ($name + '.test.cpp')", `$source = Join-Path ${quote(directory)} ($name + '.test.cpp')`],
         ["$source = Join-Path $helperDirectory 'frame_converter.probe.cpp'", `$source = Join-Path ${quote(directory)} 'frame_converter.probe.cpp'`],
         ["$systemLibraries = '", `$compileFlags += ' /I "${native}"'\n$systemLibraries = '`],
+        ["@('h264_encoder', 'process_audio', 'capture_target')", "@('h264_encoder', 'audio_applications', 'process_audio', 'capture_target')"],
     ];
     for (const [before, after] of edits) {
         if (script.split(before).length !== 2)

@@ -8,7 +8,8 @@ import {piikClientOverlay} from '../scripts/piik-client-overlay.mjs';
 import {nativeAudioSelection} from '../integrations/piik/share-audio.ts';
 
 const entry = 'integrations/piik/.deps/upstream/src/client/native/client.ts';
-test('pinned native control wire validates independent audio, status identity, errors and legacy compatibility', {skip: !existsSync(entry) && 'Piik upstream must be prepared by build:piik'}, async () => {
+test('pinned native control wire validates independent audio, status identity, errors and legacy compatibility', {skip: !existsSync(entry) && process.env.CI !== 'true' && 'Piik upstream must be prepared by build:piik'}, async () => {
+    assert.ok(existsSync(entry), 'Run npm run build:piik -- --web-only before the CI suite');
     const bundle = await build({entryPoints:[entry],bundle:true,write:false,format:'iife',globalName:'Wire',platform:'browser',define:{'import.meta.env':'{}','import.meta.url':JSON.stringify('http://localhost/fixture.js')},plugins:[piikClientOverlay]});
     for (const independentAudio of [true,false]) {
         const requests=[], sockets=[];

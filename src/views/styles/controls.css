@@ -58,19 +58,6 @@
 #buttons .local-user-name:hover { border-color: var(--line); }
 #buttons .local-user-name:focus { border-color: var(--accent); outline: 1px solid var(--accent); }
 
-.page-tile-media-controls-panel #buttons.media-dock {
-    height: auto;
-    flex: 1 0 auto;
-    align-content: start;
-    min-height: 0;
-    padding: 8px 10px;
-    gap: 6px;
-    border: 0;
-    border-radius: 0;
-    background: transparent;
-    box-shadow: none;
-}
-
 #buttons.media-dock.hidden {
     display: grid !important;
 }
@@ -262,35 +249,10 @@
     padding-right: 52px;
 }
 
-.noise-toggle {
-    cursor: pointer;
-    user-select: none;
-}
-
-.noise-toggle:hover,
-.noise-toggle:focus-visible {
-    border-color: rgba(216, 111, 154, 0.38);
-    background-color: #fff;
-}
-
-.noise-toggle[aria-pressed='true'],
 .screen-status-chip {
     border-color: rgba(78, 168, 118, 0.24);
     background-color: #e7f6ed;
     color: #3d7b59;
-}
-
-.noise-toggle[aria-pressed='true'] strong {
-    color: #2f704c;
-}
-
-.noise-toggle[aria-pressed='false'] {
-    opacity: 0.72;
-}
-
-.noise-toggle.na {
-    opacity: 0.45;
-    pointer-events: none;
 }
 
 .media-dock-actions {
@@ -606,8 +568,4 @@
 
 .hidden {
     display: none !important;
-}
-
-.text-center {
-    text-align: center;
 }

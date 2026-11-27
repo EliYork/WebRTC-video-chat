@@ -11,7 +11,7 @@
 
 ## 生产变更
 
-站点仍为 `https://voice.eliyork.com`，目录仍为 `/www/wwwroot/voice.eliyork.com`。2026-10-19 02:09 左右（北京时间）切换成功，PM2 stop 至公网健康恢复实测 **4.29 秒**；不是连续探测得到的精确外部停机时长。活跃语音/共享会话需重新连接。
+站点仍为 `https://voice.eliyork.com`，目录仍为 `<VOICE_APP_ROOT>`。2026-10-19 02:09 左右（北京时间）切换成功，PM2 stop 至公网健康恢复实测 **4.29 秒**；不是连续探测得到的精确外部停机时长。活跃语音/共享会话需重新连接。
 
 | 服务 | PID（交付采样） | 监听 | RSS / CPU（交付采样） |
 | --- | --- | --- | --- |
@@ -39,15 +39,15 @@ PM2 自动重启已启用并保存，现有 `pm2-root.service` enabled。新增 
 
 ## 备份与回滚
 
-私有备份：`/www/backup/voice-deploy/piik-20261018-180715`（目录权限700；名称时间为 UTC）。包含旧运行文件/逐项 SHA256 读回校验、环境/数据快照、配置/TLS归档、PM2前态/dump、候选验证结果、实际切换记录及回滚脚本。没有将备份或密钥提交 Git。
+私有备份：`<VOICE_BACKUP_ROOT>/piik-20261018-180715`（目录权限700；名称时间为 UTC）。包含旧运行文件/逐项 SHA256 读回校验、环境/数据快照、配置/TLS归档、PM2前态/dump、候选验证结果、实际切换记录及回滚脚本。没有将备份或密钥提交 Git。
 
 SSH 内回滚：
 
 ```sh
-sh /www/backup/voice-deploy/piik-20261018-180715/rollback.sh
+sh <VOICE_BACKUP_ROOT>/piik-20261018-180715/rollback.sh
 ```
 
-恢复旧版 `56d344d06be97f7cbb1c7c87a975724844df1187` 的运行代码，停止/删除 `voice-piik`、以原媒体模式重启 `voice-room` 并保存 PM2；保持实时聊天数据和 `.env`。回滚文件/hash 已验证，生产未实际切回旧版演练。旧版原备份亦保留于 `/www/backup/voice-deploy/av1-fix-20261018-195616-281`。
+恢复旧版 `56d344d06be97f7cbb1c7c87a975724844df1187` 的运行代码，停止/删除 `voice-piik`、以原媒体模式重启 `voice-room` 并保存 PM2；保持实时聊天数据和 `.env`。回滚文件/hash 已验证，生产未实际切回旧版演练。旧版原备份亦保留于 `<VOICE_BACKUP_ROOT>/av1-fix-20261018-195616-281`。
 
 ```sh
 export PATH=/www/server/nodejs/v24.15.0/bin:$PATH
@@ -72,10 +72,10 @@ TURN、Piik SFU、跨 NAT 保证、多级观看者转发、自动更新及原生
 
 429 项测试及新增原生设置回归、三观看者合成 H.264 测试通过；公网隐藏浏览器只检查设置有效性，没有加入频道或开始采集。更新四个前端运行文件，没有重启 Node/Go，所有 PM2 PID 保持不变，公网文件逐项 SHA256 与健康检查通过。后台版本仍为 `83f7e13`，manifest 另记 `frontendRevision=cafd37b...`。客户端无需重新打包，Ctrl+R 刷新后重新加入频道，原生共享选择明确的 `2160p（4K）/60 fps` 等档位。
 
-补丁备份：`/www/backup/voice-deploy/piik-resolution-20261018-182607`。仅回滚此补丁：
+补丁备份：`<VOICE_BACKUP_ROOT>/piik-resolution-20261018-182607`。仅回滚此补丁：
 
 ```sh
-python3 /www/backup/voice-deploy/piik-resolution-20261018-182607/hotfix-tool.py rollback /www/backup/voice-deploy/piik-resolution-20261018-182607/patch.json
+python3 <VOICE_BACKUP_ROOT>/piik-resolution-20261018-182607/hotfix-tool.py rollback <VOICE_BACKUP_ROOT>/piik-resolution-20261018-182607/patch.json
 ```
 
 未 Push；临时连接凭据脚本已自动删除。主工作区和用户解压的客户端目录保持原样。

@@ -3,7 +3,7 @@
 ## 当前线上版本
 
 - 网站：<https://voice.eliyork.com/room/lobby>
-- 程序目录：`/www/wwwroot/voice.eliyork.com`；PM2：`voice-room`。
+- 程序目录：`<VOICE_APP_ROOT>`；PM2：`voice-room`。
 - 版本号仍为 1.0.5，以包时间戳和哈希区分本次发布。
 - 最终包：`release/webrtc-video-chat-1.0.5-20261012-041439-063.zip`。
 - SHA256：`3C6BF97A9A627553478D6B364875BF8ED998B6140CE7FEEDCCD3383CF26E9ADC`。
@@ -35,18 +35,18 @@
 
 完整 UI 发布前版本保存在：
 
-`/www/backup/voice-deploy/ui-20261012-040448`
+`<VOICE_BACKUP_ROOT>/ui-20261012-040448`
 
 需要整体回滚时执行：
 
 ```sh
-python3 /www/backup/voice-deploy/ui-20261012-040448/rollback.py
+python3 <VOICE_BACKUP_ROOT>/ui-20261012-040448/rollback.py
 ```
 
 该脚本保留回滚前程序，恢复旧源码、依赖和清单，重启现有 `voice-room` 并检查本机 HTTP，不回退当前聊天记录或真实配置。脚本语法已校验，未为了测试执行实际回滚。
 
 单独撤回最后手机 CSS 修复的副本和脚本在：
 
-`/www/backup/voice-deploy/ui-mobile-20261012-041439`
+`<VOICE_BACKUP_ROOT>/ui-mobile-20261012-041439`
 
 原 ZIP、两次服务器备份和回执均保留，没有清理或删除旧版本；没有 Git 提交、推送或打标签。

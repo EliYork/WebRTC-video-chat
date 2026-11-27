@@ -31,7 +31,7 @@ class NativeObject extends EventEmitter {
         this.closed = true;
     }
 }
-const fixture = (overrides = {}) => {
+const fixture = (overrides = {}, options = {}) => {
     const config = readScreenSfuConfig({ SFU_ANNOUNCED_ADDRESS: '127.0.0.1', SFU_EGRESS_MBPS: 30, SFU_VIDEO_MBPS: 22, SFU_PAYLOAD_MBPS: 23, SFU_INITIAL_VIEWER_MBPS: 5.5, ...overrides });
     const created = [];
     let trafficBitrate = 0;
@@ -68,13 +68,17 @@ const fixture = (overrides = {}) => {
             transport.setMaxOutgoingBitrate = async (value) => {
                 transport.outgoing = value;
             };
-            transport.produce = async (value) =>
-                new NativeObject({
+            transport.produce = async (value) => {
+                const producer = new NativeObject({
                     ...value,
                     getStats: async () => [
                         { type: 'inbound-rtp', bitrate: trafficBitrate },
                     ],
                 });
+                transport.producers ||= [];
+                transport.producers.push(producer);
+                return producer;
+            };
             transport.consume = async (value) => {
                 const consumer = new NativeObject({
                     ...value,
@@ -105,6 +109,7 @@ const fixture = (overrides = {}) => {
         egressSample: () => hostBps,
         now: () => clock,
         logger: { warn: (line) => logs.push(line), info: (line) => logs.push(line) },
+        ...options,
     });
     const sampleTraffic = service.sampleTraffic;
     service.sampleTraffic = () => { clock += 2000; return sampleTraffic(); };
@@ -370,7 +375,32 @@ test('stop/restart sharing frees send transport and budget while retaining recei
     assert.equal(f.created[0].closed, true);
     assert.equal(f.created[1].closed, false);
     assert.notEqual(await f.publish(publisher), id);
+    f.created[0].producers[0].emit('transportclose');
     assert.equal(f.service.snapshot().publishers, 1);
+});
+
+test('a stuck native operation releases the mutation queue and fences late results', { timeout: 3000 }, async (t) => {
+    const f = fixture({}, { operationTimeoutMs: 20 });
+    t.after(f.service.close);
+    const active = f.socket('active');
+    assert.equal((await f.request(active, 'capabilities')).ok, true);
+    let releaseRouter;
+    const entered = new Promise(resolve => {
+        f.fakeWorker.createRouter = () => new Promise(release => { releaseRouter = release; resolve(); });
+    });
+    const pending = f.request(f.socket('blocked', 'lobby'), 'capabilities');
+    await entered;
+    const waiting = f.request(active, 'list');
+    assert.deepEqual(await pending, { ok: false, reason: 'sfu-operation-timeout' });
+    assert.deepEqual(await waiting, { ok: false, reason: 'sfu-unavailable' });
+    assert.equal(f.fakeWorker.closed, true);
+    assert.equal(f.service.snapshot().ready, false);
+    assert.ok(active.events.some(event => event.event === 'sfu:fallback'));
+    const lateRouter = new NativeObject();
+    releaseRouter(lateRouter);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(lateRouter.closed, true);
+    assert.equal(f.service.snapshot().clients, 0);
 });
 
 test('worker failure releases every reservation and tells both sides to use P2P', async (t) => {

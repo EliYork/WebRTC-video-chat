@@ -17,13 +17,13 @@ import { createVoiceCallSignaling } from '../src/utils/VoiceCallSignaling.js';
 
 class FakeIo {
     constructor() {
-        this.sockets = [];
+        this.sockets = { sockets: new Map() };
     }
 
     in(roomId) {
         return {
             fetchSockets: async () =>
-                this.sockets.filter((socket) => socket.rooms.has(roomId)),
+                [...this.sockets.sockets.values()].filter((socket) => socket.rooms.has(roomId)),
         };
     }
 }
@@ -36,7 +36,8 @@ class FakeSocket extends EventEmitter {
         this.io = io;
         this.received = [];
         this.rooms = new Set([id]);
-        io?.sockets.push(this);
+        io?.sockets.sockets.set(id, this);
+        this.on('screen:share', payload => this.received.push({ event: 'screen:share', payload }));
     }
 
     async join(roomId) {
@@ -50,7 +51,7 @@ class FakeSocket extends EventEmitter {
     to(roomId) {
         return {
             emit: (event, payload) => {
-                this.io?.sockets
+                [...(this.io?.sockets.sockets.values() || [])]
                     .filter(
                         (socket) => socket !== this && socket.rooms.has(roomId)
                     )
@@ -86,6 +87,7 @@ const createSignalingFixture = () => {
     const screenChanges = [];
     const signaling = createVoiceCallSignaling({
         io,
+        authorizePeer: () => true,
         onScreenShareChange: ({ socket, ...event }) =>
             screenChanges.push({ ...event, socketId: socket.id }),
         resolveRoomId: (roomId) =>
@@ -287,6 +289,7 @@ test('sharing disconnect broadcasts sharing false and peer leave once', async ()
                     peerId: 'sharer-peer',
                     roomId: 'lobby',
                     sharing: false,
+                    sourceVoiceSessionGeneration: joined.voiceSessionGeneration,
                     voiceSessionGeneration: joined.voiceSessionGeneration,
                 },
             },

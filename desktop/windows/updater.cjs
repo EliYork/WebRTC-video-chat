@@ -5,6 +5,7 @@ function createUpdates({
     window,
     log,
     prepareInstall,
+    recoverInstall = async () => true,
     timers = { setTimeout, clearTimeout, setInterval, clearInterval },
 }) {
     let status = 'idle',
@@ -16,7 +17,8 @@ function createUpdates({
         lastChecked = null,
         token = null;
     let cancelled = false,
-        phase = 'check';
+        phase = 'check',
+        installAttempt;
     const listeners = new Set();
     updater.autoDownload = false;
     updater.autoInstallOnAppQuit = false;
@@ -51,7 +53,7 @@ function createUpdates({
         const win = window();
         if (win && !win.isDestroyed()) win.setProgressBar(value);
     };
-    const failed = (failure) => {
+    const failed = (failure, nativeRecovered = false) => {
         if (stopped) return;
         taskbar(-1);
         if (cancelled) {
@@ -64,13 +66,35 @@ function createUpdates({
             phase === 'check'
                 ? '暂时无法连接更新服务，请检查网络后重试。'
                 : phase === 'install'
-                  ? '未能启动安装，请重试。当前客户端仍可继续使用。'
+                  ? nativeRecovered
+                      ? '未能启动安装。客户端仍可使用，原生共享可重新开启。'
+                      : '未能启动安装，原生共享组件也未恢复。请重新启动客户端。'
                   : '下载或完整性校验失败。请重新检查更新，未通过校验的文件不会安装。';
         update('error');
     };
+    const recoverFailedInstall = (attempt) => {
+        if (!attempt.recovery) {
+            busy = true;
+            attempt.recovery = Promise.resolve().then(async () => {
+                let recovered = false;
+                try { if (!stopped) recovered = await recoverInstall(); }
+                catch { log('update-install-native-recovery-failed'); }
+                if (installAttempt === attempt) {
+                    installAttempt = undefined;
+                    busy = false;
+                    failed(attempt.failure, recovered === true);
+                }
+            });
+        }
+        return attempt.recovery;
+    };
     // Keep an error listener after stop: late updater events must not crash Electron.
     updater.on('error', (failure) => {
-        if (status !== 'downloaded') failed(failure);
+        if (stopped) return;
+        if (installAttempt) {
+            installAttempt.failure ||= failure;
+            if (installAttempt.handoff) void recoverFailedInstall(installAttempt);
+        } else if (status !== 'downloaded' && phase !== 'install') failed(failure);
         else log(`update-error ${failure.message}`);
     });
     updater.on('update-available', (info) => {
@@ -165,14 +189,20 @@ function createUpdates({
         if (busy || stopped || status !== 'downloaded') return;
         busy = true;
         phase = 'install';
+        const attempt = { handoff: false, failure: null, recovery: null };
+        installAttempt = attempt;
         try {
             update('installing');
             taskbar(2);
             await prepareInstall();
-            if (!stopped) updater.quitAndInstall(false, true);
+            if (!stopped && !attempt.failure) {
+                attempt.handoff = true;
+                updater.quitAndInstall(false, true);
+            }
         } catch (failure) {
-            failed(failure);
+            attempt.failure ||= failure;
         } finally {
+            if (attempt.failure && !stopped) await recoverFailedInstall(attempt);
             busy = false;
             publish();
         }

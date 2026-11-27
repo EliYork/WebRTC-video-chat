@@ -13,11 +13,15 @@ import { build } from 'esbuild';
 import { preparePiikGoOverlay } from './piik-go-overlay.mjs';
 import { preparePiikNativeOverlay } from './piik-native-overlay.mjs';
 import { piikClientOverlay, checkPiikTypes } from './piik-client-overlay.mjs';
+import { piikBuildInputs, recordPiikServerBuild } from './piik-build-provenance.mjs';
 const root = resolve(import.meta.dirname, '..');
 const home = join(root, 'integrations/piik');
 const pin = JSON.parse(readFileSync(join(home, 'source.json')));
 const source = join(home, '.deps/upstream');
 const out = join(home, '.build');
+const linuxServer = process.argv.includes('--linux-server');
+const webOnly = process.argv.includes('--web-only');
+const inputs = linuxServer && !webOnly ? piikBuildInputs(root) : null;
 const run = (exe, args, cwd = source, env = process.env) =>
     execFileSync(exe, args, { cwd, env, stdio: 'inherit', windowsHide: true });
 mkdirSync(join(home, '.deps'), { recursive: true });
@@ -90,10 +94,9 @@ writeFileSync(
         '\n' +
         readFileSync(join(out, 'third-party-web.txt'), 'utf8')
 );
-if (!process.argv.includes('--web-only')) {
+if (!webOnly) {
     const go = process.env.PIIK_GO || 'go';
     const overlay = preparePiikGoOverlay(source, out);
-    const linuxServer = process.argv.includes('--linux-server');
     const serverTarget = { goos: linuxServer || process.platform !== 'win32' ? 'linux' : 'windows', goarch: 'amd64' };
     const serverDirectory = linuxServer ? join(out, 'production') : out;
     mkdirSync(serverDirectory, { recursive: true });
@@ -189,5 +192,6 @@ if (!process.argv.includes('--web-only')) {
             null
         ));
     }
+    if (inputs) recordPiikServerBuild(root, out, inputs);
 }
 process.stdout.write(`Piik source ${pin.revision}; output ${out}\n`);

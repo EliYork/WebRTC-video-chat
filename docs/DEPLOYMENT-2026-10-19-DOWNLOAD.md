@@ -28,12 +28,12 @@
 
 未改 Nginx、带宽预算、Piik、下载包/feed、聊天数据、密钥、TLS、SSH、cron、防火墙，也未清理旧包或备份。额外生产写入为本次私有候选/备份目录和验证报告。
 
-私有服务器备份：`/www/backup/voice-deploy/client-ui-20261019T113354`，包含旧代码、完整 env/data/Nginx/TLS/PM2 安全快照、摘要、候选和结果。
+私有服务器备份：`<VOICE_BACKUP_ROOT>/client-ui-20261019T113354`，包含旧代码、完整 env/data/Nginx/TLS/PM2 安全快照、摘要、候选和结果。
 
 回滚：
 
 ```sh
-sh /www/backup/voice-deploy/client-ui-20261019T113354/rollback.sh
+sh <VOICE_BACKUP_ROOT>/client-ui-20261019T113354/rollback.sh
 ```
 
 回滚仅恢复本轮代码/build 并重启本站 Node，不回写实时聊天或环境；新增下载 helper 会撤除。未对生产执行回滚。

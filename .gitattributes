@@ -2,3 +2,9 @@
 src/views/vendor/deepfilter-0.2.0/processor.js -text
 src/views/vendor/deepfilter-0.2.0/LICENSE -text
 src/views/wasm/deepfilter-0.2.0/** -text
+
+# Preserve the checkout line endings used by diagnostic SHA256 manifests.
+docs/diagnostics/*.md text eol=lf
+docs/diagnostics/*.json text eol=lf
+docs/diagnostics/*_both*.json text eol=crlf
+docs/diagnostics/server-readonly-2026-10-17_history.json text eol=crlf

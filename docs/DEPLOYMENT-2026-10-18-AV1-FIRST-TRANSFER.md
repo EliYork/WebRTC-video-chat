@@ -36,12 +36,12 @@ AV1 实验模式在两个有效窗口均有原尺寸 AV1 输出时，允许带�
 
 - 包：`release/webrtc-video-chat-1.0.5-20261018-195616-281.zip`，ZIP 不提交 Git。
 - SHA256：`264a091789ccd97a40c8cc76ee41c9c3d4bf5b514ae1f15bddcba42c9868724a`。
-- 私有备份：`/www/backup/voice-deploy/av1-fix-20261018-195616-281/`。
+- 私有备份：`<VOICE_BACKUP_ROOT>/av1-fix-20261018-195616-281/`。
 
 回滚命令：
 
 ```sh
-python3 /www/backup/voice-deploy/av1-fix-20261018-195616-281/rollback.py
+python3 <VOICE_BACKUP_ROOT>/av1-fix-20261018-195616-281/rollback.py
 ```
 
 脚本核对当前源码、环境及原版本备份哈希并获取部署锁，保存回滚前源码，恢复上次源码和 `package.json`，仅重启语音服务。生产配置及聊天历史保持现值。脚本通过语法检查，未执行生产回滚演练；本次未触发自动回滚。
