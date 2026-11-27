@@ -108,7 +108,7 @@ try {
     assert.equal(data.clipboardReadDenied, true);
     assert.equal(data.updaterLoaded, true);
     assert.equal(data.qualityLabelFits, true);
-    assert.equal(data.windowTitle, '语音据点');
+    assert.equal(data.windowTitle, JSON.parse(readFileSync('desktop/windows/package.json', 'utf8')).productName);
     assert.equal(data.menuHidden, true);
     assert.equal(data.settingsEntry, true);
     assert.deepEqual(data.settingsItems, ['关于与更新…', '复制诊断', '查看通话日志…', '诊断工具', '退出']);

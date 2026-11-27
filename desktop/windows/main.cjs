@@ -346,7 +346,7 @@ else {
             );
             mainWindow = new BrowserWindow({
                 icon: join(__dirname, 'assets/app.png'),
-                title: '语音据点',
+                title: app.getName(),
                 titleBarStyle: 'hidden',
                 titleBarOverlay: { color: '#f4ebf0', symbolColor: '#49333f', height: 40 },
                 autoHideMenuBar: true,
@@ -436,7 +436,7 @@ else {
             });
             mainWindow.webContents.on('page-title-updated', (event) => {
                 event.preventDefault();
-                mainWindow.setTitle('语音据点');
+                mainWindow.setTitle(app.getName());
             });
             mainWindow.webContents.setWindowOpenHandler(() => ({
                 action: 'deny',
@@ -625,7 +625,7 @@ else {
                         if (!geometry.overlay || geometry.header.x !== 0 || geometry.header.y !== 0 ||
                             Math.abs(geometry.refresh.right - geometry.area.width) > 2 ||
                             geometry.drag !== 'drag' || geometry.noDrag !== 'no-drag' ||
-                            geometry.titleCount.join() !== '语音据点') throw Error(JSON.stringify(geometry));
+                            geometry.titleCount.join() !== app.getName()) throw Error(JSON.stringify(geometry));
                         result.chromeCases.push({ size, geometry });
                     }
                     mainWindow.setSize(1440, 940);
@@ -660,7 +660,7 @@ else {
                     } finally {
                         panels.confirm = originalConfirm;
                     }
-                    if (!result.refreshCancelled || !result.refreshKeptNative || !result.menuHidden || result.windowTitle !== '语音据点') throw Error(JSON.stringify(result));
+                    if (!result.refreshCancelled || !result.refreshKeptNative || !result.menuHidden || result.windowTitle !== app.getName()) throw Error(JSON.stringify(result));
                     // Stop only this isolated App. The page and joined voice
                     // membership must survive a component-only recovery.
                     await mainWindow.webContents.executeJavaScript(`document.querySelector('#stageJoinVoice').click()`);
@@ -753,7 +753,7 @@ else {
             windowStartup?.dispose();
             log(error.stack);
             if (!smoke && panels) await panels.confirm({
-                title: '暂时无法打开语音据点',
+                title: `暂时无法打开${app.getName()}`,
                 detail: '请检查网络后重新打开客户端。原有设置会保留；详细原因已记录在本地日志中。',
                 accept: '关闭客户端', cancel: '关闭',
             }).catch(() => {});
