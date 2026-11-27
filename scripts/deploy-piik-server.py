@@ -174,7 +174,9 @@ def prepare(directory, archive_path, expected):
     go_url = f'http://127.0.0.1:{unused_port()}'
     go_env = {**os.environ, **config['env'], 'PORT': go_url.rsplit(':', 1)[1],
               'LISTEN_HOST': '127.0.0.1', 'ALLOWED_ORIGINS': go_url,
-              'STUN_URLS': '', 'NAT_PREDICTION_ENABLED': 'false', 'ROOM_DATABASE_PATH': ':memory:'}
+              # Production requires STUN and binds UDP 3478 on the configured address.
+              'STUN_URLS': 'stun:127.0.0.2:3478', 'STUN_LISTEN_HOST': '127.0.0.2',
+              'NAT_PREDICTION_ENABLED': 'false', 'ROOM_DATABASE_PATH': ':memory:'}
     children, logs = [], []
     try:
         go_log = open(directory / 'candidate-go.log', 'w')

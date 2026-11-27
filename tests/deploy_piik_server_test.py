@@ -240,7 +240,8 @@ class Rollback(unittest.TestCase):
             go, node = children
             self.assertNotEqual(go.env['PORT'], '17887')
             self.assertNotEqual(node.env['PORT'], go.env['PORT'])
-            self.assertEqual(go.env['STUN_URLS'], '')
+            self.assertEqual(go.env['STUN_URLS'], 'stun:127.0.0.2:3478')
+            self.assertEqual(go.env['STUN_LISTEN_HOST'], '127.0.0.2')
             self.assertEqual(go.env['ROOM_DATABASE_PATH'], ':memory:')
             self.assertEqual(node.env['SFU_ENABLED'], 'false')
             self.assertEqual(node.env['PIIK_INTERNAL_URL'], 'http://127.0.0.1:' + go.env['PORT'])
