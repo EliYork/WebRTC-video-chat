@@ -27,6 +27,15 @@ def digest(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+def lock_dependencies(path):
+    lock = json.loads(path.read_text())
+    lock.pop('version', None)
+    workspace = lock['packages']['']
+    workspace.pop('version', None)
+    workspace.pop('engines', None)
+    return lock
+
+
 def unused_port():
     with socket.socket() as listener:
         listener.bind(('127.0.0.1', 0))
@@ -156,7 +165,7 @@ def prepare(directory, archive_path, expected):
             dest = stage / member.name
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(content)
-    assert json.loads((stage / 'package-lock.json').read_text()) == json.loads((ROOT / 'package-lock.json').read_text()), 'dependencies changed; review required'
+    assert lock_dependencies(stage / 'package-lock.json') == lock_dependencies(ROOT / 'package-lock.json'), 'dependencies changed; review required'
     (stage / 'node_modules').symlink_to(ROOT / 'node_modules', target_is_directory=True)
     binary = stage / 'integrations/piik/.build/piik-server'
     binary.chmod(0o700)

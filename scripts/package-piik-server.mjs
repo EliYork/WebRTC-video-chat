@@ -89,7 +89,8 @@ if (kind === 'release' && (isDirty() || git(['rev-parse', 'HEAD']).trim() !== re
     throw new Error('Git worktree changed during formal Piik packaging');
 }
 writeFileSync(join(stage, 'manifest.json'), JSON.stringify(manifest, null, 2));
-const archive = join(build, `eliyork-voice-piik-server-${stamp}.tar.gz`);
+const { version } = JSON.parse(readFileSync(join(stage, 'package.json')));
+const archive = join(build, `晓语音-服务端-${version}-${stamp}.tar.gz`);
 execFileSync(
     'tar.exe',
     ['-czf', archive, '-C', stage, ...files, 'manifest.json'],

@@ -41,6 +41,12 @@ const origin = smoke
     ? loopbackOrigin(process.env.ELIYORK_TEST_ORIGIN)
     : preview || 'https://voice.eliyork.com';
 if (preview) app.setPath('userData', process.env.ELIYORK_PREVIEW_USER_DATA || join(app.getPath('appData'), 'EliYork Voice UI Preview'));
+if (!preview && !smoke) {
+    // Preserve preferences, update state and native settings across the rename.
+    const profile = join(app.getPath('appData'), 'EliYork Voice');
+    mkdirSync(profile, { recursive: true });
+    app.setPath('userData', profile);
+}
 if (smoke) {
     const profile = process.env.ELIYORK_TEST_USER_DATA;
     if (!profile || !isAbsolute(profile)) throw Error('Smoke test requires a fresh absolute user data directory');
@@ -52,7 +58,7 @@ if (smoke) {
 }
 let smokeClipboardText = '';
 const readSmokeClipboard = () => realSmokeClipboard ? clipboard.readText() : smokeClipboardText;
-app.setName('EliYork Voice');
+app.setName('晓语音');
 app.setAppUserModelId('com.eliyork.voice');
 let mainWindow,
     native,

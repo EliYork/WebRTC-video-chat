@@ -23,7 +23,8 @@ const git = (...args) =>
     }).trim();
 const revision = git('rev-parse', 'HEAD');
 const stamp = new Date().toISOString().replace(/[-:.]/g, '');
-const name = `EliYork-Voice-${pkg.version}-${stamp}-win-x64`;
+const name = `${pkg.productName}-${pkg.version}-${stamp}-win-x64`;
+const installer = config.nsis.artifactName.replace('${version}', pkg.version);
 const output = join(directory, '.build', name);
 const hash = (path) =>
     createHash('sha256').update(readFileSync(path)).digest('hex');
@@ -46,7 +47,7 @@ await build({
         afterPack: async ({ appOutDir }) => {
             const appDir = join(appOutDir, 'resources/app');
             const notices = [
-                'EliYork Voice desktop runtime third-party licenses',
+                `${pkg.productName} desktop runtime third-party licenses`,
             ];
             function licenses(modules) {
                 for (const name of readdirSync(modules)) {
@@ -129,8 +130,8 @@ for (const [path, digest] of Object.entries(manifest.files))
 const bundle = join(output, 'distribution');
 mkdirSync(bundle);
 for (const file of [
-    `EliYork-Voice-Setup-${pkg.version}-x64.exe`,
-    `EliYork-Voice-Setup-${pkg.version}-x64.exe.blockmap`,
+    installer,
+    `${installer}.blockmap`,
     'latest.yml',
 ])
     cpSync(join(output, file), join(bundle, file));

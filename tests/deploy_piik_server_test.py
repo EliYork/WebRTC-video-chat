@@ -195,9 +195,11 @@ class Rollback(unittest.TestCase):
                 {'name': 'voice-room', 'pm2_env': {'SFU_ENABLED': 'false'}}]))
             (root / '.env').write_text('PRESERVED_SETTING=1')
             (root / 'node_modules').mkdir()
-            (root / 'package-lock.json').write_text('{}')
+            lock_before = {'version': '1.0.6', 'packages': {'': {'version': '1.0.6'}}}
+            lock_candidate = {'version': '1.0.7', 'packages': {'': {'version': '1.0.7', 'engines': {'node': '>=22'}}}}
+            (root / 'package-lock.json').write_text(json.dumps(lock_before))
             (directory / 'gateway-test.mjs').write_text("const piik = await startPiikLocal();")
-            files = {'package-lock.json': b'{}',
+            files = {'package-lock.json': json.dumps(lock_candidate).encode(),
                      'scripts/piik-production.config.cjs': b'fixture',
                      'integrations/piik/.build/piik-server': b'fixture'}
             manifest = {'revision': 'candidate-revision',

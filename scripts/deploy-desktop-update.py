@@ -1,9 +1,11 @@
 """Run on the authorized host: prepare|activate|rollback /www/backup/voice-deploy/client-... .
 
 Operator stages plan.json, this file and after/<relative path>. No credentials.
-Only four frontend assets, three download files, one Nginx location are changed.
+Three download files and one Nginx location are updated. Legacy plans can also
+include the four supported frontend assets.
 Node/Go are not restarted. Rollback preserves live environment and chat data.
 """
+import base64
 import hashlib
 import json
 import os
@@ -13,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import urllib.request
+from urllib.parse import quote, unquote
 
 os.umask(0o077)
 os.environ['PATH'] = '/www/server/nodejs/v24.15.0/bin:' + os.environ['PATH']
@@ -30,11 +33,13 @@ backup = pathlib.Path(location)
 assert backup.parent == pathlib.Path('/www/backup/voice-deploy')
 assert re.fullmatch(r'client-[0-9T-]+', backup.name)
 plan = json.loads((backup / 'plan.json').read_text())
-downloads = {'downloads/windows/latest.yml',
-             f'downloads/windows/EliYork-Voice-Setup-{plan["version"]}-x64.exe',
-             f'downloads/windows/EliYork-Voice-Setup-{plan["version"]}-x64.exe.blockmap'}
 assert re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', plan['version'])
-assert set(plan['files']) == set(FRONTEND) | downloads
+installer = plan.get('installer', f'EliYork-Voice-Setup-{plan["version"]}-x64.exe')
+assert installer in {f'{prefix}-Setup-{plan["version"]}-x64.exe' for prefix in ('EliYork-Voice', '晓语音')}
+downloads = {'downloads/windows/latest.yml', f'downloads/windows/{installer}',
+             f'downloads/windows/{installer}.blockmap'}
+frontend = FRONTEND if set(plan['files']) - downloads else {}
+assert set(plan['files']) == set(frontend) | downloads
 
 
 def sha(path):
@@ -43,6 +48,16 @@ def sha(path):
         for block in iter(lambda: handle.read(1024 * 1024), b''):
             digest.update(block)
     return digest.hexdigest()
+
+
+def verify_feed(location):
+    feed = (location / 'downloads/windows/latest.yml').read_text(encoding='utf-8')
+    fields = dict(re.findall(r'^(version|path|sha512):[ \t]*(.+?)\s*$', feed, re.MULTILINE))
+    assert fields['version'].strip("'\"") == plan['version'], 'Feed version does not match the release'
+    assert unquote(fields['path'].strip("'\"")) == installer, 'Feed does not reference the intended installer'
+    with (location / 'downloads/windows' / installer).open('rb') as binary:
+        expected = base64.b64encode(hashlib.file_digest(binary, 'sha512').digest()).decode()
+    assert fields['sha512'].strip("'\"") == expected, 'Feed installer SHA512 mismatch'
 
 
 def run(*args):
@@ -81,10 +96,11 @@ def rollback():
 if mode == 'prepare':
     assert not (backup / 'snapshot.json').exists(), 'Backup already prepared'
     manifest = json.loads((ROOT / 'voice-build-manifest.json').read_text())
-    for path in FRONTEND:
+    for path in frontend:
         assert sha(ROOT / path) == manifest['files'][path], f'Production drift: {path}'
     for path, digest in plan['files'].items():
         assert sha(backup / 'after' / path) == digest, f'Upload mismatch: {path}'
+    verify_feed(backup / 'after')
     snapshot = {}
     for path in [*plan['files'], 'voice-build-manifest.json', '@nginx']:
         source = NGINX if path == '@nginx' else ROOT / path
@@ -110,6 +126,7 @@ elif mode == 'rollback':
 elif mode == 'activate':
     assert (backup / 'snapshot.json').exists()
     assert 'zone=perserver:' in pathlib.Path('/www/server/nginx/conf/nginx.conf').read_text()
+    verify_feed(backup / 'after')
     try:
         # Publish immutable installer/blockmap first, latest.yml last.
         order = [p for p in plan['files'] if not p.endswith('latest.yml')]
@@ -117,10 +134,10 @@ elif mode == 'activate':
         for path in order:
             assert sha(backup / 'after' / path) == plan['files'][path]
             replace(backup / 'after' / path, ROOT / path)
-        NGINX.write_text('''# EliYork desktop updates; no internal Piik routes.
+        NGINX.write_text('''# Xiaoyuyin Windows downloads and legacy installer compatibility.
 location ^~ /downloads/windows/ {
     root /www/wwwroot/voice.eliyork.com;
-    if ($uri !~ "^/downloads/windows/(latest\\.yml|EliYork-Voice-Setup-[0-9]+\\.[0-9]+\\.[0-9]+-x64\\.exe(\\.blockmap)?)$") { return 404; }
+    if ($uri !~ "^/downloads/windows/(latest\\.yml|(EliYork-Voice|晓语音)-Setup-[0-9]+\\.[0-9]+\\.[0-9]+-x64\\.exe(\\.blockmap)?)$") { return 404; }
     try_files $uri =404;
     autoindex off;
     limit_except GET { deny all; }
@@ -138,20 +155,21 @@ location ^~ /downloads/windows/ {
         run(BIN, '-s', 'reload')
         manifest = json.loads((ROOT / 'voice-build-manifest.json').read_text())
         manifest['files'].update(plan['files'])
-        manifest['frontendRevision'] = plan['revision']
+        if frontend:
+            manifest['frontendRevision'] = plan['revision']
         manifest['desktopVersion'] = plan['version']
         manifest.setdefault('hotfixes', []).append({'revision': plan['revision'], 'backup': str(backup)})
         temp = backup / 'manifest-after.json'
         temp.write_text(json.dumps(manifest, indent=2))
         replace(temp, ROOT / 'voice-build-manifest.json')
-        for path, url in FRONTEND.items():
+        for path, url in frontend.items():
             with urllib.request.urlopen('https://voice.eliyork.com' + url + '?v=' + plan['revision'], timeout=20) as response:
                 assert hashlib.sha256(response.read()).hexdigest() == plan['files'][path]
         with urllib.request.urlopen('https://voice.eliyork.com/healthz', timeout=15) as response:
             health = json.load(response)
         assert health['ok'] and health['mediaReady']
         for path in downloads:
-            url = 'https://voice.eliyork.com/' + path
+            url = 'https://voice.eliyork.com/' + quote(path)
             request = urllib.request.Request(url, headers={'Range': 'bytes=0-63'})
             with urllib.request.urlopen(request, timeout=20) as response:
                 assert response.status == 206
@@ -161,7 +179,7 @@ location ^~ /downloads/windows/ {
         before = json.loads((backup / 'pm2-before.json').read_text())
         after = json.loads(run('pm2', 'jlist'))
         assert {p['name']: p['pid'] for p in before} == {p['name']: p['pid'] for p in after}
-        result = {'status': 'deployed', 'version': plan['version'], 'frontendRevision': plan['revision'],
+        result = {'status': 'deployed', 'version': plan['version'], 'revision': plan['revision'],
                   'backup': str(backup), 'health': health, 'nodeGoRestarted': False,
                   'nginxGracefulReload': True, 'downloadLimitBytesPerSecond': 1000000,
                   'downloadConnections': 2, 'downloadAggregateBytesPerSecond': 2000000}

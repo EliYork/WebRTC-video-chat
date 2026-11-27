@@ -1,6 +1,6 @@
 module.exports = {
     appId: 'com.eliyork.voice',
-    productName: 'EliYork Voice',
+    productName: '晓语音',
     executableName: 'EliYork Voice',
     asar: false,
     npmRebuild: false,
@@ -57,7 +57,7 @@ module.exports = {
         packElevateHelper: false,
         deleteAppDataOnUninstall: false,
         createDesktopShortcut: true,
-        artifactName: 'EliYork-Voice-Setup-${version}-x64.exe',
+        artifactName: '晓语音-Setup-${version}-x64.exe',
     },
     publish: {
         provider: 'generic',

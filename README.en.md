@@ -1,6 +1,6 @@
 <p align="right"><a href="./README.md">中文</a> | English</p>
 
-# Friends Channel Voice Rooms
+# 晓语音
 
 A self-hosted voice room for small groups of friends, with fixed channels, voice, video, screen sharing, chat, presence and shared cursors. A responsive stage keeps screen shares in focus on desktop and mobile.
 

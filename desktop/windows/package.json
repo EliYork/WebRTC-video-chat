@@ -1,9 +1,9 @@
 {
     "name": "eliyork-voice-desktop",
-    "productName": "EliYork Voice",
-    "version": "0.1.11",
+    "productName": "晓语音",
+    "version": "0.1.12",
     "private": true,
-    "description": "EliYork Voice Windows client with Piik native sharing",
+    "description": "晓语音 Windows 客户端",
     "author": "EliYork",
     "license": "ISC",
     "main": "main.cjs",
