@@ -60,6 +60,8 @@ let smokeClipboardText = '';
 const readSmokeClipboard = () => realSmokeClipboard ? clipboard.readText() : smokeClipboardText;
 app.setName('晓语音');
 app.setAppUserModelId('com.eliyork.voice');
+// Keep the version readable by existing diagnostics after the display-name change.
+app.userAgentFallback += ` eliyork-voice-desktop/${app.getVersion()}`;
 let mainWindow,
     native,
     picker,
