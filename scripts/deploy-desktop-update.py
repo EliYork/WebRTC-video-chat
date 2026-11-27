@@ -14,6 +14,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import urllib.request
 from urllib.parse import quote, unquote
 
@@ -58,6 +59,24 @@ def verify_feed(location):
     with (location / 'downloads/windows' / installer).open('rb') as binary:
         expected = base64.b64encode(hashlib.file_digest(binary, 'sha512').digest()).decode()
     assert fields['sha512'].strip("'\"") == expected, 'Feed installer SHA512 mismatch'
+
+
+def wait_for_download(path):
+    url = 'https://voice.eliyork.com/' + quote(path)
+    request = urllib.request.Request(url, headers={'Range': 'bytes=0-63'})
+    with (ROOT / path).open('rb') as file:
+        expected = file.read(64)
+    deadline = time.monotonic() + 12
+    while True:
+        try:
+            with urllib.request.urlopen(request, timeout=3) as response:
+                if response.status == 206 and response.read(64) == expected:
+                    return
+        except OSError:
+            pass
+        if time.monotonic() >= deadline:
+            raise RuntimeError('Public download failed verification: ' + path)
+        time.sleep(.25)
 
 
 def run(*args):
@@ -128,12 +147,13 @@ elif mode == 'activate':
     assert 'zone=perserver:' in pathlib.Path('/www/server/nginx/conf/nginx.conf').read_text()
     verify_feed(backup / 'after')
     try:
-        # Publish immutable installer/blockmap first, latest.yml last.
-        order = [p for p in plan['files'] if not p.endswith('latest.yml')]
-        order.append('downloads/windows/latest.yml')
-        for path in order:
+        # Stage the immutable files before reloading Nginx. The existing feed
+        # continues to serve the previous version until both new URLs work.
+        feed_path = 'downloads/windows/latest.yml'
+        for path in plan['files']:
             assert sha(backup / 'after' / path) == plan['files'][path]
-            replace(backup / 'after' / path, ROOT / path)
+            if path != feed_path:
+                replace(backup / 'after' / path, ROOT / path)
         NGINX.write_text('''# Xiaoyuyin Windows downloads and legacy installer compatibility.
 location ^~ /downloads/windows/ {
     root /www/wwwroot/voice.eliyork.com;
@@ -153,6 +173,10 @@ location ^~ /downloads/windows/ {
         os.chmod(NGINX, 0o600)
         run(BIN, '-t')
         run(BIN, '-s', 'reload')
+        for path in sorted(downloads - {feed_path}):
+            wait_for_download(path)
+        replace(backup / 'after' / feed_path, ROOT / feed_path)
+        wait_for_download(feed_path)
         manifest = json.loads((ROOT / 'voice-build-manifest.json').read_text())
         manifest['files'].update(plan['files'])
         if frontend:
@@ -168,12 +192,6 @@ location ^~ /downloads/windows/ {
         with urllib.request.urlopen('https://voice.eliyork.com/healthz', timeout=15) as response:
             health = json.load(response)
         assert health['ok'] and health['mediaReady']
-        for path in downloads:
-            url = 'https://voice.eliyork.com/' + quote(path)
-            request = urllib.request.Request(url, headers={'Range': 'bytes=0-63'})
-            with urllib.request.urlopen(request, timeout=20) as response:
-                assert response.status == 206
-                assert response.read() == (ROOT / path).open('rb').read(64)
         for path, digest in plan['files'].items():
             assert sha(ROOT / path) == digest
         before = json.loads((backup / 'pm2-before.json').read_text())
